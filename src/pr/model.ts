@@ -20,6 +20,7 @@ import {
   gitLedger,
   migrateOpExample,
   migrationsDir,
+  closeVersioned,
   openVersioned,
   outOfOrder,
   planDigest,
@@ -66,7 +67,7 @@ export type ApprovalView =
 export interface VersionedPlan {
   environment: string;
   dialect: SqlDialect;
-  /** `<database>.history (<topology> (<where it came from>))`; absent when there is no history (Postgres, until #13). */
+  /** `<database>.history (<topology> (<where it came from>))`. */
   history?: string | undefined;
   appliedCount: number;
   pending: PendingView[];
@@ -117,16 +118,23 @@ export async function collectVersionedPlan(project: Project, env: Environment, o
   }
   const ordered = scan.ordered;
 
-  if (project.dialect === "postgres") {
-    return {
-      ...base,
-      appliedCount: 0,
-      pending: ordered.map((m) => viewOf(m)),
-      notes: ["Postgres has no history table yet (#13): every migration is listed, and there is no digest to approve."],
-    };
-  }
-
   const venv = options.venv ?? (await openVersioned(project, env, options.processEnv));
+  try {
+    return await collectWith(project, env, options, venv, ordered, base, problems);
+  } finally {
+    if (!options.venv) await closeVersioned(venv);
+  }
+}
+
+async function collectWith(
+  project: Project,
+  env: Environment,
+  options: CollectOptions,
+  venv: VersionedEnv,
+  ordered: readonly Migration[],
+  base: { environment: string; dialect: Project["dialect"]; problems: string[]; notes: string[] },
+  problems: string[],
+): Promise<VersionedPlan> {
   const report = await statusReport(venv, ordered, { allowOutOfOrder: options.allowOutOfOrder === true, sync: false });
   const { status } = report;
   for (const m of status.mismatches) if (!problems.includes(m.message)) problems.push(m.message);

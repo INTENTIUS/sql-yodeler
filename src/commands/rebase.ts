@@ -3,7 +3,7 @@ import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { MigrationDirectoryError, refusedSteps, scanMigrations } from "../migrations/index.js";
-import { migrationsDir, openVersioned } from "../versioned/index.js";
+import { closeVersioned, migrationsDir, openVersioned } from "../versioned/index.js";
 import { planRebase, REBASE_REFUSED, writeRebase, type RebasePlan } from "../rebase/index.js";
 
 const usage = "usage: yodel rebase [<id>] [--onto <parent-id>] [--env <env>]... [--force] [--json] [--dir <project>]";
@@ -95,7 +95,7 @@ async function checkHistories(project: Project, envs: readonly string[], plan: R
   for (const name of envs) {
     const env = resolveEnvironment(project, name);
     const venv = await openVersioned(project, env);
-    const state = await venv.store.state();
+    const state = await venv.store.state().finally(() => closeVersioned(venv));
     const ran = plan.rewritten.flatMap((m) => {
       const rec = state.byId.get(m.id);
       return rec ? [`${m.id} (${rec.status === "succeeded" ? "applied" : `ran part way, ${rec.status}`})`] : [];

@@ -5,6 +5,7 @@
  *   stepSha(step, files)      the hash a step's history rows record
  *   runRebuild(...)           a ClickHouseRebuildOp step (./rebuild.ts)
  *   runBackfill(...)          a backfill step, an Op of effect() batches (./backfill.ts)
+ *   runPgMigration(...)       a PostgresMigrationOp step (./postgres-migration.ts)
  *   defaultStepRunner         what the versioned apply calls for an Op step
  */
 
@@ -16,18 +17,23 @@ import { YodelError } from "../project.js";
 import { runBackfill, serverReceipts } from "./backfill.js";
 import type { StepPlan } from "./kinds.js";
 import { rebuildChantConfig, runRebuild } from "./rebuild.js";
+import { runPgMigration } from "./postgres-migration.js";
 
 export * from "./kinds.js";
 export * from "./run.js";
 export * from "./rebuild.js";
 export * from "./backfill.js";
+export * from "./postgres-migration.js";
 
 /** What running one Op step needs. */
 export interface StepContext {
   environment: string;
   /** The project directory, which holds chant.config.ts. */
   projectDir: string;
-  port: ClickHousePort;
+  /** The ClickHouse server a backfill's SQL runs on; absent on Postgres. */
+  port?: ClickHousePort | undefined;
+  /** Postgres: the environment's lock timeout, for a PostgresMigrationOp step whose options set none. */
+  lockTimeoutMs?: number | undefined;
   /** The server, for chant's receipt store; the port is enough for everything else. */
   endpoint?: ClickHouseEndpoint | undefined;
   migration: Migration;
@@ -47,6 +53,11 @@ export const defaultStepRunner: StepRunner = async (ctx) => {
     const { summary } = await runRebuild(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, log: ctx.log, config });
     return { summary };
   }
+  if (ctx.plan.run === "pgMigration") {
+    const { summary } = await runPgMigration(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, lockTimeoutMs: ctx.lockTimeoutMs, log: ctx.log });
+    return { summary };
+  }
+  if (!ctx.port) throw new YodelError("a backfill step runs its SQL on ClickHouse, and this environment has no ClickHouse server");
   const receipts = ctx.receipts ?? (ctx.endpoint ? await serverReceipts(ctx.endpoint, ctx.environment) : undefined);
   if (!receipts) throw new YodelError("a backfill step needs a receipt store, and this environment has no server endpoint for one");
   const { summary } = await runBackfill(ctx.plan.file, {

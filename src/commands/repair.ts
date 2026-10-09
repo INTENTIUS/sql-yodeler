@@ -1,24 +1,22 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import type { Command } from "../command.js";
+import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { MIGRATION_JSON, scanMigrations, serializeDocument, verifyChecksum, type Migration } from "../migrations/index.js";
-import { acquireLock, appliedBy, newRunContext, withLock } from "../history/index.js";
-import { migrationsDir, openVersioned } from "../versioned/index.js";
+import { appliedBy, newRunContext, withLock } from "../history/index.js";
+import { closeVersioned, migrationsDir, openVersioned, type VersionedEnv } from "../versioned/index.js";
 import { checkRepair, repairRow } from "../rebase/repair.js";
 
 const usage = 'usage: yodel repair <id> --reason "<text>" <env> [--json] [--dir <project>]';
-
-/** Exit code: the dialect has no history yet. */
-const NOT_YET = 2;
 
 const help = `${usage}
 
 Records an intended edit to a migration that is already applied in <env>:
 appends a row to the environment's history table (yodel.config.ts
-history.database, else YODEL_HISTORY_DATABASE, default yodeler) with the
+history.database, else YODEL_HISTORY_DATABASE, default yodeler; on
+Postgres the schema of that name) with the
 checksum the migration's files have now and the reason, under the apply lock. After it, yodel status and yodel apply compare
 the files with the new checksum. Nothing is run on the server: the edit is
 recorded, not applied. Repair each environment the migration ran in.
@@ -37,7 +35,6 @@ Exit codes:
      run, or part way), its files already match the history, or it is gone
      from the directory
   5  another apply holds the lock
-  2  Postgres: its history table is not built yet (#13)
   1  anything else: no --reason, a bad config, a server that does not answer
 `;
 
@@ -82,50 +79,50 @@ export const repair: Command = {
       const { id, env: name, reason, json, dir } = parseRepairArgs(args);
       const project = await loadProject(dir);
       const env = resolveEnvironment(project, name);
-      if (project.dialect === "postgres") {
-        throw new YodelError("refused: Postgres has no history table yet (#13), so there is no applied migration to repair; nothing was written", NOT_YET);
-      }
       const m = scanMigrations(migrationsDir(project)).migrations.find((x) => x.id === id);
       const venv = await openVersioned(project, env);
-      checkRepair(m, id, await venv.store.state(), env.name); // refuse before taking the lock
-
-      const lock = await acquireLock(venv.port, {
-        database: venv.location.database,
-        topology: venv.location.topology,
-        holder: appliedBy(),
-        ttlMs: venv.lockTtlMs,
-        serverKey: venv.serverKey,
-      });
-      if (lock.notice && !json) io.err(`lock: ${lock.notice}\n`);
-      const row = await withLock(lock, venv.lockTtlMs, async () => {
-        const state = await venv.store.state();
-        const check = checkRepair(m, id, state, env.name);
-        const r = repairRow({ migration: m as Migration, check, reason, run: newRunContext(check.record.planDigest), seq: state.maxSeq + 1 });
-        await venv.store.append([r]);
-        return { r, check };
-      });
-      const synced = syncRecordedChecksum(m as Migration);
-
-      if (json) {
-        io.out(
-          `${JSON.stringify(
-            { repaired: true, id, environment: env.name, oldChecksum: row.check.oldChecksum, newChecksum: row.check.newChecksum, reason, seq: row.r.seq, runId: row.r.run_id, migrationJsonUpdated: synced },
-            null,
-            2,
-          )}\n`,
-        );
-      } else {
-        io.out(
-          [
-            `Repaired ${id} in ${env.name}'s history (${venv.location.database}).`,
-            `  old checksum: ${row.check.oldChecksum}`,
-            `  new checksum: ${row.check.newChecksum}`,
-            `  reason: ${reason}`,
-            ...(synced ? [`  ${MIGRATION_JSON}'s checksum field updated to match`] : []),
-            "",
-          ].join("\n"),
-        );
+      try {
+        return await repairWith(venv, m, { id, envName: env.name, reason, json, io });
+      } finally {
+        await closeVersioned(venv);
       }
-      return 0;
     }),
 };
+
+async function repairWith(venv: VersionedEnv, m: Migration | undefined, { id, envName, reason, json, io }: { id: string; envName: string; reason: string; json: boolean; io: Io }): Promise<number> {
+  checkRepair(m, id, await venv.store.state(), envName); // refuse before taking the lock
+
+  const lock = await venv.driver.acquireLock(appliedBy());
+  if (lock.notice && !json) io.err(`lock: ${lock.notice}\n`);
+  const row = await withLock(lock, venv.lockTtlMs, async () => {
+    const state = await venv.store.state();
+    const check = checkRepair(m, id, state, envName);
+    const r = repairRow({ migration: m as Migration, check, reason, run: newRunContext(check.record.planDigest), seq: state.maxSeq + 1 });
+    await venv.store.append([r]);
+    return { r, check };
+  });
+  const synced = syncRecordedChecksum(m as Migration);
+
+  if (json) {
+    io.out(
+      `${JSON.stringify(
+        { repaired: true, id, environment: envName, oldChecksum: row.check.oldChecksum, newChecksum: row.check.newChecksum, reason, seq: row.r.seq, runId: row.r.run_id, migrationJsonUpdated: synced },
+        null,
+        2,
+      )}\n`,
+    );
+  } else {
+    io.out(
+      [
+        `Repaired ${id} in ${envName}'s history (${venv.location.database}).`,
+        `  old checksum: ${row.check.oldChecksum}`,
+        `  new checksum: ${row.check.newChecksum}`,
+        `  reason: ${reason}`,
+        ...(synced ? [`  ${MIGRATION_JSON}'s checksum field updated to match`] : []),
+        "",
+      ].join("\n"),
+    );
+  }
+  return 0;
+
+}

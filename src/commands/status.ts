@@ -2,7 +2,7 @@ import type { Command } from "../command.js";
 import { guarded, parseEnvArgs, usage } from "../env-args.js";
 import { loadProject, resolveEnvironment } from "../project.js";
 import { readMigrations } from "../migrations/index.js";
-import { migrationsDir, openVersioned, renderStatus, statusJson, statusReport } from "../versioned/index.js";
+import { closeVersioned, migrationsDir, openVersioned, renderStatus, statusJson, statusReport } from "../versioned/index.js";
 
 /** Exit code: migrations are pending, and nothing is wrong. */
 export const STATUS_PENDING = 3;
@@ -45,7 +45,7 @@ export const status: Command = {
       const env = resolveEnvironment(project, name);
       const ordered = readMigrations(migrationsDir(project));
       const venv = await openVersioned(project, env);
-      const report = await statusReport(venv, ordered, { sync: false });
+      const report = await statusReport(venv, ordered, { sync: false }).finally(() => closeVersioned(venv));
       if (json) io.out(`${JSON.stringify(statusJson(report), null, 2)}\n`);
       // The sections already say what is wrong; the refusal's wording is apply's.
       else io.out(renderStatus({ ...report, refusal: undefined }));

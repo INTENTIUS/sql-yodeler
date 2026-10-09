@@ -235,9 +235,13 @@ describe("preflight", () => {
     expect(() => { preflight(withHistory.p, withHistory.env, { processEnv: env }); }).toThrow(/includes yodel_8_history, the history's database/);
   });
 
-  it("asks a Postgres profile for no scope", () => {
-    const { p, env: e } = project("postgres", { url: "postgres://pg:5432/db" });
-    expect(() => { preflight(p, e, { processEnv: env }); }).not.toThrow();
+  it("asks a Postgres profile for its schemas, the history's not among them", () => {
+    const none = project("postgres", { url: "postgres://pg:5432/db" });
+    expect(() => { preflight(none.p, none.env, { processEnv: env }); }).toThrow(/names no schemas, so the import would read every schema on the server/);
+    const own = project("postgres", { url: "postgres://pg:5432/db", schemas: ["app", "yodeler"] });
+    expect(() => { preflight(own.p, own.env, { processEnv: {} }); }).toThrow(/schemas includes yodeler, the history's schema/);
+    const ok = project("postgres", { url: "postgres://pg:5432/db", schemas: ["app"] });
+    expect(() => { preflight(ok.p, ok.env, { processEnv: {} }); }).not.toThrow();
   });
 });
 
@@ -263,12 +267,13 @@ describe("yodel init arguments", () => {
     expect(r.err).toContain('migration name "Bad Name"');
   });
 
-  it("says what must exist first, and the Postgres exit code, in --help", async () => {
+  it("says what must exist first, for both dialects, in --help", async () => {
     const r = await run(["init", "--help"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("What must exist first");
     expect(r.out).toContain("sql.profiles.<env>.databases");
-    expect(r.out).toMatch(/2 {2}Postgres: declarations and the baseline written, the baseline not\n\s+recorded \(the Postgres history is #13\)/);
+    expect(r.out).toContain("sql.profiles.<env>.schemas");
+    expect(r.out).not.toContain("#13");
   });
 
   it("fails without a project", async () => {

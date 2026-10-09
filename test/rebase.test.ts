@@ -281,7 +281,7 @@ describe("yodel repair", () => {
     }
   });
 
-  it("needs a reason, and refuses Postgres until its history exists", async () => {
+  it("needs a reason", async () => {
     const noReason = await yodel(["repair", "20261009T1000-one", "e2e"]);
     expect(noReason.code).toBe(1);
     expect(noReason.err).toContain("a repair needs a reason");
@@ -289,10 +289,5 @@ describe("yodel repair", () => {
     expect(usage.code).toBe(1);
     expect(usage.err).toContain('usage: yodel repair <id> --reason "<text>" <env>');
 
-    const { dir, dispose } = projectFrom("postgres");
-    projects.push(dispose);
-    const pg = await yodel(["repair", "20261009T1000-one", "--reason", "x", "e2e", "--dir", dir]);
-    expect(pg.code).toBe(2);
-    expect(pg.err).toContain("Postgres has no history table yet (#13)");
   });
 });

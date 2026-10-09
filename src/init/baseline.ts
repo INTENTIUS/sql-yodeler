@@ -23,7 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { YodelError } from "../project.js";
 import type { Migration } from "../migrations/index.js";
-import { acquireLock, appliedBy, MIGRATION_ROW, withLock, type HistoryRow } from "../history/index.js";
+import { appliedBy, MIGRATION_ROW, withLock, type HistoryRow } from "../history/index.js";
 import { REFUSED, type VersionedEnv } from "../versioned/index.js";
 
 /** The baseline migration's name: its id is `<YYYYMMDDTHHMM>-baseline`. */
@@ -85,13 +85,7 @@ export async function checkHistoryEmpty(venv: VersionedEnv): Promise<void> {
  */
 export async function recordBaseline(venv: VersionedEnv, m: Migration, processEnv: NodeJS.ProcessEnv = process.env): Promise<{ row: HistoryRow; lock: { kind: string; where: string; notice?: string } }> {
   const by = appliedBy(processEnv);
-  const lock = await acquireLock(venv.port, {
-    database: venv.location.database,
-    topology: venv.location.topology,
-    holder: by,
-    ttlMs: venv.lockTtlMs,
-    serverKey: venv.serverKey,
-  });
+  const lock = await venv.driver.acquireLock(by);
   return withLock(lock, venv.lockTtlMs, async () => {
     await venv.store.ensure();
     const state = await venv.store.state();

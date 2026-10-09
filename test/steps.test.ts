@@ -84,7 +84,8 @@ describe("planStep", () => {
   it("runs a rebuild in materialized-view mode and a backfill; refuses app mode, a manual step and another Op", () => {
     expect(planStep(op({ name: "r", table: "d.t", dualWrite: { mode: "materialized-view", cutoverColumn: "ts" } })).run).toBe("rebuild");
     expect(planStep(op({ name: "r", table: "d.t", dualWrite: { mode: "app" } }))).toMatchObject({ run: "refused", reason: expect.stringContaining("app mode") as unknown });
-    expect(planStep(op({ name: "r", table: "d.t", column: "c" }, "PostgresMigrationOp"))).toMatchObject({ run: "refused" });
+    expect(planStep(op({ name: "r", table: "d.t", column: "c" }, "PostgresMigrationOp"))).toMatchObject({ run: "pgMigration" });
+    expect(planStep(op({ name: "r", table: "d.t" }, "PostgresMigrationOp"))).toMatchObject({ run: "refused" });
     expect(planStep({ kind: "manual", object: "v", type: "ClickHouse::View", name: "d.v", changes: [], detail: "by hand" })).toMatchObject({ run: "refused" });
     expect(planStep(backfillStep("fill") as unknown as MigrationStep)).toEqual({ run: "backfill", file: "backfill.ts" });
     expect(planStep({ ...backfillStep("fill"), options: { file: "../escape.ts" } })).toMatchObject({ run: "refused" });

@@ -22,8 +22,18 @@
  * and resumes from its receipts: the partitions or batches that finished
  * are skipped.
  *
- * Manual steps, and Op steps apply does not run (a rebuild in app mode,
- * `PostgresMigrationOp`), are refused before anything runs (exit 2).
+ * On Postgres (#13) a `PostgresMigrationOp` step (a column rename or type
+ * change) runs the same way, as chant's expand-and-contract Op
+ * (`../steps/postgres-migration.ts`).
+ *
+ * What is the dialect's (the lock, the live-schema fingerprint, how a
+ * statement is sent and its `succeeded` row written) is the driver's
+ * (`./driver.ts`): on Postgres a transactional statement and its row commit
+ * in one transaction, under `lock_timeout`, retried on a lock timeout
+ * (`./postgres/executor.ts`).
+ *
+ * Manual steps, and Op steps apply does not run (a rebuild in app mode, a
+ * step of the other dialect), are refused before anything runs (exit 2).
  */
 
 import type { ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
@@ -31,18 +41,16 @@ import { YodelError, type Environment, type Project } from "../project.js";
 import { PLAN_NEEDS_OP } from "../chant/plan.js";
 import type { Migration } from "../migrations/index.js";
 import { environmentSettings } from "../config/settings.js";
-import { renderForEnvironment, topologyNote, type Topology } from "../topology/render.js";
+import type { Topology } from "../topology/render.js";
 import { defaultStepRunner, describeStep, planStep, stepSha, StepOpFailed, type StepRunner } from "../steps/index.js";
 import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import {
-  acquireLock,
   HistoryRecorder,
   HistoryStore,
   httpPort,
   MIGRATION_ROW,
   newRunContext,
   SINGLE,
-  serverMessage,
   statementDone,
   statementSha,
   withLock,
@@ -50,10 +58,15 @@ import {
   type ClickHousePort,
   type HistoryLocation,
   type HistoryState,
+  type HistoryStoreLike,
   type MigrationRecord,
 } from "../history/index.js";
+import type { SqlDialect } from "../project.js";
+import { clickhouseDriver } from "./clickhouse.js";
+import type { VersionedDriver } from "./driver.js";
+import { openPostgres, type PgConnect } from "./postgres/driver.js";
 import { compareHistory, outOfOrder, type PendingMigration, type VersionedStatus } from "./state.js";
-import { catalogFingerprint, digestSubject, planDigest, readLiveCatalog, sameDigest, type LiveScope } from "./digest.js";
+import { digestSubject, planDigest, sameDigest, type LiveScope } from "./digest.js";
 
 /** Exit code: a checksum mismatch, an applied migration gone from the directory, or an out-of-order migration without `--allow-out-of-order`. */
 export const REFUSED = 4;
@@ -61,9 +74,15 @@ export const REFUSED = 4;
 /** Everything a versioned verb needs about one environment. */
 export interface VersionedEnv {
   environment: string;
-  port: ClickHousePort;
-  store: HistoryStore;
+  dialect: SqlDialect;
+  /** The dialect's lock, fingerprint and statement sending (`./driver.ts`). */
+  driver: VersionedDriver;
+  /** The ClickHouse server; absent on Postgres, whose connections the driver keeps. */
+  port?: ClickHousePort;
+  store: HistoryStoreLike;
+  /** Where the history is: on Postgres, `database` is the history's schema and the topology a single node. */
   location: HistoryLocation;
+  /** ClickHouse: the databases the fingerprint covers. Postgres: `databases` is the profile's schemas. */
   scope: LiveScope;
   /** Identifies the server, for the local lock's file name. */
   serverKey: string;
@@ -78,22 +97,43 @@ export interface VersionedEnv {
   topologySource?: string;
 }
 
-/** Binds an environment's server (`sql.profiles.<env>`) and history. ClickHouse only, for now (Postgres is #13). */
-export async function openVersioned(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv = process.env, port?: ClickHousePort): Promise<VersionedEnv> {
-  if (project.dialect !== "clickhouse") throw new YodelError("versioned migrations are ClickHouse only for now; Postgres is #13");
+/**
+ * Binds an environment's server (`sql.profiles.<env>`) and history. `port`
+ * (ClickHouse) and `pgConnect` (Postgres) stand in for the server in tests.
+ * Close it with {@link closeVersioned} when done: on Postgres it holds a
+ * connection.
+ */
+export async function openVersioned(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv = process.env, port?: ClickHousePort, pgConnect?: PgConnect): Promise<VersionedEnv> {
   const settings = environmentSettings(project, env.name, processEnv);
+  if (project.dialect === "postgres") {
+    const pg = await openPostgres(project, env, processEnv, settings.historyDatabase, pgConnect);
+    return {
+      environment: env.name,
+      dialect: "postgres",
+      driver: pg.driver,
+      store: pg.store,
+      location: { database: settings.historyDatabase, topology: SINGLE },
+      scope: { databases: pg.schemas, historyDatabase: settings.historyDatabase },
+      serverKey: pg.endpoint.url,
+      lockTtlMs: settings.lockTtlMs,
+      projectDir: project.dir,
+    };
+  }
   const { resolveClickHouseTarget, isUnresolvedTarget } = await import("@intentius/chant-lexicon-sql/clickhouse/live/bind");
   const target = resolveClickHouseTarget({ environment: env.name, config: project.config, env: processEnv });
   if (isUnresolvedTarget(target)) throw new YodelError(target.detail);
   const endpoint: ClickHouseEndpoint = target.endpoint;
   const location: HistoryLocation = { database: settings.historyDatabase, topology: settings.historyTopology };
   const p = port ?? (await httpPort(endpoint));
+  const scope = { databases: target.databases, historyDatabase: settings.historyDatabase };
   return {
     environment: env.name,
+    dialect: "clickhouse",
+    driver: clickhouseDriver({ port: p, location, scope, serverKey: endpoint.url, lockTtlMs: settings.lockTtlMs, endpoint, topology: settings.topology }),
     port: p,
     store: new HistoryStore(p, location),
     location,
-    scope: { databases: target.databases, historyDatabase: settings.historyDatabase },
+    scope,
     serverKey: endpoint.url,
     lockTtlMs: settings.lockTtlMs,
     projectDir: project.dir,
@@ -102,6 +142,9 @@ export async function openVersioned(project: Project, env: Environment, processE
     topologySource: settings.topologySource,
   };
 }
+
+/** Closes what {@link openVersioned} opened (a Postgres connection). Safe to call twice. */
+export const closeVersioned = (venv: VersionedEnv): Promise<void> => venv.driver.close();
 
 /** The history and how the directory compares with it. Reads only; takes no lock. */
 export async function inspect(venv: VersionedEnv, ordered: readonly Migration[], options: { sync?: boolean } = {}): Promise<{ state: HistoryState; status: VersionedStatus }> {
@@ -131,7 +174,7 @@ export function stepRefusal(toApply: readonly PendingMigration[]): YodelError | 
   const lines = toApply.flatMap((p) => p.refusedSteps.map(({ index, reason }) => `  ${p.id} step ${String(index)}: ${reason}`));
   if (lines.length === 0) return undefined;
   return new YodelError(
-    `refused: a pending migration has a step yodel apply does not run: a person acts on a manual step, and yodel apply runs only ClickHouseRebuildOp (materialized-view mode) and backfill steps. Nothing was applied:\n${lines.join("\n")}`,
+    `refused: a pending migration has a step yodel apply does not run: a person acts on a manual step, and yodel apply runs only ClickHouseRebuildOp (materialized-view mode) and backfill steps on ClickHouse, and PostgresMigrationOp on Postgres. Nothing was applied:\n${lines.join("\n")}`,
     PLAN_NEEDS_OP,
   );
 }
@@ -145,7 +188,7 @@ export function selectToApply(status: VersionedStatus, allowOutOfOrder: boolean)
 
 /** The plan digest of applying `toApply` from the server's state now. */
 export async function currentDigest(venv: VersionedEnv, status: VersionedStatus, toApply: readonly PendingMigration[]): Promise<string> {
-  const live = catalogFingerprint(await readLiveCatalog(venv.port, venv.scope));
+  const live = await venv.driver.liveFingerprint();
   return planDigest(digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, topology: venv.topology, applied: status.applied, toApply, live }));
 }
 
@@ -207,7 +250,7 @@ export interface ExecuteResult {
   applied: string[];
   /** Statements not sent because an earlier run had already succeeded with them. */
   skipped: Array<{ id: string; statement: number }>;
-  lock: { kind: "keeper" | "local"; where: string; notice?: string };
+  lock: { kind: "keeper" | "local" | "advisory"; where: string; notice?: string };
 }
 
 /**
@@ -216,13 +259,7 @@ export interface ExecuteResult {
  * approval, then runs each statement not yet succeeded.
  */
 export async function executeApply(venv: VersionedEnv, ordered: readonly Migration[], options: ExecuteOptions): Promise<ExecuteResult> {
-  const lock = await acquireLock(venv.port, {
-    database: venv.location.database,
-    topology: venv.location.topology,
-    holder: appliedBy(options.processEnv),
-    ttlMs: venv.lockTtlMs,
-    serverKey: venv.serverKey,
-  });
+  const lock = await venv.driver.acquireLock(appliedBy(options.processEnv));
   if (lock.notice) options.log(`lock: ${lock.notice}`);
   else options.log(`lock: held in ${lock.where}`);
 
@@ -260,7 +297,6 @@ async function applyMigration(
   options: ExecuteOptions,
   result: ExecuteResult,
 ): Promise<void> {
-  const port: ClickHousePort = venv.port;
   const m = p.migration;
   const silences = options.silences?.(m) ?? "[]";
   const base = { migration_id: m.id, parent: m.parent ?? "", checksum: p.checksum, silences };
@@ -281,19 +317,22 @@ async function applyMigration(
     await beat();
     // The neutral statement's sha, so a resume matches on every topology; the note says what it was rendered for.
     const sha = statementSha(step.sql);
-    const topology = venv.topology ?? SINGLE;
-    const row = { ...base, kind: "statement" as const, statement_index: i, statement_sha: sha, note: topologyNote(topology) };
+    const rowNote = venv.driver.rowNote ?? "";
+    const row = { ...base, kind: "statement" as const, statement_index: i, statement_sha: sha, note: rowNote };
     await recorder.record({ ...row, status: "started" });
     try {
-      await port.query(renderForEnvironment(step.sql, topology), step.waitsForMutation ? { settings: { mutations_sync: "2" } } : {});
+      // The driver writes the succeeded row: on Postgres in the statement's own transaction, so the two commit together.
+      await venv.driver.runStatement(step, {
+        succeeded: (note) => recorder.record({ ...row, status: "succeeded", note: [rowNote, note].filter(Boolean).join("; ") }),
+        log: options.log,
+      });
     } catch (e) {
-      const error = serverMessage(e);
+      const error = e instanceof Error ? e.message : String(e);
       await recorder.record({ ...row, status: "failed", error });
       await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "failed", error: `statement ${String(i)}: ${error}` });
       options.log(`  statement ${String(i)}: failed: ${error.split("\n")[0] ?? ""}`);
       throw new ApplyFailed(m.id, i, error.split("\n")[0] ?? error);
     }
-    await recorder.record({ ...row, status: "succeeded" });
     options.log(`  statement ${String(i)}: ok (${step.rule} ${step.class}, ${step.name})`);
   }
   await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "succeeded" });
@@ -321,8 +360,7 @@ async function runOpStep(venv: VersionedEnv, p: PendingMigration, i: number, rec
     ({ summary } = await run({
       environment: venv.environment,
       projectDir: venv.projectDir ?? process.cwd(),
-      port: venv.port,
-      endpoint: venv.endpoint,
+      ...venv.driver.stepContext(),
       migration: m,
       index: i,
       plan,

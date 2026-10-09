@@ -6,14 +6,22 @@
  * writes a migration whose parent is the baseline.
  *
  * ClickHouse: objects in database yodel_10, the history in yodel_10_history.
- * Postgres: objects in schema yodel_10; the baseline is written but not
- * recorded, since Postgres has no history until #13.
+ * Postgres: objects in schema yodel_10, the history in schema
+ * yodel_10_history (#13).
+ *
+ * "No change" for an adopted project is two things: the versioned plan
+ * (`yodel plan`, which takes the versioned path once migrations/ exists) has
+ * nothing pending, and the declared schema diffs clean against the live
+ * database (chant's declarative plan, read through the library).
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readMigrations } from "../../src/migrations/index.js";
+import { loadProject, resolveEnvironment } from "../../src/project.js";
+import { buildSchema } from "../../src/chant/build.js";
+import { planEnvironment } from "../../src/chant/plan.js";
 import { json, projectFrom, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable, postgres, postgresReachable } from "./emulator.js";
 
@@ -30,6 +38,30 @@ interface InitDoc {
 }
 
 const count = async (sql: string) => Number((await clickhouse(sql)).trim());
+
+/** The declarative diff of the project's declared schema against the live database: what chant's plan would change. */
+async function declarativeDiff(dir: string): Promise<{ changes: unknown[]; refused: unknown[] }> {
+  const project = await loadProject(dir);
+  const build = await buildSchema(project);
+  try {
+    const plan = await planEnvironment(project, resolveEnvironment(project, "e2e"), build);
+    return { changes: plan.diff.changes, refused: plan.refused };
+  } finally {
+    build.dispose();
+  }
+}
+
+/** The versioned plan has nothing to apply, and the declared schema diffs clean against the live database. */
+async function expectNoChange(at: (...args: string[]) => string[], dir: string, baseline: string): Promise<void> {
+  const ran = await yodel(at("plan", "e2e", "--json"));
+  expect(ran.code, ran.err).toBe(0);
+  expect(json(ran)).toMatchObject({ mode: "versioned", applied: 1, pending: [], problems: [] });
+  expect((json(ran) as { refusal?: unknown }).refusal).toBeUndefined();
+  const text = await yodel(at("plan", "e2e"));
+  expect(text.code, text.err).toBe(0);
+  expect(text.out).not.toContain(baseline);
+  expect(await declarativeDiff(dir)).toEqual({ changes: [], refused: [] });
+}
 
 describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
   let dir = "";
@@ -88,11 +120,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
   }, 300_000);
 
   it("then yodel plan shows no change", async () => {
-    const ran = await yodel(at("plan", "e2e", "--json"));
-    expect(ran.code, ran.err).toBe(0);
-    expect(json(ran)).toMatchObject({ changes: [], rebuilds: [] });
-    const text = await yodel(at("plan", "e2e"));
-    expect(text.out).toContain("No changes.");
+    await expectNoChange(at, dir, doc.migration.id);
   }, 300_000);
 
   it("and yodel status shows the baseline applied with nothing pending", async () => {
@@ -165,11 +193,13 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse, refused"
 describe.skipIf(!postgresReachable)("yodel init --from on postgres", () => {
   let dir = "";
   let dispose = (): void => undefined;
+  const saved = process.env.YODEL_HISTORY_DATABASE;
   const at = (...args: string[]) => [...args, "--dir", dir];
   let doc: InitDoc;
 
   beforeAll(async () => {
-    await postgres(`DROP SCHEMA IF EXISTS ${DB} CASCADE`);
+    process.env.YODEL_HISTORY_DATABASE = HISTORY;
+    await postgres(`DROP SCHEMA IF EXISTS ${DB} CASCADE; DROP SCHEMA IF EXISTS ${HISTORY} CASCADE`);
     await postgres(`
       CREATE SCHEMA ${DB};
       CREATE TABLE ${DB}.customers (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, email text NOT NULL UNIQUE, created_at timestamptz NOT NULL DEFAULT now());
@@ -186,17 +216,19 @@ describe.skipIf(!postgresReachable)("yodel init --from on postgres", () => {
   });
   afterAll(async () => {
     dispose();
-    await postgres(`DROP SCHEMA IF EXISTS ${DB} CASCADE`);
+    if (saved === undefined) delete process.env.YODEL_HISTORY_DATABASE;
+    else process.env.YODEL_HISTORY_DATABASE = saved;
+    await postgres(`DROP SCHEMA IF EXISTS ${DB} CASCADE; DROP SCHEMA IF EXISTS ${HISTORY} CASCADE`);
   });
 
-  it("writes the declarations and the baseline, and refuses to record it until #13", async () => {
+  it("writes the declarations and the baseline, and records the baseline applied in the history schema", async () => {
     const ran = await yodel(at("init", "--from", "e2e", "--json"));
-    expect(ran.code, ran.err).toBe(2);
+    expect(ran.code, ran.err).toBe(0);
     doc = json(ran) as InitDoc;
-    expect(doc.status).toBe("not-recorded");
-    expect(doc.recorded).toBeNull();
-    expect(doc.notRecorded).toContain("#13");
-    expect(ran.err).toContain("the baseline is not recorded as applied");
+    expect(doc.status).toBe("adopted");
+    expect(doc.recorded).toMatchObject({ history: HISTORY, seq: 1, note: expect.stringMatching(/^baseline: /) as unknown });
+    const rows = await postgres<{ kind: string; status: string; checksum: string }>(`SELECT kind, status, checksum FROM ${HISTORY}.history`);
+    expect(rows).toEqual([{ kind: "migration", status: "succeeded", checksum: doc.migration.checksum }]);
     expect(doc.objects).toEqual([`Schema ${DB}`, `Table ${DB}.customers`, `Table ${DB}.orders`, `View ${DB}.open_orders`, `Index ${DB}.orders_status_idx`]);
     const ordered = readMigrations(join(dir, "migrations"), { verify: true });
     expect(ordered.map((m) => [m.id, m.parent])).toEqual([[doc.migration.id, null]]);
@@ -206,9 +238,13 @@ describe.skipIf(!postgresReachable)("yodel init --from on postgres", () => {
   }, 300_000);
 
   it("then yodel plan shows no change", async () => {
-    const ran = await yodel(at("plan", "e2e", "--json"));
+    await expectNoChange(at, dir, doc.migration.id);
+  }, 300_000);
+
+  it("and yodel status shows the baseline applied with nothing pending", async () => {
+    const ran = await yodel(at("status", "e2e", "--json"));
     expect(ran.code, ran.err).toBe(0);
-    expect((json(ran) as { changes: unknown[] }).changes).toEqual([]);
+    expect(json(ran)).toMatchObject({ applied: [{ id: doc.migration.id }], pending: [] });
   }, 300_000);
 
   it("yodel new after a declared change writes a migration whose parent is the baseline", async () => {

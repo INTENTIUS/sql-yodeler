@@ -27,7 +27,7 @@ import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { computeChecksum, type Migration } from "../migrations/index.js";
 import { deriveState, type HistoryRow } from "../history/index.js";
 import { topologyLabel } from "@intentius/chant-lexicon-sql/clickhouse/topology";
-import { catalogFingerprint, digestSubject, planDigest, readLiveCatalog, sameDigest, type DigestSubject } from "./digest.js";
+import { digestSubject, planDigest, sameDigest, type DigestSubject } from "./digest.js";
 import type { VersionedEnv } from "./engine.js";
 import type { MigrateOpRef } from "./op.js";
 import { compareHistory, type AppliedMigration, type PendingMigration, type VersionedStatus } from "./state.js";
@@ -49,7 +49,7 @@ export interface MoveExplanation {
 
 /** The subject `currentDigest` hashes, read now. */
 export async function currentSubject(venv: VersionedEnv, status: VersionedStatus, toApply: readonly PendingMigration[]): Promise<DigestSubject> {
-  const live = catalogFingerprint(await readLiveCatalog(venv.port, venv.scope));
+  const live = await venv.driver.liveFingerprint();
   return digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, topology: venv.topology, applied: status.applied, toApply, live });
 }
 
@@ -115,7 +115,7 @@ export function diffSubjects(before: DigestSubject, after: DigestSubject, applie
   const nowOrder = after.pending.filter((p) => wasPending.has(p.id)).map((p) => p.id);
   if (JSON.stringify(reordered) !== JSON.stringify(nowOrder)) out.push({ part: "pending", message: `the chain order changed: ${list(reordered)} -> ${list(nowOrder)}` });
 
-  if (before.live !== after.live) out.push({ part: "live", message: "a table, view, dictionary or database in the environment is not as it was" });
+  if (before.live !== after.live) out.push({ part: "live", message: "an object in the environment's live schema (a table, view, index, dictionary, database or schema) is not as it was" });
   return out;
 }
 
@@ -249,8 +249,8 @@ export async function explainMove(input: ExplainInput): Promise<MoveExplanation>
   changes.push({
     part: "live",
     message:
-      "no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so a table, view, " +
-      "dictionary or database in the environment changed since approval (or a part yodel cannot rebuild did)",
+      "no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in " +
+      "the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did)",
   });
   return done(false, changes);
 }

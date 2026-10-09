@@ -120,6 +120,14 @@ function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWa
   };
 }
 
+/** Why a step apply runs on one dialect is refused in a migration of the other, or `undefined`. */
+function dialectRefusal(run: string, dialect: string): string | undefined {
+  if (run === "rebuild" && dialect !== "clickhouse") return `a ClickHouseRebuildOp step in a ${dialect} migration`;
+  if (run === "pgMigration" && dialect !== "postgres") return `a PostgresMigrationOp step in a ${dialect} migration`;
+  if (run === "backfill" && dialect !== "clickhouse") return `a backfill step in a ${dialect} migration: yodel apply runs backfill steps on ClickHouse only for now (on Postgres, a column change is a PostgresMigrationOp step, which backfills itself)`;
+  return undefined;
+}
+
 /** A migration's Op steps, split into the ones apply runs and the ones it refuses. A backfill step whose module is not among the migration's files is refused. */
 export function classifySteps(m: Migration): Pick<PendingMigration, "opSteps" | "refusedSteps"> {
   const opSteps: PendingMigration["opSteps"] = [];
@@ -127,7 +135,9 @@ export function classifySteps(m: Migration): Pick<PendingMigration, "opSteps" | 
   m.document.steps.forEach((step, index) => {
     if (step.kind === "statement") return;
     const plan = planStep(step);
+    const wrongDialect = dialectRefusal(plan.run, m.document.dialect);
     if (plan.run === "refused") refusedSteps.push({ index, step, reason: plan.reason });
+    else if (wrongDialect) refusedSteps.push({ index, step, reason: wrongDialect });
     else if (plan.run === "backfill" && m.files.extra?.[plan.file] === undefined) {
       refusedSteps.push({ index, step, reason: `a backfill step whose module ${plan.file} is not in ${m.id}'s directory` });
     } else opSteps.push({ index, step });

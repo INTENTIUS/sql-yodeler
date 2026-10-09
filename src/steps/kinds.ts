@@ -10,10 +10,12 @@
  * - `ClickHouseRebuildOp`, the step `yodel new` writes for a ClickHouse sort
  *   key, engine or key-column change (`./rebuild.ts`);
  * - `backfill`, a data backfill the author writes as an Op of `effect()`
- *   steps in a module in the migration's directory (`./backfill.ts`).
+ *   steps in a module in the migration's directory (`./backfill.ts`);
+ * - `PostgresMigrationOp`, the step `yodel new` writes for a Postgres column
+ *   rename or type change across kinds (`./postgres-migration.ts`, #13).
  *
- * Everything else (a manual step, `PostgresMigrationOp`, a rebuild in app
- * mode) is refused before anything runs, with exit 2.
+ * Everything else (a manual step, a rebuild in app mode) is refused before
+ * anything runs, with exit 2.
  */
 
 import { createHash } from "node:crypto";
@@ -25,6 +27,7 @@ export const BACKFILL_OP = "backfill";
 /** The module a backfill step runs, in the migration's directory, unless its `options.file` names another. */
 export const BACKFILL_FILE = "backfill.ts";
 export const REBUILD_OP = "ClickHouseRebuildOp";
+export const PG_MIGRATION_OP = "PostgresMigrationOp";
 
 type OpStep = Extract<MigrationStep, { kind: "op" }>;
 
@@ -49,9 +52,24 @@ export interface RebuildOptions {
   dualWrite: DualWrite;
 }
 
+/** A `PostgresMigrationOp` step's options: chant's `{ name, env, table, column }`, and what the author may add (`using`, `retain`, ...). */
+export interface PgMigrationOptions {
+  name: string;
+  table: string;
+  column: string;
+  using?: string;
+  /** How long the old column is kept after the switch; default none, so the contract runs in the same apply. */
+  retain?: string;
+  batchSize?: number;
+  replicationLag?: { max?: string; wait?: string } | false;
+  lockTimeoutMs?: number;
+  statementTimeoutMs?: number;
+}
+
 export type StepPlan =
   | { run: "statement" }
   | { run: "rebuild"; options: RebuildOptions }
+  | { run: "pgMigration"; options: PgMigrationOptions }
   | { run: "backfill"; file: string }
   | { run: "refused"; reason: string };
 
@@ -98,7 +116,46 @@ export function planStep(step: MigrationStep | BackfillStep): StepPlan {
     }
     return { run: "rebuild", options: { name: o.name, table: o.table, dualWrite: dw as DualWrite } };
   }
+  if (step.op === PG_MIGRATION_OP) return planPgMigration(step);
   return { run: "refused", reason: `${step.op} for ${step.object} (${step.name}), not SQL: yodel apply does not run that Op` };
+}
+
+const optional = <T>(o: Record<string, unknown>, key: string, ok: (v: unknown) => v is T): T | undefined | null => {
+  const v = o[key];
+  if (v === undefined) return undefined;
+  return ok(v) ? v : null;
+};
+const isString = (v: unknown): v is string => typeof v === "string" && v !== "";
+const isPositiveInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
+const isLag = (v: unknown): v is PgMigrationOptions["replicationLag"] => v === false || (isRecord(v) && Object.values(v).every((x) => typeof x === "string"));
+
+function planPgMigration(step: OpStep): StepPlan {
+  const o = step.options;
+  const bad = (what: string): StepPlan => ({ run: "refused", reason: `${PG_MIGRATION_OP} for ${step.object} (${step.name}): ${what}` });
+  if (!isString(o.name) || !isString(o.table) || !isString(o.column)) return bad("without its name, table and column options");
+  const using = optional(o, "using", isString);
+  const retain = optional(o, "retain", isString);
+  const batchSize = optional(o, "batchSize", isPositiveInt);
+  const lockTimeoutMs = optional(o, "lockTimeoutMs", isPositiveInt);
+  const statementTimeoutMs = optional(o, "statementTimeoutMs", isPositiveInt);
+  const replicationLag = optional(o, "replicationLag", isLag);
+  for (const [k, v] of Object.entries({ using, retain, batchSize, lockTimeoutMs, statementTimeoutMs, replicationLag })) {
+    if (v === null) return bad(`options.${k} is ${JSON.stringify(o[k])}, which is not one it takes`);
+  }
+  return {
+    run: "pgMigration",
+    options: {
+      name: o.name,
+      table: o.table,
+      column: o.column,
+      ...(using ? { using } : {}),
+      ...(retain ? { retain } : {}),
+      ...(batchSize ? { batchSize } : {}),
+      ...(lockTimeoutMs ? { lockTimeoutMs } : {}),
+      ...(statementTimeoutMs ? { statementTimeoutMs } : {}),
+      ...(replicationLag !== undefined && replicationLag !== null ? { replicationLag } : {}),
+    },
+  };
 }
 
 /** One line naming a step, for logs and refusals. */

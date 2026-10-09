@@ -63,7 +63,8 @@ export const LOCK_NAME = "apply";
 export const DEFAULT_LOCK_TTL_MS = 15 * 60 * 1000;
 
 export interface Lock {
-  kind: "keeper" | "local";
+  /** `advisory`: a Postgres session advisory lock (`./postgres/lock.ts`). */
+  kind: "keeper" | "local" | "advisory";
   owner: string;
   /** Where it is: the KeeperMap table, or the lock file. */
   where: string;

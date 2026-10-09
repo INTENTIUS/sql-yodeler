@@ -19,6 +19,7 @@ import {
   hasMigrations,
   inspect,
   migrationsDir,
+  closeVersioned,
   openVersioned,
   renderStatus,
   runMigrateOp,
@@ -95,7 +96,8 @@ Exit codes:
   0  applied, or nothing to apply
   2  a change needs its own Op (declarative), or a pending migration has a
      manual step or an Op step apply does not run (versioned: it runs
-     ClickHouseRebuildOp in materialized-view mode and backfill steps);
+     ClickHouseRebuildOp in materialized-view mode and backfill steps on
+     ClickHouse, PostgresMigrationOp on Postgres);
      nothing was applied
   3  stopped at the gate, waiting for approval of this plan
   4  versioned: refused, nothing applied: a checksum mismatch, an applied
@@ -178,6 +180,14 @@ export const apply: Command = {
 async function versionedApply(project: Project, env: Environment, a: ApplyArgs, io: Io): Promise<number> {
   const ordered = readMigrations(migrationsDir(project));
   const venv = await openVersioned(project, env);
+  try {
+    return await versionedApplyWith(project, env, a, io, ordered, venv);
+  } finally {
+    await closeVersioned(venv);
+  }
+}
+
+async function versionedApplyWith(project: Project, env: Environment, a: ApplyArgs, io: Io, ordered: readonly Migration[], venv: VersionedEnv): Promise<number> {
 
   if (a.digest) {
     const { status } = await inspect(venv, ordered);

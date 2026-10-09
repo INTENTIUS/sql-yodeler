@@ -29,14 +29,14 @@ What must exist first: a project directory with a chant.config.ts that has
 lexicons: ["sql"], sql.dialect and sql.profiles.<env> (credentials by env
 var), and a package.json from which chant and @intentius/chant-lexicon-sql
 resolve, since chant builds the declarations. For ClickHouse the profile
-must list the project's databases (sql.profiles.<env>.databases), and the
-history's database must not be one of them. init does not write
+must list the project's databases (sql.profiles.<env>.databases), for
+Postgres its schemas (sql.profiles.<env>.schemas), and the history's
+database (schema) must not be one of them. init does not write
 chant.config.ts.
 
-Postgres: the declarations and the baseline are written and plan clean,
-but the baseline is not recorded applied, because Postgres has no history
-table yet (#13); init says so and exits 2. Do not run yodel apply for this
-project against that database until #13 records the baseline.
+Postgres: the same, the history being <history database>.history in a
+schema of that name (default yodeler.history), and the profile listing the
+project's schemas (sql.profiles.<env>.schemas), the history's not among them.
 
 Ownership: chant's import strips chant's ownership marker from comments,
 and the plan compares declared definitions without it, so objects made by
@@ -53,8 +53,6 @@ Options:
 
 Exit codes:
   0  adopted: declarations and the baseline written, the baseline recorded applied
-  2  Postgres: declarations and the baseline written, the baseline not
-     recorded (the Postgres history is #13)
   4  refused, nothing written: the source directory already declares a
      schema (without --force), the project already has migrations, the
      history already records migrations, the environment holds nothing, or

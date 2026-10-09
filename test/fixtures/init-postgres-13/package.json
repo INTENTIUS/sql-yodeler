@@ -1,0 +1,5 @@
+{
+  "name": "yodel-fixture-init-postgres-13",
+  "private": true,
+  "type": "module"
+}

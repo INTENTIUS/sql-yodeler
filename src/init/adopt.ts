@@ -3,8 +3,9 @@
  *
  *  1. Refuse, before anything is written, when the project already declares
  *     a schema (unless `force`), already has migrations, or the
- *     environment's history already records any; and for ClickHouse when
- *     the environment names no `databases`, or names the history's own.
+ *     environment's history already records any; and when the environment
+ *     names no `databases` (ClickHouse) or `schemas` (Postgres), or names
+ *     the history's own.
  *  2. Read the live database with chant's import (`chant import --from`'s
  *     library functions) and write the declarations into the source
  *     directory.
@@ -13,14 +14,13 @@
  *     import does not round-trip, and everything written is taken back.
  *  4. Write the baseline migration: the first migration (parent `null`),
  *     whose statements create everything, from an empty schema to the build.
- *  5. Record it applied in the history without running it (`./baseline.ts`).
- *     Postgres has no history until #13, so there this step is refused with
- *     {@link NOT_RECORDED}, and what 2 to 4 wrote stays.
+ *  5. Record it applied in the history without running it (`./baseline.ts`),
+ *     on ClickHouse in `<history database>.history`, on Postgres in
+ *     `<history schema>.history` (#13), under the apply lock.
  *
- * Any failure in 2 to 5 (but the Postgres refusal) takes back every file
- * written. The live database is only read; the one write to the server is
- * the history row, and the history database and table when they were not
- * there.
+ * Any failure in 2 to 5 takes back every file written. The live database
+ * is only read; the one write to the server is the history row, and the
+ * history database (schema) and table when they were not there.
  */
 
 import { join, relative } from "node:path";
@@ -29,13 +29,13 @@ import { buildSchema } from "../chant/build.js";
 import { planEnvironment, renderPlan, type Plan } from "../chant/plan.js";
 import { createMigration, MIGRATIONS_DIR, writeMigration, type Migration } from "../migrations/index.js";
 import { environmentSettings } from "../config/settings.js";
-import { hasMigrations, openVersioned, REFUSED, type VersionedEnv } from "../versioned/index.js";
+import { closeVersioned, hasMigrations, openVersioned, REFUSED, type VersionedEnv } from "../versioned/index.js";
 import type { HistoryRow } from "../history/index.js";
 import { BASELINE_NAME, checkHistoryEmpty, recordBaseline } from "./baseline.js";
 import { declarationFiles, Journal } from "./files.js";
 import { describeImported, importLive } from "./live.js";
 
-/** Exit code: Postgres; the schema and the baseline are written, and the baseline is not recorded applied (the Postgres history is #13). */
+/** Exit code: the schema and the baseline are written, and the baseline is not recorded applied. Since #13 both dialects record it, so init no longer ends with it. */
 export const NOT_RECORDED = 2;
 
 export interface AdoptOptions {
@@ -58,7 +58,7 @@ export interface Adopted {
   /** The baseline migration's directory, relative to the project. */
   migrationPath: string;
   baseline: { id: string; checksum: string; statements: number };
-  /** The history row recorded, or `undefined` when it was not (Postgres, #13). */
+  /** The history row recorded; both dialects record one since #13. */
   recorded: { database: string; row: HistoryRow; lock: { kind: string; where: string; notice?: string } } | undefined;
   /** Why the baseline is not recorded, when it is not. */
   notRecorded?: string;
@@ -85,22 +85,21 @@ export function preflight(project: Project, env: Environment, options: { force?:
       REFUSED,
     );
   }
-  if (project.dialect === "clickhouse") {
-    const { historyDatabase } = environmentSettings(project, env.name, options.processEnv);
-    const databases = env.profile.databases;
-    if (!databases || databases.length === 0) {
-      throw new YodelError(
-        `refused: sql.profiles.${env.name} names no databases, so the import would read every database on the server, the history's (${historyDatabase}) included. ` +
-          `List the databases this project owns in sql.profiles.${env.name}.databases. Nothing was written.`,
-        REFUSED,
-      );
-    }
-    if (databases.includes(historyDatabase)) {
-      throw new YodelError(
-        `refused: sql.profiles.${env.name}.databases includes ${historyDatabase}, the history's database (yodel.config.ts environments.${env.name}.history.database, else YODEL_HISTORY_DATABASE); the history is yodel's, never part of the declared schema. Nothing was written.`,
-        REFUSED,
-      );
-    }
+  const { historyDatabase } = environmentSettings(project, env.name, options.processEnv);
+  const [key, what] = project.dialect === "postgres" ? (["schemas", "schema"] as const) : (["databases", "database"] as const);
+  const scope = project.dialect === "postgres" ? env.profile.schemas : env.profile.databases;
+  if (!scope || scope.length === 0) {
+    throw new YodelError(
+      `refused: sql.profiles.${env.name} names no ${key}, so the import would read every ${what} on the server, the history's (${historyDatabase}) included. ` +
+        `List the ${key} this project owns in sql.profiles.${env.name}.${key}. Nothing was written.`,
+      REFUSED,
+    );
+  }
+  if (scope.includes(historyDatabase)) {
+    throw new YodelError(
+      `refused: sql.profiles.${env.name}.${key} includes ${historyDatabase}, the history's ${what} (yodel.config.ts environments.${env.name}.history.database, else YODEL_HISTORY_DATABASE); the history is yodel's, never part of the declared schema. Nothing was written.`,
+      REFUSED,
+    );
   }
 }
 
@@ -113,12 +112,16 @@ export async function adopt(project: Project, env: Environment, options: AdoptOp
   const log = options.log ?? (() => undefined);
   preflight(project, env, { ...(options.force !== undefined ? { force: options.force } : {}), processEnv });
 
-  let venv: VersionedEnv | undefined;
-  if (project.dialect === "clickhouse") {
-    venv = await openVersioned(project, env, processEnv);
+  const venv: VersionedEnv = await openVersioned(project, env, processEnv);
+  try {
     await checkHistoryEmpty(venv);
+    return await adoptWith(project, env, venv, options, processEnv, log);
+  } finally {
+    await closeVersioned(venv);
   }
+}
 
+async function adoptWith(project: Project, env: Environment, venv: VersionedEnv, options: AdoptOptions, processEnv: NodeJS.ProcessEnv, log: (line: string) => void): Promise<Adopted> {
   const live = await importLive(project, env, processEnv);
   if (live.ir.resources.length === 0) {
     throw new YodelError(`refused: ${env.name} holds no objects in its scope (sql.profiles.${env.name}); there is nothing to adopt. Declare a schema and run yodel new instead. Nothing was written.`, REFUSED);
@@ -174,14 +177,6 @@ export async function adopt(project: Project, env: Environment, options: AdoptOp
       baseline: { id: made.id, checksum: made.document.checksum, statements },
       warnings: live.warnings,
     };
-    if (!venv) {
-      return {
-        ...base,
-        recorded: undefined,
-        notRecorded:
-          "Postgres has no migration history yet (#13), so the baseline is not recorded as applied. Until it is, yodel apply would try to run it; do not apply this project's migrations to this database before #13 records the baseline.",
-      };
-    }
     const { row, lock } = await recordBaseline(venv, migration, processEnv);
     if (lock.notice) log(`lock: ${lock.notice}`);
     log(`recorded ${made.id} applied in ${venv.location.database}.history as a baseline; none of its statements was run`);

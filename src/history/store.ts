@@ -35,7 +35,8 @@ const columnNames = HISTORY_COLUMNS.map(([name]) => name);
 
 type RawRow = Record<string, unknown>;
 
-function fromRaw(r: RawRow): HistoryRow {
+/** A row as a server returns it (strings or numbers), as a {@link HistoryRow}. */
+export function fromRaw(r: RawRow): HistoryRow {
   const s = (k: string): string => {
     const v = r[k];
     return typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "";
@@ -59,7 +60,16 @@ function fromRaw(r: RawRow): HistoryRow {
   };
 }
 
-export class HistoryStore {
+/** What the versioned verbs need of a history, on either dialect: this ClickHouse store, or `./postgres/store.ts`. */
+export interface HistoryStoreLike {
+  exists(): Promise<boolean>;
+  ensure(): Promise<void>;
+  rows(options?: { sync?: boolean }): Promise<HistoryRow[]>;
+  state(options?: { sync?: boolean }): Promise<HistoryState>;
+  append(rows: readonly HistoryRow[]): Promise<void>;
+}
+
+export class HistoryStore implements HistoryStoreLike {
   constructor(
     readonly port: ClickHousePort,
     readonly location: HistoryLocation,
@@ -134,7 +144,7 @@ export class HistoryRecorder {
   private next: number;
 
   constructor(
-    readonly store: HistoryStore,
+    readonly store: HistoryStoreLike,
     readonly run: RunContext,
     maxSeq: number,
   ) {
