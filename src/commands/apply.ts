@@ -6,6 +6,7 @@ import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
 import { readMigrations, type Migration } from "../migrations/index.js";
+import { migrationSilences } from "../lint/index.js";
 import { describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
 import {
@@ -210,6 +211,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
       },
       log: (l) => { io.err(`${l}\n`); },
+      silences: migrationSilences,
     });
     if (a.json) io.out(`${JSON.stringify({ environment: env.name, status: "applied", planDigest: approved, ...result }, null, 2)}\n`);
     else io.out(result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);

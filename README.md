@@ -71,3 +71,22 @@ export const op = Op({
 ```
 
 `yodel apply prod` stops at the gate and prints `chant approve migrate-prod approve-migrate-prod --plan <digest>`; approve, then run it again. `yodel apply prod --plan` prints the pending migrations and the digest without applying. Running `chant run migrate-prod` directly needs `yodel` on PATH.
+
+## yodel lint
+
+`yodel lint` checks the migrations directory offline, with no server, so it runs in CI on every pull request. Every rule is free. Exit 0 when there is no error (warnings and silenced findings do not fail), 3 when there is at least one, 1 when lint cannot run; `--json` prints the findings.
+
+- Integrity, always errors: `fork` (two migrations follow the same parent; `yodel rebase`), `directory` (a bad name or file, a missing parent, a cycle, another dialect), `checksum` (a migration's files changed since it was written), `unreadable-object` (an object in a recorded schema, or a step, the sql lexicon cannot read or classify; never skipped).
+- From the classifier's classes: `destructive` (a drop), `pg-rewrite` (a rewrite or full scan under ACCESS EXCLUSIVE), `pg-lock` (writes blocked for a whole index build or scan: no `CONCURRENTLY`, a constraint validated in place), `ch-mutation` (a mutation rewriting parts), `ch-rebuild` (a `ClickHouseRebuildOp` step).
+- `refused-step` (a step `yodel apply` will not run), `migration-sql` (migration.sql does not hold a statement migration.json records), `silence` (a bad or unused `yodel:allow` line).
+
+A line above a statement in its `migration.sql` silences one of the classifier rules for that statement:
+
+```sql
+-- yodel:allow destructive the column was never read; checked in prod 2026-10-08
+ALTER TABLE `db`.`events` DROP COLUMN `legacy`;
+```
+
+The reason is required. `yodel apply` records each silence (step, rule, reason) in every history row the migration writes, in the `silences` column. The line changes the migration's checksum, so record the new one with `yodel lint --update-checksum <id>` while it is applied nowhere.
+
+`yodel lint --env <env>` also reads the environment's history: an applied migration whose files changed since it ran is a `checksum` error, a pending migration's edit a warning. `yodel.config.ts` sets rule levels: `lint: { rules: { "ch-mutation": "warning", "pg-lock": "off" } }`; the integrity rules cannot be lowered. `yodel lint --rules` lists the rules and their levels.

@@ -1,0 +1,5 @@
+{
+  "name": "yodel-fixture-lint-postgres",
+  "private": true,
+  "type": "module"
+}
