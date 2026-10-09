@@ -23,7 +23,7 @@ async function run(argv: string[], list?: readonly Command[]) {
 }
 
 const verbs = ["init", "plan", "apply", "new", "lint", "status", "drift", "rebase", "repair"];
-const envVerbs = ["plan", "apply", "drift"];
+const envVerbs = ["plan", "apply", "status", "drift"];
 const built = [...envVerbs, "new"];
 const notBuilt = verbs.filter((v) => !built.includes(v));
 
