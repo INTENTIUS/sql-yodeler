@@ -28,7 +28,8 @@ import { loadProject, YodelError, type Environment, type Project } from "../proj
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, renderPlan, type Plan } from "../chant/plan.js";
 import { createMigration, MIGRATIONS_DIR, writeMigration, type Migration } from "../migrations/index.js";
-import { hasMigrations, historySettings, openVersioned, REFUSED, type VersionedEnv } from "../versioned/index.js";
+import { environmentSettings } from "../config/settings.js";
+import { hasMigrations, openVersioned, REFUSED, type VersionedEnv } from "../versioned/index.js";
 import type { HistoryRow } from "../history/index.js";
 import { BASELINE_NAME, checkHistoryEmpty, recordBaseline } from "./baseline.js";
 import { declarationFiles, Journal } from "./files.js";
@@ -85,7 +86,7 @@ export function preflight(project: Project, env: Environment, options: { force?:
     );
   }
   if (project.dialect === "clickhouse") {
-    const { historyDatabase } = historySettings(options.processEnv);
+    const { historyDatabase } = environmentSettings(project, env.name, options.processEnv);
     const databases = env.profile.databases;
     if (!databases || databases.length === 0) {
       throw new YodelError(
@@ -96,7 +97,7 @@ export function preflight(project: Project, env: Environment, options: { force?:
     }
     if (databases.includes(historyDatabase)) {
       throw new YodelError(
-        `refused: sql.profiles.${env.name}.databases includes ${historyDatabase}, the history's database (YODEL_HISTORY_DATABASE); the history is yodel's, never part of the declared schema. Nothing was written.`,
+        `refused: sql.profiles.${env.name}.databases includes ${historyDatabase}, the history's database (yodel.config.ts environments.${env.name}.history.database, else YODEL_HISTORY_DATABASE); the history is yodel's, never part of the declared schema. Nothing was written.`,
         REFUSED,
       );
     }

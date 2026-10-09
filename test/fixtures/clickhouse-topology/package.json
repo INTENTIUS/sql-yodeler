@@ -1,0 +1,5 @@
+{
+  "name": "yodel-fixture-clickhouse-topology",
+  "private": true,
+  "type": "module"
+}

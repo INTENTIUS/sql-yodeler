@@ -6,6 +6,8 @@
  * - the migrations it would apply, in order, each with its files' checksum
  *   and the statements of it that already succeeded (a part-way one resumes);
  * - the history it starts from: every applied migration and its checksum;
+ * - the topology the statements are rendered for (#9): an approval given
+ *   for a single node never applies on a cluster;
  * - the live schema: a fingerprint of the server's catalog in the
  *   environment's databases (every table, view and dictionary there, by its
  *   `create_table_query`, and each database's engine). The history database
@@ -22,6 +24,7 @@ import { createHash } from "node:crypto";
 import type { ClickHousePort } from "../history/index.js";
 import { literal } from "../history/index.js";
 import type { AppliedMigration, PendingMigration } from "./state.js";
+import type { Topology } from "../topology/render.js";
 
 export const DIGEST_KIND = "yodel-migrations";
 
@@ -71,6 +74,8 @@ export function catalogFingerprint(catalog: LiveCatalog): string {
 export interface DigestSubject {
   environment: string;
   historyDatabase: string;
+  /** The environment's topology, with a cluster's Keeper path and replica name when it sets them. Always set by {@link digestSubject}; absent in a subject carried from before #9. */
+  topology?: Topology;
   applied: Array<{ id: string; checksum: string }>;
   pending: Array<{ id: string; checksum: string; done: number[] }>;
   live: string;
@@ -79,6 +84,8 @@ export interface DigestSubject {
 export function digestSubject(input: {
   environment: string;
   historyDatabase: string;
+  /** Default: a single node. */
+  topology?: Topology | undefined;
   applied: readonly AppliedMigration[];
   toApply: readonly PendingMigration[];
   live: string;
@@ -86,6 +93,7 @@ export function digestSubject(input: {
   return {
     environment: input.environment,
     historyDatabase: input.historyDatabase,
+    topology: input.topology ?? { kind: "single" },
     applied: input.applied.map((a) => ({ id: a.id, checksum: a.checksum })),
     pending: input.toApply.map((p) => ({ id: p.id, checksum: p.checksum, done: p.partWay?.done ?? [] })),
     live: input.live,

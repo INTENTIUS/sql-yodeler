@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { SqlConfig, SqlProfile } from "@intentius/chant-lexicon-sql/config";
 import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
+import type { YodelConfig } from "./config/define.js";
 
 export type { SqlDialect, SqlProfile };
 
@@ -42,6 +43,8 @@ export interface Project {
   dialect: SqlDialect;
   /** Where the declared schema lives, relative to `dir`: `sourceDir`, else `src` when it exists, else `.`. */
   sourceDir: string;
+  /** `yodel.config.ts`, checked, when the project has one (`./config/`). */
+  yodel?: { path: string; config: YodelConfig } | undefined;
 }
 
 export interface Environment {
@@ -76,18 +79,19 @@ export function projectDialect(config: ProjectConfig, configPath: string): SqlDi
 }
 
 /** Builds a {@link Project} from a config already loaded. Pure, for tests and callers that load the config themselves. */
-export function projectFromConfig(dir: string, configPath: string, config: ProjectConfig): Project {
+export function projectFromConfig(dir: string, configPath: string, config: ProjectConfig, yodel?: Project["yodel"]): Project {
   if (!(config.lexicons ?? []).includes("sql")) {
     throw new YodelError(`${configPath}: lexicons does not include "sql"; add lexicons: ["sql"] and import "@intentius/chant-lexicon-sql"`);
   }
   const sourceDir = config.sourceDir ?? (existsSync(join(dir, "src")) ? "src" : ".");
-  return { dir, configPath, config, dialect: projectDialect(config, configPath), sourceDir };
+  return { dir, configPath, config, dialect: projectDialect(config, configPath), sourceDir, ...(yodel ? { yodel } : {}) };
 }
 
 /**
  * Finds the project at or above `start` (default: the working directory) and
  * loads its `chant.config.ts` through chant's own loader, so it is validated
- * the same way `chant build` validates it.
+ * the same way `chant build` validates it, and its `yodel.config.ts` when
+ * there is one.
  */
 export async function loadProject(start: string = process.cwd()): Promise<Project> {
   const dir = findProjectDir(start);
@@ -99,7 +103,10 @@ export async function loadProject(start: string = process.cwd()): Promise<Projec
   } catch (e) {
     throw new YodelError(e instanceof Error ? e.message : String(e));
   }
-  return projectFromConfig(dir, loaded.configPath ?? join(dir, "chant.config.ts"), loaded.config);
+  const config = loaded.config as ProjectConfig;
+  const { loadYodelConfig } = await import("./config/load.js");
+  const yodel = await loadYodelConfig(dir, Object.keys(config.sql?.profiles ?? {}));
+  return projectFromConfig(dir, loaded.configPath ?? join(dir, "chant.config.ts"), config, yodel);
 }
 
 /** `sql.profiles.<name>`, or an error naming the environments the project declares. */

@@ -1,0 +1,14 @@
+import { Op, phase, gate, shell, stepOutput } from "@intentius/chant/op";
+
+const plan = shell("yodel apply replicated --digest", { id: "plan" });
+const digest = stepOutput(plan, "stdout");
+
+export const op = Op({
+  name: "migrate-replicated",
+  overview: "Apply the pending migrations to replicated, behind an approval bound to their plan digest",
+  phases: [
+    phase("Plan", [plan]),
+    phase("Approve", [gate("approve-migrate-replicated", { plan: digest })]),
+    phase("Apply", [shell("yodel apply replicated --execute", { env: { YODEL_APPROVED_PLAN: digest }, timeout: "2h" })]),
+  ],
+});

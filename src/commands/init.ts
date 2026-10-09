@@ -15,10 +15,11 @@ its declarations to the source directory (sourceDir, else src/), builds
 them and plans them against the same database, which must show no change.
 Then writes the baseline migration, migrations/<YYYYMMDDTHHMM>-baseline/,
 the first migration (no parent), whose statements create everything, and
-records it applied in the history table (YODEL_HISTORY_DATABASE, default
-yodeler) without running any of them. From there, yodel plan <env> shows no
-change, yodel status <env> lists the baseline applied with nothing pending,
-and yodel new writes the next migration after the baseline.
+records it applied in the history table (yodel.config.ts history.database,
+else YODEL_HISTORY_DATABASE, default yodeler) without running any of them.
+From there, yodel plan <env> shows no change, yodel status <env> lists the
+baseline applied with nothing pending, and yodel new writes the next
+migration after the baseline.
 
 The live database is only read. The one write to the server is the
 baseline's history row (and the history's database and table, when they

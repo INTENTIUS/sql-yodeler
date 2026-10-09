@@ -91,7 +91,7 @@ export function declarativeSuite(h: DialectHooks): void {
 
       const text = await yodel(at("plan", "e2e"));
       expect(text.code).toBe(0);
-      expect(text.out).toContain(`Plan for e2e (${h.dialect}, sql.profiles.e2e)`);
+      expect(text.out).toContain(`Plan for e2e (${h.dialect}, sql.profiles.e2e`);
       expect(text.out).toContain(`${String(h.declared)} create`);
     });
 

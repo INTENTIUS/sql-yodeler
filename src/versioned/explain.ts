@@ -2,7 +2,7 @@
  * What moved: why the plan digest now differs from one approved earlier.
  *
  * The digest is a hash of its subject (`./digest.ts`): the environment, the
- * history database, the applied migrations with their recorded checksums,
+ * history database, the topology, the applied migrations with their recorded checksums,
  * the pending ones with their checksums and the statements of each already
  * done, and the live schema's fingerprint. A hash says nothing about which
  * of those changed, so yodel works back to the subject it was taken over:
@@ -26,6 +26,7 @@ import { dirname } from "node:path";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { computeChecksum, type Migration } from "../migrations/index.js";
 import { deriveState, type HistoryRow } from "../history/index.js";
+import { topologyLabel } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { catalogFingerprint, digestSubject, planDigest, readLiveCatalog, sameDigest, type DigestSubject } from "./digest.js";
 import type { VersionedEnv } from "./engine.js";
 import type { MigrateOpRef } from "./op.js";
@@ -49,7 +50,7 @@ export interface MoveExplanation {
 /** The subject `currentDigest` hashes, read now. */
 export async function currentSubject(venv: VersionedEnv, status: VersionedStatus, toApply: readonly PendingMigration[]): Promise<DigestSubject> {
   const live = catalogFingerprint(await readLiveCatalog(venv.port, venv.scope));
-  return digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, applied: status.applied, toApply, live });
+  return digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, topology: venv.topology, applied: status.applied, toApply, live });
 }
 
 /** A subject as text safe to carry in an HTML comment: base64url of its JSON. */
@@ -75,6 +76,11 @@ export function diffSubjects(before: DigestSubject, after: DigestSubject, applie
   const out: Moved[] = [];
   if (before.environment !== after.environment) out.push({ part: "environment", message: `the environment changed: ${before.environment} -> ${after.environment}` });
   if (before.historyDatabase !== after.historyDatabase) out.push({ part: "environment", message: `the history database changed: ${before.historyDatabase} -> ${after.historyDatabase}` });
+  const topology = (s: DigestSubject) => JSON.stringify(Object.entries(s.topology ?? { kind: "single" }).sort(([a], [b]) => a.localeCompare(b)));
+  if (topology(before) !== topology(after)) {
+    const label = (s: DigestSubject) => topologyLabel(s.topology ?? { kind: "single" });
+    out.push({ part: "environment", message: `the topology changed: ${label(before)} -> ${label(after)}` });
+  }
 
   const wasApplied = new Map(before.applied.map((a) => [a.id, a]));
   const isApplied = new Map(after.applied.map((a) => [a.id, a]));
@@ -214,7 +220,9 @@ export async function explainMove(input: ExplainInput): Promise<MoveExplanation>
   const baselines: DigestSubject[] = [];
   for (const state of states) {
     const status = compareHistory(input.ordered, state);
-    const base = digestSubject({ environment: input.now.environment, historyDatabase: input.now.historyDatabase, applied: status.applied, toApply: status.pending, live: input.now.live });
+    const base = digestSubject({ environment: input.now.environment, historyDatabase: input.now.historyDatabase, topology: input.now.topology, applied: status.applied, toApply: status.pending, live: input.now.live });
+    // A subject carried from before #9 has no topology; rebuild it the same way.
+    if (input.now.topology === undefined) delete base.topology;
     baselines.push(base);
     for (const pending of subsets(base.pending)) {
       const variants = pending.map((p) => [p.checksum, ...(input.checksums?.(p.id) ?? []).filter((c) => c !== p.checksum)]);

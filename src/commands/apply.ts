@@ -7,6 +7,7 @@ import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, P
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
 import { readMigrations, type Migration } from "../migrations/index.js";
 import { describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
+import { declarativeTopologyRefusal } from "../config/settings.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -51,12 +52,15 @@ Two paths, chosen by the project:
 
 - Versioned: the project has a migrations/ directory holding a migration.
   Applies the pending migrations in chain order, statement by statement,
-  recording each in the history table (YODEL_HISTORY_DATABASE, default
-  yodeler) under the apply lock. Runs the project's migrations Op for the
+  recording each in the history table (yodel.config.ts history.database,
+  else YODEL_HISTORY_DATABASE, default yodeler) under the apply lock. Each
+  statement is rendered for the environment's topology (yodel.config.ts
+  topology, else sql.profiles.<env>.topology, else YODEL_TOPOLOGY, default
+  single) as it is sent. Runs the project's migrations Op for the
   environment (chant run <op>), whose gate is bound to the plan digest: the
-  pending migrations' checksums, the history and the live schema. A run
-  that stops at the gate prints the chant approve command; approve, then
-  run yodel apply again. If anything the digest covers changes after
+  pending migrations' checksums, the topology, the history and the live
+  schema. A run that stops at the gate prints the chant approve command;
+  approve, then run yodel apply again. If anything the digest covers changes after
   approval, the gate asks again.
 
   A migration that failed part way resumes at the statement that failed; a
@@ -165,6 +169,8 @@ export const apply: Command = {
       if (a.plan || a.digest || a.execute || a.allowOutOfOrder) {
         throw new YodelError(`--plan, --digest, --execute and --allow-out-of-order are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
       }
+      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
+      if (refusal) throw refusal;
       return declarativeApply(project, env, a, io);
     }),
 };

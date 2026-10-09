@@ -204,8 +204,8 @@ export function asWritten(m: Migration): boolean {
 
 /** Rewrites one migration onto a new parent whose recorded schema is `base1`. */
 function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: BuildOutput, theirs: string): RebasedMigration {
-  if (m.document.topology !== undefined) {
-    throw new YodelError(`${m.id} was rendered for ClickHouse topology ${m.document.topology}; this yodel renders statements for a single node only (#9), so it cannot rebase it`);
+  if (m.document.topology !== undefined && m.document.topology !== "single") {
+    throw new YodelError(`${m.id} was rendered for ClickHouse topology ${m.document.topology}; yodel writes migrations for a single node and renders them per environment when applied, so it cannot rebase one written for a topology`);
   }
   const schema = mergeChange(base0, m.document.schema, base1, { migration: m.id, theirs });
   let statements: SchemaStatements;

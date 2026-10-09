@@ -9,6 +9,12 @@
     "url": "git+https://github.com/INTENTIUS/sql-yodeler.git"
   },
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "bin": {
     "yodel": "dist/bin.js"
   },
@@ -26,8 +32,8 @@
     "check": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {
-    "@intentius/chant": "^0.113.0",
-    "@intentius/chant-lexicon-sql": "^0.113.0",
+    "@intentius/chant": "^0.114.0",
+    "@intentius/chant-lexicon-sql": "^0.114.0",
     "tsx": "^4.23.15"
   },
   "devDependencies": {

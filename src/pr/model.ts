@@ -66,7 +66,7 @@ export type ApprovalView =
 export interface VersionedPlan {
   environment: string;
   dialect: SqlDialect;
-  /** `<database>.history (<topology>)`; absent when there is no history (Postgres, until #13). */
+  /** `<database>.history (<topology> (<where it came from>))`; absent when there is no history (Postgres, until #13). */
   history?: string | undefined;
   appliedCount: number;
   pending: PendingView[];
@@ -142,7 +142,7 @@ export async function collectVersionedPlan(project: Project, env: Environment, o
 
   const plan: VersionedPlan = {
     ...base,
-    history: `${venv.location.database}.history (${describeTopology(venv.location.topology)})`,
+    history: `${venv.location.database}.history (${report.topology ?? describeTopology(venv.location.topology)})`,
     appliedCount: status.applied.length,
     pending: status.pending.map((p) => viewOf(p.migration, p.partWay?.done ?? [], p.outOfOrder, p.partWay?.resumeAt, p.refusedSteps)),
     refusal: report.refusal,

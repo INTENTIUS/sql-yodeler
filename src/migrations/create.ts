@@ -1,7 +1,9 @@
 /**
  * Making the next migration, offline: the newest migration's recorded
  * schema (or an empty schema, for the first) diffed against the current
- * build with chant's `diffStatements`. No server is read. Pure: nothing
+ * build with chant's `diffStatements`. No server is read. The statements
+ * are written for a single node and the migration records no topology: it
+ * is rendered for each environment's topology when it is applied (#9). Pure: nothing
  * here touches the disk; `yodel new` writes what it returns with
  * `writeMigration`.
  */
@@ -15,14 +17,6 @@ import { MIGRATION_NAME, type Migration } from "./directory.js";
 import { asBackfill, BACKFILL_FILE } from "../steps/kinds.js";
 import { backfillStep } from "../steps/backfill.js";
 
-/**
- * A ClickHouse topology, as chant's `./clickhouse/topology.ts` declares it
- * (`{ kind: "single" }`, a cluster, a Replicated database, Cloud). Passed to
- * `diffStatements` as is. `yodel new` leaves it unset, which renders for a
- * single node; #9 chooses it per environment.
- */
-export type Topology = { kind: string } & Record<string, unknown>;
-
 export interface CreateMigrationOptions {
   /** The migration's name, the part of its id after the timestamp. */
   name: string;
@@ -32,8 +26,6 @@ export interface CreateMigrationOptions {
   previous?: Migration | undefined;
   /** When it is made. Default: now. Its UTC minute is the id's timestamp. */
   now?: Date;
-  /** ClickHouse: the topology to render statements for. Default: chant's, a single node. */
-  topology?: Topology;
   /** The ownership marker each `CREATE` carries. Default: chant's, `managed-by=chant`. */
   marker?: DiffStatementsOptions["marker"];
   /** ClickHouse: the database a bare name means. Default: chant's, `default`. */
@@ -137,14 +129,9 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
       ...(options.marker ? { marker: options.marker } : {}),
       ...(options.defaultDatabase !== undefined ? { defaultDatabase: options.defaultDatabase } : {}),
       ...(options.defaultSchema !== undefined ? { defaultSchema: options.defaultSchema } : {}),
-      ...(options.topology ? ({ topology: options.topology } as object) : {}),
     });
   } catch (e) {
     throw new YodelError(e instanceof Error ? e.message : String(e));
-  }
-  const rendered = statements as SchemaStatements & { topology?: unknown };
-  if (options.topology && rendered.topology === undefined) {
-    throw new YodelError("this @intentius/chant-lexicon-sql renders no ClickHouse topology; a newer release is needed to render for one");
   }
   if (options.backfill) {
     const file = options.backfill.file ?? BACKFILL_FILE;
@@ -162,7 +149,6 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
     ...(statements.defaultDatabase !== undefined ? { defaultDatabase: statements.defaultDatabase } : {}),
     ...(statements.defaultSchema !== undefined ? { defaultSchema: statements.defaultSchema } : {}),
     ...(statements.major !== undefined ? { major: statements.major } : {}),
-    ...(typeof rendered.topology === "string" ? { topology: rendered.topology } : {}),
     refused: statements.refused,
     hints: statements.hints,
     steps: statements.steps,

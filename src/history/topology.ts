@@ -4,8 +4,8 @@
  *
  * The same four kinds as chant's ClickHouse topology, with the same string
  * form (`single`, `cluster:<name>`, `replicated`, `replicated:<cluster>`,
- * `cloud`). Choosing one per environment is #9's (`yodel.config.ts`); until
- * then `YODEL_TOPOLOGY` sets it and the default is a single node.
+ * `cloud`). Each environment names one in `yodel.config.ts` (#9, see
+ * `../config/settings.ts` for the fallbacks); the default is a single node.
  */
 
 import { YodelError } from "../project.js";

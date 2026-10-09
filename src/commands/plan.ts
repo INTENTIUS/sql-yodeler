@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
+import { declarativeTopologyRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
 import { hasMigrations } from "../versioned/index.js";
@@ -140,11 +141,14 @@ export const plan: Command = {
 };
 
 async function declarativePlan(project: Project, env: Environment, json: boolean, io: Io): Promise<number> {
+  const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
+  if (refusal) throw refusal;
+  const topology = project.dialect === "clickhouse" ? `, topology ${describeSettingsTopology(environmentSettings(project, env.name))}` : "";
   const build = await buildSchema(project);
   try {
     const result = await planEnvironment(project, env, build);
     if (json) io.out(`${JSON.stringify(planJson(result), null, 2)}\n`);
-    else io.out(`${await renderPlan(result, `Plan for ${env.name} (${project.dialect}, sql.profiles.${env.name})`)}\n`);
+    else io.out(`${await renderPlan(result, `Plan for ${env.name} (${project.dialect}, sql.profiles.${env.name}${topology})`)}\n`);
     return planExitCode(result);
   } finally {
     build.dispose();

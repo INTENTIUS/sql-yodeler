@@ -7,6 +7,8 @@ import { outOfOrder, partWay, type VersionedStatus } from "./state.js";
 export interface StatusReport {
   environment: string;
   location: HistoryLocation;
+  /** The topology statements are rendered for, and where it came from: `cluster:main (yodel.config.ts)`. Default: the history's. */
+  topology?: string | undefined;
   status: VersionedStatus;
   /** The digest `yodel apply` would ask approval for, when it would not refuse. */
   digest?: string | undefined;
@@ -19,6 +21,7 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
   return {
     environment: r.environment,
     history: { database: r.location.database, topology: describeTopology(r.location.topology) },
+    topology: r.topology ?? describeTopology(r.location.topology),
     applied: status.applied.map((a) => ({ id: a.id, checksum: a.checksum, appliedBy: a.appliedBy, recordedAt: a.recordedAt, planDigest: a.planDigest, inDirectory: a.index !== undefined })),
     pending: status.pending.map((p) => ({
       id: p.id,
@@ -38,7 +41,7 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
 
 export function renderStatus(r: StatusReport): string {
   const { status } = r;
-  const lines = [`Migrations in ${r.environment} (history ${r.location.database}.history, topology ${describeTopology(r.location.topology)})`, ""];
+  const lines = [`Migrations in ${r.environment} (history ${r.location.database}.history, topology ${r.topology ?? describeTopology(r.location.topology)})`, ""];
   lines.push(status.applied.length === 0 ? "Applied: none" : `Applied (${String(status.applied.length)}):`);
   for (const a of status.applied) lines.push(`  ${a.id}${a.index === undefined ? "  (not in the directory)" : ""}  ${a.recordedAt} by ${a.appliedBy}`);
   lines.push("", status.pending.length === 0 ? "Pending: none" : `Pending (${String(status.pending.length)}):`);

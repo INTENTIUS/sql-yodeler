@@ -19,6 +19,7 @@ import { MIGRATIONS_DIR } from "../migrations/index.js";
 import type { Migration } from "../migrations/index.js";
 import { currentDigest, inspect, integrityRefusal, stepRefusal, type VersionedEnv } from "./engine.js";
 import type { StatusReport } from "./report.js";
+import { describeSettingsTopology } from "../config/settings.js";
 
 export * from "./approval.js";
 export * from "./digest.js";
@@ -50,6 +51,7 @@ export async function statusReport(venv: VersionedEnv, ordered: readonly Migrati
   return {
     environment: venv.environment,
     location: venv.location,
+    topology: venv.topology ? describeSettingsTopology({ topology: venv.topology, topologySource: venv.topologySource ?? "default" }) : undefined,
     status,
     digest,
     refusal: refusal ? { exitCode: refusal.exitCode, message: refusal.message } : undefined,

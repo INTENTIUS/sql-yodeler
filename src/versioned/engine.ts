@@ -4,7 +4,8 @@
  * after the plan digest the run was approved under is checked again.
  *
  * Statements are the `statement` steps of each migration's `migration.json`,
- * sent as they are there (not rendered again). A statement whose latest
+ * written for a single node, each rendered for the environment's topology
+ * as it is sent (#9, `../topology/render.ts`). A statement whose latest
  * history row is `succeeded` is never sent again, so a migration that failed
  * part way resumes at the statement that failed. A statement whose latest
  * row is `started` (the runner stopped while it ran) is sent again: the
@@ -29,18 +30,18 @@ import type { ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse
 import { YodelError, type Environment, type Project } from "../project.js";
 import { PLAN_NEEDS_OP } from "../chant/plan.js";
 import type { Migration } from "../migrations/index.js";
+import { environmentSettings } from "../config/settings.js";
+import { renderForEnvironment, topologyNote, type Topology } from "../topology/render.js";
 import { defaultStepRunner, describeStep, planStep, stepSha, StepOpFailed, type StepRunner } from "../steps/index.js";
 import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import {
   acquireLock,
-  DEFAULT_HISTORY_DATABASE,
-  DEFAULT_LOCK_TTL_MS,
   HistoryRecorder,
   HistoryStore,
   httpPort,
   MIGRATION_ROW,
   newRunContext,
-  parseHistoryTopology,
+  SINGLE,
   serverMessage,
   statementDone,
   statementSha,
@@ -71,41 +72,21 @@ export interface VersionedEnv {
   projectDir?: string;
   /** The server, for the receipt store a backfill step keeps its receipts in. */
   endpoint?: ClickHouseEndpoint;
-}
-
-/**
- * The history's settings for an environment. Until #9's `yodel.config.ts`
- * sets them per environment, from the process environment:
- *
- *   YODEL_HISTORY_DATABASE  the database the history and lock live in (default `yodeler`)
- *   YODEL_TOPOLOGY          single | cluster:<name> | replicated[:<cluster>] | cloud (default single)
- *   YODEL_LOCK_TTL          the lock's TTL in seconds (default 900)
- */
-export interface HistorySettings {
-  historyDatabase: string;
-  topology: HistoryLocation["topology"];
-  lockTtlMs: number;
-}
-
-export function historySettings(env: NodeJS.ProcessEnv = process.env): HistorySettings {
-  const ttl = env.YODEL_LOCK_TTL ? Number(env.YODEL_LOCK_TTL) : undefined;
-  if (ttl !== undefined && !(Number.isFinite(ttl) && ttl > 0)) throw new YodelError(`YODEL_LOCK_TTL must be a number of seconds, got ${JSON.stringify(env.YODEL_LOCK_TTL)}`);
-  return {
-    historyDatabase: env.YODEL_HISTORY_DATABASE || DEFAULT_HISTORY_DATABASE,
-    topology: parseHistoryTopology(env.YODEL_TOPOLOGY || "single"),
-    lockTtlMs: ttl !== undefined ? ttl * 1000 : DEFAULT_LOCK_TTL_MS,
-  };
+  /** What each statement is rendered for when it is sent (`../config/settings.ts`). Default: a single node. */
+  topology?: Topology;
+  /** Where {@link topology} came from: `yodel.config.ts`, `sql.profiles.<env>.topology`, `YODEL_TOPOLOGY` or `default`. */
+  topologySource?: string;
 }
 
 /** Binds an environment's server (`sql.profiles.<env>`) and history. ClickHouse only, for now (Postgres is #13). */
 export async function openVersioned(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv = process.env, port?: ClickHousePort): Promise<VersionedEnv> {
   if (project.dialect !== "clickhouse") throw new YodelError("versioned migrations are ClickHouse only for now; Postgres is #13");
-  const settings = historySettings(processEnv);
+  const settings = environmentSettings(project, env.name, processEnv);
   const { resolveClickHouseTarget, isUnresolvedTarget } = await import("@intentius/chant-lexicon-sql/clickhouse/live/bind");
   const target = resolveClickHouseTarget({ environment: env.name, config: project.config, env: processEnv });
   if (isUnresolvedTarget(target)) throw new YodelError(target.detail);
   const endpoint: ClickHouseEndpoint = target.endpoint;
-  const location: HistoryLocation = { database: settings.historyDatabase, topology: settings.topology };
+  const location: HistoryLocation = { database: settings.historyDatabase, topology: settings.historyTopology };
   const p = port ?? (await httpPort(endpoint));
   return {
     environment: env.name,
@@ -117,6 +98,8 @@ export async function openVersioned(project: Project, env: Environment, processE
     lockTtlMs: settings.lockTtlMs,
     projectDir: project.dir,
     endpoint,
+    topology: settings.topology,
+    topologySource: settings.topologySource,
   };
 }
 
@@ -163,7 +146,7 @@ export function selectToApply(status: VersionedStatus, allowOutOfOrder: boolean)
 /** The plan digest of applying `toApply` from the server's state now. */
 export async function currentDigest(venv: VersionedEnv, status: VersionedStatus, toApply: readonly PendingMigration[]): Promise<string> {
   const live = catalogFingerprint(await readLiveCatalog(venv.port, venv.scope));
-  return planDigest(digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, applied: status.applied, toApply, live }));
+  return planDigest(digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, topology: venv.topology, applied: status.applied, toApply, live }));
 }
 
 export class ApplyFailed extends YodelError {
@@ -296,11 +279,13 @@ async function applyMigration(
       continue;
     }
     await beat();
+    // The neutral statement's sha, so a resume matches on every topology; the note says what it was rendered for.
     const sha = statementSha(step.sql);
-    const row = { ...base, kind: "statement" as const, statement_index: i, statement_sha: sha };
+    const topology = venv.topology ?? SINGLE;
+    const row = { ...base, kind: "statement" as const, statement_index: i, statement_sha: sha, note: topologyNote(topology) };
     await recorder.record({ ...row, status: "started" });
     try {
-      await port.query(step.sql, step.waitsForMutation ? { settings: { mutations_sync: "2" } } : {});
+      await port.query(renderForEnvironment(step.sql, topology), step.waitsForMutation ? { settings: { mutations_sync: "2" } } : {});
     } catch (e) {
       const error = serverMessage(e);
       await recorder.record({ ...row, status: "failed", error });

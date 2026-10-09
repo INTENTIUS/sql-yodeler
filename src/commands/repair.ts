@@ -17,9 +17,9 @@ const NOT_YET = 2;
 const help = `${usage}
 
 Records an intended edit to a migration that is already applied in <env>:
-appends a row to the environment's history table (YODEL_HISTORY_DATABASE,
-default yodeler) with the checksum the migration's files have now and the
-reason, under the apply lock. After it, yodel status and yodel apply compare
+appends a row to the environment's history table (yodel.config.ts
+history.database, else YODEL_HISTORY_DATABASE, default yodeler) with the
+checksum the migration's files have now and the reason, under the apply lock. After it, yodel status and yodel apply compare
 the files with the new checksum. Nothing is run on the server: the edit is
 recorded, not applied. Repair each environment the migration ran in.
 

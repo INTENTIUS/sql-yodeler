@@ -50,7 +50,7 @@ export interface MigrationDocument {
   defaultSchema?: string;
   /** Postgres: the major the changes were classified for. */
   major?: number;
-  /** ClickHouse: the topology the statements were rendered for, as chant labels it. */
+  /** ClickHouse: unset (or `single`): yodel writes migrations topology-neutral and renders them per environment at apply time. */
   topology?: string;
   /** True when a step is an Op or a manual step: the migration is more than its SQL. */
   refused: boolean;
