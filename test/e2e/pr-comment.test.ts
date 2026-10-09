@@ -3,8 +3,8 @@
  * carries the digest the migrations Op's gate asks for; `chant approve`
  * with that digest lets the apply after merge run; and when the plan moved
  * after approval (a migration added), the apply applies nothing and
- * `yodel plan` says what moved. Objects in database yodel_16, the history in
- * yodel_16_history. The comment goes to a local GitHub-shaped fake.
+ * `yodel plan` says what moved. Objects in database <prefix>_pr_comment, the
+ * history in <prefix>_pr_comment_history (./names.ts). The comment goes to a local GitHub-shaped fake.
  */
 
 import { execFileSync } from "node:child_process";
@@ -15,11 +15,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration } from "../../src/migrations/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 
-const DB = "yodel_16";
-const HISTORY = "yodel_16_history";
+const DB = suiteName("pr_comment");
+const HISTORY = `${DB}_history`;
 
 const build = (columns: string): BuildOutput => ({
   dialect: "clickhouse",
@@ -60,10 +61,10 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
 
   beforeAll(async () => {
     process.env.YODEL_HISTORY_DATABASE = HISTORY;
-    process.env.YODEL_16_TOKEN = "fake-token";
+    process.env.YODEL_E2E_PR_TOKEN = "fake-token";
     await clickhouse(`DROP DATABASE IF EXISTS ${DB}`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY}`);
-    ({ dir, dispose } = projectFrom("clickhouse-pr"));
+    ({ dir, dispose } = e2eProject("clickhouse-pr", DB));
     server = createServer((req, res) => {
       let body = "";
       req.on("data", (c) => (body += String(c)));
@@ -95,14 +96,14 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
   afterAll(async () => {
     server.close();
     dispose();
-    delete process.env.YODEL_16_TOKEN;
+    delete process.env.YODEL_E2E_PR_TOKEN;
     if (saved === undefined) delete process.env.YODEL_HISTORY_DATABASE;
     else process.env.YODEL_HISTORY_DATABASE = saved;
     await clickhouse(`DROP DATABASE IF EXISTS ${DB}`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY}`);
   });
 
-  const comment = (...extra: string[]) => yodel(at("plan", "e2e", "--comment", "--forge", "github", "--repo", "acme/db", "--pr", "16", "--api-url", api, "--token-env", "YODEL_16_TOKEN", ...extra));
+  const comment = (...extra: string[]) => yodel(at("plan", "e2e", "--comment", "--forge", "github", "--repo", "acme/db", "--pr", "16", "--api-url", api, "--token-env", "YODEL_E2E_PR_TOKEN", ...extra));
   const plan = async () => {
     const ran = await yodel(at("plan", "e2e", "--json"));
     expect(ran.code, ran.err).toBe(0);
@@ -123,7 +124,7 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
     const body = comments[0]?.body ?? "";
     expect(body.startsWith("<!-- yodel:plan env=e2e -->")).toBe(true);
     expect(body).toContain(`#### \`${one}\``);
-    expect(body).toMatch(/\| 0 \| statement \| SQLCH\d+ \| \w+ \| `yodel_16` \|/);
+    expect(body).toMatch(new RegExp(`\\| 0 \\| statement \\| SQLCH\\d+ \\| \\w+ \\| \`${DB}\` \\|`));
     const digest = /Plan digest the apply gate binds: `(jcs1-sha256:[0-9a-f]{64})`/.exec(body)?.[1];
     const command = /```sh\n(chant approve migrate-e2e approve-migrate-e2e --plan jcs1-sha256:[0-9a-f]{64})\n```/.exec(body)?.[1];
     expect(command).toBe(`chant approve migrate-e2e approve-migrate-e2e --plan ${String(digest)}`);

@@ -10,12 +10,14 @@
  * A local Postgres often holds 127.0.0.1:5432, so use the machine's LAN
  * address (`ipconfig getifaddr en0`) rather than localhost. A suite whose
  * variable is set but whose server does not answer skips too, saying why.
- * The tests write only to ClickHouse database and Postgres schema yodel_6.
+ * Every database and schema a suite writes is named from YODEL_E2E_PREFIX
+ * (default yodel_e2e) and the suite, <prefix>_<suite>; see ./names.ts. Set
+ * it to keep a run apart from others on the same emulator:
+ *
+ *   YODEL_E2E_PREFIX=yodel_54
  */
 
 import pg from "pg";
-
-export const SCHEMA = "yodel_6";
 
 export const clickhouseUrl = process.env.YODEL_E2E_CLICKHOUSE_URL ?? "";
 export const postgresUrl = process.env.YODEL_E2E_POSTGRES_URL ?? "";

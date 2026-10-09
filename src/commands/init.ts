@@ -3,7 +3,7 @@ import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { migrationId } from "../migrations/index.js";
-import { adopt, BASELINE_NAME, NOT_RECORDED, type Adopted } from "../init/index.js";
+import { adopt, BASELINE_NAME, type Adopted } from "../init/index.js";
 
 const usage = "usage: yodel init --from <env> [--json] [--dir <project>] [--force] [--name <name>]";
 
@@ -108,12 +108,11 @@ function report(io: Io, json: boolean, a: Adopted): void {
         {
           environment: a.environment,
           dialect: a.dialect,
-          status: a.recorded ? "adopted" : "not-recorded",
+          status: "adopted",
           objects: a.objects,
           schemaFiles: a.schemaFiles,
           migration: { path: a.migrationPath, ...a.baseline },
-          recorded: a.recorded ? { history: a.recorded.database, seq: a.recorded.row.seq, note: a.recorded.row.note, appliedBy: a.recorded.row.applied_by } : null,
-          ...(a.notRecorded ? { notRecorded: a.notRecorded } : {}),
+          recorded: { history: a.recorded.database, seq: a.recorded.row.seq, note: a.recorded.row.note, appliedBy: a.recorded.row.applied_by },
           warnings: a.warnings,
         },
         null,
@@ -128,13 +127,10 @@ function report(io: Io, json: boolean, a: Adopted): void {
     "",
     `Declarations: ${a.schemaFiles.join(", ")}`,
     `Baseline:     ${a.migrationPath}/ (${String(a.baseline.statements)} statement${a.baseline.statements === 1 ? "" : "s"}, ${a.baseline.checksum})`,
+    `Recorded:     applied in ${a.recorded.database}.history as a baseline; none of its statements was run`,
+    "",
+    `yodel plan ${a.environment} shows no change, and yodel status ${a.environment} lists the baseline applied.`,
   ];
-  if (a.recorded) {
-    lines.push(`Recorded:     applied in ${a.recorded.database}.history as a baseline; none of its statements was run`);
-    lines.push("", `yodel plan ${a.environment} shows no change, and yodel status ${a.environment} lists the baseline applied.`);
-  } else {
-    lines.push(`Not recorded: ${a.notRecorded ?? ""}`);
-  }
   for (const w of a.warnings) lines.push(`warning: ${w}`);
   io.out(`${lines.join("\n")}\n`);
 }
@@ -151,10 +147,6 @@ export const init: Command = {
       const env = resolveEnvironment(project, a.from);
       const adopted = await adopt(project, env, { force: a.force, name: a.name, log: (l) => { io.err(`${l}\n`); } });
       report(io, a.json, adopted);
-      if (!adopted.recorded) {
-        if (a.json) io.err(`yodel init: the baseline is not recorded as applied: ${adopted.notRecorded ?? ""}\n`);
-        return NOT_RECORDED;
-      }
       return 0;
     }),
 };

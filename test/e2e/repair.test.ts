@@ -3,7 +3,8 @@
  * apply a migration behind the gate, edit it, see status refuse the
  * mismatch, repair it with a reason, see status clean and the reason in the
  * history; and a rebase refused for a migration the history records. The
- * objects live in database yodel_15, the history in yodel_15_history.
+ * objects live in database <prefix>_repair, the history in
+ * <prefix>_repair_history (./names.ts).
  */
 
 import { appendFileSync, readFileSync } from "node:fs";
@@ -12,11 +13,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { computeChecksum, createMigration, scanMigrations, writeMigration, type Migration } from "../../src/migrations/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 
-const DB = "yodel_15";
-const HISTORY = "yodel_15_history";
+const DB = suiteName("repair");
+const HISTORY = `${DB}_history`;
 
 const db: BuiltObject = { export: "db", type: "ClickHouse::Database", ddl: `CREATE DATABASE ${DB} ENGINE = Atomic`, dependsOn: [] };
 const table = (name: string): BuiltObject => ({ export: name, type: "ClickHouse::Table", ddl: `CREATE TABLE ${DB}.${name} (id UInt64) ENGINE = MergeTree ORDER BY id`, dependsOn: ["db"] });
@@ -52,7 +54,7 @@ describe.skipIf(!clickhouseReachable)("yodel repair and rebase on clickhouse", (
     process.env.YODEL_HISTORY_DATABASE = HISTORY;
     await clickhouse(`DROP DATABASE IF EXISTS ${DB}`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY}`);
-    ({ dir, dispose } = projectFrom("clickhouse-repair"));
+    ({ dir, dispose } = e2eProject("clickhouse-repair", DB));
   });
   afterAll(async () => {
     dispose();

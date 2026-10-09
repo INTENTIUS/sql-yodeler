@@ -5,9 +5,10 @@
  * gate; and a backfill step that fails part way and resumes from its
  * receipts without redoing the batches that finished.
  *
- * Objects in database yodel_12, the history in yodel_12_history; receipts in
- * chant's chant_receipts.receipts, under this test's migration ids, deleted
- * first so the suite reruns from scratch. Gated like the other e2e suites:
+ * Objects in database <prefix>_steps, the history in <prefix>_steps_history
+ * (./names.ts); receipts in chant's chant_receipts.receipts, under this
+ * test's environment (also <prefix>_steps) and migration ids, deleted first
+ * so the suite reruns from scratch. Gated like the other e2e suites:
  *
  *   YODEL_E2E_CLICKHOUSE_URL=http://$(ipconfig getifaddr en0):8123 npx vitest run test/e2e/steps.test.ts
  */
@@ -19,10 +20,14 @@ import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration, type CreatedMigration } from "../../src/migrations/index.js";
 import { json, projectFrom, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { FIXTURE_NAME, suiteName } from "./names.js";
 
-const DB = "yodel_12";
-const HISTORY = "yodel_12_history";
-const FAIL_ENV = "YODEL_12_FAIL_AT";
+const DB = suiteName("steps");
+const HISTORY = `${DB}_history`;
+// The environment is named for the suite too: the backfill's receipts, in chant's own
+// chant_receipts.receipts, are addressed yodel/<env>/<migration id>/<effect>.
+const ENV = DB;
+const FAIL_ENV = "YODEL_E2E_STEPS_FAIL_AT";
 
 const events = (orderBy: string, extraColumns = ""): BuiltObject => ({
   export: "events",
@@ -38,7 +43,7 @@ const build = (...objects: BuiltObject[]): BuildOutput => ({
 
 const MONTHS = [202607, 202608, 202609];
 
-/** Three batches, one per month; the one named by YODEL_12_FAIL_AT fails before it changes anything. */
+/** Three batches, one per month; the one named by YODEL_E2E_STEPS_FAIL_AT fails before it changes anything. */
 const BACKFILL = `
 import { EffectReceipt } from "@intentius/chant";
 import { Op, activity, effect, phase } from "@intentius/chant/op";
@@ -83,13 +88,13 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
   };
 
   const approve = async (command: string | undefined) => {
-    expect(command).toMatch(/^chant approve migrate-e2e approve-migrate-e2e --plan jcs1-sha256:[0-9a-f]{64}$/);
+    expect(command).toMatch(new RegExp(`^chant approve migrate-${ENV} approve-migrate-${ENV} --plan jcs1-sha256:[0-9a-f]{64}$`));
     const ran = await runChant((command ?? "").split(" ").slice(1), { cwd: dir });
     expect(ran.code, ran.stderr).toBe(0);
   };
 
   const gated = async () => {
-    const ran = await yodel(at("apply", "e2e", "--json"));
+    const ran = await yodel(at("apply", ENV, "--json"));
     expect(ran.code, ran.err).toBe(3);
     const doc = json(ran) as Doc;
     expect(doc.status).toBe("gated");
@@ -98,7 +103,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
 
   const approvedApply = async () => {
     await approve((await gated()).approve);
-    return yodel(at("apply", "e2e", "--json"));
+    return yodel(at("apply", ENV, "--json"));
   };
 
   const historyRows = (id: string) =>
@@ -110,9 +115,10 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
     await clickhouse(`DROP DATABASE IF EXISTS ${DB} SYNC`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY} SYNC`);
     if ((await count(`EXISTS TABLE chant_receipts.receipts`)) === 1) {
-      await clickhouse(`ALTER TABLE chant_receipts.receipts DELETE WHERE startsWith(address, 'yodel/e2e/20261009T16') SETTINGS mutations_sync = 2`);
+      await clickhouse(`ALTER TABLE chant_receipts.receipts DELETE WHERE startsWith(address, 'yodel/${ENV}/20261009T16') SETTINGS mutations_sync = 2`);
     }
-    ({ dir, dispose } = projectFrom("clickhouse-steps"));
+    // The fixture names its environment e2e (test/rebuild-topology.test.ts uses it too); this copy names it ENV, in the profile and the Op.
+    ({ dir, dispose } = projectFrom("clickhouse-steps", (text) => text.replaceAll(FIXTURE_NAME, DB).replace(/\be2e\b/g, ENV)));
   });
   afterAll(async () => {
     dispose();
@@ -138,7 +144,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
     expect(refused.pending).toMatchObject([{ id: rekey.id, opSteps: [{ index: 0, op: "ClickHouseRebuildOp" }] }]);
     process.env.YODEL_APPROVED_PLAN = refused.planDigest;
     try {
-      const bypass = await yodel(at("apply", "e2e", "--execute"));
+      const bypass = await yodel(at("apply", ENV, "--execute"));
       expect(bypass.code).toBe(3);
       expect(bypass.err).toContain("gate ledger holds no approval");
     } finally {
@@ -150,7 +156,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
 
     // Approved: the rebuild runs inside the migration, under the lock.
     await approve(refused.approve);
-    const applied = await yodel(at("apply", "e2e", "--json"));
+    const applied = await yodel(at("apply", ENV, "--json"));
     expect(applied.code, applied.err).toBe(0);
     expect(applied.err).toContain("step 0: ClickHouseRebuildOp for events");
     expect(await text(`SELECT sorting_key FROM system.tables WHERE database = '${DB}' AND name = 'events'`)).toBe("id, k");
@@ -175,8 +181,8 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
     expect(await text(`SELECT groupArray((m, filled)) FROM (SELECT toYYYYMM(ts) AS m, countIf(country != '') = count() AS filled FROM ${DB}.events GROUP BY m ORDER BY m)`)).toBe(
       `[(${String(MONTHS[0])},1),(${String(MONTHS[1])},1),(${String(MONTHS[2])},0)]`,
     );
-    expect(await count(`SELECT count() FROM chant_receipts.receipts WHERE startsWith(address, 'yodel/e2e/${fill.id}/')`)).toBe(2);
-    const mid = json(await yodel(at("status", "e2e", "--json"))) as Doc;
+    expect(await count(`SELECT count() FROM chant_receipts.receipts WHERE startsWith(address, 'yodel/${ENV}/${fill.id}/')`)).toBe(2);
+    const mid = json(await yodel(at("status", ENV, "--json"))) as Doc;
     expect(mid.pending).toMatchObject([{ id: fill.id, partWay: { resumeAt: 2, done: [0, 1] } }]);
     const failedNote = JSON.parse(await text(`SELECT note FROM ${HISTORY}.history WHERE migration_id = '${fill.id}' AND kind = 'step' AND status = 'failed'`)) as Record<string, unknown>;
     expect(failedNote).toEqual({ op: "backfill", file: "backfill.ts", name: "backfill-country", effects: 3, skipped: 0, ran: 2 });
@@ -195,7 +201,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
       "['migration:-1:started','statement:0:started','statement:0:succeeded','statement:1:started','statement:1:succeeded','step:2:started','step:2:failed','migration:-1:failed'," +
         "'migration:-1:started','step:2:started','step:2:succeeded','migration:-1:succeeded']",
     );
-    const done = json(await yodel(at("status", "e2e", "--json"))) as Doc;
+    const done = json(await yodel(at("status", ENV, "--json"))) as Doc;
     expect(done.pending).toEqual([]);
     expect(done.applied.map((a) => a.id)).toContain(fill.id);
   }, 600_000);

@@ -1,8 +1,8 @@
 import { index, schema, table } from "@intentius/chant-lexicon-sql/postgres";
 
 export const app = schema`
-  CREATE SCHEMA yodel_6;
-  COMMENT ON SCHEMA yodel_6 IS 'yodel e2e fixture'`;
+  CREATE SCHEMA yodel_e2e_fixture;
+  COMMENT ON SCHEMA yodel_e2e_fixture IS 'yodel e2e fixture'`;
 
 export const orders = table`
   CREATE TABLE ${app}.orders (

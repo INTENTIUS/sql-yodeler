@@ -8,12 +8,15 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runChant } from "../../src/chant/process.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
+import { e2eProject } from "./names.js";
 
 export interface DialectHooks {
   dialect: "clickhouse" | "postgres";
   reachable: boolean;
-  /** Drops database / schema yodel_6. */
+  /** The database / schema the fixture declares (FIXTURE_NAME in it). */
+  name: string;
+  /** Drops it. */
   reset: () => Promise<void>;
   /** Whether the fixture's main table exists on the server. */
   tableExists: () => Promise<boolean>;
@@ -75,7 +78,7 @@ export function declarativeSuite(h: DialectHooks): void {
 
     beforeAll(async () => {
       await h.reset();
-      ({ dir, dispose } = projectFrom(h.dialect));
+      ({ dir, dispose } = e2eProject(h.dialect, h.name));
     });
     afterAll(async () => {
       dispose();

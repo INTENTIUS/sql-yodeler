@@ -13,8 +13,9 @@
  *
  *   npm run build && YODEL_E2E_CLICKHOUSE_URL=... YODEL_E2E_KEEPER=1 npx vitest run test/e2e/topology.test.ts
  *
- * Objects live in yodel_9, the history in yodel_9_history. Both are dropped
- * on the emulator before and after; the scratch cluster is removed after.
+ * Objects live in <prefix>_topology, the history in <prefix>_topology_history
+ * (./names.ts). Both are dropped on the emulator before and after; the
+ * scratch cluster is removed after.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -24,12 +25,13 @@ import { dockerAvailable } from "@intentius/chant-lexicon-sql/core/container";
 import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration, type Migration } from "../../src/migrations/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 import { startKeeperCluster, type KeeperCluster } from "./keeper-cluster.js";
 
-const DB = "yodel_9";
-const HISTORY = "yodel_9_history";
+const DB = suiteName("topology");
+const HISTORY = `${DB}_history`;
 
 const keeperEnabled = process.env.YODEL_E2E_KEEPER === "1" && (await dockerAvailable());
 
@@ -58,7 +60,7 @@ let written: Migration[] = [];
 const at = (...args: string[]) => [...args, "--dir", dir];
 
 function writeMigrations(): void {
-  ({ dir, dispose } = projectFrom("clickhouse-topology"));
+  ({ dir, dispose } = e2eProject("clickhouse-topology", DB));
   const migrations = join(dir, "migrations");
   let previous: Migration | undefined;
   const country = "id UInt64, ts DateTime, country LowCardinality(String) DEFAULT ''";
@@ -98,17 +100,17 @@ async function secondApplySendsNothing(env: string, count: () => Promise<number>
 
 let cluster: KeeperCluster | undefined;
 
-// The cluster starts before anything loads chant.config.ts, which reads YODEL_9_REPLICATED_URL.
+// The cluster starts before anything loads chant.config.ts, which reads YODEL_E2E_REPLICATED_URL.
 beforeAll(async () => {
   if (keeperEnabled) {
-    cluster = await startKeeperCluster();
-    process.env.YODEL_9_REPLICATED_URL = cluster.replicas[0].url;
+    cluster = await startKeeperCluster(DB);
+    process.env.YODEL_E2E_REPLICATED_URL = cluster.replicas[0].url;
   }
   if (clickhouseReachable || keeperEnabled) writeMigrations();
 }, 600_000);
 afterAll(async () => {
   dispose();
-  delete process.env.YODEL_9_REPLICATED_URL;
+  delete process.env.YODEL_E2E_REPLICATED_URL;
   await cluster?.stop();
 });
 

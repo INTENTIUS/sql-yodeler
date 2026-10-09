@@ -26,8 +26,9 @@ export interface KeeperCluster {
   stop(): Promise<void>;
 }
 
-export async function startKeeperCluster(): Promise<KeeperCluster> {
-  const name = uniqueContainerName("yodel-8-keeper");
+/** Starts the cluster. Its containers are named `<containers>-<pid>-<random>-r1` and `-r2`; underscores in `containers` become dashes. */
+export async function startKeeperCluster(containers = "yodel-keeper"): Promise<KeeperCluster> {
+  const name = uniqueContainerName(containers.replaceAll("_", "-"));
   const network = `${name}-net`;
   const nodes = [`${name}-r1`, `${name}-r2`] as const;
   const dir = mkdtempSync(join(tmpdir(), "yodel-keeper-"));

@@ -1,7 +1,11 @@
-import { clickhouse, clickhouseReachable, SCHEMA } from "./emulator.js";
+import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { suiteName } from "./names.js";
 import { declarativeSuite } from "./declarative.js";
 
+const SCHEMA = suiteName("declarative_ch");
+
 declarativeSuite({
+  name: SCHEMA,
   dialect: "clickhouse",
   reachable: clickhouseReachable,
   reset: async () => {

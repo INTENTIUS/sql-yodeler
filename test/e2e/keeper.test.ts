@@ -14,7 +14,12 @@ import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
 import { currentDigest, executeApply, inspect, openVersioned, verifyApproval } from "../../src/versioned/index.js";
 import { migration } from "../helpers/fake-clickhouse.js";
 import { CLUSTER, startKeeperCluster, type KeeperCluster } from "./keeper-cluster.js";
+import { suiteName } from "./names.js";
 
+const DB = suiteName("keeper");
+const HISTORY = `${DB}_history`;
+const HREPL = `${DB}_hrepl`;
+const HIST2 = `${DB}_hist2`;
 
 const enabled = process.env.YODEL_E2E_KEEPER === "1" && (await dockerAvailable());
 let cluster: KeeperCluster | undefined;
@@ -45,7 +50,7 @@ const row = (seq: number, id: string): HistoryRow => ({
 
 describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch cluster with Keeper)", () => {
   beforeAll(async () => {
-    cluster = await startKeeperCluster();
+    cluster = await startKeeperCluster(DB);
   }, 600_000);
   afterAll(async () => {
     await cluster?.stop();
@@ -53,14 +58,14 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
 
   it("on a cluster, the history is a ReplicatedMergeTree ON CLUSTER, and a row written on one replica is read on the other", async () => {
     const [r1, r2] = replicas();
-    const location: HistoryLocation = { database: "yodel_8_history", topology: { kind: "cluster", cluster: CLUSTER } };
+    const location: HistoryLocation = { database: HISTORY, topology: { kind: "cluster", cluster: CLUSTER } };
     const s1 = new HistoryStore(await httpPort(r1), location);
     const s2 = new HistoryStore(await httpPort(r2), location);
     await s1.ensure();
     for (const r of [r1, r2]) {
-      const [t] = await q<{ engine: string; engine_full: string }>(r, "SELECT engine, engine_full FROM system.tables WHERE database = 'yodel_8_history' AND name = 'history'");
+      const [t] = await q<{ engine: string; engine_full: string }>(r, `SELECT engine, engine_full FROM system.tables WHERE database = '${HISTORY}' AND name = 'history'`);
       expect(t?.engine).toBe("ReplicatedMergeTree");
-      expect(t?.engine_full).toContain("ReplicatedMergeTree('/clickhouse/yodeler/yodel_8_history/history', '{shard}-{replica}')");
+      expect(t?.engine_full).toContain(`ReplicatedMergeTree('/clickhouse/yodeler/${HISTORY}/history', '{shard}-{replica}')`);
     }
     await s1.append([row(1, "m1")]);
     const state = await s2.state();
@@ -69,13 +74,13 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
 
   it("in a Replicated database, the history is a ReplicatedMergeTree with no arguments, on every replica", async () => {
     const [r1, r2] = replicas();
-    const location: HistoryLocation = { database: "yodel_8_hrepl", topology: { kind: "replicated", cluster: CLUSTER } };
+    const location: HistoryLocation = { database: HREPL, topology: { kind: "replicated", cluster: CLUSTER } };
     const s1 = new HistoryStore(await httpPort(r1), location);
     await s1.ensure();
-    await q(r2, "SYSTEM SYNC DATABASE REPLICA yodel_8_hrepl");
-    const [db] = await q<{ engine: string }>(r2, "SELECT engine FROM system.databases WHERE name = 'yodel_8_hrepl'");
+    await q(r2, `SYSTEM SYNC DATABASE REPLICA ${HREPL}`);
+    const [db] = await q<{ engine: string }>(r2, `SELECT engine FROM system.databases WHERE name = '${HREPL}'`);
     expect(db?.engine).toBe("Replicated");
-    const [t] = await q<{ engine: string; create_table_query: string }>(r2, "SELECT engine, create_table_query FROM system.tables WHERE database = 'yodel_8_hrepl' AND name = 'history'");
+    const [t] = await q<{ engine: string; create_table_query: string }>(r2, `SELECT engine, create_table_query FROM system.tables WHERE database = '${HREPL}' AND name = 'history'`);
     expect(t?.engine).toBe("ReplicatedMergeTree");
     await s1.append([row(1, "m1")]);
     expect((await new HistoryStore(await httpPort(r2), location).state()).byId.get("m1")?.status).toBe("succeeded");
@@ -83,7 +88,7 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
 
   it("holds one apply at a time across runners on different replicas, by a KeeperMap row with an owner and an expiry", async () => {
     const [r1, r2] = replicas();
-    const options = (holder: string, ttlMs = 60_000) => ({ database: "yodel_8_history", topology: { kind: "cluster", cluster: CLUSTER } as const, holder, ttlMs, serverKey: "scratch" });
+    const options = (holder: string, ttlMs = 60_000) => ({ database: HISTORY, topology: { kind: "cluster", cluster: CLUSTER } as const, holder, ttlMs, serverKey: "scratch" });
     const p1 = await httpPort(r1);
     const p2 = await httpPort(r2);
 
@@ -111,19 +116,19 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
 
   it("applies under the Keeper lock, and refuses (exit 5) while another runner holds it", async () => {
     const [r1, r2] = replicas();
-    const project = projectFromConfig("/nowhere", "/nowhere/chant.config.ts", { lexicons: ["sql"], sql: { dialect: "clickhouse", profiles: { e2e: { url: r1.url, databases: ["yodel_8"] } } } });
-    const env = { YODEL_HISTORY_DATABASE: "yodel_8_hist2", YODEL_TOPOLOGY: `cluster:${CLUSTER}` };
+    const project = projectFromConfig("/nowhere", "/nowhere/chant.config.ts", { lexicons: ["sql"], sql: { dialect: "clickhouse", profiles: { e2e: { url: r1.url, databases: [DB] } } } });
+    const env = { YODEL_HISTORY_DATABASE: HIST2, YODEL_TOPOLOGY: `cluster:${CLUSTER}` };
     const venv = await openVersioned(project, { name: "e2e", profile: { url: r1.url } }, env);
     const m = migration("20261009T1000-one", null, [
-      `CREATE DATABASE IF NOT EXISTS yodel_8 ON CLUSTER ${CLUSTER}`,
-      `CREATE TABLE yodel_8.t ON CLUSTER ${CLUSTER} (x UInt8) ENGINE = ReplicatedMergeTree ORDER BY x`,
+      `CREATE DATABASE IF NOT EXISTS ${DB} ON CLUSTER ${CLUSTER}`,
+      `CREATE TABLE ${DB}.t ON CLUSTER ${CLUSTER} (x UInt8) ENGINE = ReplicatedMergeTree ORDER BY x`,
     ]);
     const { status } = await inspect(venv, [m]);
     const digest = await currentDigest(venv, status, status.pending);
     const op = { name: "migrate-e2e", filePath: "", gate: "approve-migrate-e2e", quorum: false };
     const ledger = memoryGateLedgerPort({ resolutions: [{ version: 1, op: op.name, gate: op.gate, resolvedBy: "e2e", timestamp: new Date().toISOString(), planDigest: digest }] });
 
-    const other = await acquireLock(await httpPort(r2), { database: "yodel_8_hist2", topology: { kind: "cluster", cluster: CLUSTER }, holder: "other-runner", serverKey: "scratch" });
+    const other = await acquireLock(await httpPort(r2), { database: HIST2, topology: { kind: "cluster", cluster: CLUSTER }, holder: "other-runner", serverKey: "scratch" });
     const blocked = executeApply(venv, [m], { approvedDigest: digest, allowOutOfOrder: false, approve: (d) => verifyApproval(ledger, op, d), log: () => undefined });
     await expect(blocked).rejects.toMatchObject({ exitCode: LOCKED, holder: other.owner });
     await other.release();
@@ -131,8 +136,8 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
     const result = await executeApply(venv, [m], { approvedDigest: digest, allowOutOfOrder: false, approve: (d) => verifyApproval(ledger, op, d), log: () => undefined });
     expect(result.applied).toEqual([m.id]);
     expect(result.lock.kind).toBe("keeper");
-    expect(Number((await q<{ n: string | number }>(r2, "SELECT count() AS n FROM system.tables WHERE database = 'yodel_8' AND name = 't'"))[0]?.n)).toBe(1);
+    expect(Number((await q<{ n: string | number }>(r2, `SELECT count() AS n FROM system.tables WHERE database = '${DB}' AND name = 't'`))[0]?.n)).toBe(1);
     // The lock was released: nothing is left in it.
-    expect(Number((await q<{ n: string | number }>(r2, "SELECT count() AS n FROM yodel_8_hist2.lock"))[0]?.n)).toBe(0);
+    expect(Number((await q<{ n: string | number }>(r2, `SELECT count() AS n FROM ${HIST2}.lock`))[0]?.n)).toBe(0);
   }, 180_000);
 });

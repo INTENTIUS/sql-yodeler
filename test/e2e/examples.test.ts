@@ -13,7 +13,8 @@
  *
  * ClickHouse database yodel_18_shop and yodel_18_history, Postgres schemas of
  * the same names; each run drops them first. The replay check at the end of
- * each walkthrough empties them.
+ * each walkthrough empties them. These names are fixed, not taken from
+ * YODEL_E2E_PREFIX: the committed example migrations carry them.
  */
 
 import { existsSync } from "node:fs";

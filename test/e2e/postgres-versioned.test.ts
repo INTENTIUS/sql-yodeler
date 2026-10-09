@@ -9,7 +9,8 @@
  * type change across kinds as PostgresMigrationOp steps, and yodel init
  * --from recording the baseline.
  *
- * Objects in schema yodel_13, the history in schema yodel_13_history. Each
+ * Objects in schema <prefix>_pg_versioned, the history in schema
+ * <prefix>_pg_versioned_history (./names.ts). Each
  * suite drops both first, so a run starts clean and can be run again:
  *
  *   YODEL_E2E_POSTGRES_URL=postgres://$(ipconfig getifaddr en0):5432/postgres \
@@ -25,11 +26,12 @@ import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, scanMigrations, writeMigration, computeChecksum, serializeDocument, type Migration, type MigrationDocument } from "../../src/migrations/index.js";
 import { lockKeys } from "../../src/history/postgres/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { postgres, postgresReachable, postgresUrl } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 
-const S = "yodel_13";
-const HISTORY = "yodel_13_history";
+const S = suiteName("pg_versioned");
+const HISTORY = `${S}_history`;
 
 interface StatusDoc {
   applied: Array<{ id: string; checksum: string }>;
@@ -139,7 +141,7 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
   beforeAll(async () => {
     process.env.YODEL_HISTORY_DATABASE = HISTORY;
     await postgres(`DROP SCHEMA IF EXISTS ${S} CASCADE; DROP SCHEMA IF EXISTS ${HISTORY} CASCADE`);
-    ({ dir, dispose } = projectFrom("postgres-versioned"));
+    ({ dir, dispose } = e2eProject("postgres-versioned", S));
   });
   afterAll(async () => {
     dispose();
@@ -192,7 +194,7 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
       await holder.query("SELECT pg_advisory_lock($1::int4, $2::int4)", [k1, k2]);
       const refused = await execute(digest);
       expect(refused.code, refused.err).toBe(5);
-      expect(refused.err).toMatch(/another apply holds the lock \(Postgres advisory lock .* yodel_13_history\): owner someone else, pid \d+/);
+      expect(refused.err).toMatch(new RegExp(String.raw`another apply holds the lock \(Postgres advisory lock .* ${HISTORY}\): owner someone else, pid \d+`));
       expect(refused.err).toMatch(/pg_terminate_backend\(\d+\)/);
     } finally {
       await holder.end();
@@ -347,7 +349,7 @@ describe.skipIf(!postgresReachable)("yodel init --from on postgres records the b
       CREATE TABLE ${S}.customers (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, email text NOT NULL UNIQUE);
       CREATE TABLE ${S}.orders (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, customer_id bigint NOT NULL REFERENCES ${S}.customers(id), amount numeric(12, 2) NOT NULL);
       CREATE INDEX orders_customer_idx ON ${S}.orders (customer_id);`);
-    ({ dir, dispose } = projectFrom("init-postgres-13"));
+    ({ dir, dispose } = e2eProject("init-postgres-13", S));
   });
   afterAll(async () => {
     dispose();

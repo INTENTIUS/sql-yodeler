@@ -7,8 +7,8 @@
  * first migration that differs and what differs; and a target that is not
  * fresh is refused unless reset.
  *
- * ClickHouse database yodel_11, Postgres schema yodel_11_pg. Gated like the
- * other e2e suites:
+ * ClickHouse database <prefix>_replay, Postgres schema <prefix>_replay_pg
+ * (./names.ts). Gated like the other e2e suites:
  *
  *   YODEL_E2E_CLICKHOUSE_URL=http://$(ipconfig getifaddr en0):8123 \
  *   YODEL_E2E_POSTGRES_URL=postgres://$(ipconfig getifaddr en0):5432/postgres \
@@ -23,16 +23,16 @@ import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, serializeDocument, writeMigration, type CreatedMigration, type MigrationDocument } from "../../src/migrations/index.js";
 import { loadProject, resolveEnvironment, YodelError } from "../../src/project.js";
 import { NOT_FRESH, renderReplay, replayExitCode, replayFailure, replayHistory, type ReplayResult } from "../../src/replay/index.js";
-import { projectFrom } from "../helpers/run.js";
+import { e2eProject, suiteName } from "./names.js";
 import { clickhouse, clickhouseReachable, postgres, postgresReachable } from "./emulator.js";
 
-const DB = "yodel_11";
-const PG = "yodel_11_pg";
-const HISTORY = "yodel_11_history";
+const DB = suiteName("replay");
+const PG = `${DB}_pg`;
+const HISTORY = `${DB}_history`;
 
 /** A project copied from `fixture`, with helpers to write its migrations and replay them. */
 function project(fixture: string) {
-  const { dir, dispose } = projectFrom(fixture);
+  const { dir, dispose } = e2eProject(fixture, DB);
   const migrations = join(dir, "migrations");
   const next = (name: string, minute: number, schema: BuildOutput): CreatedMigration => {
     const made = createMigration({ name, build: schema, previous: readMigrations(migrations).at(-1), now: new Date(Date.UTC(2026, 9, 9, 11, minute)) });
@@ -97,7 +97,7 @@ describe.skipIf(!clickhouseReachable)("the replay check on clickhouse", () => {
     expect(replayExitCode(result)).toBe(0);
     expect(result.scope).toEqual([DB]);
     expect(result.matched.map((m) => m.id)).toEqual([one.id, two.id, three.id]);
-    expect(result.matched[2]?.ran).toEqual(["step 0: ClickHouseRebuildOp for events (yodel_11.events) (swapped)"]);
+    expect(result.matched[2]?.ran).toEqual([`step 0: ClickHouseRebuildOp for events (${DB}.events) (swapped)`]);
     expect(renderReplay(result)).toContain("Every migration replays to its recorded schema.");
     // The replay's database is emptied at the end.
     expect(await count(`SELECT count() FROM system.databases WHERE name = '${DB}'`)).toBe(0);
@@ -122,7 +122,7 @@ describe.skipIf(!clickhouseReachable)("the replay check on clickhouse", () => {
     const failure = replayFailure(result);
     expect(failure?.migration).toBe(two.id);
     expect(failure?.message).toContain(`${two.id}: replaying the history through it does not give the schema it records (migrations/${two.id}/migration.json); 1 difference:`);
-    expect(failure?.message).toMatch(/events \(yodel_11\.events\): columns\.country\.type: replay has String, migration\.json records LowCardinality ?\( ?String ?\) \(SQLCH\d+\)$/m);
+    expect(failure?.message).toMatch(new RegExp(String.raw`events \(${DB}\.events\): columns\.country\.type: replay has String, migration\.json records LowCardinality ?\( ?String ?\) \(SQLCH\d+\)$`, "m"));
     expect(failure?.message).not.toContain(three.id);
     // kept: the database is as the replay left it, after two.
     expect(await count(`SELECT count() FROM system.columns WHERE database = '${DB}' AND table = 'events' AND name = 'country' AND type = 'String'`)).toBe(1);
@@ -205,8 +205,8 @@ describe.skipIf(!postgresReachable)("the replay check on postgres", () => {
     expect(replayFailure(result)?.message).toBeUndefined();
     expect(result.outcome).toBe("matches");
     expect(result.matched.map((m) => m.id)).toEqual([one.id, two.id, three.id]);
-    expect(result.matched[1]?.ran).toEqual(["step 0: PostgresMigrationOp for orders (yodel_11_pg.orders) (switched, old column dropped)"]);
-    expect(result.matched[2]?.ran).toEqual(["step 0: PostgresMigrationOp for orders (yodel_11_pg.orders) (switched, old column dropped)"]);
+    expect(result.matched[1]?.ran).toEqual([`step 0: PostgresMigrationOp for orders (${PG}.orders) (switched, old column dropped)`]);
+    expect(result.matched[2]?.ran).toEqual([`step 0: PostgresMigrationOp for orders (${PG}.orders) (switched, old column dropped)`]);
     expect(await schemaExists()).toBe(false);
   }, 600_000);
 
@@ -223,7 +223,7 @@ describe.skipIf(!postgresReachable)("the replay check on postgres", () => {
     expect(result.matched.map((m) => m.id)).toEqual([one.id]);
     const failure = replayFailure(result);
     expect(failure?.migration).toBe(two.id);
-    expect(failure?.message).toMatch(/orders \(yodel_11_pg\.orders\): columns\.note\.type: replay has text, migration\.json records (character varying|varchar)\(200\)/);
+    expect(failure?.message).toMatch(new RegExp(String.raw`orders \(${PG}\.orders\): columns\.note\.type: replay has text, migration\.json records (character varying|varchar)\(200\)`));
     expect(await schemaExists()).toBe(false);
   }, 120_000);
 });

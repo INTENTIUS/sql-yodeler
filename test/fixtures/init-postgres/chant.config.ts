@@ -3,7 +3,9 @@ import "@intentius/chant-lexicon-sql";
 
 // The init e2e tests point YODEL_E2E_POSTGRES_URL at the emulator
 // (`chant emulator up --lexicon sql`); the adopted objects live in schema
-// yodel_10. No src/: yodel init --from e2e writes it.
+// yodel_e2e_fixture. No src/: yodel init --from e2e writes it.
+// yodel_e2e_fixture stands for the suite's own name (test/e2e/names.ts), put in
+// its place when the suite copies this fixture.
 export default {
   lexicons: ["sql"],
   sql: {
@@ -13,7 +15,7 @@ export default {
         url: process.env.YODEL_E2E_POSTGRES_URL ?? "postgres://localhost:5432/postgres",
         user: { env: "YODEL_E2E_POSTGRES_USER" },
         password: { env: "YODEL_E2E_POSTGRES_PASSWORD" },
-        schemas: ["yodel_10"],
+        schemas: ["yodel_e2e_fixture"],
       },
     },
   },

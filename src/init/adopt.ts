@@ -35,9 +35,6 @@ import { BASELINE_NAME, checkHistoryEmpty, recordBaseline } from "./baseline.js"
 import { declarationFiles, Journal } from "./files.js";
 import { describeImported, importLive } from "./live.js";
 
-/** Exit code: the schema and the baseline are written, and the baseline is not recorded applied. Since #13 both dialects record it, so init no longer ends with it. */
-export const NOT_RECORDED = 2;
-
 export interface AdoptOptions {
   /** Overwrite declaration files the source directory already has. */
   force?: boolean;
@@ -58,10 +55,8 @@ export interface Adopted {
   /** The baseline migration's directory, relative to the project. */
   migrationPath: string;
   baseline: { id: string; checksum: string; statements: number };
-  /** The history row recorded; both dialects record one since #13. */
-  recorded: { database: string; row: HistoryRow; lock: { kind: string; where: string; notice?: string } } | undefined;
-  /** Why the baseline is not recorded, when it is not. */
-  notRecorded?: string;
+  /** The baseline's history row, recorded applied; init records it on both dialects. */
+  recorded: { database: string; row: HistoryRow; lock: { kind: string; where: string; notice?: string } };
   warnings: string[];
 }
 

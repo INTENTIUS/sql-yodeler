@@ -2,8 +2,8 @@
  * `yodel lint --replay <env>` (#11) against the emulator: a clean history
  * passes, a hand-edited recorded schema fails naming the migration (exit 3),
  * and a target that already holds the history's database or schema is
- * refused with exit 4 unless --reset. ClickHouse database yodel_11, Postgres
- * schema yodel_11_pg, through the replay e2e fixtures (profile `emulator`).
+ * refused with exit 4 unless --reset. ClickHouse database <prefix>_lint_replay,
+ * Postgres schema <prefix>_lint_replay_pg, through the replay e2e fixtures (profile `emulator`).
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -12,11 +12,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, scanMigrations, serializeDocument, writeMigration, type CreatedMigration, type MigrationDocument } from "../../src/migrations/index.js";
 import { updateChecksum } from "../../src/lint/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
+import { e2eProject, suiteName } from "./names.js";
 import { clickhouse, clickhouseReachable, postgres, postgresReachable } from "./emulator.js";
 
-const DB = "yodel_11";
-const PG = "yodel_11_pg";
+const DB = suiteName("lint_replay");
+const PG = `${DB}_pg`;
 
 interface LintDoc {
   status: string;
@@ -26,7 +27,7 @@ interface LintDoc {
 }
 
 function project(fixture: string) {
-  const { dir, dispose } = projectFrom(fixture);
+  const { dir, dispose } = e2eProject(fixture, DB);
   const migrations = join(dir, "migrations");
   const next = (name: string, minute: number, schema: BuildOutput): CreatedMigration => {
     const made = createMigration({ name, build: schema, previous: readMigrations(migrations).at(-1), now: new Date(Date.UTC(2026, 9, 9, 15, minute)) });

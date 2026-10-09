@@ -2,10 +2,10 @@
  * `yodel lint` against the emulator's ClickHouse: a migration whose risky
  * statements are silenced passes lint, applies behind the gate, and the
  * history records each silence with its reason; an applied migration edited
- * afterwards fails `yodel lint --env`. Everything lives in database yodel_14:
+ * afterwards fails `yodel lint --env`. Everything lives in database <prefix>_lint:
  * the table the migrations make, and the history (YODEL_HISTORY_DATABASE).
  * The database is made by the test, not declared, so the history can share it.
- * The Postgres suite does the same in schema yodel_14.
+ * The Postgres suite does the same in schema <prefix>_lint (./names.ts).
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -14,10 +14,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, MIGRATION_SQL, newestMigration, readMigrations, writeMigration, type CreatedMigration } from "../../src/migrations/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable, postgres, postgresReachable } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 
-const DB = "yodel_14";
+const DB = suiteName("lint");
 
 const build = (columns: string): BuildOutput => ({
   dialect: "clickhouse",
@@ -51,7 +52,7 @@ describe.skipIf(!clickhouseReachable)("yodel lint on clickhouse", () => {
     process.env.YODEL_HISTORY_DATABASE = DB;
     await clickhouse(`DROP DATABASE IF EXISTS ${DB} SYNC`);
     await clickhouse(`CREATE DATABASE ${DB} ENGINE = Atomic`);
-    ({ dir, dispose } = projectFrom("lint-clickhouse"));
+    ({ dir, dispose } = e2eProject("lint-clickhouse", DB));
   });
   afterAll(async () => {
     dispose();
@@ -72,8 +73,8 @@ describe.skipIf(!clickhouseReachable)("yodel lint on clickhouse", () => {
 
     const sqlPath = join(migrations(), risky.id, MIGRATION_SQL);
     const sql = readFileSync(sqlPath, "utf8")
-      .replace("ALTER TABLE `yodel_14`.`events` DROP COLUMN `gone`", "-- yodel:allow destructive gone was never read by anything\nALTER TABLE `yodel_14`.`events` DROP COLUMN `gone`")
-      .replace("ALTER TABLE `yodel_14`.`events` MODIFY COLUMN `n` UInt64", "-- yodel:allow ch-mutation events is empty in e2e\nALTER TABLE `yodel_14`.`events` MODIFY COLUMN `n` UInt64");
+      .replace(`ALTER TABLE \`${DB}\`.\`events\` DROP COLUMN \`gone\``, `-- yodel:allow destructive gone was never read by anything\nALTER TABLE \`${DB}\`.\`events\` DROP COLUMN \`gone\``)
+      .replace(`ALTER TABLE \`${DB}\`.\`events\` MODIFY COLUMN \`n\` UInt64`, `-- yodel:allow ch-mutation events is empty in e2e\nALTER TABLE \`${DB}\`.\`events\` MODIFY COLUMN \`n\` UInt64`);
     writeFileSync(sqlPath, sql);
 
     // Pending in e2e: the edit is a warning there, and --update-checksum records it.
@@ -157,7 +158,7 @@ describe.skipIf(!postgresReachable)("yodel lint on postgres", () => {
   beforeAll(async () => {
     process.env.YODEL_HISTORY_DATABASE = DB;
     await postgres(`DROP SCHEMA IF EXISTS ${DB} CASCADE; CREATE SCHEMA ${DB}`);
-    ({ dir, dispose } = projectFrom("lint-postgres"));
+    ({ dir, dispose } = e2eProject("lint-postgres", DB));
   });
   afterAll(async () => {
     dispose();

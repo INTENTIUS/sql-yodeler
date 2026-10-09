@@ -5,9 +5,9 @@
  * applied with nothing pending, and `yodel new` after a declared change
  * writes a migration whose parent is the baseline.
  *
- * ClickHouse: objects in database yodel_10, the history in yodel_10_history.
- * Postgres: objects in schema yodel_10, the history in schema
- * yodel_10_history (#13).
+ * ClickHouse: objects in database <prefix>_init, the history in
+ * <prefix>_init_history. Postgres: objects in schema <prefix>_init, the
+ * history in schema <prefix>_init_history (#13). See ./names.ts.
  *
  * "No change" for an adopted project is two things: the versioned plan
  * (`yodel plan`, which takes the versioned path once migrations/ exists) has
@@ -22,19 +22,19 @@ import { readMigrations } from "../../src/migrations/index.js";
 import { loadProject, resolveEnvironment } from "../../src/project.js";
 import { buildSchema } from "../../src/chant/build.js";
 import { planEnvironment } from "../../src/chant/plan.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable, postgres, postgresReachable } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 
-const DB = "yodel_10";
-const HISTORY = "yodel_10_history";
+const DB = suiteName("init");
+const HISTORY = `${DB}_history`;
 
 interface InitDoc {
   status: string;
   objects: string[];
   schemaFiles: string[];
   migration: { path: string; id: string; checksum: string; statements: number };
-  recorded: { history: string; seq: number; note: string } | null;
-  notRecorded?: string;
+  recorded: { history: string; seq: number; note: string };
 }
 
 const count = async (sql: string) => Number((await clickhouse(sql)).trim());
@@ -83,7 +83,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
     await clickhouse(`CREATE MATERIALIZED VIEW ${DB}.daily_mv TO ${DB}.daily AS SELECT toDate(ts) AS day, kind, count() AS n FROM ${DB}.events GROUP BY day, kind`);
     await clickhouse(`CREATE VIEW ${DB}.recent AS SELECT * FROM ${DB}.events WHERE ts > now() - INTERVAL 1 DAY`);
     await clickhouse(`INSERT INTO ${DB}.events VALUES (1, now(), 'click', 'x')`);
-    ({ dir, dispose } = projectFrom("init-clickhouse"));
+    ({ dir, dispose } = e2eProject("init-clickhouse", DB));
   });
   afterAll(async () => {
     dispose();
@@ -102,8 +102,8 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
     expect(doc.schemaFiles).toEqual(["src/schema.ts"]);
     expect(doc.migration.id).toMatch(/^\d{8}T\d{4}-baseline$/);
     expect(doc.migration.statements).toBe(5);
-    expect(doc.recorded?.history).toBe(HISTORY);
-    expect(doc.recorded?.note).toMatch(/^baseline: /);
+    expect(doc.recorded.history).toBe(HISTORY);
+    expect(doc.recorded.note).toMatch(/^baseline: /);
 
     const ordered = readMigrations(join(dir, "migrations"), { verify: true });
     expect(ordered.map((m) => [m.id, m.parent])).toEqual([[doc.migration.id, null]]);
@@ -169,7 +169,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse, refused"
 
   beforeAll(() => {
     process.env.YODEL_HISTORY_DATABASE = `${HISTORY}_refused`;
-    ({ dir, dispose } = projectFrom("init-clickhouse"));
+    ({ dir, dispose } = e2eProject("init-clickhouse", DB));
   });
   afterAll(async () => {
     dispose();
@@ -212,7 +212,7 @@ describe.skipIf(!postgresReachable)("yodel init --from on postgres", () => {
       CREATE INDEX orders_status_idx ON ${DB}.orders (status);
       COMMENT ON TABLE ${DB}.orders IS 'customer orders';
       CREATE VIEW ${DB}.open_orders AS SELECT id, amount FROM ${DB}.orders WHERE status = 'placed';`);
-    ({ dir, dispose } = projectFrom("init-postgres"));
+    ({ dir, dispose } = e2eProject("init-postgres", DB));
   });
   afterAll(async () => {
     dispose();

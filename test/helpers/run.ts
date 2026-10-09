@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -31,10 +31,18 @@ export const json = (ran: Ran): unknown => JSON.parse(ran.out);
  * A copy of a fixture project in a temporary directory: its own git
  * repository (Op discovery and the gate ledger live in git), with yodel's
  * node_modules linked in so the project resolves chant and the lexicon.
+ * `edit`, when given, rewrites every file's text before the first commit.
  */
-export function projectFrom(name: string): { dir: string; dispose: () => void } {
+export function projectFrom(name: string, edit?: (text: string) => string): { dir: string; dispose: () => void } {
   const dir = mkdtempSync(join(tmpdir(), `yodel-${name}-`));
   cpSync(fixture(name), dir, { recursive: true });
+  if (edit) {
+    for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const file = join(entry.parentPath, entry.name);
+      writeFileSync(file, edit(readFileSync(file, "utf8")));
+    }
+  }
   symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"), "dir");
   writeFileSync(join(dir, ".gitignore"), "node_modules\ndist\n");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });

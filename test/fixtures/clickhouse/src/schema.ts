@@ -1,7 +1,7 @@
 import { database, table } from "@intentius/chant-lexicon-sql/clickhouse";
 
 export const yodel = database`
-  CREATE DATABASE yodel_6
+  CREATE DATABASE yodel_e2e_fixture
   ENGINE = Atomic
   COMMENT 'yodel e2e fixture'`;
 

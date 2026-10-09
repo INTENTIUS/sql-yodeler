@@ -2,8 +2,8 @@
  * The versioned path end to end against the emulator's ClickHouse: apply
  * behind the migrations Op's gate, status, a migration interrupted part way
  * and resumed, checksum and out-of-order refusals, and an approval that no
- * longer holds once the plan moved. The objects live in database yodel_8,
- * the history in yodel_8_history. The emulator has no Keeper, so the lock is
+ * longer holds once the plan moved. The objects live in database
+ * <prefix>_versioned, the history in <prefix>_versioned_history (./names.ts). The emulator has no Keeper, so the lock is
  * the local one here; test/e2e/keeper.test.ts covers the Keeper lock.
  */
 
@@ -13,11 +13,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { computeChecksum, createMigration, readMigrations, serializeDocument, writeMigration, type CreatedMigration, type Migration, type MigrationDocument } from "../../src/migrations/index.js";
-import { json, projectFrom, yodel } from "../helpers/run.js";
+import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { e2eProject, suiteName } from "./names.js";
 
-const DB = "yodel_8";
-const HISTORY = "yodel_8_history";
+const DB = suiteName("versioned");
+const HISTORY = `${DB}_history`;
 
 const build = (aColumns: string, extra: BuiltObject[] = []): BuildOutput => ({
   dialect: "clickhouse",
@@ -88,7 +89,7 @@ describe.skipIf(!clickhouseReachable)("the versioned path on clickhouse", () => 
     process.env.YODEL_HISTORY_DATABASE = HISTORY;
     await clickhouse(`DROP DATABASE IF EXISTS ${DB}`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY}`);
-    ({ dir, dispose } = projectFrom("clickhouse-versioned"));
+    ({ dir, dispose } = e2eProject("clickhouse-versioned", DB));
   });
   afterAll(async () => {
     dispose();

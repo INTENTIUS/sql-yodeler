@@ -1,7 +1,11 @@
-import { postgres, postgresReachable, SCHEMA } from "./emulator.js";
+import { postgres, postgresReachable } from "./emulator.js";
+import { suiteName } from "./names.js";
 import { declarativeSuite } from "./declarative.js";
 
+const SCHEMA = suiteName("declarative_pg");
+
 declarativeSuite({
+  name: SCHEMA,
   dialect: "postgres",
   reachable: postgresReachable,
   reset: async () => {
