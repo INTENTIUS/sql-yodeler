@@ -1,8 +1,11 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { help, main } from "../src/cli.js";
 import type { Command, Io } from "../src/command.js";
 import { commands } from "../src/commands/index.js";
+import { fixture } from "./helpers/run.js";
 
 const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
@@ -20,6 +23,8 @@ async function run(argv: string[], list?: readonly Command[]) {
 }
 
 const verbs = ["init", "plan", "apply", "new", "lint", "status", "drift", "rebase", "repair"];
+const built = ["plan", "apply", "drift"];
+const notBuilt = verbs.filter((v) => !built.includes(v));
 
 describe("yodel", () => {
   it("prints the package version", async () => {
@@ -32,8 +37,12 @@ describe("yodel", () => {
     const { code, out } = await run(["--help"]);
     expect(code).toBe(0);
     expect(commands.map((c) => c.name)).toEqual(verbs);
-    for (const verb of verbs) {
+    for (const verb of notBuilt) {
       expect(out).toMatch(new RegExp(`^  ${verb} +.+\\(not implemented yet\\)$`, "m"));
+    }
+    for (const verb of built) {
+      expect(out).toMatch(new RegExp(`^  ${verb} +.+$`, "m"));
+      expect(out).not.toMatch(new RegExp(`^  ${verb} +.+\\(not implemented yet\\)$`, "m"));
     }
   });
 
@@ -55,11 +64,53 @@ describe("yodel", () => {
   });
 
   it("says a verb is not implemented yet", async () => {
-    for (const verb of verbs) {
+    for (const verb of notBuilt) {
       const { code, err } = await run([verb, "prod"]);
       expect(code).toBe(2);
       expect(err).toBe(`yodel ${verb}: not implemented yet\n`);
     }
+  });
+
+  it("takes exactly one environment for plan, apply and drift", async () => {
+    for (const verb of built) {
+      for (const args of [[], ["dev", "prod"]]) {
+        const { code, err } = await run([verb, ...args]);
+        expect(code).toBe(1);
+        expect(err).toContain(`usage: yodel ${verb} <env> [--json] [--dir <project>]`);
+      }
+      const flag = await run([verb, "dev", "--nope"]);
+      expect(flag.code).toBe(1);
+      expect(flag.err).toContain("--nope");
+    }
+  });
+
+  it("documents the exit codes in each built verb's --help", async () => {
+    for (const verb of built) {
+      const { code, out } = await run([verb, "--help"]);
+      expect(code).toBe(0);
+      expect(out).toMatch(new RegExp(`^usage: yodel ${verb} <env>`));
+      expect(out).toMatch(/Exit codes:\n {2}0 [\s\S]*\n {2}2 [\s\S]*\n {2}1 /);
+    }
+    expect((await run(["apply", "-h"])).out).toContain("  3  stopped at the gate");
+  });
+
+  it("fails plan, apply and drift outside a project", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-cli-"));
+    try {
+      for (const verb of built) {
+        const { code, err } = await run([verb, "dev", "--dir", dir]);
+        expect(code).toBe(1);
+        expect(err).toMatch(new RegExp(`^yodel ${verb}: no chant.config.ts in `));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("names the declared environments for an unknown one", async () => {
+    const { code, err } = await run(["plan", "prod", "--dir", fixture("clickhouse")]);
+    expect(code).toBe(1);
+    expect(err).toMatch(/no environment "prod".*declared: e2e/);
   });
 
   it("passes the arguments after the verb to the command", async () => {
