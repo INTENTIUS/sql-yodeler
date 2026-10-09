@@ -16,6 +16,8 @@
 #     pipelines run on unprotected branches), masked; no environment scope.
 #   PROD_CLICKHOUSE_WRITER_USER, PROD_CLICKHOUSE_WRITER_PASSWORD: protected, masked,
 #     environment scope "prod": only apply-prod declares that environment.
+#   SQL_YODELER_TOKEN: optional, masked; a token that can read github.com/INTENTIUS/sql-yodeler,
+#     for npm ci while that repository is private. Unset, the jobs skip it.
 #   GITLAB_TOKEN: a project access token with the api scope (Reporter), for
 #     the plan comment; CI_JOB_TOKEN cannot write merge request notes.
 # The jobs that hold no writer read with the reader: chant.config.ts picks
@@ -41,6 +43,7 @@ variables:
 .yodel:
   image: node:22-bookworm
   before_script:
+    - if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'

@@ -48,7 +48,7 @@ Lineage: dir:<clone>/templates/clickhouse (a directory, recorded by digest only)
 Parameters: database="yodel_18_tpl", history_database="yodel_18_tpl_history", name="events-schema"
 ```
 
-The template's `package.json` takes `@intentius/sql-yodeler` from git, which does not install a working `yodel` today ([issue #44](https://github.com/INTENTIUS/sql-yodeler/issues/44)). This run installed a packed copy instead, as [Installing](configuration.md#installing) describes (`npm install ./vendor/intentius-sql-yodeler-0.0.0.tgz` in `my-schema`, which also rewrites the dependency in `package.json` to that file).
+The template's `package.json` takes `@intentius/sql-yodeler` from git, `github:INTENTIUS/sql-yodeler#main`, so `npm install` in `my-schema` clones it and builds `yodel`. The repository is private: the install, and the generated pipelines' `npm ci`, need read access to it, which [Installing](configuration.md#installing) and the project's README describe (in CI, a `SQL_YODELER_TOKEN` secret). This run predates that ([issue #44](https://github.com/INTENTIUS/sql-yodeler/issues/44)) and installed a packed copy instead, the other route Installing describes (`npm install ./vendor/intentius-sql-yodeler-0.0.0.tgz` in `my-schema`, which also rewrites the dependency in `package.json` to that file).
 
 The first migration creates what `src/schema.ts` declares. `yodel new` needs no server:
 

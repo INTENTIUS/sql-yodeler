@@ -75,18 +75,18 @@ The watch reports a declared object changed out of band or gone; an object `src/
 
 GitHub Actions:
 
-- Repository secrets: the readers' variables and the URLs.
+- Repository secrets: the readers' variables and the URLs, and `SQL_YODELER_TOKEN` while sql-yodeler is private (see [The sql-yodeler dependency](#the-sql-yodeler-dependency)).
 - Environments `dev` and `prod`, each limited to the `main` branch, holding that environment's URL and writer variables. Pull request jobs cannot read an environment's secrets.
 - The workflows set their own token permissions: `contents: read`, and `pull-requests: write` on the pull request workflow for the comment.
 
 Forgejo Actions:
 
-- Repository secrets for all of the variables. Forgejo has no environments, so each job names only its own secrets; restrict who can push to the repository, since a branch can change a workflow.
+- Repository secrets for all of the variables, and `SQL_YODELER_TOKEN` while sql-yodeler is private. Forgejo has no environments, so each job names only its own secrets; restrict who can push to the repository, since a branch can change a workflow.
 - The comment is posted with the job's own token. It needs an Actions runner with the `docker` label.
 
 GitLab CI:
 
-- CI/CD variables: readers not protected (merge request pipelines run on unprotected branches); writers protected and scoped to environment `dev` or `prod`, which only `apply-<env>` declares.
+- CI/CD variables: readers not protected (merge request pipelines run on unprotected branches); writers protected and scoped to environment `dev` or `prod`, which only `apply-<env>` declares. `SQL_YODELER_TOKEN`, while sql-yodeler is private: masked, not protected, no environment scope, since every job runs `npm ci`.
 - `GITLAB_TOKEN`: a project access token with the `api` scope, for the plan comment (`CI_JOB_TOKEN` cannot write merge request notes).
 - GitLab has no cron in the file: create one pipeline schedule per watch (Settings > CI/CD > Schedules) with the cron and the `CHANT_SCHEDULED_OP` value noted at the top of `.gitlab/yodel-watch.gitlab-ci.yml`.
 
@@ -100,10 +100,22 @@ Add its profile to `chant.config.ts` (in the order merges apply them) and its en
 
 ## The sql-yodeler dependency
 
-`@intentius/sql-yodeler` is not on npm. `package.json` takes it from git, `github:INTENTIUS/sql-yodeler#main`, and `package-lock.json` pins the commit. While that repository is private, `npm install` needs access to it: on your machine, `gh auth setup-git` or an SSH key; in CI, a read token for it (for example `git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"` before `npm ci`), or a packed copy committed to the repository:
+`@intentius/sql-yodeler` is not on npm. `package.json` takes it from git, `github:INTENTIUS/sql-yodeler#main`, and `package-lock.json` pins the commit. npm clones that commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin, so the first install takes a little longer than a registry package.
+
+The repository is private, so every `npm install` and `npm ci` needs read access to it. On your machine, `gh auth setup-git` or an SSH key that GitHub accepts is enough. The lockfile records the dependency as `git+ssh://git@github.com/...`; when SSH fails, npm retries over HTTPS, so an HTTPS token works too. In CI, every job that runs `npm ci` first checks for a `SQL_YODELER_TOKEN` secret (GitLab: a masked CI/CD variable): a token that can read `INTENTIUS/sql-yodeler`, for example a fine-grained GitHub token with Contents read-only on that repository. When it is set, the job rewrites that repository's SSH and HTTPS URLs to HTTPS with the token, and nothing else:
+
+```sh
+git config --global --add url."https://x-access-token:${SQL_YODELER_TOKEN}@github.com/INTENTIUS/sql-yodeler".insteadOf "https://github.com/INTENTIUS/sql-yodeler"
+```
+
+(and the same for `ssh://git@github.com/INTENTIUS/sql-yodeler` and `git@github.com:INTENTIUS/sql-yodeler`). The job's own `GITHUB_TOKEN` cannot read another private repository. When the secret is not set, the step does nothing, which is what you want once the package is public.
+
+Or skip git and commit a packed copy, which needs no access in CI. With a clone of sql-yodeler next to this project:
 
 ```sh
 mkdir -p vendor
-(cd ../sql-yodeler && npm ci && npm run build && npm pack --pack-destination "$OLDPWD/vendor")
+(cd ../sql-yodeler && npm ci && npm pack --pack-destination "$OLDPWD/vendor")
 npm install ./vendor/intentius-sql-yodeler-0.0.0.tgz
 ```
+
+`npm pack` builds `dist/` itself through the same `prepare` script. `npm install` of the tarball rewrites the dependency in `package.json` to `file:vendor/intentius-sql-yodeler-0.0.0.tgz`.

@@ -19,8 +19,10 @@ jobs:
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
       DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
+      SQL_YODELER_TOKEN: '${{ secrets.SQL_YODELER_TOKEN }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
+      - run: if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'

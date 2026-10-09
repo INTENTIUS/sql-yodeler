@@ -26,6 +26,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && chmod +x dist/bin.js",
+    "prepare": "npm run build",
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

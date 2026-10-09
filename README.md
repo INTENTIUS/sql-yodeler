@@ -4,7 +4,7 @@ Schema management and migrations for ClickHouse and Postgres, on chant's `sql` l
 
 ## Documentation
 
-[`docs/`](docs/README.md) covers installing (the package is not on npm; it installs from a built clone or a packed tarball), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
+[`docs/`](docs/README.md) covers installing (the package is not on npm; it installs from git, which needs read access to this private repository, or from a clone or a packed tarball), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
 
 [`examples/clickhouse`](examples/clickhouse/README.md) and [`examples/postgres`](examples/postgres/README.md) are example projects, each with a transcript of a run against chant's emulator.
 

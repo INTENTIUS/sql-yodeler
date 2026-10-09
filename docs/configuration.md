@@ -2,24 +2,40 @@
 
 ## Installing
 
-`@intentius/sql-yodeler` is not published to npm. Today it installs from a built clone of this repository, either linked or packed. It needs Node 22.12 or later.
+`@intentius/sql-yodeler` is not published to npm. It installs from git, or from a clone of this repository, linked or packed. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import: `npm install @intentius/chant@0.114.0 @intentius/chant-lexicon-sql@0.114.0`.
 
-Build it once:
+### From git
+
+```sh
+npm install github:INTENTIUS/sql-yodeler#main
+npx yodel --version
+```
+
+This is what the starter templates' `package.json` names. npm clones the commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin; `package-lock.json` pins the commit. Use a tag or a commit instead of `#main` to pin it in `package.json` too.
+
+The repository is private, so the install, and every `npm ci` after it, needs read access to it. On your machine, `gh auth setup-git` or an SSH key that GitHub accepts is enough. The lockfile records the dependency as `git+ssh://git@github.com/INTENTIUS/sql-yodeler.git#<commit>`; when SSH fails, npm retries over HTTPS, so an HTTPS token works too. In CI, give the job a token that can read `INTENTIUS/sql-yodeler` (a GitHub Actions job's own `GITHUB_TOKEN` cannot read another private repository) and set it before `npm ci`:
+
+```sh
+git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+```
+
+### From a clone
+
+Clone and build it once:
 
 ```sh
 git clone https://github.com/INTENTIUS/sql-yodeler.git
 cd sql-yodeler
 npm ci
-npm run build
 ```
 
-Then, in your project, either install the clone by path (npm links it, so a rebuild of the clone is picked up):
+`npm ci` builds `dist/` through the `prepare` script (`npm run build` does the same by hand). Then, in your project, either install the clone by path (npm links it, so a rebuild of the clone is picked up):
 
 ```sh
 npm install ../sql-yodeler
 ```
 
-or pack it and install the tarball, which you can commit so CI does not need the clone:
+or pack it and install the tarball, which you can commit so CI needs no access to this repository:
 
 ```sh
 mkdir -p vendor
@@ -28,9 +44,7 @@ npm install ./vendor/intentius-sql-yodeler-0.0.0.tgz
 npx yodel --version
 ```
 
-The project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import: `npm install @intentius/chant@0.114.0 @intentius/chant-lexicon-sql@0.114.0`.
-
-The starter templates' `package.json` names `github:INTENTIUS/sql-yodeler#main`. That install currently gives a package with no `dist/` and no `yodel` bin ([issue #44](https://github.com/INTENTIUS/sql-yodeler/issues/44)); replace it with one of the two forms above until that is fixed. The examples in `examples/` use `file:../..`, the clone they sit in.
+Installing the tarball rewrites the dependency in `package.json` to `file:vendor/intentius-sql-yodeler-0.0.0.tgz`. The examples in `examples/` use `file:../..`, the clone they sit in.
 
 ## A project
 
