@@ -23,7 +23,8 @@ async function run(argv: string[], list?: readonly Command[]) {
 }
 
 const verbs = ["init", "plan", "apply", "new", "lint", "status", "drift", "rebase", "repair"];
-const built = ["plan", "apply", "drift"];
+const envVerbs = ["plan", "apply", "drift"];
+const built = [...envVerbs, "new"];
 const notBuilt = verbs.filter((v) => !built.includes(v));
 
 describe("yodel", () => {
@@ -72,7 +73,7 @@ describe("yodel", () => {
   });
 
   it("takes exactly one environment for plan, apply and drift", async () => {
-    for (const verb of built) {
+    for (const verb of envVerbs) {
       for (const args of [[], ["dev", "prod"]]) {
         const { code, err } = await run([verb, ...args]);
         expect(code).toBe(1);
@@ -85,20 +86,21 @@ describe("yodel", () => {
   });
 
   it("documents the exit codes in each built verb's --help", async () => {
-    for (const verb of built) {
+    for (const verb of envVerbs) {
       const { code, out } = await run([verb, "--help"]);
       expect(code).toBe(0);
       expect(out).toMatch(new RegExp(`^usage: yodel ${verb} <env>`));
       expect(out).toMatch(/Exit codes:\n {2}0 [\s\S]*\n {2}2 [\s\S]*\n {2}1 /);
     }
     expect((await run(["apply", "-h"])).out).toContain("  3  stopped at the gate");
+    expect((await run(["new", "--help"])).out).toMatch(/^usage: yodel new <name>[\s\S]*Exit codes:\n {2}0 [\s\S]*\n {2}1 /);
   });
 
   it("fails plan, apply and drift outside a project", async () => {
     const dir = mkdtempSync(join(tmpdir(), "yodel-cli-"));
     try {
       for (const verb of built) {
-        const { code, err } = await run([verb, "dev", "--dir", dir]);
+        const { code, err } = await run([verb, verb === "new" ? "add-country" : "dev", "--dir", dir]);
         expect(code).toBe(1);
         expect(err).toMatch(new RegExp(`^yodel ${verb}: no chant.config.ts in `));
       }

@@ -26,8 +26,8 @@
     "check": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {
-    "@intentius/chant": "^0.112.0",
-    "@intentius/chant-lexicon-sql": "^0.112.0",
+    "@intentius/chant": "^0.113.0",
+    "@intentius/chant-lexicon-sql": "^0.113.0",
     "tsx": "^4.23.15"
   },
   "devDependencies": {
