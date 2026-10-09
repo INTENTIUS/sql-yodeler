@@ -1,0 +1,23 @@
+import type { Command } from "../command.js";
+import { apply } from "./apply.js";
+import { drift } from "./drift.js";
+import { init } from "./init.js";
+import { lint } from "./lint.js";
+import { newCommand } from "./new.js";
+import { plan } from "./plan.js";
+import { rebase } from "./rebase.js";
+import { repair } from "./repair.js";
+import { status } from "./status.js";
+
+/** Every verb, in the order `yodel --help` lists them. */
+export const commands: readonly Command[] = [
+  init,
+  plan,
+  apply,
+  newCommand,
+  lint,
+  status,
+  drift,
+  rebase,
+  repair,
+];
