@@ -37,8 +37,8 @@ export interface VersionedDriver {
   liveFingerprint(): Promise<string>;
   /** Sends one statement and writes its `succeeded` row through `run`; throws with the server's message when it fails. */
   runStatement(step: StatementStep, run: StatementRun): Promise<void>;
-  /** What an Op step's runner gets from the dialect: the ClickHouse port and endpoint, the Postgres lock timeout. */
-  stepContext(): Pick<StepContext, "port" | "endpoint" | "lockTimeoutMs">;
+  /** What an Op step's runner gets from the dialect: the ClickHouse port and endpoint; the Postgres lock timeout, and the connection, timeouts and receipts schema a backfill uses. */
+  stepContext(): Pick<StepContext, "port" | "endpoint" | "lockTimeoutMs" | "postgres">;
   /** Closes what the driver opened (a Postgres connection). Safe to call twice. */
   close(): Promise<void>;
 }

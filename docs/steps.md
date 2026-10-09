@@ -5,7 +5,7 @@ Most of a migration is statements. A change that is not one statement is a step 
 | Step | Dialect | Written by `yodel new` for |
 |---|---|---|
 | `ClickHouseRebuildOp` | ClickHouse | a change `ALTER` cannot make: the sort key, the engine, a key column's type or name |
-| backfill | ClickHouse | `yodel new <name> --backfill <file>`: a data migration you write |
+| backfill | ClickHouse, Postgres | `yodel new <name> --backfill <file>`: a data migration you write |
 | `PostgresMigrationOp` | Postgres | a column rename (SQLPG205) or a type change across kinds (SQLPG208) |
 
 A step and any file it runs are in the migration's checksum, so in the plan digest the approval binds. Its history rows have `kind = 'step'`, and the `succeeded` (or `failed`) row's `note` is the step's summary as JSON. A step that failed or was stopped runs again on the next `yodel apply` and resumes from its receipts, skipping the partitions or batches that finished. `yodel lint --replay` runs rebuild and `PostgresMigrationOp` steps in the replayed database and skips backfills, which move data the replayed database does not have.
@@ -193,14 +193,42 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:eaf4af6d1b7133e0863c
 The rules for a backfill module:
 
 - Each step is an `effect()` batch. Its SQL runs with `activity("yodelSql", { sql, settings? })`, which yodel provides, on the environment's server; any activity chant has works too.
-- Make each batch safe to run twice. A batch that was running when a run stopped runs again on the next one. The example's `UPDATE` touches only rows still empty.
+- On ClickHouse, make each batch safe to run twice. A batch that was running when a run stopped runs again on the next one. The example's `UPDATE` touches only rows still empty. (On Postgres a batch is one transaction with its receipt; see [Backfills on Postgres](#backfills-on-postgres).)
 - Import packages only, no relative paths: the copy in the migration's directory is the one that runs.
 - No gates: the migration's approval covers it.
 - It counts in the migration's checksum, so editing `backfill.ts` after the migration ran is a checksum mismatch.
 
-The receipts are rows in chant's receipts table on the environment's server (`chant_receipts.receipts`, the one the rebuild uses), addressed `yodel/<env>/<migration id>/<effect>`, so the same effect name in two migrations is two receipts.
+The receipts are rows on the environment's server, addressed `yodel/<env>/<migration id>/<effect>`, so the same effect name in two migrations is two receipts. On ClickHouse they are in chant's receipts table (`chant_receipts.receipts`, the one the rebuild uses).
 
-Backfill steps run on ClickHouse only today; on Postgres they are [issue #39](https://github.com/INTENTIUS/sql-yodeler/issues/39).
+### Backfills on Postgres
+
+On Postgres the batches' SQL runs on the apply's own connection to the environment's server, and the receipts are rows in `<history schema>.__chant_receipts` (chant's Postgres receipts table, the one `PostgresMigrationOp` keeps in the migrated table's schema), in the schema yodel's history is in: `yodeler.__chant_receipts` by default.
+
+Each batch runs in one transaction: `BEGIN` at its first `yodelSql` statement, then its statements, then its receipt, then `COMMIT`. A batch whose statement fails is rolled back whole and leaves no receipt, and a run killed in the middle of a batch leaves neither its changes nor its receipt, so the next `yodel apply` runs that batch again from its first statement and skips every batch that committed. A Postgres batch whose steps are all `yodelSql` therefore does not need to be safe to run twice (another activity in a batch runs outside its transaction), but its statements must be ones Postgres runs in a transaction block: no `CREATE INDEX CONCURRENTLY`, no `VACUUM`. Keep batches small enough that holding their row locks until the batch commits is acceptable.
+
+The batch's transaction has `lock_timeout` and `statement_timeout` set from the environment's profile (`lockTimeoutMs`, default 5 s, and `scanTimeoutMs`, default none). A batch blocked behind another session's lock fails when the lock timeout passes; the next `yodel apply` resumes at it. `yodelSql`'s `settings` are set for the batch's transaction only (`set_config(name, value, true)`), for example `{ work_mem: "256MB" }`.
+
+A Postgres backfill filling a new column, one range of ids per batch:
+
+```ts
+import { EffectReceipt } from "@intentius/chant";
+import { Op, activity, effect, phase } from "@intentius/chant/op";
+
+const ranges = [[1, 100_000], [100_001, 200_000], [200_001, 300_000]];
+
+const batch = ([from, to]: number[]) =>
+  effect(EffectReceipt(`fill-region-${String(from)}`, { effect: `fill-region/${String(from)}`, flavor: "existence" }), [
+    activity("yodelSql", { sql: `UPDATE shop.orders SET region = lower(country) WHERE id BETWEEN ${String(from)} AND ${String(to)}` }, "atMostOnce"),
+  ]);
+
+export const op = Op({
+  name: "backfill-fill-region",
+  overview: "orders.region from the country, a range of ids at a time",
+  phases: [phase("Backfill", ranges.map(batch))],
+});
+```
+
+The template `yodel new --backfill` writes in a Postgres project raises an exception (`DO $$ BEGIN RAISE EXCEPTION ... END $$`) in place of the SQL until you write it.
 
 ## Postgres: PostgresMigrationOp
 

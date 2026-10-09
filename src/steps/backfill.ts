@@ -29,10 +29,23 @@
  * to repeat (an idempotent `UPDATE`, or a delete of its rows before the
  * insert), as the rebuild's backfill does per partition.
  *
- * The receipts are rows on the environment's server, in chant's receipts
- * table (`chant_receipts.receipts`, the one `ClickHouseRebuildOp` uses),
- * addressed `yodel/<env>/<migration id>/<effect>`, so the same effect name
- * in two migrations is two receipts.
+ * The receipts are rows on the environment's server, addressed
+ * `yodel/<env>/<migration id>/<effect>`, so the same effect name in two
+ * migrations is two receipts:
+ *
+ * - ClickHouse: chant's receipts table (`chant_receipts.receipts`, the one
+ *   `ClickHouseRebuildOp` uses).
+ * - Postgres: `<history schema>.__chant_receipts`, chant's Postgres receipt
+ *   table (the one `PostgresMigrationOp` keeps in the migrated table's
+ *   schema), in the schema yodel's history is in. Each batch runs in one
+ *   transaction on the apply's connection, and its receipt is written last
+ *   inside it: the batch's statements and its receipt commit together or
+ *   not at all, so a run killed anywhere leaves no batch half done, and a
+ *   resumed backfill runs no batch twice. A batch's statements must be ones
+ *   Postgres runs in a transaction block (no `CREATE INDEX CONCURRENTLY`,
+ *   no `VACUUM`). The environment's `lockTimeoutMs` and `scanTimeoutMs` are
+ *   the batch's `lock_timeout` and `statement_timeout`, and `yodelSql`'s
+ *   `settings` are set for the batch's transaction (`set_config(..., true)`).
  *
  * The module is one of the migration's own files: it counts in the
  * migration's checksum, so the plan digest an approval binds covers it, and
@@ -46,11 +59,14 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { OpConfig } from "@intentius/chant/op/types";
+import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
 import { YodelError } from "../project.js";
 import type { ClickHousePort } from "../history/index.js";
+import type { PgClient } from "../history/postgres/index.js";
+import type { PgTimeouts } from "../versioned/postgres/executor.js";
 import { gatesOf, runOp, StepOpFailed, type RunOpOptions } from "./run.js";
 import { BACKFILL_FILE, BACKFILL_OP, type BackfillStep } from "./kinds.js";
 
@@ -77,13 +93,23 @@ export function backfillStep(migrationName: string, file = BACKFILL_FILE): Backf
 export const TEMPLATE_MARK = "write the backfill of";
 
 /** What `yodel new --backfill <file>` writes at `<file>` when there is none yet. */
-export function backfillTemplate(name: string): string {
+export function backfillTemplate(name: string, dialect: SqlDialect = "clickhouse"): string {
+  const todo =
+    dialect === "postgres"
+      ? `DO $$ BEGIN RAISE EXCEPTION 'write the backfill of ${name} for batch \${b}'; END $$`
+      : `SELECT throwIf(1, 'write the backfill of ${name} for batch \${b}')`;
   return `/**
  * The backfill of migration ${name}. yodel apply runs the Op this file
  * exports, after the migration's statements before the step and before
  * those after it. Each effect() is one batch with its own receipt: a rerun
- * after a failure skips the batches that finished. Make each batch safe to
- * run twice (the one running when a run stopped runs again).
+ * after a failure skips the batches that finished. ${
+    dialect === "postgres"
+      ? `Each batch is one transaction
+ * with its receipt, so a batch that was running when a run stopped left
+ * nothing and runs again whole.`
+      : `Make each batch safe to
+ * run twice (the one running when a run stopped runs again).`
+  }
  *
  * This file is copied into the migration's directory and counts in its
  * checksum. Import packages only, no relative paths. No gates: the
@@ -98,7 +124,7 @@ const batches: string[] = ["202601", "202602"];
 const batch = (b: string) =>
   effect(EffectReceipt(\`${name}-\${b}\`, { effect: \`${name}/\${b}\`, flavor: "existence" }), [
     // TODO: the SQL for one batch.
-    activity("${SQL_ACTIVITY}", { sql: \`SELECT throwIf(1, 'write the backfill of ${name} for batch \${b}')\` }, "atMostOnce"),
+    activity("${SQL_ACTIVITY}", { sql: \`${todo}\` }, "atMostOnce"),
   ]);
 
 export const op = Op({
@@ -172,10 +198,88 @@ export function prefixedStore(store: ReceiptStore, prefix: string): ReceiptStore
   };
 }
 
-/** The receipt store on the server: chant's, in `chant_receipts.receipts`. */
+/** The receipt store on a ClickHouse server: chant's, in `chant_receipts.receipts`. */
 export async function serverReceipts(endpoint: { url: string; user?: string; password?: string }, environment: string): Promise<ReceiptStore> {
   const { clickhouseReceiptStore } = await import("@intentius/chant-lexicon-sql/clickhouse/rebuild/receipts");
   return clickhouseReceiptStore(endpoint, { stack: "yodel", env: environment });
+}
+
+/**
+ * The receipt store on a Postgres server: chant's, in `<schema>.__chant_receipts`,
+ * over `client` (so a receipt written inside a batch's transaction commits
+ * with it). Creates the table when it is not there.
+ */
+export async function postgresServerReceipts(client: PgClient, schema: string, environment: string): Promise<ReceiptStore> {
+  const { postgresReceiptStore } = await import("@intentius/chant-lexicon-sql/postgres/migrate/receipts");
+  // The store never closes the apply's connection.
+  const store = postgresReceiptStore({ query: (sql, params) => client.query(sql, params), end: () => Promise.resolve() }, schema, { stack: "yodel", env: environment });
+  await store.ensure();
+  return store;
+}
+
+/** A backfill on Postgres: the connection its batches run on, and the environment's timeouts. */
+export interface PgBackfillServer {
+  client: PgClient;
+  timeouts: Pick<PgTimeouts, "lockTimeoutMs" | "scanTimeoutMs">;
+}
+
+/** How a backfill's batches meet the server: `next` starts a batch, `sql` runs one of its statements, `done` follows its receipt's write, `abandon` its failure. */
+interface BatchSession {
+  next(): Promise<void>;
+  sql(sql: string, settings: Record<string, string> | undefined): Promise<number>;
+  done(): Promise<void>;
+  abandon(): Promise<void>;
+}
+
+function clickhouseBatches(port: ClickHousePort): BatchSession {
+  return {
+    next: () => Promise.resolve(),
+    sql: async (sql, settings) => (await port.query(sql, settings ? { settings } : {})).length,
+    done: () => Promise.resolve(),
+    abandon: () => Promise.resolve(),
+  };
+}
+
+/** Each batch in one transaction, begun at its first statement and committed after its receipt. */
+function postgresBatches(server: PgBackfillServer): BatchSession {
+  const { client, timeouts } = server;
+  let open = false;
+  /** Why this batch's transaction was rolled back: its later statements (an activity's retry) do not run without the earlier ones. */
+  let lost: string | undefined;
+  const rollback = async () => {
+    if (!open) return;
+    open = false;
+    await client.query("ROLLBACK").catch(() => undefined);
+  };
+  return {
+    async next() {
+      await rollback();
+      lost = undefined;
+    },
+    async sql(sql, settings) {
+      if (lost !== undefined) throw new Error(`this batch's transaction was rolled back (${lost}); the batch runs again whole on the next yodel apply`);
+      try {
+        if (!open) {
+          await client.query("BEGIN");
+          open = true;
+          await client.query(`SET LOCAL lock_timeout = '${String(Math.max(0, Math.floor(timeouts.lockTimeoutMs)))}ms'`);
+          await client.query(`SET LOCAL statement_timeout = '${String(Math.max(0, Math.floor(timeouts.scanTimeoutMs)))}ms'`);
+        }
+        for (const [name, value] of Object.entries(settings ?? {})) await client.query("SELECT pg_catalog.set_config($1, $2, true)", [name, value]);
+        return (await client.query(sql)).length;
+      } catch (e) {
+        lost = e instanceof Error ? e.message : String(e);
+        await rollback();
+        throw e;
+      }
+    },
+    async done() {
+      if (!open) return;
+      open = false;
+      await client.query("COMMIT");
+    },
+    abandon: rollback,
+  };
 }
 
 export interface RunBackfillOptions extends Omit<RunOpOptions, "activities" | "cwd"> {
@@ -185,7 +289,10 @@ export interface RunBackfillOptions extends Omit<RunOpOptions, "activities" | "c
   dir: string;
   /** The module's text as the migration read it (and checksummed). */
   text?: string | undefined;
-  port: ClickHousePort;
+  /** The ClickHouse server the SQL runs on; or `postgres`. */
+  port?: ClickHousePort | undefined;
+  /** The Postgres server the SQL runs on, a transaction per batch; or `port`. */
+  postgres?: PgBackfillServer | undefined;
   receipts: ReceiptStore;
   log?: (line: string) => void;
 }
@@ -194,16 +301,27 @@ export interface RunBackfillOptions extends Omit<RunOpOptions, "activities" | "c
 export async function runBackfill(file: string, run: RunBackfillOptions): Promise<{ summary: BackfillSummary; records: StepRecord[] }> {
   const config = await loadBackfill(join(run.dir, file), run.text);
   const summary: BackfillSummary = { op: "backfill", file, name: config.name, effects: config.phases.reduce((n, p) => n + p.steps.length, 0), skipped: 0, ran: 0 };
+  const session = run.postgres ? postgresBatches(run.postgres) : run.port ? clickhouseBatches(run.port) : undefined;
+  if (!session) throw new YodelError("a backfill step needs the environment's server to run its SQL on, and has none");
   const { receiptActivities } = await import("@intentius/chant/op/receipt-store");
   const store = receiptActivities(prefixedStore(run.receipts, `${run.migrationId}/`));
   const activities: Record<string, ActivityFn> = {
     receiptRead: async (args) => {
+      // A new batch: nothing of an earlier one is left open.
+      await session.next();
       const r = await store.receiptRead(args as unknown as Parameters<typeof store.receiptRead>[0]);
       if (r.applied) summary.skipped++;
       return r;
     },
     receiptWrite: async (args) => {
-      const r = await store.receiptWrite(args as unknown as Parameters<typeof store.receiptWrite>[0]);
+      let r: Awaited<ReturnType<typeof store.receiptWrite>>;
+      try {
+        r = await store.receiptWrite(args as unknown as Parameters<typeof store.receiptWrite>[0]);
+        await session.done();
+      } catch (e) {
+        await session.abandon();
+        throw e;
+      }
       summary.ran++;
       return r;
     },
@@ -213,8 +331,7 @@ export async function runBackfill(file: string, run: RunBackfillOptions): Promis
       if (typeof sql !== "string" || sql.trim() === "") throw new Error(`${SQL_ACTIVITY}: needs { sql: "<statement>" }`);
       const settings = isRecord(args.settings) ? (Object.fromEntries(Object.entries(args.settings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined;
       run.log?.(`    ${sql.split("\n")[0] ?? ""}`);
-      const rows = await run.port.query(sql, settings ? { settings } : {});
-      return { rows: rows.length };
+      return { rows: await session.sql(sql, settings) };
     },
   };
   try {
@@ -230,5 +347,8 @@ export async function runBackfill(file: string, run: RunBackfillOptions): Promis
   } catch (e) {
     if (e instanceof StepOpFailed) e.summary = summary;
     throw e;
+  } finally {
+    // A batch stopped part way (a failed step that was not ours, an abort) leaves nothing behind.
+    await session.abandon();
   }
 }

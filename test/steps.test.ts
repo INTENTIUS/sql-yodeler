@@ -245,6 +245,59 @@ describe("a backfill step", () => {
     expect(ch.sent).toHaveLength(4);
   });
 
+  it("on Postgres runs each batch in one transaction with its receipt, rolls a failed batch back whole, and resumes at it", async () => {
+    const dir = tempDir(true);
+    const mdir = join(dir, "migrations", "20261009T1400-fill");
+    mkdirSync(mdir, { recursive: true });
+    writeFileSync(join(mdir, "backfill.ts"), BACKFILL);
+    let failOn: string | undefined = "b2";
+    const sent: string[] = [];
+    const receipts = new Map<string, string>();
+    // A receipt written in a batch's transaction is kept only when the transaction commits.
+    let pending: [string, string] | undefined;
+    const store: ReceiptStore = {
+      read: (r) => Promise.resolve(receipts.get(r.effect)),
+      write: (r, e) => {
+        sent.push(`receipt ${r.effect}`);
+        pending = [r.effect, e];
+        return Promise.resolve();
+      },
+    };
+    const client = {
+      query: (sql: string) => {
+        sent.push(sql);
+        if (sql === "COMMIT" && pending) receipts.set(...pending);
+        if (sql === "COMMIT" || sql === "ROLLBACK") pending = undefined;
+        if (failOn && sql.includes(`'${failOn}'`)) return Promise.reject(new Error("forced"));
+        return Promise.resolve([]);
+      },
+    };
+    const run = { environment: "e2e", projectDir: dir, migrationId: "20261009T1400-fill", dir: mdir, postgres: { client, timeouts: { lockTimeoutMs: 500, scanTimeoutMs: 0 } }, receipts: store };
+    const batch = (b: string) => ["BEGIN", "SET LOCAL lock_timeout = '500ms'", "SET LOCAL statement_timeout = '0ms'", `INSERT INTO yodel_12.log VALUES ('${b}')`, `receipt 20261009T1400-fill/fill/${b}`, "COMMIT"];
+
+    const failed = await runBackfill("backfill.ts", run).catch((e: unknown) => e);
+    expect(failed).toBeInstanceOf(StepOpFailed);
+    expect((failed as StepOpFailed).summary).toMatchObject({ effects: 4, skipped: 0, ran: 2 });
+    expect(sent).toEqual([...batch("b0"), ...batch("b1"), ...batch("b2").slice(0, 4), "ROLLBACK"]);
+    expect([...receipts.keys()].sort()).toEqual(["20261009T1400-fill/fill/b0", "20261009T1400-fill/fill/b1"]);
+
+    failOn = undefined;
+    sent.length = 0;
+    const { summary } = await runBackfill("backfill.ts", run);
+    expect(summary).toMatchObject({ skipped: 2, ran: 2 });
+    expect(sent).toEqual([...batch("b2"), ...batch("b3")]);
+
+    sent.length = 0;
+    expect((await runBackfill("backfill.ts", run)).summary).toMatchObject({ skipped: 4, ran: 0 });
+    expect(sent).toEqual([]);
+  });
+
+  it("the template on Postgres raises until written", () => {
+    const t = backfillTemplate("fill", "postgres");
+    expect(t).toContain("DO $$ BEGIN RAISE EXCEPTION 'write the backfill of fill for batch ${b}'; END $$");
+    expect(t).not.toContain("throwIf");
+  });
+
   it("keeps each migration's receipts apart", async () => {
     const { map, store } = memoryReceipts();
     await prefixedStore(store, "a/").write({ name: "n", effect: "e", flavor: "existence", inputs: {} }, "x");

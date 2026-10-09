@@ -128,7 +128,6 @@ function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWa
 function dialectRefusal(run: string, dialect: string): string | undefined {
   if (run === "rebuild" && dialect !== "clickhouse") return `a ClickHouseRebuildOp step in a ${dialect} migration`;
   if (run === "pgMigration" && dialect !== "postgres") return `a PostgresMigrationOp step in a ${dialect} migration`;
-  if (run === "backfill" && dialect !== "clickhouse") return `a backfill step in a ${dialect} migration: yodel apply runs backfill steps on ClickHouse only for now (on Postgres, a column change is a PostgresMigrationOp step, which backfills itself)`;
   return undefined;
 }
 

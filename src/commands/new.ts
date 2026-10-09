@@ -143,7 +143,7 @@ export const newCommand: Command = {
         const path = resolve(project.dir, backfillArg);
         if (!existsSync(path)) {
           mkdirSync(dirname(path), { recursive: true });
-          writeFileSync(path, backfillTemplate(name));
+          writeFileSync(path, backfillTemplate(name, project.dialect));
           const where = relative(project.dir, path) || path;
           if (json) io.out(`${JSON.stringify({ written: false, template: path }, null, 2)}\n`);
           else io.out(`Wrote a backfill template at ${where}. Write its batches, then run yodel new ${name} --backfill ${backfillArg} again. No migration written.\n`);

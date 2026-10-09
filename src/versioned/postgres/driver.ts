@@ -141,7 +141,7 @@ export function postgresDriver(input: PostgresDriverInput): VersionedDriver {
       }
     },
     stepContext() {
-      return { lockTimeoutMs: settings.timeouts.lockTimeoutMs };
+      return { lockTimeoutMs: settings.timeouts.lockTimeoutMs, postgres: { client, timeouts: settings.timeouts, receiptsSchema: settings.historySchema } };
     },
     close: () => client.end(),
   };

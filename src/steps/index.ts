@@ -14,7 +14,7 @@ import type { ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse
 import type { ClickHousePort } from "../history/index.js";
 import type { Migration } from "../migrations/index.js";
 import { YodelError } from "../project.js";
-import { runBackfill, serverReceipts } from "./backfill.js";
+import { postgresServerReceipts, runBackfill, serverReceipts, type PgBackfillServer } from "./backfill.js";
 import type { StepPlan } from "./kinds.js";
 import { rebuildChantConfig, runRebuild } from "./rebuild.js";
 import { runPgMigration } from "./postgres-migration.js";
@@ -32,6 +32,8 @@ export interface StepContext {
   projectDir: string;
   /** The ClickHouse server a backfill's SQL runs on; absent on Postgres. */
   port?: ClickHousePort | undefined;
+  /** Postgres: the apply's connection a backfill's SQL runs on, its timeouts, and the schema its receipts are kept in (the history's). */
+  postgres?: (PgBackfillServer & { receiptsSchema: string }) | undefined;
   /** Postgres: the environment's lock timeout, for a PostgresMigrationOp step whose options set none. */
   lockTimeoutMs?: number | undefined;
   /** The server, for chant's receipt store; the port is enough for everything else. */
@@ -57,8 +59,14 @@ export const defaultStepRunner: StepRunner = async (ctx) => {
     const { summary } = await runPgMigration(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, lockTimeoutMs: ctx.lockTimeoutMs, log: ctx.log });
     return { summary };
   }
-  if (!ctx.port) throw new YodelError("a backfill step runs its SQL on ClickHouse, and this environment has no ClickHouse server");
-  const receipts = ctx.receipts ?? (ctx.endpoint ? await serverReceipts(ctx.endpoint, ctx.environment) : undefined);
+  if (!ctx.port && !ctx.postgres) throw new YodelError("a backfill step runs its SQL on the environment's server, and this environment has none");
+  const receipts =
+    ctx.receipts ??
+    (ctx.postgres
+      ? await postgresServerReceipts(ctx.postgres.client, ctx.postgres.receiptsSchema, ctx.environment)
+      : ctx.endpoint
+        ? await serverReceipts(ctx.endpoint, ctx.environment)
+        : undefined);
   if (!receipts) throw new YodelError("a backfill step needs a receipt store, and this environment has no server endpoint for one");
   const { summary } = await runBackfill(ctx.plan.file, {
     environment: ctx.environment,
@@ -66,7 +74,7 @@ export const defaultStepRunner: StepRunner = async (ctx) => {
     migrationId: ctx.migration.id,
     dir: ctx.migration.dir,
     text: ctx.migration.files.extra?.[ctx.plan.file],
-    port: ctx.port,
+    ...(ctx.postgres ? { postgres: { client: ctx.postgres.client, timeouts: ctx.postgres.timeouts } } : { port: ctx.port }),
     receipts,
     log: ctx.log,
   });
