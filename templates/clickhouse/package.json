@@ -1,0 +1,27 @@
+{
+  "name": "{{chant:name}}",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "ci": "tsx scripts/ci.ts",
+    "ci:check": "tsx scripts/ci.ts --check"
+  },
+  "dependencies": {
+    "@intentius/chant": "0.114.0",
+    "@intentius/chant-lexicon-sql": "0.114.0",
+    "@intentius/sql-yodeler": "github:INTENTIUS/sql-yodeler#main"
+  },
+  "devDependencies": {
+    "@intentius/chant-lexicon-forgejo": "0.114.0",
+    "@intentius/chant-lexicon-github": "0.114.0",
+    "@intentius/chant-lexicon-gitlab": "0.114.0",
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,64 @@
+# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
+# Edit those and render again; npm run ci:check says when this file is stale.
+#
+# A push to main: yodel apply per environment, in order. These are the only
+# jobs that hold a writer's credentials, one environment's each. yodel apply
+# runs the environment's migrate Op, whose gate needs an approval of the plan
+# digest the pull request comment showed: run the chant approve command from
+# the comment and push chant/lifecycle. Without one, the job fails with the
+# command to run, and applies nothing; approve, then run this workflow again.
+#
+# Forgejo has no environments: every secret is the repository's. Name each in
+# its own job only, as below, and keep who can push workflows short.
+name: yodel-apply
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+jobs:
+  apply-dev:
+    runs-on: docker
+    container: node:22-bookworm
+    concurrency:
+      group: yodel-apply-dev
+      cancel-in-progress: false
+    env:
+      YODEL_CREDENTIALS: writer
+      DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
+      DEV_POSTGRES_WRITER_USER: '${{ secrets.DEV_POSTGRES_WRITER_USER }}'
+      DEV_POSTGRES_WRITER_PASSWORD: '${{ secrets.DEV_POSTGRES_WRITER_PASSWORD }}'
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Fetch the approvals (chant/lifecycle)
+        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: yodel apply dev
+        run: yodel apply dev
+  apply-prod:
+    runs-on: docker
+    container: node:22-bookworm
+    needs: apply-dev
+    concurrency:
+      group: yodel-apply-prod
+      cancel-in-progress: false
+    env:
+      YODEL_CREDENTIALS: writer
+      PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
+      PROD_POSTGRES_WRITER_USER: '${{ secrets.PROD_POSTGRES_WRITER_USER }}'
+      PROD_POSTGRES_WRITER_PASSWORD: '${{ secrets.PROD_POSTGRES_WRITER_PASSWORD }}'
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Fetch the approvals (chant/lifecycle)
+        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: yodel apply prod
+        run: yodel apply prod

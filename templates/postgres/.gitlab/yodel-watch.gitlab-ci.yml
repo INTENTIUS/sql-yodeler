@@ -1,0 +1,44 @@
+# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
+# Edit those and render again; npm run ci:check says when this file is stale.
+# chant Ops (#927, #2084, #2293) — one job per Op under stage "ops", each
+# selected by its own rules:. A merge_request_event or push job needs no
+# setup; its rule fires on the event itself.
+#
+# GitLab has no in-file cron. Create one Pipeline Schedule per cron Op
+# below (Settings > CI/CD > Schedules): set its cron to the value noted
+# here and its CHANT_SCHEDULED_OP CI/CD variable to the Op's name, so only
+# that job runs on that schedule.
+#
+#   watch-dev: cron "17 * * * *", CHANT_SCHEDULED_OP="watch-dev", finding-mode report
+#   watch-prod: cron "47 * * * *", CHANT_SCHEDULED_OP="watch-prod", finding-mode report
+
+stages:
+  - ops
+
+watch-dev:
+  stage: ops
+  image: node:22-bookworm
+  resource_group: watch-dev
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CHANT_SCHEDULED_OP == "watch-dev"'
+  script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - git remote set-url --push origin no-push://the-drift-watch-only-reads
+    - chant run watch-dev
+    - tsx scripts/watch-outcome.ts "$CI_JOB_NAME"
+
+watch-prod:
+  stage: ops
+  image: node:22-bookworm
+  resource_group: watch-prod
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $CHANT_SCHEDULED_OP == "watch-prod"'
+  script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - git remote set-url --push origin no-push://the-drift-watch-only-reads
+    - chant run watch-prod
+    - tsx scripts/watch-outcome.ts "$CI_JOB_NAME"

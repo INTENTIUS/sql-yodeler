@@ -1,0 +1,110 @@
+# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
+# Edit those and render again; npm run ci:check says when this file is stale.
+#
+# Merge requests: lint and the plan comment (stage review). A push to the
+# default branch: yodel apply per environment (stage apply). The drift
+# watches are in .gitlab/yodel-watch.gitlab-ci.yml (stage ops).
+#
+# GitLab gives every job the project's CI/CD variables unless a variable is
+# protected or scoped to an environment, so the split between reader and
+# writer is in the variables' settings (Settings > CI/CD > Variables):
+#   DEV_POSTGRES_URL, DEV_POSTGRES_READER_USER, DEV_POSTGRES_READER_PASSWORD: not protected (merge request
+#     pipelines run on unprotected branches), masked; no environment scope.
+#   DEV_POSTGRES_WRITER_USER, DEV_POSTGRES_WRITER_PASSWORD: protected, masked,
+#     environment scope "dev": only apply-dev declares that environment.
+#   PROD_POSTGRES_URL, PROD_POSTGRES_READER_USER, PROD_POSTGRES_READER_PASSWORD: not protected (merge request
+#     pipelines run on unprotected branches), masked; no environment scope.
+#   PROD_POSTGRES_WRITER_USER, PROD_POSTGRES_WRITER_PASSWORD: protected, masked,
+#     environment scope "prod": only apply-prod declares that environment.
+#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for
+#     the plan comment; CI_JOB_TOKEN cannot write merge request notes.
+# The jobs that hold no writer read with the reader: chant.config.ts picks
+# the writer only under YODEL_CREDENTIALS=writer, which only the apply jobs set.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+include:
+  - local: .gitlab/yodel-watch.gitlab-ci.yml
+
+stages:
+  - review
+  - apply
+  - ops
+
+variables:
+  GIT_DEPTH: '0'
+
+.yodel:
+  image: node:22-bookworm
+  before_script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+
+lint:
+  extends: .yodel
+  stage: review
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - npm run ci:check
+    - yodel lint
+    - node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "replay-postgres", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-postgres:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
+    - yodel lint --replay replay --reset
+  services:
+    - name: postgres:18.6
+      alias: replay-postgres
+      variables:
+        POSTGRES_PASSWORD: replay
+  variables:
+    REPLAY_POSTGRES_URL: postgres://replay-postgres:5432/postgres
+    REPLAY_POSTGRES_USER: postgres
+    REPLAY_POSTGRES_PASSWORD: replay
+
+plan-dev:
+  extends: .yodel
+  stage: review
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - yodel plan dev --comment
+
+plan-prod:
+  extends: .yodel
+  stage: review
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - yodel plan prod --comment
+
+apply-dev:
+  extends: .yodel
+  stage: apply
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
+  environment:
+    name: dev
+  resource_group: yodel-apply-dev
+  variables:
+    YODEL_CREDENTIALS: writer
+  script:
+    - yodel apply dev
+
+apply-prod:
+  extends: .yodel
+  stage: apply
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
+  needs:
+    - apply-dev
+  environment:
+    name: prod
+  resource_group: yodel-apply-prod
+  variables:
+    YODEL_CREDENTIALS: writer
+  script:
+    - yodel apply prod

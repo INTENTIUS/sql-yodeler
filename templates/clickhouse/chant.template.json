@@ -1,0 +1,30 @@
+{
+  "$comment": "chant init --from substitutes these into the files listed below. See the README of INTENTIUS/sql-yodeler, Starting a project.",
+  "parameters": {
+    "name": {
+      "type": "string",
+      "default": "clickhouse-schema",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "The package name in package.json"
+    },
+    "database": {
+      "type": "string",
+      "default": "app",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "description": "The ClickHouse database the schema lives in"
+    },
+    "history_database": {
+      "type": "string",
+      "default": "yodeler",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "description": "The database for yodel's history table and apply lock"
+    }
+  },
+  "files": [
+    "package.json",
+    "chant.config.ts",
+    "yodel.config.ts",
+    "src/schema.ts",
+    "README.md"
+  ]
+}

@@ -1,0 +1,31 @@
+# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
+# Edit those and render again; npm run ci:check says when this file is stale.
+name: watch-prod
+
+on:
+  schedule:
+    - cron: '47 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: watch-prod
+  cancel-in-progress: false
+
+jobs:
+  watch-prod:
+    runs-on: docker
+    container: node:22-bookworm
+    env:
+      PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
+      PROD_POSTGRES_READER_USER: '${{ secrets.PROD_POSTGRES_READER_USER }}'
+      PROD_POSTGRES_READER_PASSWORD: '${{ secrets.PROD_POSTGRES_READER_PASSWORD }}'
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v7
+      - run: npm ci
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - run: git remote set-url --push origin no-push://the-drift-watch-only-reads
+      - run: chant run watch-prod
+        env:
+          GITHUB_TOKEN: '${{ github.token }}'
+      - run: tsx scripts/watch-outcome.ts watch-prod

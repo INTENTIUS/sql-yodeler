@@ -1,0 +1,24 @@
+{
+  "$comment": "chant init --from substitutes these into the files listed below. See the README of INTENTIUS/sql-yodeler, Starting a project.",
+  "parameters": {
+    "name": {
+      "type": "string",
+      "default": "postgres-schema",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "The package name in package.json"
+    },
+    "schema": {
+      "type": "string",
+      "default": "app",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "description": "The Postgres schema the declared objects live in"
+    },
+    "history_schema": {
+      "type": "string",
+      "default": "yodeler",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "description": "The schema for yodel's history table"
+    }
+  },
+  "files": ["package.json", "chant.config.ts", "yodel.config.ts", "src/schema.ts", "README.md"]
+}

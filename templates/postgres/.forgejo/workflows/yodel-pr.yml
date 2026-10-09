@@ -1,0 +1,87 @@
+# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
+# Edit those and render again; npm run ci:check says when this file is stale.
+#
+# Pull requests: yodel lint and the replay check (into a throwaway server the
+# lint job starts), and the plan comment per environment with the
+# environment's reader credentials. No job here holds a writer.
+# The comment is posted with the job's own token (Forgejo gives a same-repository
+# pull request one that can comment).
+name: yodel-pr
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: yodel-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: docker
+    container: node:22-bookworm
+    services:
+      replay-postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_PASSWORD: replay
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 45
+    env:
+      REPLAY_POSTGRES_URL: postgres://replay-postgres:5432/postgres
+      REPLAY_POSTGRES_USER: postgres
+      REPLAY_POSTGRES_PASSWORD: replay
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Fetch the approvals (chant/lifecycle)
+        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: The pipelines are up to date
+        run: npm run ci:check
+      - name: yodel lint
+        run: yodel lint
+      - name: Wait for the replay server (replay-postgres)
+        run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "replay-postgres", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-postgres:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
+      - name: yodel lint --replay
+        run: yodel lint --replay replay --reset
+  plan-dev:
+    runs-on: docker
+    container: node:22-bookworm
+    env:
+      DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
+      DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
+      DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Fetch the approvals (chant/lifecycle)
+        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: yodel plan dev --comment
+        run: yodel plan dev --comment
+        env:
+          FORGEJO_TOKEN: '${{ github.token }}'
+  plan-prod:
+    runs-on: docker
+    container: node:22-bookworm
+    env:
+      PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
+      PROD_POSTGRES_READER_USER: '${{ secrets.PROD_POSTGRES_READER_USER }}'
+      PROD_POSTGRES_READER_PASSWORD: '${{ secrets.PROD_POSTGRES_READER_PASSWORD }}'
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: npm ci
+      - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Fetch the approvals (chant/lifecycle)
+        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: yodel plan prod --comment
+        run: yodel plan prod --comment
+        env:
+          FORGEJO_TOKEN: '${{ github.token }}'
