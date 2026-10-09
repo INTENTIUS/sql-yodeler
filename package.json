@@ -30,7 +30,8 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "claims": "npm run build && tsx scenarios/run.ts"
   },
   "dependencies": {
     "@intentius/chant": "^0.114.0",

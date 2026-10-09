@@ -1,0 +1,8 @@
+{
+  "name": "yodel-claims-clickhouse",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "chant build src --lexicon sql -o dist/schema.json"
+  }
+}
