@@ -1,0 +1,5 @@
+{
+  "name": "yodel-fixture-replay-clickhouse",
+  "private": true,
+  "type": "module"
+}

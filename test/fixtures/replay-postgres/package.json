@@ -1,0 +1,5 @@
+{
+  "name": "yodel-fixture-replay-postgres",
+  "private": true,
+  "type": "module"
+}
