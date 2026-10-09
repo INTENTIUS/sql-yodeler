@@ -12,6 +12,8 @@ import type { BuildOutput } from "../chant/build.js";
 import { computeChecksum } from "./checksum.js";
 import { MIGRATION_FORMAT, serializeDocument, type MigrationDocument, type MigrationFiles, type MigrationStep } from "./document.js";
 import { MIGRATION_NAME, type Migration } from "./directory.js";
+import { asBackfill, BACKFILL_FILE } from "../steps/kinds.js";
+import { backfillStep } from "../steps/backfill.js";
 
 /**
  * A ClickHouse topology, as chant's `./clickhouse/topology.ts` declares it
@@ -38,6 +40,13 @@ export interface CreateMigrationOptions {
   defaultDatabase?: string;
   /** Postgres: the schema a bare name means. Default: chant's, `public`. */
   defaultSchema?: string;
+  /**
+   * A backfill step to end the migration with (#12): the module's text,
+   * written into the migration's directory as `file` (default `backfill.ts`)
+   * and counted in its checksum. With one, a migration is made even when the
+   * build has no schema change.
+   */
+  backfill?: { text: string; file?: string };
 }
 
 export interface CreatedMigration {
@@ -86,6 +95,8 @@ export const refusedSteps = (steps: readonly MigrationStep[]): Exclude<Migration
   steps.filter((s): s is Exclude<MigrationStep, { kind: "statement" }> => s.kind !== "statement");
 
 function describeRefused(s: Exclude<MigrationStep, { kind: "statement" }>): string {
+  const backfill = asBackfill(s);
+  if (backfill) return `a backfill: the Op ${backfill.options.file} exports, its effect() batches resumable from their receipts`;
   const rules = s.changes.map((c) => c.rule).join(", ");
   return s.kind === "op"
     ? `${s.op} for ${s.object} (${s.name}), ${rules}: not SQL; migration.json holds its declaration`
@@ -101,7 +112,13 @@ export function renderMigrationSql(doc: Pick<MigrationDocument, "id" | "parent" 
     for (const s of refused) head.push(`--   ${describeRefused(s)}`);
   }
   for (const h of doc.hints) head.push(`-- hint: ${h.replace(/\r?\n/g, " ")}`);
-  const body = renderStatements(statements).replace(/\n+$/, "");
+  const body = statements.steps
+    .map((s) => {
+      const backfill = asBackfill(s);
+      return backfill ? `-- ${backfill.object} (${backfill.name}): made by the Op ${backfill.options.file} exports, not a statement\n` : renderStatements({ ...statements, steps: [s] });
+    })
+    .join("\n")
+    .replace(/\n+$/, "");
   return `${head.join("\n")}\n\n${body}\n`;
 }
 
@@ -129,6 +146,10 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
   if (options.topology && rendered.topology === undefined) {
     throw new YodelError("this @intentius/chant-lexicon-sql renders no ClickHouse topology; a newer release is needed to render for one");
   }
+  if (options.backfill) {
+    const file = options.backfill.file ?? BACKFILL_FILE;
+    statements = { ...statements, refused: true, steps: [...statements.steps, backfillStep(options.name, file) as unknown as MigrationStep] };
+  }
   if (statements.steps.length === 0) return { id: undefined, statements };
 
   const unsigned: MigrationDocument = {
@@ -148,6 +169,7 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
     schema: options.build,
   };
   const sql = renderMigrationSql(unsigned, statements);
-  const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned }) };
-  return { id, document, files: { sql, json: serializeDocument(document) }, statements };
+  const extra = options.backfill ? { [options.backfill.file ?? BACKFILL_FILE]: options.backfill.text } : undefined;
+  const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned, extra }) };
+  return { id, document, files: { sql, json: serializeDocument(document), ...(extra ? { extra } : {}) }, statements };
 }

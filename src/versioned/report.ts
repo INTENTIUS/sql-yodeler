@@ -1,6 +1,7 @@
 /** The versioned status as text and as JSON, for `yodel status` and `yodel apply --plan`. */
 
 import { describeTopology, type HistoryLocation } from "../history/index.js";
+import { describeStep } from "../steps/index.js";
 import { outOfOrder, partWay, type VersionedStatus } from "./state.js";
 
 export interface StatusReport {
@@ -24,7 +25,8 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
       checksum: p.checksum,
       outOfOrder: p.outOfOrder,
       partWay: p.partWay ?? null,
-      refusedSteps: p.refusedSteps.map(({ index, step }) => ({ index, kind: step.kind, object: step.object, name: step.name, ...(step.kind === "op" ? { op: step.op } : {}) })),
+      opSteps: p.opSteps.map(({ index, step }) => ({ index, kind: step.kind, object: step.object, name: step.name, ...(step.kind === "op" ? { op: step.op } : {}) })),
+      refusedSteps: p.refusedSteps.map(({ index, step, reason }) => ({ index, kind: step.kind, object: step.object, name: step.name, ...(step.kind === "op" ? { op: step.op } : {}), reason })),
     })),
     outOfOrder: outOfOrder(status).map((p) => p.id),
     partWay: partWay(status).map((p) => ({ id: p.id, resumeAt: p.partWay?.resumeAt, failedStatement: p.partWay?.failedStatement ?? null })),
@@ -52,7 +54,8 @@ export function renderStatus(r: StatusReport): string {
       );
       if (pw.edited) marks.push("edited since; the statements that ran are unchanged");
     }
-    if (p.refusedSteps.length > 0) marks.push(`${String(p.refusedSteps.length)} Op or manual step(s), not run yet (#12)`);
+    if (p.opSteps.length > 0) marks.push(p.opSteps.map(({ index, step }) => `step ${String(index)}: ${describeStep(step)}`).join(", "));
+    if (p.refusedSteps.length > 0) marks.push(`${String(p.refusedSteps.length)} step(s) yodel apply does not run`);
     lines.push(`  ${p.id}${marks.length > 0 ? `  (${marks.join("; ")})` : ""}`);
     if (p.partWay?.error) lines.push(`      error: ${p.partWay.error.split("\n")[0] ?? ""}`);
   }

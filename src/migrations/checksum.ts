@@ -11,6 +11,17 @@
  *          "yodel-migration-checksum-v1\n"
  *          + "migration.sql " + byteLength(sql) + "\n" + sql
  *          + "migration.json " + byteLength(json) + "\n" + json
+ *          + for each other file in the migration's directory, by path:
+ *            path + " " + byteLength(text) + "\n" + text
+ *
+ * The other files are a migration's own besides the two, such as a backfill
+ * step's module (`backfill.ts`, see `../steps/backfill.ts`): every regular
+ * file under its directory, at any depth, except `migration.sql`,
+ * `migration.json` and anything whose name starts with `.`. `path` is
+ * relative to the directory with `/` separators; paths are taken in code
+ * point order, and each file's text has its line endings normalized as
+ * migration.sql's are. A migration with no other files hashes exactly as it
+ * did before they counted, so no existing checksum changes.
  *
  * The lengths frame each file, so no text can move from one file into the
  * other and keep the hash. Because migration.json is hashed as parsed JSON,
@@ -34,9 +45,10 @@ export function canonicalDocument(doc: MigrationDocument | Record<string, unknow
 
 /**
  * The checksum of a migration's files. `json` may be the file's text or the
- * document already parsed; whatever `checksum` it holds is ignored.
+ * document already parsed; whatever `checksum` it holds is ignored. `extra`
+ * is the migration's other files, by path (see above).
  */
-export function computeChecksum(files: { sql: string; json: string | MigrationDocument | Record<string, unknown> }): string {
+export function computeChecksum(files: { sql: string; json: string | MigrationDocument | Record<string, unknown>; extra?: Readonly<Record<string, string>> | undefined }): string {
   const sql = normalizeLineEndings(files.sql);
   const doc = typeof files.json === "string" ? (JSON.parse(files.json) as Record<string, unknown>) : files.json;
   const json = canonicalDocument(doc);
@@ -46,6 +58,11 @@ export function computeChecksum(files: { sql: string; json: string | MigrationDo
   hash.update(sql, "utf8");
   hash.update(`${MIGRATION_JSON} ${String(Buffer.byteLength(json, "utf8"))}\n`, "utf8");
   hash.update(json, "utf8");
+  for (const path of Object.keys(files.extra ?? {}).sort()) {
+    const text = normalizeLineEndings(files.extra?.[path] ?? "");
+    hash.update(`${path} ${String(Buffer.byteLength(text, "utf8"))}\n`, "utf8");
+    hash.update(text, "utf8");
+  }
   return `${CHECKSUM_PREFIX}${hash.digest("hex")}`;
 }
 

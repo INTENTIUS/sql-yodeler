@@ -12,7 +12,8 @@
 import { createHash } from "node:crypto";
 
 export type HistoryStatus = "started" | "succeeded" | "failed";
-export type HistoryKind = "migration" | "statement";
+/** `step`: an Op step (#12), recorded as a statement is, its `note` the step's summary (receipts skipped and run). */
+export type HistoryKind = "migration" | "statement" | "step";
 
 /** The statement index of a migration's own rows. */
 export const MIGRATION_ROW = -1;
@@ -28,7 +29,7 @@ export interface HistoryRow {
   parent: string;
   /** The migration's checksum when the row was written. */
   checksum: string;
-  /** {@link MIGRATION_ROW} on a migration row; else the statement's index in the migration's `steps`. */
+  /** {@link MIGRATION_ROW} on a migration row; else the statement's (or Op step's) index in the migration's `steps`. */
   statement_index: number;
   /** `sha256:<hex>` of the statement's SQL; `""` on a migration row. */
   statement_sha: string;

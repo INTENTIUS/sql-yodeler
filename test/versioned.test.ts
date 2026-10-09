@@ -199,7 +199,7 @@ describe("executeApply", () => {
     expect(ch.rows).toEqual([]);
   });
 
-  it("refuses an Op or manual step with exit 2, naming #12, and never skips it", async () => {
+  it("refuses a manual step, and an Op step apply does not run, with exit 2, and never skips it", async () => {
     const { ch, venv } = await setup();
     const rebuild: MigrationStep = {
       kind: "op",
@@ -208,14 +208,17 @@ describe("executeApply", () => {
       name: "yodel_8.events",
       op: "ClickHouseRebuildOp",
       importPath: "@intentius/chant-lexicon-sql/clickhouse",
-      options: {},
+      options: { name: "rebuild-yodel_8-events", env: "<env>", table: "yodel_8.events", dualWrite: { mode: "app" } },
       declaration: "",
       changes: [{ rule: "SQLCH301", class: "rebuild", field: "orderBy" }],
       detail: "",
     };
-    const withOp = migration("20261009T1300-rebuild", null, ["CREATE DATABASE yodel_8", rebuild]);
+    const manual: MigrationStep = { kind: "manual", object: "v", type: "ClickHouse::View", name: "yodel_8.v", changes: [], detail: "rebuild the view by hand" };
+    const withOp = migration("20261009T1300-rebuild", null, ["CREATE DATABASE yodel_8", rebuild, manual]);
     const { status } = await inspect(venv, [withOp]);
-    expect(() => selectToApply(status, false)).toThrow(expect.objectContaining({ exitCode: 2, message: expect.stringMatching(/#12[\s\S]*ClickHouseRebuildOp/) as unknown }));
+    expect(() => selectToApply(status, false)).toThrow(
+      expect.objectContaining({ exitCode: 2, message: expect.stringMatching(/step 1: ClickHouseRebuildOp .* in app mode[\s\S]*step 2: a manual step for v/) as unknown }),
+    );
     expect(ch.sent).toEqual([]);
   });
 });

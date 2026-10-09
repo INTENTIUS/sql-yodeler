@@ -42,7 +42,11 @@ Two paths, chosen by the project:
   approval, the gate asks again.
 
   A migration that failed part way resumes at the statement that failed; a
-  statement that succeeded is never sent again. Every applied migration's
+  statement that succeeded is never sent again. An Op step (a ClickHouse
+  rebuild, a backfill) runs in its place among the statements, under the
+  same lock and approval; one that failed or was stopped runs again and
+  resumes from its receipts, skipping the partitions or batches that
+  finished. Every applied migration's
   checksum is checked against its files first, and a mismatch refuses. A
   pending migration the chain puts before an applied one is out of order
   and is refused unless --allow-out-of-order; it is never skipped.
@@ -67,8 +71,10 @@ The migrations Op runs two steps of its own, not for direct use:
 
 Exit codes:
   0  applied, or nothing to apply
-  2  a change needs its own Op (declarative), or a pending migration has an
-     Op or manual step (versioned; #12 runs those); nothing was applied
+  2  a change needs its own Op (declarative), or a pending migration has a
+     manual step or an Op step apply does not run (versioned: it runs
+     ClickHouseRebuildOp in materialized-view mode and backfill steps);
+     nothing was applied
   3  stopped at the gate, waiting for approval of this plan
   4  versioned: refused, nothing applied: a checksum mismatch, an applied
      migration gone from the directory, or an out-of-order migration

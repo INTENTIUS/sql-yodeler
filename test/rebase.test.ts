@@ -84,6 +84,30 @@ describe("yodel rebase", () => {
     expect(createMigration({ name: "after", build: build(table("a", "a"), table("b", "b"), table("c", "c")), previous: moved }).id).toBeUndefined();
   });
 
+  it("keeps a backfill step and its module when it moves a migration, and the new checksum covers the module", () => {
+    const p = project();
+    const one = p.add("one", 0, build(table("a", "a")));
+    const b = p.add("add-b", 10, build(table("a", "a"), table("b", "b")), one);
+    const module = "export const op = 1;\n";
+    const made = createMigration({ name: "fill", build: build(table("a", "a"), table("c", "c")), previous: one, now: new Date(Date.UTC(2026, 9, 9, 10, 20)), backfill: { text: module } });
+    if (made.id === undefined) throw new Error("no change");
+    writeMigration(p.migrations, made);
+
+    const plan = rebased(planRebase(p.scan()));
+    expect(plan).toMatchObject({ moved: made.id, onto: b.id });
+    expect(plan.rewritten[0]?.handEdited).toBe(false);
+    writeRebase(plan);
+
+    const moved = readMigrations(p.migrations, { verify: true }).at(-1) as Migration;
+    expect(moved.parent).toBe(b.id);
+    expect(moved.files.extra).toEqual({ "backfill.ts": module });
+    expect(moved.document.steps.map((s) => (s.kind === "op" ? s.op : s.kind))).toEqual(["statement", "backfill"]);
+    expect(moved.checksum).toBe(computeChecksum(moved.files));
+    expect(moved.checksum).not.toBe(computeChecksum({ sql: moved.files.sql, json: moved.files.json }));
+    expect(verifyChecksum(moved).ok).toBe(true);
+    expect(asWritten(moved)).toBe(true);
+  });
+
   it("moves the migrations after the moved one with it, onto the end of the other branch", () => {
     const p = project();
     const one = p.add("one", 0, build(table("a", "a")));

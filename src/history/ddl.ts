@@ -36,7 +36,10 @@ const onCluster = (t: HistoryTopology): string => (t.kind === "cluster" ? ` ON C
  * - a migration row (`kind = 'migration'`, `statement_index = -1`) when a
  *   migration starts, succeeds or fails;
  * - a statement row (`kind = 'statement'`, `statement_index` its index in
- *   the migration's `steps`) when a statement starts, succeeds or fails.
+ *   the migration's `steps`) when a statement starts, succeeds or fails;
+ * - a step row (`kind = 'step'`, the same) when an Op step (a rebuild, a
+ *   backfill) starts, succeeds or fails, its `note` the step's summary as
+ *   JSON (the receipts it skipped and the work it ran).
  *
  * The state of a migration or a statement is its row with the highest
  * `seq`. `seq` is taken under the lock, one more than the highest in the

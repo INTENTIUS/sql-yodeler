@@ -7,6 +7,8 @@
  *                                   `renderStatements`); an Op or manual step
  *                                   is a comment only
  *   migrations/<id>/migration.json  a {@link MigrationDocument}
+ *   migrations/<id>/<other files>   only when a step names one, such as a
+ *                                   backfill step's `backfill.ts`
  *
  * `<id>` is `<UTC timestamp YYYYMMDDTHHMM>-<name>`, e.g.
  * `20261009T1412-add-country`. The timestamp is for people reading a
@@ -66,6 +68,12 @@ export interface MigrationFiles {
   sql: string;
   /** `migration.json`. */
   json: string;
+  /**
+   * The migration's other files, by path relative to its directory with `/`
+   * separators: a backfill step's module, for one. Absent or empty for a
+   * migration that has only the two. They count in the checksum.
+   */
+  extra?: Record<string, string>;
 }
 
 const STEP_HEAD = ["kind", "object", "type", "name"];

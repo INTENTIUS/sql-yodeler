@@ -28,7 +28,7 @@ Exit codes:
   3  migrations are pending (failed part way included), and nothing is wrong
   4  a checksum mismatch, an applied migration gone from the directory, or an
      out-of-order migration (apply refuses it without --allow-out-of-order)
-  2  a pending migration has an Op or manual step yodel apply does not run yet (#12)
+  2  a pending migration has a manual step or an Op step yodel apply does not run
   1  the status could not be read: a bad config, a malformed migrations
      directory, a server that does not answer
 `;

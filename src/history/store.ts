@@ -43,7 +43,7 @@ function fromRaw(r: RawRow): HistoryRow {
   return {
     seq: Number(r.seq),
     run_id: s("run_id"),
-    kind: s("kind") === "statement" ? "statement" : "migration",
+    kind: s("kind") === "statement" || s("kind") === "step" ? (s("kind") as "statement" | "step") : "migration",
     migration_id: s("migration_id"),
     parent: s("parent"),
     checksum: s("checksum"),

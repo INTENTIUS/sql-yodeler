@@ -25,7 +25,8 @@
 
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { computeChecksum, type Migration } from "../migrations/index.js";
-import { isApplied, statementDone, statementSha, type HistoryState, type MigrationRecord } from "../history/index.js";
+import { isApplied, statementDone, type HistoryState, type MigrationRecord } from "../history/index.js";
+import { planStep, stepSha } from "../steps/index.js";
 
 export interface AppliedMigration {
   id: string;
@@ -60,8 +61,10 @@ export interface PendingMigration {
   /** Before a migration the history records applied. */
   outOfOrder: boolean;
   partWay: PartWay | undefined;
-  /** Its Op and manual steps, which `apply` does not run (#12). */
-  refusedSteps: Array<{ index: number; step: Exclude<MigrationStep, { kind: "statement" }> }>;
+  /** Its Op steps `apply` runs: a ClickHouse rebuild, a backfill (#12). */
+  opSteps: Array<{ index: number; step: Exclude<MigrationStep, { kind: "statement" }> }>;
+  /** Its steps `apply` does not run (a manual step, an Op it does not run), each with why. Any of them refuses the run. */
+  refusedSteps: Array<{ index: number; step: Exclude<MigrationStep, { kind: "statement" }>; reason: string }>;
   migration: Migration;
 }
 
@@ -90,7 +93,7 @@ function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWa
   m.document.steps.forEach((step, i) => {
     if (statementDone(rec, i)) {
       done.push(i);
-      const sha = step.kind === "statement" ? statementSha(step.sql) : "";
+      const sha = stepSha(step, m.files);
       if (!mismatch && rec.statements.get(i)?.sha !== sha) {
         mismatch = {
           kind: "part-way",
@@ -115,6 +118,21 @@ function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWa
     },
     ...(mismatch ? { mismatch } : {}),
   };
+}
+
+/** A migration's Op steps, split into the ones apply runs and the ones it refuses. A backfill step whose module is not among the migration's files is refused. */
+export function classifySteps(m: Migration): Pick<PendingMigration, "opSteps" | "refusedSteps"> {
+  const opSteps: PendingMigration["opSteps"] = [];
+  const refusedSteps: PendingMigration["refusedSteps"] = [];
+  m.document.steps.forEach((step, index) => {
+    if (step.kind === "statement") return;
+    const plan = planStep(step);
+    if (plan.run === "refused") refusedSteps.push({ index, step, reason: plan.reason });
+    else if (plan.run === "backfill" && m.files.extra?.[plan.file] === undefined) {
+      refusedSteps.push({ index, step, reason: `a backfill step whose module ${plan.file} is not in ${m.id}'s directory` });
+    } else opSteps.push({ index, step });
+  });
+  return { opSteps, refusedSteps };
 }
 
 /** Compares the chain with the history. */
@@ -168,7 +186,7 @@ export function compareHistory(ordered: readonly Migration[], state: HistoryStat
       checksum: actual,
       outOfOrder: i < lastApplied,
       partWay: pw,
-      refusedSteps: m.document.steps.flatMap((step, index) => (step.kind === "statement" ? [] : [{ index, step }])),
+      ...classifySteps(m),
       migration: m,
     });
   }

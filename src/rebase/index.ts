@@ -17,7 +17,9 @@
  *   change different objects, that is the schema the declared build has
  *   once both are merged;
  * - its statements are diffed again, from the new parent's recorded schema
- *   to the new recorded schema, and its checksum recomputed.
+ *   to the new recorded schema, and its checksum recomputed; a backfill
+ *   step (#12) is kept at the end, and its module (one of the migration's
+ *   own files, unchanged) counts in the new checksum.
  *
  * When both sides change the same object (by export name, or by the name it
  * has on the server) and do not make the same change, the rebase refuses
@@ -55,6 +57,7 @@ import {
   type MigrationDocument,
   type MigrationFiles,
 } from "../migrations/index.js";
+import { asBackfill } from "../steps/kinds.js";
 
 /** Exit code: the rebase is refused (a conflict, hand edits, or a migration a history records). Nothing was written. */
 export const REBASE_REFUSED = 4;
@@ -214,6 +217,9 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
   } catch (e) {
     throw new YodelError(`${m.id}: ${e instanceof Error ? e.message : String(e)}`);
   }
+  // A backfill step (#12) is the author's, not the diff's: it keeps its place at the end, with its module.
+  const kept = m.document.steps.filter((s) => asBackfill(s) !== undefined);
+  if (kept.length > 0) statements = { ...statements, refused: true, steps: [...statements.steps, ...kept] };
   if (statements.steps.length === 0) {
     throw new YodelError(`${m.id} makes no change on top of ${newParent}: ${theirs} already makes it. Nothing was written; delete ${m.id}'s directory instead.`, REBASE_REFUSED);
   }
@@ -233,7 +239,7 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
     schema,
   } as MigrationDocument;
   const sql = renderMigrationSql(unsigned, statements);
-  const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned }) };
+  const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned, extra: m.files.extra }) };
   return {
     id: m.id,
     dir: m.dir,
@@ -242,7 +248,7 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
     oldChecksum: m.checksum,
     checksum: document.checksum,
     document,
-    files: { sql, json: serializeDocument(document) },
+    files: { sql, json: serializeDocument(document), ...(m.files.extra ? { extra: m.files.extra } : {}) },
     statements,
     handEdited: !asWritten(m),
   };

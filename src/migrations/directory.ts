@@ -9,7 +9,9 @@
  *
  * - every directory under `migrations/` is named like an id and holds a
  *   readable `migration.sql` and `migration.json` whose `id` is that name
- *   (plain files there, such as a README, are ignored);
+ *   (plain files directly under `migrations/`, such as a README, are
+ *   ignored; files inside a migration's directory are its own and count in
+ *   its checksum);
  * - every parent names a migration in the directory;
  * - no two migrations have the same parent, `null` included. Two branches
  *   that each added a migration give one parent two children: a fork. It is
@@ -23,7 +25,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { YodelError } from "../project.js";
 import { verifyChecksum, type ChecksumCheck } from "./checksum.js";
 import { MIGRATION_JSON, MIGRATION_SQL, type MigrationDocument, type MigrationFiles } from "./document.js";
@@ -80,13 +82,36 @@ export class MigrationDirectoryError extends YodelError {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/**
+ * A migration's files besides migration.sql and migration.json, by path
+ * relative to its directory (`/` separators): every regular file at any
+ * depth, except those two and anything whose name starts with `.`.
+ */
+export function readExtraFiles(at: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (rel: string) => {
+    for (const entry of readdirSync(rel ? join(at, rel) : at).sort()) {
+      if (entry.startsWith(".")) continue;
+      const path = rel ? `${rel}/${entry}` : entry;
+      if (!rel && (entry === MIGRATION_SQL || entry === MIGRATION_JSON)) continue;
+      const st = statSync(join(at, path));
+      if (st.isDirectory()) walk(path);
+      else if (st.isFile()) out[path] = readFileSync(join(at, path), "utf8");
+    }
+  };
+  walk("");
+  return out;
+}
+
 function readOne(dir: string, id: string): Migration | MigrationProblem {
   const at = join(dir, id);
   let sql: string;
   let json: string;
+  let extra: Record<string, string>;
   try {
     sql = readFileSync(join(at, MIGRATION_SQL), "utf8");
     json = readFileSync(join(at, MIGRATION_JSON), "utf8");
+    extra = readExtraFiles(at);
   } catch (e) {
     return { kind: "unreadable", path: at, message: `${id}: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -106,7 +131,7 @@ function readOne(dir: string, id: string): Migration | MigrationProblem {
   if (doc.id !== id) {
     return { kind: "id-mismatch", id, recorded: doc.id, message: `${id}/${MIGRATION_JSON} records id ${doc.id}; a migration's id is its directory's name` };
   }
-  return { id, dir: at, parent: doc.parent, checksum: doc.checksum, document: doc as unknown as MigrationDocument, files: { sql, json } };
+  return { id, dir: at, parent: doc.parent, checksum: doc.checksum, document: doc as unknown as MigrationDocument, files: { sql, json, ...(Object.keys(extra).length > 0 ? { extra } : {}) } };
 }
 
 /** Every migration in `dir` and every problem with the directory. A missing `dir` is an empty directory. */
@@ -197,6 +222,12 @@ export const newestMigration = (ordered: readonly Migration[]): Migration | unde
  */
 export function writeMigration(dir: string, migration: { id: string; files: MigrationFiles }): string {
   const target = join(dir, migration.id);
+  for (const path of Object.keys(migration.files.extra ?? {})) {
+    const parts = path.split("/");
+    if (parts.some((p) => p === "" || p.startsWith(".") || p.includes("\\")) || path === MIGRATION_SQL || path === MIGRATION_JSON) {
+      throw new YodelError(`${migration.id}: ${JSON.stringify(path)} is not a path a migration's own file can have (relative, "/"-separated, no part starting with ".")`);
+    }
+  }
   if (existsSync(target)) throw new YodelError(`${target} already exists; a migration's directory is never overwritten`);
   mkdirSync(dir, { recursive: true });
   const staging = join(dir, `.${migration.id}.writing`);
@@ -205,6 +236,10 @@ export function writeMigration(dir: string, migration: { id: string; files: Migr
   try {
     writeFileSync(join(staging, MIGRATION_SQL), migration.files.sql);
     writeFileSync(join(staging, MIGRATION_JSON), migration.files.json);
+    for (const [path, text] of Object.entries(migration.files.extra ?? {})) {
+      mkdirSync(dirname(join(staging, path)), { recursive: true });
+      writeFileSync(join(staging, path), text);
+    }
     renameSync(staging, target);
   } catch (e) {
     rmSync(staging, { recursive: true, force: true });

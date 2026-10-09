@@ -1,0 +1,5 @@
+{
+  "name": "yodel-fixture-clickhouse-steps",
+  "private": true,
+  "type": "module"
+}
