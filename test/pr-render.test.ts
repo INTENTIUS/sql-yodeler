@@ -105,7 +105,7 @@ describe("the plan comment's markdown", () => {
           op: "migrate-prod",
           gate: "approve-migrate-prod",
           command: `chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}`,
-          latest: { digest: OLD, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, moved: { approved: OLD, now: DIGEST, confirmed: true, changes: [{ part: "pending", message: "new pending migration: 20261009T1000-one" }] } },
+          latest: { digest: OLD, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, sameDigest: false, moved: { approved: OLD, now: DIGEST, confirmed: true, changes: [{ part: "pending", message: "new pending migration: 20261009T1000-one" }] } },
         },
       }),
     );
@@ -114,8 +114,25 @@ describe("the plan comment's markdown", () => {
   });
 
   it("says an approval for this digest holds", () => {
-    const md = renderPlanMarkdown(clickhousePlan({ approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: "x", latest: { digest: DIGEST, by: "bob", at: "t", holds: true } } }));
+    const md = renderPlanMarkdown(clickhousePlan({ approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: "x", latest: { digest: DIGEST, by: "bob", at: "t", holds: true, sameDigest: true } } }));
     expect(md).toContain("Approved by bob at t: the apply after merge runs this plan.");
+    expect(md).not.toContain("does not hold");
+  });
+
+  it("says an approval for this digest was asked for again after it, not that the plan moved", () => {
+    const latest = { digest: DIGEST, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, sameDigest: true, askedAgain: { at: "2026-10-09T13:00:00.000Z", digest: OLD } };
+    const plan = clickhousePlan({ approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: "x", latest } });
+    const md = renderPlanMarkdown(plan);
+    expect(md).toContain(
+      `The newest approval of \`approve-migrate-prod\`, by alice at 2026-10-09T12:00:00.000Z, is for this plan's digest, but approval was asked for again after it at 2026-10-09T13:00:00.000Z (a run holding \`${OLD}\`), so it does not hold; approve this plan again.`,
+    );
+    const text = renderPlanText(plan);
+    expect(text).toContain("but approval was asked for again after it at 2026-10-09T13:00:00.000Z");
+    for (const out of [md, text]) {
+      expect(out).not.toContain("not this plan");
+      expect(out).not.toContain("What moved");
+      expect(out).not.toContain("nothing moved");
+    }
   });
 
   it("renders a Postgres plan: statements with their classes, an expand-and-contract Op, no digest", () => {

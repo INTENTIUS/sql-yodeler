@@ -181,10 +181,11 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel apply dev", code: 3, expect: ["does not hold", "live schema changed"] },
     { say: "The column was a mistake. Drop it, and approve again:" },
     { sql: "ALTER TABLE yodel_18_shop.events DROP COLUMN debug" },
-    { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
+    { run: "npx yodel plan dev", code: 0, expect: ["approval was asked for again after it"] },
     {
-      say: "The digest is the approved one again, but the refused run asked for approval after that approval was given, so the gate asks again. (\"What moved: nothing moved\" under \"the plan moved since\" is [issue #46](https://github.com/INTENTIUS/sql-yodeler/issues/46).)",
+      say: "The digest is the approved one again, but the refused run asked for approval after that approval was given, and an approval holds only when it is newer than the latest request. The apply stops at the gate again:",
     },
+    { run: "npx yodel apply dev", code: 3, expect: ["approval was asked for again after it", "is waiting at gate"] },
     { run: "{approve}", code: 0 },
     { run: "npx yodel apply dev", code: 0, expect: ["Applied: "] },
 

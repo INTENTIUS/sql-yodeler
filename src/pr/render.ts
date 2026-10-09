@@ -10,7 +10,7 @@
  */
 
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
-import { describeMove, encodeSubject } from "../versioned/explain.js";
+import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
 
 /** The marker that identifies one environment's plan comment. */
@@ -53,6 +53,7 @@ function approvalLines(a: ApprovalView | undefined, digest: string | undefined, 
   if (a.latest) {
     const l = a.latest;
     if (l.holds) out.push(`Approved by ${l.by} at ${l.at}: the apply after merge runs this plan.`);
+    else if (digest && l.sameDigest) out.push(`The newest approval of ${code(a.gate)}, by ${l.by} at ${l.at}, ${askedAgainLine(l, code)}.`);
     else if (digest && l.digest) {
       out.push(`The newest approval of ${code(a.gate)}, by ${l.by} at ${l.at}, is for ${code(l.digest)}, not this plan; it does not hold.`);
       if (l.moved) out.push(`What moved${l.moved.confirmed ? "" : " (as far as yodel can tell)"}: ${describeMove(l.moved)}.`);

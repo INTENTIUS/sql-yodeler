@@ -235,6 +235,23 @@ describe("the approval --execute checks in chant's gate ledger", () => {
     expect(ch.rows).toEqual([]);
   });
 
+  it("reads the newest approval: it holds, its digest moved, or approval was asked for again after it", async () => {
+    const { latestApproval, askedAgainLine } = await import("../src/versioned/explain.js");
+    const digest = "jcs1-sha256:aaaa";
+    const other = "jcs1-sha256:bbbb";
+    await expect(latestApproval(approvedLedger(digest), OP, digest)).resolves.toEqual({ digest, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: true, sameDigest: true });
+    await expect(latestApproval(approvedLedger(other), OP, digest)).resolves.toEqual({ digest: other, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, sameDigest: false });
+    const pending = (at: string, planDigest: string) => ({ version: 1 as const, kind: "pending" as const, op: OP.name, gate: OP.gate, timestamp: at, expiresAt: "2026-10-11T13:00:00.000Z", planDigest });
+    const superseded = memoryGateLedgerPort({
+      resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z", planDigest: digest }],
+      // One before the approval (the one it answered), two after: the first after is the one that asked again.
+      pending: [pending("2026-10-09T11:00:00.000Z", digest), pending("2026-10-09T14:00:00.000Z", digest), pending("2026-10-09T13:00:00.000Z", other)],
+    });
+    const latest = await latestApproval(superseded, OP, digest);
+    expect(latest).toEqual({ digest, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, sameDigest: true, askedAgain: { at: "2026-10-09T13:00:00.000Z", digest: other } });
+    expect(askedAgainLine(latest ?? {})).toBe(`is for this plan's digest, but approval was asked for again after it at 2026-10-09T13:00:00.000Z (a run holding ${other}), so it does not hold; approve this plan again`);
+  });
+
   it("counts only an approval of this gate, for this digest, newer than the gate's newest pending fact", async () => {
     const digest = `jcs1-sha256:${"a".repeat(64)}`;
     const other = `jcs1-sha256:${"b".repeat(64)}`;

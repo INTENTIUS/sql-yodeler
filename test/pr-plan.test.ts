@@ -60,7 +60,25 @@ describe("the versioned plan", () => {
     const { venv, project } = await setup([m1]);
     const gate = await digestOf(venv, [m1]);
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: ledgerWith(gate, "2026-10-09T12:00:00.000Z") });
-    expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: true, by: "alice", digest: gate } });
+    expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: true, sameDigest: true, by: "alice", digest: gate } });
+    expect(renderPlanMarkdown(plan)).toContain("Approved by alice at 2026-10-09T12:00:00.000Z: the apply after merge runs this plan.");
+  });
+
+  it("says an approval of this digest was asked for again after it, without a move to explain", async () => {
+    const { venv, project } = await setup([m1]);
+    const gate = await digestOf(venv, [m1]);
+    // Approved at 12:00; a run that held another plan reached the gate at 13:00, so chant asks again.
+    const ledger = memoryGateLedgerPort({
+      resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z", planDigest: gate }],
+      pending: [{ version: 1, kind: "pending", op: OP.name, gate: OP.gate, timestamp: "2026-10-09T13:00:00.000Z", expiresAt: "2026-10-11T13:00:00.000Z", planDigest: "jcs1-sha256:other" }],
+    });
+    const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger });
+    expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: false, sameDigest: true, digest: gate, askedAgain: { at: "2026-10-09T13:00:00.000Z", digest: "jcs1-sha256:other" } } });
+    expect(plan.approval?.kind === "op" && plan.approval.latest?.moved).toBeFalsy();
+    const md = renderPlanMarkdown(plan);
+    expect(md).toContain("is for this plan's digest, but approval was asked for again after it at 2026-10-09T13:00:00.000Z (a run holding `jcs1-sha256:other`), so it does not hold; approve this plan again.");
+    expect(md).not.toContain("not this plan");
+    expect(md).not.toContain("nothing moved");
   });
 
   it("names the migration added after approval", async () => {
@@ -68,7 +86,7 @@ describe("the versioned plan", () => {
     const approved = await digestOf(venv, [m1]);
     writeMigration(join(project.dir, "migrations"), m2);
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: ledgerWith(approved, "2026-10-09T11:00:00.000Z") });
-    expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: false, digest: approved, moved: { confirmed: true, changes: [{ part: "pending", message: `new pending migration: ${m2.id}` }] } } });
+    expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: false, sameDigest: false, digest: approved, moved: { confirmed: true, changes: [{ part: "pending", message: `new pending migration: ${m2.id}` }] } } });
     expect(renderPlanMarkdown(plan)).toContain(`What moved: pending migrations changed: new pending migration: ${m2.id}.`);
   });
 

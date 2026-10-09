@@ -30,7 +30,7 @@ import {
   type PendingMigration,
   type VersionedEnv,
 } from "../versioned/index.js";
-import { currentSubject, explainAgainst, explainMove, latestApproval, type MoveExplanation } from "../versioned/explain.js";
+import { currentSubject, explainAgainst, explainMove, latestApproval, type LatestApproval, type MoveExplanation } from "../versioned/explain.js";
 import type { DigestSubject } from "../versioned/digest.js";
 
 export interface StepView {
@@ -59,7 +59,7 @@ export type ApprovalView =
       /** The command that approves this plan; absent when there is no digest. */
       command?: string | undefined;
       /** The newest approval of the gate in chant's ledger, when it could be read. */
-      latest?: { digest: string | undefined; by: string; at: string; holds: boolean; moved?: MoveExplanation | undefined } | undefined;
+      latest?: (LatestApproval & { moved?: MoveExplanation | undefined }) | undefined;
       /** Why the ledger was not read. */
       ledgerNote?: string | undefined;
     };
@@ -187,7 +187,7 @@ async function approvalView(project: Project, env: Environment, venv: VersionedE
     const latest = await latestApproval(ledger, op, plan.digest);
     if (!latest) return view;
     view.latest = latest;
-    if (!latest.holds && latest.digest && plan.subject) {
+    if (!latest.holds && !latest.sameDigest && latest.digest && plan.subject) {
       view.latest.moved = await explainAgainst(venv, ordered, { approvedDigest: latest.digest, approvedAt: latest.at, now: plan.subject, previous: options.previous });
     }
   } catch (e) {

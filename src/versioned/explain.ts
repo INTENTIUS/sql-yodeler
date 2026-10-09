@@ -271,15 +271,46 @@ export function describeMove(e: MoveExplanation): string {
   return e.changes.map((c) => `${label[c.part]}: ${c.message}`).join("; ");
 }
 
+/** The newest approval of a gate, as {@link latestApproval} reads it. */
+export interface LatestApproval {
+  digest: string | undefined;
+  by: string;
+  at: string;
+  /** It counts for the digest asked about, by the gate's rule. */
+  holds: boolean;
+  /** Its digest is the one asked about (it may still not hold: see `askedAgain`). */
+  sameDigest: boolean;
+  /**
+   * A run reached the gate after this approval and asked for approval again:
+   * the first such pending gate record, with the digest that run was holding.
+   * The approval no longer counts, whatever its digest.
+   */
+  askedAgain?: { at: string; digest: string | undefined } | undefined;
+}
+
 /** The newest approval of `op`'s gate in the ledger, and whether it holds for `digest` by the gate's rule (for that digest, newer than the gate's newest pending fact). */
-export async function latestApproval(ledger: GateLedgerPort, op: Pick<MigrateOpRef, "name" | "gate">, digest: string | undefined): Promise<{ digest: string | undefined; by: string; at: string; holds: boolean } | undefined> {
-  const { latestPendingGate } = await import("@intentius/chant/lifecycle/gate-ledger");
+export async function latestApproval(ledger: GateLedgerPort, op: Pick<MigrateOpRef, "name" | "gate">, digest: string | undefined): Promise<LatestApproval | undefined> {
   const read = await ledger.read(op.name);
   const newest = read.resolutions.filter((r) => r.gate === op.gate).sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)).at(-1);
   if (!newest) return undefined;
-  const since = Date.parse(latestPendingGate(read.pending, op.gate)?.timestamp ?? new Date(0).toISOString());
-  const holds = digest !== undefined && Date.parse(newest.timestamp) >= since && (await sameDigest(newest.planDigest, digest));
-  return { digest: newest.planDigest, by: newest.resolvedBy, at: newest.timestamp, holds };
+  const approvedAt = Date.parse(newest.timestamp);
+  const after = read.pending.filter((p) => p.gate === op.gate && Date.parse(p.timestamp) > approvedAt).sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))[0];
+  const same = digest !== undefined && (await sameDigest(newest.planDigest, digest));
+  return {
+    digest: newest.planDigest,
+    by: newest.resolvedBy,
+    at: newest.timestamp,
+    holds: same && after === undefined,
+    sameDigest: same,
+    ...(after ? { askedAgain: { at: after.timestamp, digest: after.planDigest } } : {}),
+  };
+}
+
+/** Why an approval for this very digest does not hold: a run asked for approval again after it. */
+export function askedAgainLine(a: Pick<LatestApproval, "askedAgain">, code: (s: string) => string = (s) => s): string {
+  const again = a.askedAgain;
+  const when = again ? ` at ${again.at}${again.digest ? ` (a run holding ${code(again.digest)})` : ""}` : "";
+  return `is for this plan's digest, but approval was asked for again after it${when}, so it does not hold; approve this plan again`;
 }
 
 /**

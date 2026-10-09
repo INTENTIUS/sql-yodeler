@@ -7,7 +7,7 @@ import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, P
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
 import { readMigrations, type Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
-import { describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
+import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
@@ -31,11 +31,17 @@ import {
   type VersionedEnv,
 } from "../versioned/index.js";
 
-/** When the gate's newest approval is for another digest: what moved since, in one line. */
+/** When the gate's newest approval does not hold: what moved since (or that approval was asked for again), in one line. */
 async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered: readonly Migration[], op: MigrateOpRef, digest: string | undefined) {
   try {
     const latest = await latestApproval(await gitLedger(project.dir), op, digest);
     if (!latest?.digest || latest.holds) return undefined;
+    if (latest.sameDigest) {
+      return {
+        moved: { approved: latest.digest, by: latest.by, at: latest.at, confirmed: true, changes: [], ...(latest.askedAgain ? { askedAgain: latest.askedAgain } : {}) },
+        line: `Nothing was applied. The approval of ${latest.digest} (by ${latest.by} at ${latest.at}) ${askedAgainLine(latest)}.`,
+      };
+    }
     const moved = await explainAgainst(venv, ordered, { approvedDigest: latest.digest, approvedAt: latest.at });
     return {
       moved: { approved: latest.digest, by: latest.by, at: latest.at, confirmed: moved.confirmed, changes: moved.changes },
