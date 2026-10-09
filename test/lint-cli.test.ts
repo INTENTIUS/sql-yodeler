@@ -144,6 +144,13 @@ describe("yodel lint (the command)", () => {
     const unknown = await yodel(p.at("--update-checksum", "20260101T0000-nope"));
     expect(unknown.code).toBe(1);
     expect(unknown.err).toContain("no such migration");
+    const reset = await yodel(p.at("--reset"));
+    expect(reset.code).toBe(1);
+    expect(reset.err).toContain("--reset and --keep go with --replay <env>");
+    const unknownEnv = await yodel(p.at("--replay", "nowhere"));
+    expect(unknownEnv.code).toBe(1);
+    expect(unknownEnv.err).toContain('no environment "nowhere"');
+    expect((await yodel(p.at("--rules"))).out).toMatch(/^replay\s+error$/m);
     const help = await yodel(["lint", "--help"]);
     expect(help.code).toBe(0);
     expect(help.out).toContain("-- yodel:allow <rule> <reason>");

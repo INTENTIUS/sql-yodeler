@@ -5,9 +5,10 @@ import { loadProject, resolveEnvironment, YodelError, type Project } from "../pr
 import { scanMigrations } from "../migrations/index.js";
 import { inspect, migrationsDir, openVersioned } from "../versioned/index.js";
 import { LINT_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
-import { projectRules } from "../lint/project-rules.js";
+import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
+import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
-const usage = "usage: yodel lint [--env <env>] [--json] [--dir <project>] [--update-checksum <id>]... [--rules]";
+const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--keep]] [--json] [--dir <project>] [--update-checksum <id>]... [--rules]";
 
 const help = `${usage}
 
@@ -31,6 +32,9 @@ Rules (yodel lint --rules lists them with their levels):
   migration-sql      migration.sql does not hold a statement migration.json
                      records (apply runs migration.json's)
   silence            a yodel:allow line that is wrong or silences nothing
+  replay             with --replay <env>: the history, replayed into a fresh
+                     database on <env>'s server, does not give a migration's
+                     recorded schema (names the first that differs)
 
 Silencing: a line above a statement in its migration.sql,
   -- yodel:allow <rule> <reason>
@@ -53,19 +57,33 @@ Options:
   --update-checksum <id>  first write <id>'s migration.json checksum to match
                           its files (repeatable); refused with --env when <id>
                           is applied there
+  --replay <env>          also replay every migration in order into <env>'s
+                          server (a throwaway emulator: chant emulator up
+                          --lexicon sql) and compare each with its recorded
+                          schema; the databases or schemas the history names
+                          must not exist there yet
+  --reset                 with --replay: drop those databases or schemas
+                          first when they exist. Destructive: never against a
+                          server whose data matters
+  --keep                  with --replay: leave the replayed database in place
   --rules                 list the rules and their levels, and exit
   --json                  print the findings as JSON
   -C, --dir <dir>         the project directory (default: the working directory)
 
 Exit codes:
   0  no errors (warnings and silenced findings do not fail)
-  3  at least one error
+  3  at least one error (a replay that differs counts)
+  4  --replay: the target already holds what the history names, and --reset
+     was not given; nothing was run
   1  lint could not run: a bad config, an unknown migration for
      --update-checksum, a server that does not answer (--env)
 `;
 
 interface LintArgs {
   env: string | undefined;
+  replay: string | undefined;
+  reset: boolean;
+  keep: boolean;
   json: boolean;
   dir: string;
   update: string[];
@@ -81,6 +99,9 @@ function parseLintArgs(args: string[]): LintArgs {
       strict: true,
       options: {
         env: { type: "string" },
+        replay: { type: "string" },
+        reset: { type: "boolean" },
+        keep: { type: "boolean" },
         json: { type: "boolean" },
         dir: { type: "string", short: "C" },
         "update-checksum": { type: "string", multiple: true },
@@ -92,8 +113,13 @@ function parseLintArgs(args: string[]): LintArgs {
   }
   const v = parsed.values;
   const update = v["update-checksum"];
+  const replay = typeof v.replay === "string" ? v.replay : undefined;
+  if (replay === undefined && (v.reset === true || v.keep === true)) throw new YodelError(`--reset and --keep go with --replay <env>\n${usage}`);
   return {
     env: typeof v.env === "string" ? v.env : undefined,
+    replay,
+    reset: v.reset === true,
+    keep: v.keep === true,
     json: v.json === true,
     dir: typeof v.dir === "string" ? v.dir : process.cwd(),
     update: Array.isArray(update) ? update.filter((u): u is string => typeof u === "string") : [],
@@ -102,7 +128,7 @@ function parseLintArgs(args: string[]): LintArgs {
 }
 
 function allRules(): Record<string, LintRule> {
-  return { ...LINT_RULES, ...Object.fromEntries(projectRules.map((r) => [r.rule.id, r.rule])) };
+  return { ...LINT_RULES, ...Object.fromEntries(projectRules.map((r) => [r.rule.id, r.rule])), [REPLAY_RULE.id]: REPLAY_RULE };
 }
 
 function listRules(io: Io, json: boolean, project: Project): number {
@@ -159,8 +185,21 @@ export const lint: Command = {
         }
       }
 
+      let replay: ReplayResult | undefined;
+      if (a.replay !== undefined) {
+        const env = resolveEnvironment(project, a.replay);
+        if (scanMigrations(dir).ordered) {
+          // A target that is not fresh throws here, exit 4, before anything is linted or run.
+          replay = await replayHistory(project, env, { reset: a.reset, keep: a.keep, log: (l) => { io.err(`replay: ${l}\n`); } });
+          options.rules = [...projectRules, replayRule(replay)];
+        } else {
+          io.err(`yodel lint: the migrations directory is not one chain, so it is not replayed; fix the findings below first\n`);
+        }
+      }
+
       const report = await lintMigrations(dir, options);
-      io.out(a.json ? `${JSON.stringify(lintJson(report), null, 2)}\n` : renderLint(report));
+      if (a.json) io.out(`${JSON.stringify({ ...lintJson(report), ...(replay ? { replay: replayJson(replay) } : {}) }, null, 2)}\n`);
+      else io.out(`${replay ? `${renderReplay(replay)}\n` : ""}${renderLint(report)}`);
       return lintExitCode(report);
     }),
 };
