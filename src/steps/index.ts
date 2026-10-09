@@ -15,7 +15,7 @@ import type { Migration } from "../migrations/index.js";
 import { YodelError } from "../project.js";
 import { runBackfill, serverReceipts } from "./backfill.js";
 import type { StepPlan } from "./kinds.js";
-import { runRebuild } from "./rebuild.js";
+import { rebuildChantConfig, runRebuild } from "./rebuild.js";
 
 export * from "./kinds.js";
 export * from "./run.js";
@@ -43,7 +43,8 @@ export type StepRunner = (ctx: StepContext) => Promise<{ summary: unknown }>;
 
 export const defaultStepRunner: StepRunner = async (ctx) => {
   if (ctx.plan.run === "rebuild") {
-    const { summary } = await runRebuild(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, log: ctx.log });
+    const config = await rebuildChantConfig(ctx.projectDir, ctx.environment);
+    const { summary } = await runRebuild(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, log: ctx.log, config });
     return { summary };
   }
   const receipts = ctx.receipts ?? (ctx.endpoint ? await serverReceipts(ctx.endpoint, ctx.environment) : undefined);

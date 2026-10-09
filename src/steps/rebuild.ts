@@ -26,6 +26,13 @@
  *   the next `yodel apply`: every partition with a receipt is skipped. To
  *   start the rebuild over instead, drop `<table>__chant_new` and
  *   `<table>__chant_dual`.
+ *
+ * The activities render their DDL for the topology chant resolves from
+ * `sql.profiles.<env>.topology`. When the environment's topology comes from
+ * elsewhere (`yodel.config.ts`, or `YODEL_TOPOLOGY`, #9), the step hands
+ * every rebuild activity chant's config with that topology set on the
+ * profile ({@link rebuildChantConfig}), so the rebuild renders for the same
+ * topology as the migration's statements.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -34,11 +41,35 @@ import { join } from "node:path";
 import type { OpConfig, PhaseDefinition } from "@intentius/chant/op/types";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
+import type { Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import type { RebuildOptions } from "./kinds.js";
+import { environmentSettings } from "../config/settings.js";
+import { loadProject, type ProjectConfig } from "../project.js";
 import { runOp, StepOpFailed, type RunOpOptions } from "./run.js";
 
 /** The rebuild activities whose results the history's summary keeps. */
 const SUMMARIZED = ["clickhouseRebuildPlan", "clickhouseRebuildBackfill", "clickhouseRebuildVerify", "clickhouseRebuildSwap", "clickhouseRebuildRetain"] as const;
+
+/** `config` with `sql.profiles.<environment>.topology` set to `topology`. Pure; `config` is not changed. */
+export function withProfileTopology(config: ProjectConfig, environment: string, topology: Topology): ProjectConfig {
+  const profiles = config.sql?.profiles ?? {};
+  const profile = profiles[environment];
+  if (!profile) return config;
+  return { ...config, sql: { ...config.sql, profiles: { ...profiles, [environment]: { ...profile, topology } } } };
+}
+
+/**
+ * The chant config a rebuild step's activities bind with: the project's,
+ * with the environment's resolved topology on its profile when chant would
+ * not find it there itself. `undefined` when chant's own resolution already
+ * gives the same topology (set in the profile, or no topology anywhere).
+ */
+export async function rebuildChantConfig(projectDir: string, environment: string, env: NodeJS.ProcessEnv = process.env): Promise<ProjectConfig | undefined> {
+  const project = await loadProject(projectDir);
+  const settings = environmentSettings(project, environment, env);
+  if (settings.topologySource === "default" || settings.topologySource === `sql.profiles.${environment}.topology`) return undefined;
+  return withProfileTopology(project.config, environment, settings.topology);
+}
 
 /** The activity of the phase left out: the old table's drop, which waits for its retention and its own gate. */
 const LEFT_OUT = new Set(["clickhouseRebuildDrop"]);
@@ -121,6 +152,8 @@ export interface RunRebuildOptions extends Omit<RunOpOptions, "activities" | "cw
   /** Activities to use in place of the lexicon's, for a test. */
   activities?: Record<string, ActivityFn>;
   log?: (line: string) => void;
+  /** The chant config the rebuild activities bind with (see {@link rebuildChantConfig}). Default: they load chant.config.ts. */
+  config?: ProjectConfig | undefined;
 }
 
 /** Runs a rebuild step to the end. The summary is filled in as the activities return, so a failure still says how far it got. */
@@ -132,12 +165,15 @@ export async function runRebuild(options: RebuildOptions, run: RunRebuildOptions
     const config = await rebuildOpConfig(options, { environment: run.environment, projectDir: run.projectDir, buildPath });
     const lexicon = run.activities ?? ((await import("@intentius/chant-lexicon-sql/op/activities")) as unknown as Record<string, ActivityFn>);
     const wrapped: Record<string, ActivityFn> = {};
-    for (const fn of SUMMARIZED) {
-      const inner = lexicon[fn];
+    // A rebuild activity takes its config as a third argument (chant's ClickHouseRebuildDeps).
+    const deps = run.config ? { config: run.config } : undefined;
+    const summarized: readonly string[] = SUMMARIZED;
+    for (const fn of Object.keys(lexicon).filter((f) => f.startsWith("clickhouseRebuild") && (deps !== undefined || summarized.includes(f)))) {
+      const inner = lexicon[fn] as ((args: Record<string, unknown>, signal?: AbortSignal, deps?: unknown) => Promise<unknown>) | undefined;
       if (!inner) continue;
       wrapped[fn] = async (args, signal) => {
-        const result = await inner(args, signal);
-        summarize(summary, fn, result);
+        const result = await (deps ? inner(args, signal, deps) : inner(args, signal));
+        if (summarized.includes(fn)) summarize(summary, fn, result);
         return result;
       };
     }

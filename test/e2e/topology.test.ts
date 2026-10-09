@@ -33,11 +33,11 @@ const HISTORY = "yodel_9_history";
 
 const keeperEnabled = process.env.YODEL_E2E_KEEPER === "1" && (await dockerAvailable());
 
-const build = (columns: string): BuildOutput => ({
+const build = (columns: string, orderBy = "id"): BuildOutput => ({
   dialect: "clickhouse",
   objects: [
     { export: "db", type: "ClickHouse::Database", ddl: `CREATE DATABASE ${DB} ENGINE = Atomic`, dependsOn: [] },
-    { export: "events", type: "ClickHouse::Table", ddl: `CREATE TABLE ${DB}.events (${columns}) ENGINE = MergeTree ORDER BY id`, dependsOn: ["db"] },
+    { export: "events", type: "ClickHouse::Table", ddl: `CREATE TABLE ${DB}.events (${columns}) ENGINE = MergeTree PARTITION BY toYYYYMM(ts) ORDER BY ${orderBy}`, dependsOn: ["db"] },
   ],
 });
 
@@ -61,8 +61,10 @@ function writeMigrations(): void {
   ({ dir, dispose } = projectFrom("clickhouse-topology"));
   const migrations = join(dir, "migrations");
   let previous: Migration | undefined;
-  for (const [i, [name, columns]] of [["events", "id UInt64"], ["add-country", "id UInt64, country LowCardinality(String) DEFAULT ''"]].entries()) {
-    const made = createMigration({ name: name ?? "", build: build(columns ?? ""), previous, now: new Date(Date.UTC(2026, 9, 9, 9, i)) });
+  const country = "id UInt64, ts DateTime, country LowCardinality(String) DEFAULT ''";
+  // The third changes the sort key: a ClickHouseRebuildOp step, which renders through chant's rebuild activities.
+  for (const [i, [name, columns, orderBy]] of [["events", "id UInt64, ts DateTime", "id"], ["add-country", country, "id"], ["rekey", country, "(country, id)"]].entries()) {
+    const made = createMigration({ name: name ?? "", build: build(columns ?? "", orderBy), previous, now: new Date(Date.UTC(2026, 9, 9, 9, i)) });
     if (made.id === undefined) throw new Error(`no change for ${name ?? ""}`);
     writeMigration(migrations, made);
     previous = readMigrations(migrations).at(-1);
@@ -132,6 +134,7 @@ describe.skipIf(!clickhouseReachable)("one migrations directory on a single node
     expect((await clickhouse(`SELECT engine FROM system.tables WHERE database = '${DB}' AND name = 'events'`)).trim()).toBe("MergeTree");
     expect((await clickhouse(`SELECT engine FROM system.tables WHERE database = '${HISTORY}' AND name = 'history'`)).trim()).toBe("MergeTree");
     expect(await n(`SELECT count() FROM system.columns WHERE database = '${DB}' AND table = 'events' AND name = 'country'`)).toBe(1);
+    expect((await clickhouse(`SELECT sorting_key FROM system.tables WHERE database = '${DB}' AND name = 'events'`)).trim()).toBe("country, id");
     expect((await clickhouse(`SELECT DISTINCT note FROM ${HISTORY}.history WHERE kind = 'statement'`)).trim()).toBe("topology=single");
 
     await secondApplySendsNothing("single", () => n(`SELECT count() FROM ${HISTORY}.history`));
@@ -157,12 +160,14 @@ describe.skipIf(!keeperEnabled)("the same migrations directory on a Replicated d
       expect(await q(r, `SELECT engine FROM system.databases WHERE name IN ('${DB}', '${HISTORY}') ORDER BY name`)).toEqual(["Replicated", "Replicated"]);
       expect(await q(r, `SELECT engine FROM system.tables WHERE database = '${DB}' AND name = 'events'`)).toEqual(["ReplicatedMergeTree"]);
       expect(await q(r, `SELECT engine FROM system.tables WHERE database = '${HISTORY}' AND name = 'history'`)).toEqual(["ReplicatedMergeTree"]);
-      expect(await q(r, `SELECT name FROM system.columns WHERE database = '${DB}' AND table = 'events' ORDER BY name`)).toEqual(["country", "id"]);
+      expect(await q(r, `SELECT name FROM system.columns WHERE database = '${DB}' AND table = 'events' ORDER BY name`)).toEqual(["country", "id", "ts"]);
+      // The rebuild step's new table, rendered for the Replicated database (#9's follow-up).
+      expect(await q(r, `SELECT engine, sorting_key FROM system.tables WHERE database = '${DB}' AND name = 'events'`)).toEqual(["ReplicatedMergeTree country, id"]);
     }
     expect(await q(r1, `SELECT DISTINCT note FROM ${HISTORY}.history WHERE kind = 'statement'`)).toEqual(["topology=replicated:yodel"]);
     // The rows are the history's on every replica.
     await q(r2, `SYSTEM SYNC REPLICA ${HISTORY}.history`);
-    expect(await q(r2, `SELECT count() FROM ${HISTORY}.history WHERE kind = 'migration' AND status = 'succeeded'`)).toEqual(["2"]);
+    expect(await q(r2, `SELECT count() FROM ${HISTORY}.history WHERE kind = 'migration' AND status = 'succeeded'`)).toEqual(["3"]);
 
     await secondApplySendsNothing("replicated", async () => Number((await q(r1, `SELECT count() FROM ${HISTORY}.history`))[0]));
     unchanged();
