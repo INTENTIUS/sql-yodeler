@@ -24,7 +24,7 @@ async function run(argv: string[], list?: readonly Command[]) {
 
 const verbs = ["init", "plan", "apply", "new", "lint", "status", "drift", "rebase", "repair"];
 const envVerbs = ["plan", "apply", "status", "drift"];
-const built = [...envVerbs, "new"];
+const built = [...envVerbs, "new", "rebase", "repair"];
 const notBuilt = verbs.filter((v) => !built.includes(v));
 
 describe("yodel", () => {
@@ -100,7 +100,8 @@ describe("yodel", () => {
     const dir = mkdtempSync(join(tmpdir(), "yodel-cli-"));
     try {
       for (const verb of built) {
-        const { code, err } = await run([verb, verb === "new" ? "add-country" : "dev", "--dir", dir]);
+        const args = verb === "new" ? ["add-country"] : verb === "repair" ? ["20261009T1000-one", "--reason", "x", "dev"] : ["dev"];
+        const { code, err } = await run([verb, ...args, "--dir", dir]);
         expect(code).toBe(1);
         expect(err).toMatch(new RegExp(`^yodel ${verb}: no chant.config.ts in `));
       }
