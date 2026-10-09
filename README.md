@@ -1,6 +1,12 @@
 # SQL Yodeler
 
-Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon. Nothing is built yet.
+Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.
+
+## Documentation
+
+[`docs/`](docs/README.md) covers installing (the package is not on npm; it installs from a built clone or a packed tarball), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
+
+[`examples/clickhouse`](examples/clickhouse/README.md) and [`examples/postgres`](examples/postgres/README.md) are example projects, each with a transcript of a run against chant's emulator.
 
 ## Starting a project
 
@@ -30,7 +36,7 @@ Working rules are in `AGENTS.md`.
 
 `yodel apply <env>` takes the versioned path when the project has a `migrations/` directory holding at least one migration (`yodel new` writes them); otherwise it is the declarative path, unchanged. `yodel status <env>` lists applied, pending, out-of-order and part-way migrations and checksum mismatches (`--json`; exit 0 up to date, 3 pending, 4 mismatch or out of order, 2 an Op step, 1 error).
 
-`yodel init --from <env>` adopts an existing database: it reads it with chant's import (`chant import --from`), writes the declarations to `src/`, checks they plan clean, writes the baseline migration (the first one, creating everything) and records it applied in the history without running it (a succeeded migration row whose `note` starts `baseline:`). It needs a `chant.config.ts` with `sql.profiles.<env>` already, and for ClickHouse the profile's `databases`; `yodel init --help` has the rest. On Postgres it writes the declarations and the baseline, and recording the baseline waits for the Postgres history (#13).
+`yodel init --from <env>` adopts an existing database: it reads it with chant's import (`chant import --from`), writes the declarations to `src/`, checks they plan clean, writes the baseline migration (the first one, creating everything) and records it applied in the history without running it (a succeeded migration row whose `note` starts `baseline:`). It needs a `chant.config.ts` with `sql.profiles.<env>` already, and for ClickHouse the profile's `databases`; `yodel init --help` has the rest. On Postgres it does the same, recording the baseline in `<history schema>.history`.
 
 The history is an append-only table, `<db>.history`, one row per migration and per statement event, never updated or deleted.
 

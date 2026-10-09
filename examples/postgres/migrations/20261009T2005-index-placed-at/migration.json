@@ -1,0 +1,165 @@
+{
+  "format": 1,
+  "id": "20261009T2005-index-placed-at",
+  "parent": "20261009T2005-add-gift",
+  "checksum": "sha256:b7b8a5d3d22f5d055134e46ac24c74f246a63ebd07791f9b8cca2843d5d2fa29",
+  "createdAt": "2026-10-09T20:05:08Z",
+  "dialect": "postgres",
+  "defaultSchema": "public",
+  "major": 18,
+  "refused": false,
+  "hints": [],
+  "steps": [
+    {
+      "kind": "statement",
+      "object": "ordersPlacedAt",
+      "type": "Postgres::Index",
+      "name": "yodel_18_shop.orders_placed_at_idx",
+      "class": "concurrently",
+      "rule": "SQLPG240",
+      "sql": "CREATE INDEX CONCURRENTLY orders_placed_at_idx ON yodel_18_shop.orders (placed_at)",
+      "transactional": false
+    },
+    {
+      "kind": "statement",
+      "object": "ordersPlacedAt",
+      "type": "Postgres::Index",
+      "name": "yodel_18_shop.orders_placed_at_idx",
+      "class": "concurrently",
+      "rule": "SQLPG240",
+      "sql": "COMMENT ON INDEX yodel_18_shop.orders_placed_at_idx IS '[chant managed-by=chant]'",
+      "transactional": true
+    }
+  ],
+  "schema": {
+    "applyOrder": [
+      "yodel18ShopSchema",
+      "orders",
+      "ordersPlacedAt",
+      "ordersStatusIdx"
+    ],
+    "dialect": "postgres",
+    "objects": [
+      {
+        "comment": "The SQL Yodeler Postgres example",
+        "ddl": "CREATE SCHEMA yodel_18_shop;\n  COMMENT ON SCHEMA yodel_18_shop IS 'The SQL Yodeler Postgres example'",
+        "dependsOn": [],
+        "export": "yodel18ShopSchema",
+        "name": "yodel_18_shop",
+        "sqlName": "yodel_18_shop",
+        "type": "Postgres::Schema"
+      },
+      {
+        "checks": [
+          {
+            "expr": "amount > 0",
+            "name": "orders_amount_positive"
+          }
+        ],
+        "columns": [
+          {
+            "generated": {
+              "always": true,
+              "kind": "identity"
+            },
+            "name": "id",
+            "type": "bigint"
+          },
+          {
+            "default": "'placed'::text",
+            "name": "status",
+            "notNull": true,
+            "type": "text"
+          },
+          {
+            "name": "amount",
+            "notNull": true,
+            "type": "numeric(12,2)"
+          },
+          {
+            "default": "now()",
+            "name": "placed_at",
+            "notNull": true,
+            "type": "timestamp with time zone"
+          },
+          {
+            "name": "refunded_at",
+            "type": "timestamp with time zone"
+          },
+          {
+            "name": "email",
+            "notNull": true,
+            "type": "text"
+          },
+          {
+            "default": "false",
+            "name": "gift",
+            "notNull": true,
+            "type": "boolean"
+          }
+        ],
+        "ddl": "CREATE TABLE yodel_18_shop.orders (\n      id bigint GENERATED ALWAYS AS IDENTITY,\n      status text DEFAULT 'placed'::text NOT NULL,\n      amount numeric(12,2) NOT NULL,\n      placed_at timestamp with time zone DEFAULT now() NOT NULL,\n      refunded_at timestamp with time zone,\n      email text NOT NULL, -- previously: customer_email\n      gift boolean DEFAULT false NOT NULL,\n      CONSTRAINT orders_pkey PRIMARY KEY (id),\n      CONSTRAINT orders_amount_positive CHECK (amount > 0)\n  )",
+        "dependsOn": [
+          "yodel18ShopSchema"
+        ],
+        "exclusions": [],
+        "export": "orders",
+        "foreignKeys": [],
+        "inherits": [],
+        "like": [],
+        "name": "orders",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "orders_pkey"
+        },
+        "schema": "yodel_18_shop",
+        "sqlName": "yodel_18_shop.orders",
+        "type": "Postgres::Table",
+        "uniques": []
+      },
+      {
+        "ddl": "CREATE INDEX orders_status_idx ON yodel_18_shop.orders USING btree (status)",
+        "dependsOn": [
+          "orders"
+        ],
+        "elements": [
+          {
+            "column": "status",
+            "expr": "status"
+          }
+        ],
+        "export": "ordersStatusIdx",
+        "method": "btree",
+        "name": "orders_status_idx",
+        "schema": "yodel_18_shop",
+        "sqlName": "yodel_18_shop.orders_status_idx",
+        "table": "orders",
+        "tableName": "yodel_18_shop.orders",
+        "type": "Postgres::Index"
+      },
+      {
+        "concurrently": true,
+        "ddl": "CREATE INDEX CONCURRENTLY orders_placed_at_idx ON yodel_18_shop.orders (placed_at)",
+        "dependsOn": [
+          "orders"
+        ],
+        "elements": [
+          {
+            "column": "placed_at",
+            "expr": "placed_at"
+          }
+        ],
+        "export": "ordersPlacedAt",
+        "name": "orders_placed_at_idx",
+        "schema": "yodel_18_shop",
+        "sqlName": "yodel_18_shop.orders_placed_at_idx",
+        "table": "orders",
+        "tableName": "yodel_18_shop.orders",
+        "type": "Postgres::Index"
+      }
+    ],
+    "postgresMajor": 18
+  }
+}

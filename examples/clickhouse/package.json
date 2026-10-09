@@ -1,0 +1,22 @@
+{
+  "name": "sql-yodeler-example-clickhouse",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "chant build src --lexicon sql -o dist/schema.json"
+  },
+  "dependencies": {
+    "@intentius/chant": "0.114.0",
+    "@intentius/chant-lexicon-sql": "0.114.0",
+    "@intentius/sql-yodeler": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
