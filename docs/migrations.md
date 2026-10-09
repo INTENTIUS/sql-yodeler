@@ -328,7 +328,7 @@ Rebased 20261009T2038-index-placed-at onto 20261009T2038-add-gift (it followed 2
 No history was checked (--env): make sure none of these ran anywhere before merging.
 ```
 
-`yodel rebase` also refuses (exit 4, nothing written) when both branches change the same object differently (resolve it by hand: delete the migration and run `yodel new` again), when a migration it would rewrite was edited by hand (unless `--force`, which drops the edits), or when the moved migration adds nothing on its new parent. A rebase drops `yodel:allow` lines from the migration it rewrites ([issue #40](https://github.com/INTENTIUS/sql-yodeler/issues/40)), so check them after.
+`yodel rebase` also refuses (exit 4, nothing written) when both branches change the same object differently (resolve it by hand: delete the migration and run `yodel new` again), when a migration it would rewrite was edited by hand (unless `--force`, which drops the edits), or when the moved migration adds nothing on its new parent. A `-- yodel:allow` line ([Lint](lint.md)) does not count as an edit by hand: the rebase writes it again above the same statement, and says how many it carried over. When the statement a line silenced is gone from the rebased migration or changed, the rebase refuses (exit 4, nothing written) and names the line; remove it, record the checksum with `yodel lint --update-checksum <id>`, rebase, and silence what the new statements need.
 
 ## yodel repair
 

@@ -19,7 +19,13 @@
  * - its statements are diffed again, from the new parent's recorded schema
  *   to the new recorded schema, and its checksum recomputed; a backfill
  *   step (#12) is kept at the end, and its module (one of the migration's
- *   own files, unchanged) counts in the new checksum.
+ *   own files, unchanged) counts in the new checksum;
+ * - each `-- yodel:allow <rule> <reason>` line (#14) is carried over to the
+ *   same step in the new file: the step `migration.json` records exactly as
+ *   before, found in order. When the step a line silenced is gone from the
+ *   rebased migration, or is not the same step any more, the rebase refuses
+ *   and names the line: a reason given for one statement is not moved onto
+ *   another.
  *
  * When both sides change the same object (by export name, or by the name it
  * has on the server) and do not make the same change, the rebase refuses
@@ -39,7 +45,7 @@
 
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { diffStatements, type SchemaStatements } from "@intentius/chant-lexicon-sql/migration-statements";
+import { diffStatements, type MigrationStep, type SchemaStatements } from "@intentius/chant-lexicon-sql/migration-statements";
 import { YodelError } from "../project.js";
 import type { BuildOutput, BuiltObject } from "../chant/build.js";
 import {
@@ -58,8 +64,9 @@ import {
   type MigrationFiles,
 } from "../migrations/index.js";
 import { asBackfill } from "../steps/kinds.js";
+import { silencesOf, type Silence } from "../lint/index.js";
 
-/** Exit code: the rebase is refused (a conflict, hand edits, or a migration a history records). Nothing was written. */
+/** Exit code: the rebase is refused (a conflict, hand edits, a silence it cannot carry over, or a migration a history records). Nothing was written. */
 export const REBASE_REFUSED = 4;
 
 export interface RebaseOptions {
@@ -80,6 +87,8 @@ export interface RebasedMigration {
   document: MigrationDocument;
   files: MigrationFiles;
   statements: SchemaStatements;
+  /** Its `-- yodel:allow` lines, carried over: each with its step and line in the rewritten files. */
+  silences: Silence[];
   /** Its files differed from what yodel writes for it (an edit by hand, or a checksum that no longer matches): the rewrite drops that edit. */
   handEdited: boolean;
 }
@@ -197,9 +206,103 @@ export function statementsOf(doc: MigrationDocument): SchemaStatements {
   };
 }
 
-/** Whether a migration's files are what yodel writes for its document: its SQL rendered from its steps, and its checksum matching. */
+/**
+ * Whether a migration's files are what yodel writes for its document: its
+ * SQL rendered from its steps, and its checksum matching. Its well-formed
+ * `-- yodel:allow` lines do not count as an edit: a rebase carries them
+ * over.
+ */
 export function asWritten(m: Migration): boolean {
-  return verifyChecksum(m).ok && normalizeLineEndings(m.files.sql) === renderMigrationSql(m.document, statementsOf(m.document));
+  if (!verifyChecksum(m).ok) return false;
+  const silenced = new Set(silencesOf(m).map((s) => s.line));
+  const sql = normalizeLineEndings(m.files.sql)
+    .split("\n")
+    .filter((_, i) => !silenced.has(i + 1))
+    .join("\n");
+  return sql === renderMigrationSql(m.document, statementsOf(m.document));
+}
+
+/** The text that marks a step in migration.sql, as lint finds it (`src/lint/silences.ts`). */
+function anchorOf(step: MigrationStep): string {
+  return step.kind === "statement" ? `${step.sql};` : `-- ${step.object} (${step.name}):`;
+}
+
+const stepLabel = (step: MigrationStep): string =>
+  step.kind === "statement" ? `${step.name}: ${step.sql.split("\n")[0] ?? ""}` : `${step.kind === "op" ? step.op : step.kind} for ${step.name}`;
+
+/**
+ * Carries `m`'s `-- yodel:allow` lines over to `sql`, rendered from
+ * `steps`: each goes above the step that is the same as the one it was
+ * above (the first such step not already matched, in order). Throws a
+ * YodelError naming every line whose step is gone or changed.
+ */
+function carrySilences(m: Migration, steps: readonly MigrationStep[], sql: string): { sql: string; silences: Silence[] } {
+  const old = silencesOf(m);
+  if (old.length === 0) return { sql, silences: [] };
+  const oldLines = normalizeLineEndings(m.files.sql).split("\n");
+
+  // Each old step to the same step in the new list, in order.
+  const used = new Set<number>();
+  const to = new Map<number, number>();
+  m.document.steps.forEach((s, i) => {
+    const j = steps.findIndex((n, k) => !used.has(k) && same(n, s));
+    if (j >= 0) {
+      used.add(j);
+      to.set(i, j);
+    }
+  });
+
+  const lost = old.filter((s) => !to.has(s.step));
+  if (lost.length > 0) {
+    const why = lost.map((s) => {
+      const was = m.document.steps[s.step] as MigrationStep;
+      const now = steps.find((n, k) => !used.has(k) && n.kind === was.kind && n.name === was.name);
+      return (
+        `  migration.sql line ${String(s.line)}: ${(oldLines[s.line - 1] ?? "").trim()}\n` +
+        `    it silences step ${String(s.step)} (${stepLabel(was)}), which ${now ? `the rebase changes to ${stepLabel(now)}` : "the rebased migration no longer has"}`
+      );
+    });
+    throw new YodelError(
+      `refused: ${m.id} has ${lost.length === 1 ? "a yodel:allow line" : "yodel:allow lines"} for a statement the rebase does not keep as it was, so ${lost.length === 1 ? "its reason" : "their reasons"} would no longer be about the statement that runs:\n${why.join("\n")}\n` +
+        `Nothing was written. Remove ${lost.length === 1 ? "the line" : "the lines"} from ${m.id}'s migration.sql, record its checksum (yodel lint --update-checksum ${m.id}), rebase, then silence what the rebased statements need again.`,
+      REBASE_REFUSED,
+    );
+  }
+
+  // Insert each line at the start of the line holding its new step's anchor, finding the anchors the way lint does.
+  const wanted = new Map<number, string[]>();
+  for (const s of old) {
+    const j = to.get(s.step) as number;
+    wanted.set(j, [...(wanted.get(j) ?? []), (oldLines[s.line - 1] ?? "").replace(/\s+$/, "")]);
+  }
+  let out = "";
+  let cursor = 0;
+  steps.forEach((step, j) => {
+    const anchor = anchorOf(step);
+    const at = sql.indexOf(anchor, cursor);
+    const lines = wanted.get(j);
+    if (at === -1) {
+      if (lines) throw new YodelError(`${m.id}: the rebased migration.sql has no place for step ${String(j)} (${stepLabel(step)}), so ${lines.join(", ")} cannot be carried over; nothing was written`, REBASE_REFUSED);
+      return;
+    }
+    if (lines) {
+      const lineStart = sql.lastIndexOf("\n", at - 1) + 1;
+      const pos = Math.max(lineStart, cursor);
+      out += sql.slice(cursor, pos) + (pos === lineStart ? "" : "\n") + lines.map((l) => `${l}\n`).join("") + sql.slice(pos, at);
+    } else out += sql.slice(cursor, at);
+    out += anchor;
+    cursor = at + anchor.length;
+  });
+  out += sql.slice(cursor);
+
+  // Read back the way lint and apply read it: the same {rule, reason}s, each on its new step.
+  const carried = silencesOf({ files: { sql: out, json: "" }, document: { steps } as MigrationDocument });
+  const key = (s: Pick<Silence, "step" | "rule" | "reason">) => `${String(s.step)} ${s.rule} ${s.reason}`;
+  const expected = old.map((s) => key({ ...s, step: to.get(s.step) as number }));
+  if (JSON.stringify(carried.map(key)) !== JSON.stringify(expected)) {
+    throw new YodelError(`${m.id}: its yodel:allow lines did not read back on the same steps after the rebase; nothing was written. Rebase it by hand.`, REBASE_REFUSED);
+  }
+  return { sql: out, silences: carried };
 }
 
 /** Rewrites one migration onto a new parent whose recorded schema is `base1`. */
@@ -238,7 +341,7 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
     steps: statements.steps,
     schema,
   } as MigrationDocument;
-  const sql = renderMigrationSql(unsigned, statements);
+  const { sql, silences } = carrySilences(m, statements.steps, renderMigrationSql(unsigned, statements));
   const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned, extra: m.files.extra }) };
   return {
     id: m.id,
@@ -250,6 +353,7 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
     document,
     files: { sql, json: serializeDocument(document), ...(m.files.extra ? { extra: m.files.extra } : {}) },
     statements,
+    silences,
     handEdited: !asWritten(m),
   };
 }

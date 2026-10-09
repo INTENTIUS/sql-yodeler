@@ -158,7 +158,9 @@ statement	0	succeeded	[{"step":0,"rule":"destructive","reason":"no order ever ha
 migration	-1	succeeded	[{"step":0,"rule":"destructive","reason":"no order ever had a coupon; checked on dev"}]
 ```
 
-A `yodel:allow` line that is malformed, names a rule that cannot be silenced, has no reason, or silences nothing is itself an error (rule `silence`). `yodel rebase` drops these lines from a migration it rewrites ([issue #40](https://github.com/INTENTIUS/sql-yodeler/issues/40)).
+A `yodel:allow` line that is malformed, names a rule that cannot be silenced, has no reason, or silences nothing is itself an error (rule `silence`).
+
+`yodel rebase` keeps each `yodel:allow` line above the same statement in the migration.sql it writes again, and the new checksum covers it, so lint passes after a rebase and apply records the same step, rule and reason. When the statement a line silenced is gone from the rebased migration, or changed (the other branch already made that change, say), the rebase refuses, names the line, and writes nothing ([Migrations](migrations.md#forks-and-yodel-rebase)).
 
 ## Against an environment's history: --env
 

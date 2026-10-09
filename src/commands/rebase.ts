@@ -23,6 +23,9 @@ recorded schema; its statements are diffed again from the new parent's, and
 its migration.sql, migration.json and checksum are written again. When both
 branches change the same object, differently, nothing is written and the
 object is named: resolve it by hand (delete the migration, then yodel new).
+Each -- yodel:allow line is carried over to the same statement in the new
+migration.sql; when that statement is gone or changed, nothing is written
+and the line is named.
 Offline: no database is read, except the histories --env names.
 
 Ids do not change. The order is the chain of parent ids, not the ids'
@@ -36,16 +39,17 @@ Options:
                    Without it, no history is checked: never rebase a
                    migration that ran somewhere
   --force          rewrite migrations whose files were edited by hand (the
-                   edits, such as a -- yodel:allow line, are dropped)
+                   edits are dropped; well-formed -- yodel:allow lines are
+                   still carried over)
   --json           print what was rewritten as JSON
   -C, --dir <dir>  the project directory (default: the working directory)
 
 Exit codes:
   0  rebased, or no fork to rebase
   4  refused, nothing written: both branches change the same object, a
-     migration to rewrite was edited by hand (without --force), a history
-     records one of them, or the moved migration adds nothing on its new
-     parent
+     migration to rewrite was edited by hand (without --force), a
+     yodel:allow line's statement is gone or changed, a history records one
+     of them, or the moved migration adds nothing on its new parent
   1  the rebase could not be worked out: no such migration, a fork the
      defaults cannot settle, a bad config, a server that does not answer
 `;
@@ -129,6 +133,7 @@ function report(io: Io, json: boolean, plan: RebasePlan, envs: readonly string[]
             checksum: m.checksum,
             statements: m.statements.steps.length - refusedSteps(m.statements.steps).length,
             refused: m.statements.refused,
+            silences: m.silences.map((x) => ({ step: x.step, rule: x.rule, reason: x.reason, line: x.line })),
             handEdited: m.handEdited,
           })),
         },
@@ -141,7 +146,7 @@ function report(io: Io, json: boolean, plan: RebasePlan, envs: readonly string[]
   const lines = [`Rebased ${plan.moved} onto ${plan.onto} (it followed ${plan.from ?? "nothing"}).`];
   for (const m of plan.rewritten) {
     const n = m.statements.steps.length - refusedSteps(m.statements.steps).length;
-    lines.push(`  ${m.id}: follows ${m.parent}; ${String(n)} statement${n === 1 ? "" : "s"}${m.statements.refused ? " and an Op or manual step" : ""}; checksum ${m.oldChecksum} -> ${m.checksum}`);
+    lines.push(`  ${m.id}: follows ${m.parent}; ${String(n)} statement${n === 1 ? "" : "s"}${m.statements.refused ? " and an Op or manual step" : ""}${m.silences.length > 0 ? `; ${String(m.silences.length)} yodel:allow line${m.silences.length === 1 ? "" : "s"} carried over` : ""}; checksum ${m.oldChecksum} -> ${m.checksum}`);
     for (const h of m.statements.hints) lines.push(`    hint: ${h}`);
   }
   lines.push(
