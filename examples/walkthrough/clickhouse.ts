@@ -157,6 +157,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel new fill-country --backfill backfills/country.ts", code: 0, expect: ["backfill step"] },
     { cat: "migrations/{id:fill-country}/migration.sql" },
     { run: "npx yodel lint", code: 0 },
+    { say: "The pull request comment lists the step under the Op steps apply runs, with the backfill's module:" },
+    { run: "npx yodel plan dev --format markdown", code: 0, expect: ["Op steps:", "made by Op `backfill` (backfill.ts)"] },
     { run: "git add -A && git commit -q -m 'feat: fill events.country' && git push -q origin main", code: 0, hide: true },
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },

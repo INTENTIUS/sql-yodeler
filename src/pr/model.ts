@@ -15,6 +15,7 @@ import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { scanMigrations, type Migration } from "../migrations/index.js";
 import { describeTopology } from "../history/index.js";
+import { asBackfill } from "../steps/kinds.js";
 import {
   findMigrateOp,
   gitLedger,
@@ -40,6 +41,8 @@ export interface StepView {
   done: boolean;
   /** An Op or manual step apply does not run, and why; any of them refuses the run. */
   refused?: string | undefined;
+  /** A backfill step's module, as the migration's directory holds it. */
+  source?: { file: string; text: string } | undefined;
 }
 
 export interface PendingView {
@@ -67,7 +70,7 @@ export type ApprovalView =
 export interface VersionedPlan {
   environment: string;
   dialect: SqlDialect;
-  /** `<database>.history (<topology> (<where it came from>))`. */
+  /** `<database>.history (<topology> (<where it came from>))`; Postgres has no topology, so only `<database>.history`. */
   history?: string | undefined;
   appliedCount: number;
   pending: PendingView[];
@@ -103,7 +106,11 @@ const viewOf = (m: Migration, done: readonly number[] = [], outOfOrder = false, 
   id: m.id,
   outOfOrder,
   resumeAt,
-  steps: m.document.steps.map((step, index) => ({ index, step, done: done.includes(index), refused: refused.find((r) => r.index === index)?.reason })),
+  steps: m.document.steps.map((step, index) => {
+    const file = asBackfill(step)?.options.file;
+    const text = file === undefined ? undefined : m.files.extra?.[file];
+    return { index, step, done: done.includes(index), refused: refused.find((r) => r.index === index)?.reason, ...(file !== undefined && text !== undefined ? { source: { file, text } } : {}) };
+  }),
 });
 
 /** Collects the plan; throws only when the project or the server cannot be read at all. */
@@ -150,7 +157,7 @@ async function collectWith(
 
   const plan: VersionedPlan = {
     ...base,
-    history: `${venv.location.database}.history (${report.topology ?? describeTopology(venv.location.topology)})`,
+    history: venv.dialect === "postgres" ? `${venv.location.database}.history` : `${venv.location.database}.history (${report.topology ?? describeTopology(venv.location.topology)})`,
     appliedCount: status.applied.length,
     pending: status.pending.map((p) => viewOf(p.migration, p.partWay?.done ?? [], p.outOfOrder, p.partWay?.resumeAt, p.refusedSteps)),
     refusal: report.refusal,

@@ -16,6 +16,7 @@ import { asWritten, mergeChange, planRebase, RebaseConflict, writeRebase, type R
 import { checkRepair, repairRow } from "../src/rebase/repair.js";
 import { deriveState, MIGRATION_ROW, type HistoryRow } from "../src/history/index.js";
 import { compareHistory } from "../src/versioned/index.js";
+import { renderStatus, statusJson } from "../src/versioned/report.js";
 import { json, projectFrom, yodel } from "./helpers/run.js";
 
 const DB = "yodel_15";
@@ -264,7 +265,37 @@ describe("yodel repair", () => {
     expect(after.mismatches).toEqual([]);
     expect(after.applied).toMatchObject([{ id: one.id, checksum: computeChecksum(editedFiles) }]);
     expect(deriveState([...history, r]).byId.get(one.id)?.appliedSeq).toBe(2);
+    expect((before.mismatches[0] as { message: string }).message).toContain(`if the edit is intended, record it with yodel repair ${one.id} --reason ... <env>`);
+    expect((before.mismatches[0] as { message: string }).message).not.toMatch(/\(#\d+\)/);
     expect(() => repairRow({ migration: edited, check, reason: "  ", run, seq: 3 })).toThrow(/needs a reason/);
+  });
+
+  it("keeps when and by whom a repaired migration was applied, and lists the repair after it", () => {
+    const { add } = p();
+    const one = add("one", 0, build(table("a", "a")));
+    const editedFiles = { ...one.files, sql: `${one.files.sql}-- reformatted\n` };
+    const edited: Migration = { ...one, files: editedFiles };
+    const at = (r: HistoryRow, recorded_at: string): HistoryRow => ({ ...r, recorded_at });
+    const history = [at(row(1, one, one.checksum, "started"), "2026-10-09 20:00:00.000000"), at(row(2, one, one.checksum, "succeeded"), "2026-10-09 20:00:01.000000")];
+    const check = checkRepair(edited, one.id, deriveState(history), "e2e");
+    const repair = at(repairRow({ migration: edited, check, reason: "a server upgrade reformatted it", run: { ...run, appliedBy: "bob@laptop" }, seq: 3 }), "2026-10-09 21:30:00.000000");
+
+    const status = compareHistory([edited], deriveState([...history, repair]));
+    expect(status.applied).toEqual([
+      {
+        id: one.id,
+        checksum: computeChecksum(editedFiles),
+        appliedBy: "ci@host",
+        recordedAt: "2026-10-09 20:00:01.000000",
+        planDigest: "jcs1-sha256:abc",
+        index: 0,
+        repairs: [{ checksum: computeChecksum(editedFiles), by: "bob@laptop", at: "2026-10-09 21:30:00.000000", reason: "a server upgrade reformatted it", seq: 3 }],
+      },
+    ]);
+    const report = { environment: "e2e", location: { database: "yodeler", topology: { kind: "single" as const } }, status };
+    const text = renderStatus(report);
+    expect(text).toContain(`  ${one.id}  2026-10-09 20:00:01.000000 by ci@host\n      repaired 2026-10-09 21:30:00.000000 by bob@laptop: a server upgrade reformatted it\n`);
+    expect(statusJson(report).applied).toMatchObject([{ recordedAt: "2026-10-09 20:00:01.000000", appliedBy: "ci@host", repairs: [{ by: "bob@laptop", at: "2026-10-09 21:30:00.000000", reason: "a server upgrade reformatted it" }] }]);
   });
 
   it("refuses a migration not applied, part way, already matching, or gone from the directory", () => {

@@ -81,15 +81,15 @@ $ npx yodel init --from dev --force
 read 2 object(s) from dev
 wrote src/schema.ts
 planned against dev: no change
-wrote migrations/20261009T2003-baseline (2 statements)
+wrote migrations/20261009T2036-baseline (2 statements)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-recorded 20261009T2003-baseline applied in yodel_18_history.history as a baseline; none of its statements was run
+recorded 20261009T2036-baseline applied in yodel_18_history.history as a baseline; none of its statements was run
 Adopted dev (clickhouse): 2 objects
   Database yodel_18_shop
   Table yodel_18_shop.events
 
 Declarations: src/schema.ts
-Baseline:     migrations/20261009T2003-baseline/ (2 statements, sha256:79d972ef06812f879291b4d31efaaa0b267e08b3ff58d7eac2e62852da07c599)
+Baseline:     migrations/20261009T2036-baseline/ (2 statements, sha256:9353189519b18681df1e8b476555b2a6ed37472c0956494543ec627821df75b2)
 Recorded:     applied in yodel_18_history.history as a baseline; none of its statements was run
 
 yodel plan dev shows no change, and yodel status dev lists the baseline applied.
@@ -124,7 +124,7 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history, topology single (default))
 
 Applied (1):
-  20261009T2003-baseline  2026-10-09 20:03:45.442137 by yodel@Mac
+  20261009T2036-baseline  2026-10-09 20:36:52.078218 by yodel@example
 
 Pending: none
 ```

@@ -12,6 +12,8 @@ import { currentSubject, decodeSubject, diffSubjects, explainMove } from "../src
 import { collectVersionedPlan } from "../src/pr/model.js";
 import { renderPlanMarkdown, subjectIn } from "../src/pr/render.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
+import { computeChecksum, serializeDocument } from "../src/migrations/index.js";
+import { backfillStep } from "../src/steps/backfill.js";
 
 const m1 = migration("20261009T1000-one", null, ["CREATE DATABASE yodel_8", "CREATE TABLE yodel_8.a (x UInt8) ENGINE = MergeTree ORDER BY x"]);
 const m2 = migration("20261009T1100-two", m1.id, ["ALTER TABLE yodel_8.a ADD COLUMN y UInt8"]);
@@ -41,6 +43,14 @@ async function digestOf(venv: VersionedEnv, ordered: Migration[]): Promise<strin
   return currentDigest(venv, status, status.pending);
 }
 
+/** `m` with a backfill step after its statements, and the backfill's module among its files. */
+function withBackfill(m: Migration, text: string, file = "country.ts"): Migration {
+  const unsigned = { ...m.document, checksum: "", refused: true, steps: [...m.document.steps, backfillStep("fill-country", file) as unknown as Migration["document"]["steps"][number]] };
+  const extra = { [file]: text };
+  const document = { ...unsigned, checksum: computeChecksum({ sql: m.files.sql, json: unsigned, extra }) };
+  return { ...m, checksum: document.checksum, document, files: { sql: m.files.sql, json: serializeDocument(document), extra } };
+}
+
 describe("the versioned plan", () => {
   it("has the digest the gate binds (the Plan step's currentDigest) and the exact approve command", async () => {
     const { venv, project } = await setup([m1, m2]);
@@ -54,6 +64,21 @@ describe("the versioned plan", () => {
     expect(carried).toBeDefined();
     const { planDigest } = await import("../src/versioned/digest.js");
     expect(await planDigest(decodeSubject(carried ?? "") as never)).toBe(gate);
+  });
+
+  it("lists a backfill step apply runs under Op steps, with its module's name and text", async () => {
+    const source = 'export const op = Op({ name: "backfill-fill-country", phases: [] });\n';
+    const m = withBackfill(m1, source);
+    const { venv, project } = await setup([m]);
+    const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort() });
+    expect(plan.pending[0]?.steps[2]).toMatchObject({ index: 2, refused: undefined, source: { file: "country.ts", text: source } });
+    const md = renderPlanMarkdown(plan);
+    expect(md).toContain("Op steps:\n- step 2, `fill-country`: made by Op `backfill` (country.ts). yodel apply runs it as this step.");
+    expect(md).toContain("<summary>backfill: country.ts</summary>");
+    expect(md).toContain('  ```ts\n  export const op = Op({ name: "backfill-fill-country", phases: [] });\n  ```');
+    expect(md).not.toContain("Refused changes");
+    expect(md).not.toContain("the Op exported by");
+    expect(md).not.toContain("`backfill` ()");
   });
 
   it("says an approval of this digest holds", async () => {

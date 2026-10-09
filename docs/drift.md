@@ -64,9 +64,9 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
 [phase] Snapshot
   ✓ lifecycleSnapshot(env=dev)   1.1s
 [phase] Diff
-  ✓ lifecycleDiff(env=dev, live=true)   875ms
+  ✓ lifecycleDiff(env=dev, live=true)   975ms
     [outcome] Drift=true
-Op "watch-dev" completed in 2.1s
+Op "watch-dev" completed in 2.2s
 ```
 
 `chant run` exits 0 when the watch completes, drift or not. The drift is the run's `Drift` outcome, in its run record on the local `chant/lifecycle` branch. The starter templates' `scripts/watch-outcome.ts` reads the newest record after `chant run` and exits 1 when the run failed or found drift, so a scheduled run that found drift shows red.

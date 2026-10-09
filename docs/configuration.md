@@ -122,7 +122,7 @@ export default defineConfig({
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
 | lint rule levels | `lint.rules` | | | each rule's own |
 
-The first one set wins. `yodel status <env>` and `yodel plan <env>` print the topology and where it came from (`topology single (default)`).
+The first one set wins. On ClickHouse, `yodel status <env>` and `yodel plan <env>` print the topology and where it came from (`topology single (default)`); Postgres has no topology, and they print none.
 
 The declarative path plans and applies through chant, which reads only `sql.profiles.<env>.topology`. So a topology set in `yodel.config.ts` alone is refused there, even `single`:
 

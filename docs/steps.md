@@ -18,15 +18,15 @@ Changing the sort key of the ClickHouse example's `events` table, `ORDER BY (kin
 
 ```console
 $ npx yodel new events-by-id
-Wrote migrations/20261009T2004-events-by-id/ (0 statements; follows 20261009T2003-add-country)
+Wrote migrations/20261009T2037-events-by-id/ (0 statements; follows 20261009T2037-add-country)
   This migration contains an Op step: ClickHouseRebuildOp for events (yodel_18_shop.events), SQLCH220.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = ClickHouseRebuildOp({ name: "rebuild-yodel-18-shop-events", env: "<env>", table: "yodel_18_shop.events", dualWrite: { mode: "materialized-view", cutoverColumn: "at" } });
 ```
 
 ```sql
--- yodel migration 20261009T2004-events-by-id
--- parent: 20261009T2003-add-country
+-- yodel migration 20261009T2037-events-by-id
+-- parent: 20261009T2037-add-country
 -- This migration contains an Op step, not only SQL:
 --   ClickHouseRebuildOp for events (yodel_18_shop.events), SQLCH220: not SQL; migration.json holds its declaration
 
@@ -50,7 +50,7 @@ The rebuild's own gates are left out: its approval is the migration's. The repla
 ```console
 $ npx yodel lint --replay replay --reset
 ...
-replay: 20261009T2004-events-by-id: replaying
+replay: 20261009T2037-events-by-id: replaying
 -- yodel_18_shop.events needs a rebuild (SQLCH220 Change the sorting key); 4 column(s) copied
 --   SQLCH220 orderBy: ( kind , at ) -> ( kind , id )
 CREATE TABLE `yodel_18_shop`.`events__chant_new`
@@ -63,21 +63,21 @@ CREATE TABLE `yodel_18_shop`.`events__chant_new`
   ENGINE = MergeTree
   PARTITION BY toYYYYMM(at)
   ORDER BY (kind, id) COMMENT '[chant managed-by=chant rebuild=yodel_18_shop.events role=new]'
-CREATE MATERIALIZED VIEW `yodel_18_shop`.`events__chant_dual` TO `yodel_18_shop`.`events__chant_new` AS SELECT `id`, `kind`, `at`, `country` FROM `yodel_18_shop`.`events` WHERE `at` >= toDateTime64('2026-10-09 20:07:05.346', 3, 'UTC') COMMENT 'chant rebuild of yodel_18_shop.events: rows at or after the cut-over [chant managed-by=chant rebuild=yodel_18_shop.events role=dual cutover=2026-10-09T20%3A07%3A05.346Z]'
--- waiting 60s for the cut-over at 2026-10-09T20:07:05.346Z
--- waiting 50s for the cut-over at 2026-10-09T20:07:05.346Z
--- waiting 40s for the cut-over at 2026-10-09T20:07:05.346Z
--- waiting 30s for the cut-over at 2026-10-09T20:07:05.346Z
--- waiting 20s for the cut-over at 2026-10-09T20:07:05.346Z
--- waiting 10s for the cut-over at 2026-10-09T20:07:05.346Z
+CREATE MATERIALIZED VIEW `yodel_18_shop`.`events__chant_dual` TO `yodel_18_shop`.`events__chant_new` AS SELECT `id`, `kind`, `at`, `country` FROM `yodel_18_shop`.`events` WHERE `at` >= toDateTime64('2026-10-09 20:40:55.029', 3, 'UTC') COMMENT 'chant rebuild of yodel_18_shop.events: rows at or after the cut-over [chant managed-by=chant rebuild=yodel_18_shop.events role=dual cutover=2026-10-09T20%3A40%3A55.029Z]'
+-- waiting 60s for the cut-over at 2026-10-09T20:40:55.029Z
+-- waiting 50s for the cut-over at 2026-10-09T20:40:55.029Z
+-- waiting 40s for the cut-over at 2026-10-09T20:40:55.029Z
+-- waiting 30s for the cut-over at 2026-10-09T20:40:55.029Z
+-- waiting 20s for the cut-over at 2026-10-09T20:40:55.029Z
+-- waiting 10s for the cut-over at 2026-10-09T20:40:55.029Z
 -- backfill of yodel_18_shop.events: 0 partition(s), 0 copied, 0 already copied, 0 cleared first
--- yodel_18_shop.events: 0 partition(s), 0 row(s) before the cut-over at 2026-10-09T20:07:05.346Z, counts and checksums equal in the old and new tables
+-- yodel_18_shop.events: 0 partition(s), 0 row(s) before the cut-over at 2026-10-09T20:40:55.029Z, counts and checksums equal in the old and new tables
 EXCHANGE TABLES `yodel_18_shop`.`events` AND `yodel_18_shop`.`events__chant_new`
 DROP VIEW `yodel_18_shop`.`events__chant_dual` SYNC
 RENAME TABLE `yodel_18_shop`.`events__chant_new` TO `yodel_18_shop`.`events__chant_old`
-ALTER TABLE `yodel_18_shop`.`events__chant_old` MODIFY COMMENT 'chant rebuild of yodel_18_shop.events: the old table, kept until 2026-10-16T20:07:05.427Z [chant managed-by=chant rebuild=yodel_18_shop.events role=old retain-until=2026-10-16T20%3A07%3A05.427Z]'
+ALTER TABLE `yodel_18_shop`.`events__chant_old` MODIFY COMMENT 'chant rebuild of yodel_18_shop.events: the old table, kept until 2026-10-16T20:40:55.165Z [chant managed-by=chant rebuild=yodel_18_shop.events role=old retain-until=2026-10-16T20%3A40%3A55.165Z]'
 ALTER TABLE `yodel_18_shop`.`events` MODIFY COMMENT '[chant managed-by=chant]'
-replay: 20261009T2004-events-by-id: matches its recorded schema
+replay: 20261009T2037-events-by-id: matches its recorded schema
 ...
 ```
 
@@ -88,11 +88,11 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:9e6a127906c8b962f0a8f9e58ed2a55e8227903412fd6fdd79d13a414f75d56b, by yodel at 2026-10-09T20:04:17.565Z
-20261009T2004-events-by-id: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:1956d6b1748a90c3114a31c4b5f9e827970c8c5c0097deb5cb9dd9642a44d3e5, by yodel at 2026-10-09T20:38:00.313Z
+20261009T2037-events-by-id: applying
   step 0: ClickHouseRebuildOp for events (yodel_18_shop.events)
-  step 0: ok {"op":"ClickHouseRebuildOp","table":"yodel_18_shop.events","state":"rebuild","partitions":6,"copied":6,"skipped":0,"cleared":0,"verifiedRows":600,"swapped":true,"oldTable":"yodel_18_shop.events__chant_old","retainUntil":"2026-10-16T20:05:22.476Z"}
-20261009T2004-events-by-id: applied
+  step 0: ok {"op":"ClickHouseRebuildOp","table":"yodel_18_shop.events","state":"rebuild","partitions":6,"copied":6,"skipped":0,"cleared":0,"verifiedRows":600,"swapped":true,"oldTable":"yodel_18_shop.events__chant_old","retainUntil":"2026-10-16T20:39:05.097Z"}
+20261009T2037-events-by-id: applied
 ...
 ```
 
@@ -155,14 +155,14 @@ Run again, `yodel new` copies the file into the migration's directory as `backfi
 
 ```console
 $ npx yodel new fill-country --backfill backfills/country.ts
-Wrote migrations/20261009T2005-fill-country/ (0 statements; follows 20261009T2004-events-by-id)
+Wrote migrations/20261009T2039-fill-country/ (0 statements; follows 20261009T2037-events-by-id)
   This migration ends with a backfill step: the Op backfill.ts exports, copied into the migration's directory.
     yodel apply runs its effect() batches after the statements before it, resuming from their receipts after a failure.
 ```
 
 ```sql
--- yodel migration 20261009T2005-fill-country
--- parent: 20261009T2004-events-by-id
+-- yodel migration 20261009T2039-fill-country
+-- parent: 20261009T2037-events-by-id
 -- This migration contains an Op step, not only SQL:
 --   a backfill: the Op backfill.ts exports, its effect() batches resumable from their receipts
 
@@ -176,8 +176,8 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:1b18f082bd6328299e7efdf79c2e31be2bdbb1363fad93106b0e6a884cf0cc9f, by yodel at 2026-10-09T20:05:32.684Z
-20261009T2005-fill-country: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:eaf4af6d1b7133e0863c24b0f42df7b08d673aaca833ba6b159f33052ff8a88f, by yodel at 2026-10-09T20:39:20.182Z
+20261009T2039-fill-country: applying
   step 0: backfill backfill.ts
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202603 AND country = ''
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202604 AND country = ''
@@ -186,7 +186,7 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:1b18f082bd6328299e7e
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202607 AND country = ''
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202608 AND country = ''
   step 0: ok {"op":"backfill","file":"backfill.ts","name":"backfill-fill-country","effects":6,"skipped":0,"ran":6}
-20261009T2005-fill-country: applied
+20261009T2039-fill-country: applied
 ...
 ```
 
@@ -218,15 +218,15 @@ With the line (`email text NOT NULL, -- previously: customer_email`), it is a `P
 
 ```console
 $ npx yodel new rename-email
-Wrote migrations/20261009T2004-rename-email/ (0 statements; follows 20261009T2004-validate-amount)
+Wrote migrations/20261009T2038-rename-email/ (0 statements; follows 20261009T2037-validate-amount)
   This migration contains an Op step: PostgresMigrationOp for orders (yodel_18_shop.orders), SQLPG205.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = PostgresMigrationOp({ name: "migrate-yodel-18-shop-orders-email", env: "<env>", table: "yodel_18_shop.orders", column: "email" });
 ```
 
 ```sql
--- yodel migration 20261009T2004-rename-email
--- parent: 20261009T2004-validate-amount
+-- yodel migration 20261009T2038-rename-email
+-- parent: 20261009T2037-validate-amount
 -- This migration contains an Op step, not only SQL:
 --   PostgresMigrationOp for orders (yodel_18_shop.orders), SQLPG205: not SQL; migration.json holds its declaration
 
@@ -241,11 +241,11 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:70d06ec0abe6c155f0b4b03fc96caf13cca350aa8bfabe4c6d0afc8fe5848294, by yodel at 2026-10-09T20:04:38.924Z
-20261009T2004-rename-email: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7dd885c06a5ffdaeb426e45fd6ce5fad997b1f2e59018df13a59c34d60b0b77b, by yodel at 2026-10-09T20:38:19.678Z
+20261009T2038-rename-email: applying
   step 0: PostgresMigrationOp for orders (yodel_18_shop.orders)
-  step 0: ok {"op":"PostgresMigrationOp","table":"yodel_18_shop.orders","column":"email","state":"migrate","change":"rename","filled":1,"skipped":0,"backfilledRows":301,"carried":0,"verifiedRows":301,"switched":true,"oldColumn":"yodel_18_shop.orders.customer_email","retainUntil":"2026-10-09T20:04:43.744Z","dropped":true}
-20261009T2004-rename-email: applied
+  step 0: ok {"op":"PostgresMigrationOp","table":"yodel_18_shop.orders","column":"email","state":"migrate","change":"rename","filled":1,"skipped":0,"backfilledRows":301,"carried":0,"verifiedRows":301,"switched":true,"oldColumn":"yodel_18_shop.orders.customer_email","retainUntil":"2026-10-09T20:38:25.564Z","dropped":true}
+20261009T2038-rename-email: applied
 ...
 ```
 

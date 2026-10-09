@@ -25,17 +25,20 @@
 
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { computeChecksum, type Migration } from "../migrations/index.js";
-import { isApplied, statementDone, type HistoryState, type MigrationRecord } from "../history/index.js";
+import { isApplied, statementDone, type HistoryState, type MigrationRecord, type Repair } from "../history/index.js";
 import { planStep, stepSha } from "../steps/index.js";
 
 export interface AppliedMigration {
   id: string;
   checksum: string;
   appliedBy: string;
+  /** When it was applied; a later repair does not change it. */
   recordedAt: string;
   planDigest: string;
   /** Its position in the chain; `undefined` when the directory no longer has it. */
   index: number | undefined;
+  /** `yodel repair` records since it was applied, oldest first. */
+  repairs?: Repair[] | undefined;
 }
 
 export interface PartWay {
@@ -84,7 +87,8 @@ export interface VersionedStatus {
 export const outOfOrder = (s: VersionedStatus): PendingMigration[] => s.pending.filter((p) => p.outOfOrder);
 export const partWay = (s: VersionedStatus): PendingMigration[] => s.pending.filter((p) => p.partWay !== undefined);
 
-const REPAIR = "if the edit is intended, record it with yodel repair <id> --reason ... (#15)";
+/** How to record an intended edit of migration `id`. */
+const repair = (id: string) => `if the edit is intended, record it with yodel repair ${id} --reason ... <env>`;
 
 function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWay: PartWay; mismatch?: Mismatch } {
   const done: number[] = [];
@@ -99,7 +103,7 @@ function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWa
           kind: "part-way",
           id: m.id,
           statement: i,
-          message: `${m.id} ran part way, and statement ${String(i)}, which succeeded, has changed in its files since; ${REPAIR}`,
+          message: `${m.id} ran part way, and statement ${String(i)}, which succeeded, has changed in its files since; ${repair(m.id)}`,
         };
       }
     } else if (resumeAt === m.document.steps.length) {
@@ -157,25 +161,25 @@ export function compareHistory(ordered: readonly Migration[], state: HistoryStat
     if (!rec || !isApplied(rec)) continue;
     lastApplied = i;
     const actual = computeChecksum(m.files);
-    applied.push({ id: m.id, checksum: rec.checksum, appliedBy: rec.appliedBy, recordedAt: rec.recordedAt, planDigest: rec.planDigest, index: i });
+    applied.push({ id: m.id, checksum: rec.checksum, appliedBy: rec.appliedBy, recordedAt: rec.recordedAt, planDigest: rec.planDigest, index: i, ...(rec.repairs.length > 0 ? { repairs: rec.repairs } : {}) });
     if (rec.checksum !== actual) {
       mismatches.push({
         kind: "applied",
         id: m.id,
         recorded: rec.checksum,
         actual,
-        message: `${m.id} was applied with checksum ${rec.checksum}, but its files now hash to ${actual}; ${REPAIR}`,
+        message: `${m.id} was applied with checksum ${rec.checksum}, but its files now hash to ${actual}; ${repair(m.id)}`,
       });
     }
   }
   const gone = state.migrations.filter((r) => isApplied(r) && !position.has(r.id)).sort((a, b) => (a.appliedSeq ?? 0) - (b.appliedSeq ?? 0));
   for (const r of gone) {
-    applied.push({ id: r.id, checksum: r.checksum, appliedBy: r.appliedBy, recordedAt: r.recordedAt, planDigest: r.planDigest, index: undefined });
+    applied.push({ id: r.id, checksum: r.checksum, appliedBy: r.appliedBy, recordedAt: r.recordedAt, planDigest: r.planDigest, index: undefined, ...(r.repairs.length > 0 ? { repairs: r.repairs } : {}) });
     mismatches.push({
       kind: "missing",
       id: r.id,
       recorded: r.checksum,
-      message: `${r.id} is recorded applied, but the migrations directory no longer has it; restore it, or ${REPAIR}`,
+      message: `${r.id} is recorded applied, but the migrations directory no longer has it; restore it, or ${repair(r.id)}`,
     });
   }
 

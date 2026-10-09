@@ -67,15 +67,28 @@ export interface MigrationRecord {
   checksum: string;
   status: HistoryStatus;
   error: string;
+  /** Who applied it; until it is applied, who wrote its latest migration row. A repair does not change it. */
   appliedBy: string;
   planDigest: string;
+  /** When it was applied (the row that first recorded it succeeded); until then, its latest migration row's time. A repair does not change it. */
   recordedAt: string;
+  /** The repairs recorded since it was applied (`yodel repair`: a later succeeded migration row), oldest first. */
+  repairs: Repair[];
   /** The seq of its latest migration row. */
   seq: number;
   /** The seq of the first row that recorded it `succeeded`; orders applied migrations by when they were applied. */
   appliedSeq: number | undefined;
   /** Each statement's latest row, by index. */
   statements: Map<number, StatementRecord>;
+}
+
+/** A `yodel repair` of an applied migration: the new checksum, who recorded it, when and why. */
+export interface Repair {
+  checksum: string;
+  by: string;
+  at: string;
+  reason: string;
+  seq: number;
 }
 
 export interface HistoryState {
@@ -107,12 +120,20 @@ export function deriveState(rows: readonly HistoryRow[]): HistoryState {
         recordedAt: r.recorded_at ?? "",
         seq: r.seq,
         appliedSeq: undefined,
+        repairs: [],
         statements: new Map(),
       };
       byId.set(r.migration_id, m);
       order.push(m);
     }
-    if (r.kind === "migration") {
+    if (r.kind === "migration" && r.status === "succeeded" && m.status === "succeeded" && m.appliedSeq !== undefined) {
+      // Already applied: a repair. It records a new checksum; the migration was applied when and by whom it was.
+      m.parent = r.parent === "" ? null : r.parent;
+      m.checksum = r.checksum;
+      m.planDigest = r.plan_digest;
+      m.seq = r.seq;
+      m.repairs.push({ checksum: r.checksum, by: r.applied_by, at: r.recorded_at ?? "", reason: r.note, seq: r.seq });
+    } else if (r.kind === "migration") {
       m.parent = r.parent === "" ? null : r.parent;
       m.checksum = r.checksum;
       m.status = r.status;

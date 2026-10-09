@@ -1,11 +1,14 @@
 /** The versioned status as text and as JSON, for `yodel status` and `yodel apply --plan`. */
 
+import type { SqlDialect } from "../project.js";
 import { describeTopology, type HistoryLocation } from "../history/index.js";
 import { describeStep } from "../steps/index.js";
 import { outOfOrder, partWay, type VersionedStatus } from "./state.js";
 
 export interface StatusReport {
   environment: string;
+  /** Postgres has no topology: its report leaves it out. Default ClickHouse. */
+  dialect?: SqlDialect | undefined;
   location: HistoryLocation;
   /** The topology statements are rendered for, and where it came from: `cluster:main (yodel.config.ts)`. Default: the history's. */
   topology?: string | undefined;
@@ -20,9 +23,18 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
   const { status } = r;
   return {
     environment: r.environment,
-    history: { database: r.location.database, topology: describeTopology(r.location.topology) },
-    topology: r.topology ?? describeTopology(r.location.topology),
-    applied: status.applied.map((a) => ({ id: a.id, checksum: a.checksum, appliedBy: a.appliedBy, recordedAt: a.recordedAt, planDigest: a.planDigest, inDirectory: a.index !== undefined })),
+    ...(r.dialect === "postgres"
+      ? { history: { database: r.location.database } }
+      : { history: { database: r.location.database, topology: describeTopology(r.location.topology) }, topology: r.topology ?? describeTopology(r.location.topology) }),
+    applied: status.applied.map((a) => ({
+      id: a.id,
+      checksum: a.checksum,
+      appliedBy: a.appliedBy,
+      recordedAt: a.recordedAt,
+      planDigest: a.planDigest,
+      inDirectory: a.index !== undefined,
+      ...(a.repairs ? { repairs: a.repairs.map((r) => ({ checksum: r.checksum, by: r.by, at: r.at, reason: r.reason })) } : {}),
+    })),
     pending: status.pending.map((p) => ({
       id: p.id,
       checksum: p.checksum,
@@ -41,9 +53,13 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
 
 export function renderStatus(r: StatusReport): string {
   const { status } = r;
-  const lines = [`Migrations in ${r.environment} (history ${r.location.database}.history, topology ${r.topology ?? describeTopology(r.location.topology)})`, ""];
+  const topology = r.dialect === "postgres" ? "" : `, topology ${r.topology ?? describeTopology(r.location.topology)}`;
+  const lines = [`Migrations in ${r.environment} (history ${r.location.database}.history${topology})`, ""];
   lines.push(status.applied.length === 0 ? "Applied: none" : `Applied (${String(status.applied.length)}):`);
-  for (const a of status.applied) lines.push(`  ${a.id}${a.index === undefined ? "  (not in the directory)" : ""}  ${a.recordedAt} by ${a.appliedBy}`);
+  for (const a of status.applied) {
+    lines.push(`  ${a.id}${a.index === undefined ? "  (not in the directory)" : ""}  ${a.recordedAt} by ${a.appliedBy}`);
+    for (const r of a.repairs ?? []) lines.push(`      repaired ${r.at} by ${r.by}: ${r.reason}`);
+  }
   lines.push("", status.pending.length === 0 ? "Pending: none" : `Pending (${String(status.pending.length)}):`);
   for (const p of status.pending) {
     const marks: string[] = [];

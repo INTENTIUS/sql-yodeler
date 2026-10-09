@@ -257,7 +257,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel apply dev --allow-out-of-order", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },
     { run: "npx yodel apply dev --allow-out-of-order", code: 0, expect: ["Applied: "] },
-    { run: "npx yodel status dev", code: 0 },
+    { say: "`yodel status` lists `index-placed-at` as applied when it ran, and the repair under it:" },
+    { run: "npx yodel status dev", code: 0, expect: ["repaired "] },
 
     { say: "## 8. Drift" },
     { say: "Someone changes a default by hand:" },

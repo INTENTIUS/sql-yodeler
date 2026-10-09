@@ -11,6 +11,7 @@
 
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
 import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
+import { asBackfill } from "../steps/kinds.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
 
 /** The marker that identifies one environment's plan comment. */
@@ -109,21 +110,44 @@ function pendingMarkdown(p: PendingView, withSql: boolean): string[] {
     const sql = statements.map(({ index, step }) => (step.kind === "statement" ? `-- ${String(index)}: ${step.rule} ${step.class}, ${step.name}\n${redact(step.sql)};` : "")).join("\n\n");
     out.push("", `<details><summary>Statements (${String(statements.length)})</summary>`, "", fence(sql, "sql"), "", "</details>");
   }
-  const refused = p.steps.filter((s) => s.step.kind !== "statement");
+  const nonStatements = p.steps.filter((s) => s.step.kind !== "statement");
+  const runs = nonStatements.filter((s) => s.refused === undefined && s.step.kind === "op");
+  const refused = nonStatements.filter((s) => !runs.includes(s));
+  if (runs.length > 0) {
+    out.push("", "Op steps:");
+    for (const s of runs) out.push(...opStepMarkdown(s, " yodel apply runs it as this step."));
+  }
   if (refused.length > 0) {
     out.push("", "Refused changes:");
-    for (const { index, step, refused: why } of refused) {
-      const runs = why ? ` **yodel apply refuses it:** ${cell(why)}` : step.kind === "op" ? " yodel apply runs it as this step." : "";
-      if (step.kind === "op") {
-        out.push(`- step ${String(index)}, \`${step.name}\`: made by Op \`${step.op}\` (${cell(changes(step.changes))}).${runs}`);
-        out.push("", `  <details><summary>${cell(step.op)} for ${cell(step.object)}</summary>`, "", indent(fence(step.detail, "text")), "", indent(fence(step.declaration, "ts")), "", "  </details>");
-      } else if (step.kind === "manual") {
+    for (const s of refused) {
+      const { index, step, refused: why } = s;
+      if (step.kind === "op") out.push(...opStepMarkdown(s, why ? ` **yodel apply refuses it:** ${cell(why)}` : ""));
+      else if (step.kind === "manual") {
         out.push(`- step ${String(index)}, \`${step.name}\`: manual, no Op makes it (${cell(changes(step.changes))}).${why ? " yodel apply refuses it." : ""}`);
         out.push("", indent(fence(step.detail, "text")));
       }
     }
   }
   return out;
+}
+
+/** An Op step: what makes it (the changes, or a backfill's module), then its detail and declaration (a backfill's module as written). */
+function opStepMarkdown({ index, step, source }: PendingView["steps"][number], runs: string): string[] {
+  if (step.kind !== "op") return [];
+  const made = step.changes.length > 0 ? changes(step.changes) : (source?.file ?? asBackfill(step)?.options.file ?? "");
+  const what = made ? ` (${cell(made)})` : "";
+  const declaration = source ? fence(redact(source.text).replace(/\n+$/, ""), "ts") : fence(step.declaration, "ts");
+  return [
+    `- step ${String(index)}, \`${step.name}\`: made by Op \`${step.op}\`${what}.${runs}`,
+    "",
+    `  <details><summary>${source ? `${cell(step.op)}: ${cell(source.file)}` : `${cell(step.op)} for ${cell(step.object)}`}</summary>`,
+    "",
+    indent(fence(step.detail, "text")),
+    "",
+    indent(declaration),
+    "",
+    "  </details>",
+  ];
 }
 
 const indent = (s: string) => s.split("\n").map((l) => (l ? `  ${l}` : l)).join("\n");

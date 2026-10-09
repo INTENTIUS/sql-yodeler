@@ -50,6 +50,7 @@ export async function statusReport(venv: VersionedEnv, ordered: readonly Migrati
   const digest = !refusal && status.pending.length > 0 ? await currentDigest(venv, status, status.pending) : undefined;
   return {
     environment: venv.environment,
+    dialect: venv.dialect,
     location: venv.location,
     topology: venv.topology ? describeSettingsTopology({ topology: venv.topology, topologySource: venv.topologySource ?? "default" }) : undefined,
     status,

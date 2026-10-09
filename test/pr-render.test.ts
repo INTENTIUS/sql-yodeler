@@ -80,6 +80,23 @@ describe("the plan comment's markdown", () => {
     expect(md).toContain("a view's query changes; drop and create it by hand");
   });
 
+  it("lists the Op steps apply runs under Op steps, and only the steps it refuses under Refused changes", () => {
+    const md = renderPlanMarkdown(clickhousePlan());
+    const ops = md.indexOf("\nOp steps:\n");
+    const refused = md.indexOf("\nRefused changes:\n");
+    expect(ops).toBeGreaterThan(-1);
+    expect(refused).toBeGreaterThan(ops);
+    expect(md.indexOf("step 2, `yodel_16.events`: made by Op `ClickHouseRebuildOp`")).toBeGreaterThan(ops);
+    expect(md.indexOf("step 2, `yodel_16.events`: made by Op `ClickHouseRebuildOp`")).toBeLessThan(refused);
+    expect(md.indexOf("step 3, `yodel_16.v`: manual")).toBeGreaterThan(refused);
+
+    const onlyRefused = renderPlanMarkdown(
+      clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step: rebuild, done: false, refused: "a ClickHouseRebuildOp step in app mode" }] }] }),
+    );
+    expect(onlyRefused).not.toContain("Op steps:");
+    expect(onlyRefused).toContain("Refused changes:\n- step 0, `yodel_16.events`: made by Op `ClickHouseRebuildOp` (SQLCH220 rebuild orderBy). **yodel apply refuses it:** a ClickHouseRebuildOp step in app mode");
+  });
+
   it("lists integrity problems and apply's refusal", () => {
     const md = renderPlanMarkdown(clickhousePlan({ digest: undefined, refusal: { exitCode: 4, message: "refused: the history does not match" } }));
     expect(md).toContain("#### Integrity problems (1)");

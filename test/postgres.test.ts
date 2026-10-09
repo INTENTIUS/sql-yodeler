@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
@@ -6,7 +9,10 @@ import { acquireAdvisoryLock, insertRows, LOCK_CLASS, lockKeys, pgHistoryDdl, Po
 import { concurrentIndex, DEFAULT_PG_TIMEOUTS, PgStatementError, pgCatalogFingerprint, pgSettings, runPgStatement, type PgStatementOptions } from "../src/versioned/postgres/index.js";
 import { classifySteps, closeVersioned, currentDigest, executeApply, inspect, openVersioned, selectToApply, statusReport, type VersionedEnv } from "../src/versioned/index.js";
 import { projectFromConfig } from "../src/project.js";
-import type { Migration } from "../src/migrations/index.js";
+import { writeMigration, type Migration } from "../src/migrations/index.js";
+import { renderStatus, statusJson } from "../src/versioned/report.js";
+import { collectVersionedPlan } from "../src/pr/model.js";
+import { renderPlanMarkdown, renderPlanText } from "../src/pr/render.js";
 import { pgMigrationOpConfig, planStep, runPgMigration, STEP_RETAIN } from "../src/steps/index.js";
 import { FakePgServer } from "./helpers/fake-postgres.js";
 import { migration } from "./helpers/fake-clickhouse.js";
@@ -327,8 +333,32 @@ describe("executeApply on Postgres", () => {
     expect(server.sent.at(-1)).toBe("CREATE TABLE yodel_13.b (id bigint)");
     const report = await statusReport(venv, [m1]);
     expect(report.status.applied.map((a) => a.id)).toEqual([m1.id]);
+    // Topology is ClickHouse's: a Postgres report leaves it out.
+    expect(renderStatus(report).split("\n")[0]).toBe(`Migrations in e2e (history ${SCHEMA}.history)`);
+    expect(renderStatus(report)).not.toContain("topology");
+    expect(statusJson(report)).not.toHaveProperty("topology");
+    expect(statusJson(report).history).toEqual({ database: SCHEMA });
     await closeVersioned(venv);
     expect(server.connections.every((c) => c.ended)).toBe(true);
+  });
+
+  it("plans with no topology: Postgres has none", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-pg-plan-"));
+    try {
+      writeMigration(join(dir, "migrations"), m1);
+      const project = projectFromConfig(dir, join(dir, "chant.config.ts"), { lexicons: ["sql"], sql: { dialect: "postgres", profiles: { e2e: { url: "postgres://pg:5432/db", schemas: ["yodel_13"] } } } });
+      const server = new FakePgServer();
+      const venv = await openVersioned(project, { name: "e2e", profile: { url: "postgres://pg:5432/db" } }, { YODEL_HISTORY_DATABASE: SCHEMA }, undefined, () => server.connect());
+      venv.driver.liveFingerprint = () => Promise.resolve("sha256:fake");
+      const op = { name: "migrate-e2e", filePath: "/p/ops/migrate-e2e.op.ts", gate: "approve-migrate-e2e", quorum: false };
+      const plan = await collectVersionedPlan(project, { name: "e2e", profile: { url: "postgres://pg:5432/db" } }, { venv, op, ledger: null });
+      expect(plan.history).toBe(`${SCHEMA}.history`);
+      expect(renderPlanText(plan).split("\n")[0]).toBe(`Plan for e2e (postgres, history ${SCHEMA}.history): 0 applied, 1 pending`);
+      expect(renderPlanMarkdown(plan)).toContain(`Postgres, history \`${SCHEMA}.history\`: 0 applied`);
+      await closeVersioned(venv);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("refuses with exit 5 while another session holds the lock", async () => {
