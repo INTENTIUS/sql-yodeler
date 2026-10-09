@@ -249,8 +249,10 @@ export async function executeApply(venv: VersionedEnv, ordered: readonly Migrati
     const toApply = selectToApply(status, options.allowOutOfOrder);
     const digest = await currentDigest(venv, status, toApply);
     if (!(await sameDigest(digest, options.approvedDigest))) {
+      const { describeMove, explainAgainst } = await import("./explain.js");
+      const moved = await explainAgainst(venv, ordered, { approvedDigest: options.approvedDigest });
       throw new YodelError(
-        `refused: the plan moved since it was approved (approved ${options.approvedDigest}, now ${digest}): the pending migrations, the history or the live schema changed. ` +
+        `refused: the plan moved since it was approved (approved ${options.approvedDigest}, now ${digest}): ${describeMove(moved)}. ` +
           `Nothing was applied; run yodel apply ${venv.environment} again and approve the new plan.`,
         1,
       );

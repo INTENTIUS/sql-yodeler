@@ -5,7 +5,8 @@ import { loadProject, resolveEnvironment, YodelError, type Environment, type Pro
 import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
-import { readMigrations } from "../migrations/index.js";
+import { readMigrations, type Migration } from "../migrations/index.js";
+import { describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -23,7 +24,24 @@ import {
   selectToApply,
   statusJson,
   statusReport,
+  type MigrateOpRef,
+  type VersionedEnv,
 } from "../versioned/index.js";
+
+/** When the gate's newest approval is for another digest: what moved since, in one line. */
+async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered: readonly Migration[], op: MigrateOpRef, digest: string | undefined) {
+  try {
+    const latest = await latestApproval(await gitLedger(project.dir), op, digest);
+    if (!latest?.digest || latest.holds) return undefined;
+    const moved = await explainAgainst(venv, ordered, { approvedDigest: latest.digest, approvedAt: latest.at });
+    return {
+      moved: { approved: latest.digest, by: latest.by, at: latest.at, confirmed: moved.confirmed, changes: moved.changes },
+      line: `Nothing was applied. The approval of ${latest.digest} (by ${latest.by} at ${latest.at}) does not hold: the plan moved since. ${moved.confirmed ? "What moved" : "What moved, as far as yodel can tell"}: ${describeMove(moved)}.`,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 const usage = "usage: yodel apply <env> [--json] [--dir <project>] [--op <name>] [--allow-out-of-order] [--plan]";
 
@@ -205,11 +223,13 @@ async function versionedApply(project: Project, env: Environment, a: ApplyArgs, 
   if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
   const run = await runMigrateOp(project, op, { allowOutOfOrder: a.allowOutOfOrder, onOutput: (t) => { io.err(t); } });
   if (run.status === "gated") {
+    const stale = await movedSinceApproval(project, venv, ordered, op, run.planDigest ?? report.digest);
+    if (stale && !a.json) io.out(`\n${stale.line}\n`);
     if (!a.json) {
       io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
       if (run.approve) io.out(`Approve it with:\n  ${run.approve}\nthen run yodel apply ${env.name} again.\n`);
     }
-    return emit({ status: "gated", op: op.name, gate: op.gate, ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, GATED);
+    return emit({ status: "gated", op: op.name, gate: op.gate, ...(stale ? { moved: stale.moved } : {}), ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, GATED);
   }
 
   const after = await statusReport(venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
