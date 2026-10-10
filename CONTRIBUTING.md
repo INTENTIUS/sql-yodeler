@@ -1,4 +1,4 @@
-# Contributing to SQL Yodeler
+# <img src="docs-site/public/brand/hat-small.png" width="18" height="16" alt=""> Contributing to SQL Yodeler
 
 This page is for working on SQL Yodeler itself. To use it, start with [Your first migration](docs/getting-started.md). The rules for commits, pull requests and releases are in [AGENTS.md](AGENTS.md); they apply to people and coding agents alike.
 
@@ -77,6 +77,8 @@ cd docs-site && npm ci && npm run build
 ```
 
 The build fails on an internal link that leads nowhere.
+
+The logo is a 78x72 pixel-art cowboy hat with a database on its front. `docs-site/public/brand/hat-source.png` is the art, one pixel per art pixel, and `python3 scripts/brand.py` (Pillow and NumPy) draws everything else from it: `brand/hat.svg` with one square per art pixel (copied to `docs-site/src/assets/brand/hat.svg` for Starlight's header logo), `brand/hat-small.png` (the 18x16 mark at twice that size, for inline use), `brand/hat-160.png` for the README, the favicons, `hat-share.png` (the square image a shared link shows), `social-preview.png`, the database icon `brand/database.svg` and its one-colour `brand/database-mono.svg` (the site's list bullets), and `src/brand.ts`, which inlines the hat in the pages `yodel report --html` and `yodel docs` write. Show the hat at a whole multiple of 78x72 (the `Hat` component's `scale`) so every pixel stays square. `social-preview.png` is the image for the repository's social preview in GitHub's settings. After changing `src/brand.ts`, run `yodel docs` in each example to rewrite its `schema-docs/`.
 
 ## Scenario claims
 

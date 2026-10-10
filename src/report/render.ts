@@ -5,6 +5,7 @@
  * dev to prod reads left to right. Then the gaps and the audit log.
  */
 
+import { HAT_CSS, HAT_ICON, HAT_IMG } from "../brand.js";
 import type { AuditEntry } from "./audit.js";
 import type { EnvironmentMigration, Report } from "./model.js";
 
@@ -83,6 +84,7 @@ export function renderReportHtml(r: Report): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Migrations report</title>
+${HAT_ICON}
 <style>
 :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --applied: #e3f4e8; --pending: #fff6db; --failed: #fde4e1; --started: #fde4e1; }
 @media (prefers-color-scheme: dark) { :root { --bg: #161618; --fg: #ececf0; --muted: #a1a1a6; --line: #3a3a3c; --applied: #1f3a29; --pending: #3d3317; --failed: #4a2420; --started: #4a2420; } }
@@ -96,11 +98,12 @@ th, td { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: lef
 td.applied { background: var(--applied); } td.pending { background: var(--pending); } td.failed, td.started { background: var(--failed); }
 code { font: 12px ui-monospace, monospace; }
 .gaps li { color: #c0392b; } .ok { color: var(--muted); }
+${HAT_CSS}
 </style>
 </head>
 <body>
 <main>
-<h1>Migrations report</h1>
+<h1 class="brand">${HAT_IMG}Migrations report</h1>
 <p class="meta">${esc(r.project)} (${esc(r.dialect)}), generated ${esc(r.generatedAt)}. One row per migration, one column per environment.</p>
 ${notes.length > 0 ? `<ul>${notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
 <div class="scroll"><table>

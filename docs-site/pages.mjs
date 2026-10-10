@@ -6,7 +6,8 @@
 // links into the rest of the repository (examples, source files) become their
 // plain text. The landing page is the
 // README's intro over docs/README.md, and the sidebar follows the order of
-// docs/README.md's table, then any page the table does not list.
+// docs/README.md's table, then any page the table does not list. The 404
+// page is written here too, with the hat.
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -107,6 +108,24 @@ function claimsSections(front, rows) {
 	return { top, bottom };
 }
 
+/** The hat's art at a whole multiple of its 78x72, so every art pixel stays square (components/Hat.astro does the same). */
+const hatImg = (n) => `<img class="sy-hero-hat" src="${base}/brand/hat.svg" width="${78 * n}" height="${72 * n}" alt="">`;
+
+/** The 404 page: the hat, the news, and the way back. */
+const notFound = `---
+title: "Page not found"
+description: "This address has no page on the SQL Yodeler site."
+template: splash
+editUrl: false
+pagefind: false
+hero:
+  title: "Page not found"
+  tagline: ${JSON.stringify(`This address has no page. Start again from <a href="${base}/">the home page</a>, or find the page in <a href="${base}/llms.txt">llms.txt</a>, which lists every page.`)}
+  image:
+    html: ${JSON.stringify(hatImg(2))}
+---
+`;
+
 const frontmatter = (fields) => `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}\n---\n\n`;
 
 /** The README's first paragraph, without the sentences that point into the repository's design and research notes. */
@@ -178,6 +197,8 @@ description: "What SQL Yodeler is, the docs pages, and the yodel commands with t
 template: splash
 hero:
   tagline: ${JSON.stringify(tagline())}
+  image:
+    html: ${JSON.stringify(hatImg(3))}
   actions:
     - text: ${JSON.stringify(first.label)}
       link: ${JSON.stringify(`${base}/${first.slug}/`)}
@@ -190,6 +211,7 @@ hero:
 
 `;
 	writeFileSync(`${outDir}index.md`, head + rewriteLinks(index.body, slugs));
+	writeFileSync(`${outDir}404.md`, notFound);
 	writeSchemaReferences();
 }
 

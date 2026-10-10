@@ -1,3 +1,5 @@
+<p align="center"><img src="docs-site/public/brand/hat-160.png" width="160" height="148" alt="SQL Yodeler's logo, a pixel-art cowboy hat with a database on it"></p>
+
 # SQL Yodeler
 
 Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.

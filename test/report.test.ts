@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, describe, expect, it } from "vitest";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
+import { HAT_ICON, HAT_IMG } from "../src/brand.js";
 import { reportJson } from "../src/commands/report.js";
 import type { HistoryRow } from "../src/history/index.js";
 import type { Migration } from "../src/migrations/index.js";
@@ -239,7 +240,9 @@ describe("the report across environments", async () => {
     expect(text).toContain("prod: the history could not be read");
     const html = renderReportHtml({ ...r, project: "<script>" });
     expect(html).toMatch(/^<!doctype html>/);
-    expect(html).not.toMatch(/<script|src=|href=/);
+    // The hat is the one image and the icon, inline as data: URIs; nothing else loads.
+    expect(html).toContain(`<h1 class="brand">${HAT_IMG}Migrations report</h1>`);
+    expect(html.replace(HAT_ICON, "").replace(HAT_IMG, "")).not.toMatch(/<script|src=|href=/);
     expect(html).toContain("&lt;script&gt;");
   });
 
