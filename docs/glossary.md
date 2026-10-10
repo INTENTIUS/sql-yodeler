@@ -4,7 +4,7 @@ SQL Yodeler is built on chant. These are the chant terms the docs and yodel's ou
 
 | Term | What it is in SQL Yodeler |
 |---|---|
-| chant | the toolkit yodel is built on. Its CLI is the npm package `@intentius/chant`: `npx @intentius/chant` before a project exists, `npx chant` inside one (plain `npx chant` outside a project runs an unrelated package). |
+| chant | the toolkit yodel is built on. Its CLI is the npm package `@intentius/chant`: `npx @intentius/chant@latest` before a project exists, `npx chant` inside one (plain `npx chant` outside a project runs an unrelated package). |
 | `chant init --from` | makes a new project from one of SQL Yodeler's templates. See [Starting a project](adoption.md). |
 | the `sql` lexicon | chant's package for ClickHouse and Postgres (`@intentius/chant-lexicon-sql`). The declarations in `src/` use it, and yodel uses it to plan, diff and apply. |
 | `chant.config.ts` | the project's config: the dialect and one profile per environment. |

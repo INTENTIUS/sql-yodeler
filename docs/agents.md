@@ -29,8 +29,8 @@ A task page's own prompt sits under its title as "Optional: hand this page to yo
 3. Make the project from the template, with chant's CLI from npm (plain `npx chant` outside a project is an unrelated package). `--force` lets it write into a directory that is not empty; check `git status` afterwards.
 
    ```sh
-   npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=<package name> --param database=<database> --force .
-   npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=<package name> --param schema=<schema> --force .
+   npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=<package name> --param database=<database> --force .
+   npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=<package name> --param schema=<schema> --force .
    npm install
    ```
 
