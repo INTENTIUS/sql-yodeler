@@ -5,6 +5,7 @@ import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { hasMigrations, readChain } from "../versioned/index.js";
+import { expandTargets } from "../tenants/index.js";
 import type { AuditEntry } from "../report/audit.js";
 import { appendAudit, compareAudit, describeEntry, readAuditFile } from "../report/jsonl.js";
 import { collectReport, type Report } from "../report/model.js";
@@ -18,7 +19,8 @@ const usage = "usage: yodel report [<env>...] [--json] [--html <file>] [--audit 
 const help = `${usage}
 
 Every environment's migrations side by side (default: every environment in
-chant.config.ts's sql.profiles, in that order), and the audit log derived
+chant.config.ts's sql.profiles, in that order; an environment with a tenant
+set, yodel.config.ts environments.<env>.tenants, is one column per tenant), and the audit log derived
 from each environment's history table and chant's gate ledger (the
 chant/lifecycle branch): approval requested, approved, override, silenced,
 applied, refused, failed, repaired, reverted. Nothing in the log is written
@@ -103,7 +105,8 @@ export const report: Command = {
       const a = parseReportArgs(args);
       const project = await loadProject(a.dir);
       if (!hasMigrations(project)) throw new YodelError(`yodel report reads versioned migrations' history, and ${project.dir} has no migrations/ directory with a migration`);
-      const names = a.envs.length > 0 ? a.envs : Object.keys(project.config.sql?.profiles ?? {});
+      // An environment with a tenant set is a column per tenant (#56).
+      const names = await expandTargets(project, a.envs.length > 0 ? a.envs : Object.keys(project.config.sql?.profiles ?? {}));
       for (const n of names) resolveEnvironment(project, n);
       const r = await collectReport(project, readChain(project), names);
 

@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import type { SqlConfig, SqlProfile } from "@intentius/chant-lexicon-sql/config";
 import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
 import type { YodelConfig } from "./config/define.js";
+import { splitTarget, TENANT_NAME } from "./tenants/target.js";
 
 export type { SqlDialect, SqlProfile };
 
@@ -49,8 +50,19 @@ export interface Project {
 
 export interface Environment {
   name: string;
-  /** `sql.profiles.<name>`. */
+  /** `sql.profiles.<name>`; a tenant's is its environment's, on the tenant's database or schema. */
   profile: SqlProfile;
+  /** A tenant of a tenant set (#56): `name` is `<env>/<tenant>`. */
+  tenant?: TenantOf;
+}
+
+/** Which tenant an {@link Environment} is. */
+export interface TenantOf {
+  /** The environment whose tenant set names it. */
+  env: string;
+  name: string;
+  /** The database (ClickHouse) or schema (Postgres) the environment's profile names, which the migrations are written against. */
+  template: string;
 }
 
 /** The nearest directory at or above `start` that holds `chant.config.ts`. */
@@ -109,8 +121,17 @@ export async function loadProject(start: string = process.cwd()): Promise<Projec
   return projectFromConfig(dir, loaded.configPath ?? join(dir, "chant.config.ts"), config, yodel);
 }
 
-/** `sql.profiles.<name>`, or an error naming the environments the project declares. */
+/**
+ * `sql.profiles.<name>`, or an error naming the environments the project
+ * declares. A tenant, `<env>/<tenant>`, is `<env>`'s profile on the
+ * tenant's database or schema; it is added to the loaded config's
+ * `sql.profiles` under its own name, so chant binds it like any profile.
+ * Whether a tenant set given by a file or a query names it is checked when
+ * its server is opened (`openVersioned`).
+ */
 export function resolveEnvironment(project: Project, name: string): Environment {
+  const { env: base, tenant } = splitTarget(name);
+  if (tenant !== undefined) return resolveTenant(project, base, tenant);
   const profiles = project.config.sql?.profiles ?? {};
   const profile = profiles[name];
   if (!profile) {
@@ -127,4 +148,25 @@ export function resolveEnvironment(project: Project, name: string): Environment 
     );
   }
   return { name, profile };
+}
+
+function resolveTenant(project: Project, base: string, tenant: string): Environment {
+  const env = resolveEnvironment(project, base);
+  const set = project.yodel?.config.environments?.[base]?.tenants;
+  if (!set) throw new YodelError(`no environment "${base}/${tenant}": ${base} has no tenant set (yodel.config.ts environments.${base}.tenants)`);
+  if (!TENANT_NAME.test(tenant)) throw new YodelError(`"${tenant}" is not a tenant name (letters, digits and _, not starting with a digit)`);
+  if (Array.isArray(set) && !set.includes(tenant)) throw new YodelError(`no tenant "${tenant}" in ${base}'s tenant set (${set.join(", ")})`);
+  const key = project.dialect === "postgres" ? "schemas" : "databases";
+  const named = (env.profile as unknown as Record<string, unknown>)[key];
+  const template = Array.isArray(named) && named.length === 1 && typeof named[0] === "string" ? named[0] : undefined;
+  if (!template) {
+    throw new YodelError(
+      `${base} has a tenant set, so sql.profiles.${base}.${key} must name exactly one ${project.dialect === "postgres" ? "schema" : "database"}: the template its tenants are made from, which the migrations are written against`,
+    );
+  }
+  const name = `${base}/${tenant}`;
+  const profile: SqlProfile = { ...env.profile, [key]: [tenant] };
+  const sql = (project.config.sql ??= {} as SqlConfig);
+  sql.profiles = { ...(sql.profiles ?? {}), [name]: profile };
+  return { name, profile, tenant: { env: base, name: tenant, template } };
 }

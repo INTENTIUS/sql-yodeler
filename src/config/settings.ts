@@ -10,6 +10,9 @@
  * | lock wait        | `environments.<env>.lockWait` (seconds)|                                   | `YODEL_LOCK_WAIT`       | 0        |
  *
  * `yodel apply --lock-wait <duration>` sets the lock wait over all three.
+ *
+ * A tenant (`<env>/<tenant>`, #56) has its environment's settings, its
+ * history database suffixed with `_<tenant>`.
  */
 
 import { toTopology, topologyLabel, type Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
@@ -18,6 +21,7 @@ import { DEFAULT_LOCK_TTL_MS } from "../history/lock.js";
 import type { HistoryTopology } from "../history/topology.js";
 import { YodelError, type Project } from "../project.js";
 import { CONFIG_FILE } from "./load.js";
+import { splitTarget } from "../tenants/target.js";
 
 export interface EnvironmentSettings {
   /** What every statement is rendered for when it is sent. */
@@ -69,7 +73,9 @@ export function historyTopologyOf(t: Topology): HistoryTopology {
 }
 
 /** The settings of environment `name`; see the module comment for the order. */
-export function environmentSettings(project: Pick<Project, "config" | "yodel">, name: string, env: NodeJS.ProcessEnv = process.env): EnvironmentSettings {
+export function environmentSettings(project: Pick<Project, "config" | "yodel">, target: string, env: NodeJS.ProcessEnv = process.env): EnvironmentSettings {
+  // A tenant, <env>/<tenant>, has its environment's settings, and a history of its own (#56).
+  const { env: name, tenant } = splitTarget(target);
   const own = project.yodel?.config.environments?.[name];
   const profile = project.config.sql?.profiles?.[name] as { topology?: string | Topology } | undefined;
 
@@ -105,7 +111,7 @@ export function environmentSettings(project: Pick<Project, "config" | "yodel">, 
     topology,
     topologySource,
     historyTopology: historyTopologyOf(topology),
-    historyDatabase: own?.history?.database ?? (env.YODEL_HISTORY_DATABASE || DEFAULT_HISTORY_DATABASE),
+    historyDatabase: `${own?.history?.database ?? (env.YODEL_HISTORY_DATABASE || DEFAULT_HISTORY_DATABASE)}${tenant !== undefined ? `_${tenant}` : ""}`,
     lockTtlMs,
     lockWaitMs,
   };

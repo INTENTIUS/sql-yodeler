@@ -74,6 +74,10 @@ export const approve: Command = {
       const allowOutOfOrder = values["allow-out-of-order"] === true || process.env[ALLOW_OUT_OF_ORDER_ENV] === "1";
       const project = await loadProject(typeof values.dir === "string" ? values.dir : process.cwd());
       const env = resolveEnvironment(project, name);
+      const set = env.tenant?.env ?? (project.yodel?.config.environments?.[env.name]?.tenants ? env.name : undefined);
+      if (set !== undefined) {
+        throw new YodelError(`${set} is a tenant set: its wave is approved once for every tenant, with the chant approve command its deciding job printed (yodel apply <tenant> --wave-plan prints it too); nothing was approved`);
+      }
       // Asked before anything is read: no terminal is no one to ask, whatever the plan.
       const ask = io.ask;
       if (!ask) {

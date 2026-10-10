@@ -2,10 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://intentius.io/sql-yodeler/schemas/v1/status.schema.json",
   "title": "yodel status <env> --json",
-  "description": "Version 1. The environment's migrations against its history. Within a version, fields are only added; a reader ignores fields it does not know. yodel apply --json carries the same fields (apply.schema.json).",
+  "description": "Version 1. The environment's migrations against its history; for an environment with a tenant set (yodel.config.ts environments.<env>.tenants), each tenant's, against its own history. Within a version, fields are only added; a reader ignores fields it does not know. yodel apply --json carries the same fields (apply.schema.json).",
   "type": "object",
-  "$ref": "#/$defs/report",
-  "unevaluatedProperties": false,
+  "oneOf": [
+    {
+      "type": "object",
+      "$ref": "#/$defs/report",
+      "unevaluatedProperties": false
+    },
+    {
+      "$ref": "#/$defs/tenants"
+    }
+  ],
   "$defs": {
     "step": {
       "type": "object",
@@ -324,6 +332,38 @@
         },
         "refusal": {
           "$ref": "common.schema.json#/$defs/refusal"
+        }
+      }
+    },
+    "tenants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "tenants",
+        "upToDate",
+        "total"
+      ],
+      "description": "A tenant set: each tenant's status, named <env>/<tenant>, and how many are up to date.",
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "tenants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/report",
+            "unevaluatedProperties": false
+          }
+        },
+        "upToDate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

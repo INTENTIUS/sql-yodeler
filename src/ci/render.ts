@@ -538,6 +538,13 @@ export interface Wave {
    * wave before): this wave's jobs, and its plan job, read it with its reader.
    */
   requires?: string;
+  /**
+   * A tenant set's wave (#56): a run per tenant, `<env>/<tenant>`, in place
+   * of the environment's one, all behind the wave's one gate.
+   */
+  targets?: readonly string[];
+  /** Split the wave into a deciding job and this many share jobs (yodel.config.ts `waves[].shares`). */
+  shares?: number;
 }
 
 /** The environment `env`'s wave requires, as a list. */
@@ -560,6 +567,7 @@ interface WavesSpec {
     name: string;
     runs: Array<{ target: string; op: string }>;
     gate: WaveGate;
+    shares?: number;
     environment?: { name: string };
     variables?: Record<string, string>;
   }>;
@@ -580,8 +588,9 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
     branches: [MAIN],
     waves: waves.map((w) => ({
       name: w.env,
-      runs: [{ target: w.env, op: `migrate-${w.env}` }],
+      runs: (w.targets ?? [w.env]).map((target) => ({ target, op: `migrate-${w.env}` })),
       gate: w.gate,
+      ...(w.shares !== undefined && w.shares > 1 ? { shares: w.shares } : {}),
       ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
     })),
   };
@@ -655,7 +664,8 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
  * chant's emitter fails here instead of rendering something else.
  */
 function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc: Toolchain): string {
-  const envOf = (job: string) => waves.find((w, i) => job === `wave-${String(i + 1)}-${w.env}`)?.env;
+  // A wide wave's jobs are wave-<k>-<env>-decide and -share-<i>.
+  const envOf = (job: string) => waves.find((w, i) => new RegExp(`^wave-${String(i + 1)}-${w.env.replace(/[^A-Za-z0-9]/g, "\\$&")}(-decide|-share-\\d+)?$`).test(job))?.env;
   const body = yaml.search(/^[^#\n]/m);
   const header = yaml.slice(0, body);
   const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
@@ -691,15 +701,37 @@ export async function readWaves(dir: string, envs: readonly string[]): Promise<W
   const declared = (await readConfig(dir))?.waves as unknown;
   if (declared === undefined) return envs.map((env, i) => ({ env, gate: "always", ...(i > 0 ? { requires: envs[i - 1] } : {}) }));
   if (!Array.isArray(declared) || declared.length === 0) throw new Error("yodel.config.ts: waves must list at least one { env, gate }");
-  return declared.map((w: { env?: unknown; gate?: unknown; requires?: unknown }, i, all: Array<{ env?: unknown }>) => {
+  return declared.map((w: { env?: unknown; gate?: unknown; requires?: unknown; shares?: unknown }, i, all: Array<{ env?: unknown }>) => {
     const env = String(w.env);
     if (!envs.includes(env)) throw new Error(`yodel.config.ts: waves[${String(i)}].env ${env} is not an environment (${envs.join(", ")})`);
     const gate = (w.gate ?? "always") as WaveGate;
     if (!WAVE_GATES.includes(gate)) throw new Error(`yodel.config.ts: waves[${String(i)}].gate ${String(w.gate)} is not ${WAVE_GATES.join(", ")}`);
     const requires = w.requires === false ? undefined : w.requires === undefined ? (i > 0 ? String(all[i - 1]?.env) : undefined) : typeof w.requires === "string" ? w.requires : JSON.stringify(w.requires);
     if (requires !== undefined && !envs.includes(requires)) throw new Error(`yodel.config.ts: waves[${String(i)}].requires ${requires} is not an environment (${envs.join(", ")})`);
-    return { env, gate, ...(requires ? { requires } : {}) };
+    return { env, gate, ...(requires ? { requires } : {}), ...(typeof w.shares === "number" && w.shares > 1 ? { shares: w.shares } : {}) };
   });
+}
+
+/**
+ * Each wave of an environment with a tenant set (#56), with a run per
+ * tenant. A set given by a query is read from the server now, with the
+ * environment's profile: run yodel ci again when the tenants change.
+ */
+export async function withTenants(dir: string, waves: readonly Wave[]): Promise<Wave[]> {
+  const { loadProject } = await import("../project.js");
+  const { listTenants, tenantTarget } = await import("../tenants/index.js");
+  const project = await loadProject(dir);
+  const out: Wave[] = [];
+  for (const w of waves) {
+    const tenants = await listTenants(project, w.env);
+    if (tenants === undefined) {
+      out.push(w);
+      continue;
+    }
+    if (tenants.length === 0) throw new Error(`${w.env}'s tenant set lists no tenant, so its wave would apply nothing`);
+    out.push({ ...w, targets: tenants.map((t) => tenantTarget(w.env, t)) });
+  }
+  return out;
 }
 
 // ── The drift watch, through chant's generateOpsPipeline ────────────────────
@@ -783,7 +815,7 @@ export async function environments(dir: string): Promise<Environments> {
     dialect,
     names: envs,
     replay,
-    waves: await readWaves(dir, envs),
+    waves: await withTenants(dir, await readWaves(dir, envs)),
     forges: ci?.forges ?? FORGES,
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
     ...(ci?.image ? { image: ci.image } : {}),

@@ -152,6 +152,30 @@ The requirement is read from the working tree's `yodel.config.ts` and from the b
 
 `yodel plan <env>` and the pull request comment list, for each pending migration, whether the required environment has run it. The templates give each plan job and each wave job the required environment's reader for that.
 
+### Tenant sets: one wave over many databases or schemas
+
+A product with a database or schema per tenant applies the same migrations to every one of them. `environments.<env>.tenants` in `yodel.config.ts` makes the environment a tenant set:
+
+```ts
+environments: {
+  prod: { tenants: ["acme", "globex", "initech"] },
+  // or { file: "tenants.txt" }, one name per line or a JSON array,
+  // or { query: "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'tenant_%'" }
+},
+waves: [
+  { env: "staging", gate: "on-destructive" },
+  { env: "prod", gate: "always", shares: 4 },
+],
+```
+
+The profile in `chant.config.ts` names one database (ClickHouse `databases`) or schema (Postgres `schemas`): the template the declared schema and the migrations are written against. A tenant is named `<env>/<tenant>`, as in `yodel apply prod/acme`, and is the environment's profile on the tenant's database or schema. Each statement and each pre-migration check is sent with the template's name replaced by the tenant's, wherever it stands alone as an identifier, quoted or not; an Op step (a rebuild, a backfill) does not run on a tenant. Each tenant keeps its own history, `<history database>_<tenant>`, and its own lock. `yodel apply prod` without a tenant refuses, and so does `yodel approve prod`.
+
+`yodel ci` renders the tenant set's wave with a run per tenant (a query is run then, with the environment's profile; render again when the tenants change). The wave plans every tenant and gates once, on one approval of the set digest over every tenant's plan, which the deciding job prints. With `shares`, the wave is a deciding job and that many share jobs, each applying a slice of the tenants, sorted by name. A share job plans its slice again, and a tenant whose plan moved since the decision (someone changed its schema, or a migration landed) is not applied: the job names it and exits 4, and applies the rest. Run the wave again to decide over the plan as it is now.
+
+A tenant requires what its environment requires: the same tenant when the environment before is a tenant set too, else that environment.
+
+`yodel status prod` lists every tenant against its own history, then how many are up to date (exit 3 while any is behind), and `yodel report prod` shows a column per tenant.
+
 ## The pull request comment
 
 `yodel plan <env> --comment` posts the plan as one comment per environment on the pull (merge) request, and updates that comment on the next push rather than adding another. `--format markdown` prints the same Markdown without posting. From the ClickHouse example, for its rebuild:

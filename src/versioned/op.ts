@@ -120,7 +120,9 @@ export function selectMigrateOp(
   return { name: op.config.name, filePath: op.filePath, gate: op.parts.gate, quorum: op.parts.quorum };
 }
 
-export async function findMigrateOp(project: Project, env: Environment, name?: string): Promise<MigrateOpRef> {
+export async function findMigrateOp(project: Project, target: Environment, name?: string): Promise<MigrateOpRef> {
+  // A tenant (#56) is applied by its environment's Op.
+  const env: Environment = target.tenant ? { name: target.tenant.env, profile: target.profile } : target;
   const { discoverOps } = await import("@intentius/chant/op/discover");
   let found: Awaited<ReturnType<typeof discoverOps>>;
   try {

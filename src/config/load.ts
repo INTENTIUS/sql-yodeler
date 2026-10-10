@@ -11,6 +11,7 @@ import { YodelError } from "../project.js";
 import { CI_FORGES, WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
+import { TENANT_NAME } from "../tenants/target.js";
 
 export const CONFIG_FILE = "yodel.config.ts";
 
@@ -42,8 +43,9 @@ function checkTopology(value: unknown, where: string): void {
 function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
   if (!isRecord(value)) throw new YodelError(`${where}: expected an object`);
   for (const k of Object.keys(value)) {
-    if (!["topology", "history", "lockTtl", "lockWait"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait)`);
+    if (!["topology", "history", "lockTtl", "lockWait", "tenants"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait, tenants)`);
   }
+  if (value.tenants !== undefined) checkTenants(value.tenants, `${where}.tenants`);
   if (value.topology !== undefined) checkTopology(value.topology, `${where}.topology`);
   if (value.history !== undefined) {
     if (!isRecord(value.history)) throw new YodelError(`${where}.history: expected an object`);
@@ -58,6 +60,20 @@ function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
     throw new YodelError(`${where}.lockWait: expected a number of seconds, 0 or more`);
   }
   return value;
+}
+
+
+function checkTenants(value: unknown, where: string): void {
+  if (Array.isArray(value)) {
+    const bad = value.filter((t) => typeof t !== "string" || !TENANT_NAME.test(t));
+    if (bad.length > 0) throw new YodelError(`${where}: ${bad.map((b) => JSON.stringify(b)).join(", ")} ${bad.length === 1 ? "is not a tenant name" : "are not tenant names"} (letters, digits and _, not starting with a digit)`);
+    if (new Set(value).size !== value.length) throw new YodelError(`${where}: a tenant is listed twice`);
+    return;
+  }
+  const keys = isRecord(value) ? Object.keys(value) : [];
+  if (!isRecord(value) || keys.length !== 1 || !["file", "query"].includes(keys[0] ?? "") || typeof value[keys[0] ?? ""] !== "string" || value[keys[0] ?? ""] === "") {
+    throw new YodelError(`${where}: expected a list of tenant names, { file: "<path>" } or { query: "<SQL>" }`);
+  }
 }
 
 const RULE_ID = /^[a-z0-9][a-z0-9_-]*$/;
@@ -108,7 +124,8 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
   value.forEach((wave: unknown, i) => {
     const at = `${where}[${String(i)}]`;
     if (!isRecord(wave)) throw new YodelError(`${at}: expected { env, gate }`);
-    for (const k of Object.keys(wave)) if (!["env", "gate", "requires"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate, requires)`);
+    for (const k of Object.keys(wave)) if (!["env", "gate", "requires", "shares"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate, requires, shares)`);
+    if (wave.shares !== undefined && !(typeof wave.shares === "number" && Number.isInteger(wave.shares) && wave.shares >= 1)) throw new YodelError(`${at}.shares: expected a whole number from 1`);
     const env = wave.env;
     if (typeof env !== "string" || env === "") throw new YodelError(`${at}.env: expected an environment's name`);
     if (profiles && !profiles.includes(env)) throw new YodelError(`${at}.env: ${env} is not an environment chant.config.ts declares${notDeclared(profiles)}`);

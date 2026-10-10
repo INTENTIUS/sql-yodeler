@@ -117,6 +117,17 @@ export interface VersionedEnv {
  * connection.
  */
 export async function openVersioned(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv = process.env, port?: ClickHousePort, pgConnect?: PgConnect): Promise<VersionedEnv> {
+  if (env.tenant) {
+    // A tenant (#56): one its set names, its statements renamed from the template.
+    const { checkTenant, tenantDriver } = await import("../tenants/index.js");
+    await checkTenant(project, env);
+    const venv = await openEnvironment(project, env, processEnv, port, pgConnect);
+    return { ...venv, driver: tenantDriver(venv.driver, env.tenant) };
+  }
+  return openEnvironment(project, env, processEnv, port, pgConnect);
+}
+
+async function openEnvironment(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv, port?: ClickHousePort, pgConnect?: PgConnect): Promise<VersionedEnv> {
   const settings = environmentSettings(project, env.name, processEnv);
   if (project.dialect === "postgres") {
     const pg = await openPostgres(project, env, processEnv, settings.historyDatabase, pgConnect);

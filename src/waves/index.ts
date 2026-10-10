@@ -38,6 +38,7 @@ import { gitLedger, NOT_APPROVED, verifyApproval } from "../versioned/approval.j
 import type { PendingMigration } from "../versioned/state.js";
 import { WAVES_PIPELINE, type WaveRecord } from "./record.js";
 import { enforcePromotion, promotionEvidence, readPromotions, type Promotion } from "./promotion.js";
+import { baseEnvironment, splitTarget } from "../tenants/target.js";
 
 export * from "./promotion.js";
 export * from "./record.js";
@@ -49,9 +50,9 @@ export const WAVE_PLAN_KIND = "yodel-wave";
 /** The gate policy an environment no wave names gets. */
 export const DEFAULT_WAVE_GATE: WaveGate = "always";
 
-/** `env`'s wave gate in `config`. */
+/** `env`'s wave gate in `config`; a tenant's is its environment's. */
 export function waveGate(config: YodelConfig | undefined, env: string): { gate: WaveGate; declared: boolean } {
-  const wave = config?.waves?.find((w) => w.env === env);
+  const wave = config?.waves?.find((w) => w.env === baseEnvironment(env));
   return wave ? { gate: wave.gate ?? DEFAULT_WAVE_GATE, declared: true } : { gate: DEFAULT_WAVE_GATE, declared: false };
 }
 
@@ -244,18 +245,36 @@ export interface WaveForecast {
   approve: string;
 }
 
+/** Where chant run wave writes a run's plan file (chant's opWavePlanPath). */
+export const wavePlanPath = (op: string, wave: number, target: string): string => `.chant/op-waves/${op}/wave-${String(wave)}/${target.replace(/[^A-Za-z0-9._-]/g, "_")}.plan.json`;
+
 /**
  * The decision chant makes for `plan`'s wave right after `--wave-plan`,
  * made the same way and from the same sources: the policy from the spec at
  * yodel's base, chant's own rule, and the gate ledger for an approval of
- * the wave's set digest. yodel's waves have one environment each.
+ * the wave's set digest. A tenant set's wave (#56) has a run per tenant,
+ * which chant plans in order: the forecast is made at the last run, from
+ * the plan files the runs before it wrote; at any other run it is
+ * undefined.
  */
-export async function forecastWave(cwd: string, specFile: string, plan: WavePlanFile): Promise<WaveForecast> {
+export async function forecastWave(cwd: string, specFile: string, plan: WavePlanFile): Promise<WaveForecast | undefined> {
   const spec = readJson<WavesSpec & { gate?: string }>(resolve(cwd, specFile), "the waves spec");
   const { k, name } = waveOf(spec, plan.environment, specFile);
   const { waveSetDigest, waveGateName } = await import("@intentius/chant/gated-waves");
   const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
-  const members = [{ member: plan.environment, planDigest: plan.planDigest, op: "", ...(plan.destructive ? { destructive: true } : {}), ...(plan.empty ? { empty: true } : {}) }];
+  const member = (target: string, p: Pick<WavePlanFile, "planDigest" | "destructive" | "empty">) => ({ member: target, planDigest: p.planDigest, op: "", ...(p.destructive ? { destructive: true } : {}), ...(p.empty ? { empty: true } : {}) });
+  const runs = spec.waves[k - 1]?.runs ?? [];
+  if (runs.at(-1)?.target !== plan.environment) return undefined;
+  const members = [];
+  for (const run of runs) {
+    if (run.target === plan.environment) {
+      members.push(member(run.target, plan));
+      continue;
+    }
+    const path = join(cwd, wavePlanPath(spec.name, k, run.target));
+    if (!existsSync(path)) return undefined;
+    members.push(member(run.target, JSON.parse(readFileSync(path, "utf8")) as WavePlanFile));
+  }
   const digest = waveSetDigest(members);
   const gate = waveGateName(spec.gate ?? spec.name, k);
   const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
@@ -307,6 +326,8 @@ export interface WaveView {
  * target branch.
  */
 export async function waveView(project: Project, env: string, ordered: readonly Migration[], pending: readonly PendingMigration[], migrations: string): Promise<WaveView | undefined> {
+  // A tenant's wave is its whole set's, which one tenant's plan does not make (#56).
+  if (splitTarget(env).tenant !== undefined) return undefined;
   const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === env) + 1;
   if (k === 0) return undefined;
   const { gate, at } = await gateAtBase(project, env);
