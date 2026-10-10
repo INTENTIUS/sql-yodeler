@@ -1,5 +1,5 @@
 ---
-claims: [topology, declarative]
+claims: [topology, declarative, approval]
 ---
 
 # Installing and configuring
@@ -60,13 +60,85 @@ export default {
 | Field | Meaning |
 |---|---|
 | `url` | ClickHouse: the HTTP interface (`http://clickhouse:8123`). Postgres: a connection URL with no password in it. |
-| `user`, `password` | `{ env: "<VAR>" }`: the variable each is read from. Credentials are never written in the file. |
+| `user`, `password` | `{ env: "<VAR>" }`: the variable each is read from. Credentials are never written in the file. A `password` can also be a token source; see [Credentials](#credentials-a-reader-and-a-writer). |
 | `databases` (ClickHouse) | the databases the project's schema lives in. `yodel init --from` needs it, and the history's database must not be one of them. |
 | `schemas` (Postgres) | the same, for schemas. |
 | `topology` (ClickHouse) | the topology chant renders for; see [Topology](topology.md). |
 | `lockTimeoutMs`, `statementTimeoutMs`, `scanTimeoutMs` (Postgres) | the `lock_timeout` of every statement `yodel apply` sends, and of the live-schema reads before it and in `yodel drift`, which name the lock they waited on (default 5000), the `statement_timeout` of a catalog change (default 60000), and of a statement that reads or rewrites rows (default none). |
 
-The starter templates read a reader's or a writer's credentials by `YODEL_CREDENTIALS` (`writer` only in the apply job); see each template's README.
+## Credentials: a reader and a writer
+
+Each environment has two database users. The reader can only read: pull request jobs, the drift watch and anyone at a terminal use it. The writer applies migrations, and only the environment's wave job after a merge holds it. `credentials()` gives a profile both:
+
+```ts
+import { credentials } from "@intentius/sql-yodeler";
+
+profiles: {
+  dev: { url: "postgres://127.0.0.1:5432/app", ...credentials("dev", "postgres"), schemas: ["shop"] },
+}
+```
+
+A process connects as the reader unless `YODEL_CREDENTIALS` is `writer` (every environment) or `writer:<env>` (that one); only `<env>`'s wave job sets `writer:<env>`. Each role reads its user and password from a variable, by default `<ENV>_<DIALECT>_READER_USER`, `<ENV>_<DIALECT>_READER_PASSWORD`, `<ENV>_<DIALECT>_WRITER_USER` and `<ENV>_<DIALECT>_WRITER_PASSWORD` (`DEV_POSTGRES_READER_USER`), the names `yodel ci` maps the forge's secrets to. The third argument replaces a role's user or password: `credentials("prod", "postgres", { writer: { user: { env: "APP_MIGRATOR" } } })`. The starter templates' profiles are made this way.
+
+Every command refuses the project, exit 4, when an environment's reader and writer are one identity: both read their user from the same variable, the two variables hold the same user name, or both read their password from the same variable. A job holding such a reader could write.
+
+```text
+yodel status: refused: sql.profiles.prod: the reader (PROD_POSTGRES_READER_USER) and the writer (PROD_POSTGRES_WRITER_USER) are the same user, app, so a job that holds the reader can write. Give each role its own database user.
+```
+
+### Short-lived tokens
+
+A role's password can be minted when a connection needs it, so CI holds no long-lived database password. chant's `sql` lexicon mints it:
+
+| `password` | Mints with | Dialect |
+|---|---|---|
+| `{ token: "rds-iam" }` | `aws rds generate-db-auth-token`, for the profile's host, port and user; `region` or `AWS_REGION` | Postgres |
+| `{ token: "cloud-sql-iam" }` | `gcloud sql generate-login-token` | Postgres |
+| `{ token: "entra" }` | `az account get-access-token` for Azure Database for PostgreSQL | Postgres |
+| `{ token: "command", command: ["./mint.sh"] }` | any program that prints the password on its standard output, run without a shell | both |
+
+```ts
+prod: {
+  url: "postgres://db.abc.us-east-1.rds.amazonaws.com:5432/app",
+  ...credentials("prod", "postgres", { writer: { password: { token: "rds-iam" } } }),
+  schemas: ["shop"],
+},
+```
+
+A token is reused until 80% of its lifetime has passed (`ttlSeconds`; 900 for `rds-iam`, 3600 for `cloud-sql-iam` and `entra`, 300 for `command`), and minted again when the server refuses it, so a long apply never sends an expired one. A source that cannot mint fails the command as `no-credentials`, naming the source and the program but never what it printed. The cloud sources run the cloud's own command line, which reads the identity of the machine or the job; the `command` source is how a test, or a mint the others do not cover, supplies one.
+
+`yodel ci` gives each job the variables of the role it holds and nothing for a token-minted password. A job holding a role minted by `rds-iam`, `cloud-sql-iam` or `entra` also gets an OIDC token from the forge:
+
+| Forge | What `yodel ci` renders |
+|---|---|
+| GitHub | `permissions: id-token: write` on the workflow (the pull request, apply or watch workflow whose jobs hold such a role) |
+| GitLab | `id_tokens` on each job holding such a role: `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`, which the workload identity provider must allow) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
+| Forgejo | nothing: Forgejo gives a job no OIDC token, so the runner's own cloud identity (an instance profile, a workload or managed identity) mints. The rendered files say so. |
+
+The cloud's command line then has to reach that identity in the job. A runner that carries the identity itself needs nothing more; otherwise the cloud's federation setup (the role ARN and token file for AWS, the credential configuration for Google Cloud, `az login --federated-token` for Azure) is the runner's or the image's configuration. Trust the writer's cloud role from the apply job only: on GitHub by the subject `repo:<owner>/<repo>:environment:<env>`, on GitLab by `ref:main` and the environment.
+
+### yodel config check
+
+`yodel config check [<env>...]` prints each environment's settings and where each came from: the server, the role this process connects as, each role's user and password variable and whether it is set here (or the token source), the history's database, the topology and the lock settings. It never prints a password.
+
+`--write-probe` tries a write with the credentials this process holds and exits 4 when the server lets it through: a `CREATE TABLE` in the environment's first schema inside a transaction that is rolled back (Postgres), or a `Memory` table in its first database, dropped at once (ClickHouse). Only a refusal for want of privilege counts as "cannot write"; a probe that cannot tell is an error. Every pull request plan job `yodel ci` renders runs it before the plan, with each reader the job holds (`yodel config check prod dev --write-probe`), so a pull request job that holds a writer fails.
+
+### Least privilege on each forge
+
+| Job | Holds |
+|---|---|
+| lint (pull request) | no database credentials: the replay runs on a throwaway server the job starts |
+| plan-`<env>` (pull request) | `<env>`'s reader, and the reader of the environment its wave requires |
+| watch-`<env>` (schedule) | `<env>`'s reader |
+| wave `<env>` (push to main) | `<env>`'s writer (`YODEL_CREDENTIALS=writer:<env>`), and the reader of the environment it requires |
+
+The pipelines map only those, but a pull request can change a workflow, so where a secret is readable decides what a pull request could take:
+
+- GitHub: keep the readers as repository secrets and the writer's as environment secrets of the environment named after it (Settings > Environments > `<env>`), with deployment branches limited to `main`. Only the wave job names that environment. Pull requests from forks get no secrets at all.
+- GitLab: the readers unprotected and masked, with no environment scope; the writer's protected, masked and scoped to the environment `<env>`, so only a job on a protected branch that declares that environment gets them. `.gitlab-ci.yml` lists the variables in its header.
+- Forgejo: secrets belong to the repository, with no environment scope, so a workflow on any branch of the repository can name the writer's. Limit who can push branches to those trusted to apply, or take pull requests from forks, which get no secrets. A token source whose cloud role trusts only the runner that runs `main` closes the rest.
+
+The database grants are the other half: the reader with SELECT (and on Postgres `default_transaction_read_only = on`; on ClickHouse `readonly = 1`), the writer with what the migrations need on the environment's schema or database and the history's. The write probe proves the first half on every pull request.
 
 ## yodel.config.ts
 
@@ -88,7 +160,8 @@ export default defineConfig({
 
 | Setting | 1. yodel.config.ts | 2. chant.config.ts | 3. variable | Default |
 |---|---|---|---|---|
-| topology (ClickHouse) | `environments.<env>.topology` | `sql.profiles.<env>.topology` | `YODEL_TOPOLOGY` | `single` |
+| topology (ClickHouse) | `environments.<env>.topology` | `sql.profiles.<env>.topology` | `YODEL_CREDENTIALS` | `credentials()` in chant.config.ts | `writer` or `writer:<env>`: connect as the writer; otherwise the reader. Only an environment's wave job sets it |
+| `YODEL_TOPOLOGY` | `single` |
 | the history's database (ClickHouse) or schema (Postgres) | `environments.<env>.history.database` | | `YODEL_HISTORY_DATABASE` | `yodeler` |
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |

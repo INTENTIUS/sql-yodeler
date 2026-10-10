@@ -3,7 +3,9 @@
 #
 # Pull requests: yodel lint and the replay check (into a throwaway server the
 # lint job starts), and the plan comment per environment with the
-# environment's reader credentials. No job here holds a writer.
+# environment's reader credentials. No job here holds a writer, and each plan
+# job shows it first: yodel config check --write-probe tries a write and
+# fails the job when the server lets it through.
 name: yodel-pr
 
 on:
@@ -69,6 +71,8 @@ jobs:
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
         run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: This job cannot write
+        run: yodel config check dev --write-probe
       - name: yodel plan dev --comment
         run: yodel plan dev --comment
         env:
@@ -106,6 +110,8 @@ jobs:
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
         run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: This job cannot write
+        run: yodel config check prod dev --write-probe
       - name: yodel plan prod --comment
         run: yodel plan prod --comment
         env:

@@ -143,6 +143,10 @@ export async function loadProject(start: string = process.cwd()): Promise<Projec
     throw new YodelError(e instanceof Error ? e.message : String(e));
   }
   const config = loaded.config as ProjectConfig;
+  // An environment whose reader and writer are one identity is refused before anything reads or writes (#50).
+  const { sharedCredentialsIn } = await import("./credentials.js");
+  const shared = sharedCredentialsIn(config.sql?.profiles ?? {});
+  if (shared) throw new YodelError(`refused: ${shared}`, 4);
   const { loadYodelConfig } = await import("./config/load.js");
   const yodel = await loadYodelConfig(dir, Object.keys(config.sql?.profiles ?? {}));
   return projectFromConfig(dir, loaded.configPath ?? join(dir, "chant.config.ts"), config, yodel);

@@ -1,8 +1,10 @@
 import type { ChantConfig } from "@intentius/chant/config";
 import "@intentius/chant-lexicon-sql";
+import { credentials } from "@intentius/sql-yodeler";
 
 /**
- * Two sets of credentials per environment, chosen by YODEL_CREDENTIALS:
+ * Two sets of credentials per environment, from credentials(), chosen by
+ * YODEL_CREDENTIALS:
  *
  * - reader (the default): a role that can only read (USAGE and SELECT on the
  *   schema and the history schema, `default_transaction_read_only = on`).
@@ -16,16 +18,20 @@ import "@intentius/chant-lexicon-sql";
  * <ENV>_POSTGRES_URL, <ENV>_POSTGRES_READER_USER,
  * <ENV>_POSTGRES_READER_PASSWORD, <ENV>_POSTGRES_WRITER_USER and
  * <ENV>_POSTGRES_WRITER_PASSWORD. The URL names the database:
- * postgres://db.example.com:5432/app.
+ * postgres://db.example.com:5432/app. yodel refuses an environment whose
+ * reader and writer are the same user, and every pull request job tries a
+ * write first and fails if the server lets it through.
+ *
+ * A password can be a short-lived token in place of a variable, minted when
+ * a connection needs it:
+ * credentials("prod", "postgres", { writer: { password: { token: "rds-iam" } } }).
+ * `npm run ci` then renders the jobs' cloud identity; see Configuration in
+ * the SQL Yodeler docs.
  */
-const role = (env: string) => (process.env.YODEL_CREDENTIALS === "writer" || process.env.YODEL_CREDENTIALS === `writer:${env}` ? "WRITER" : "READER");
-
 function postgres(env: string, url: string) {
-  const prefix = env.toUpperCase();
   return {
-    url: process.env[`${prefix}_POSTGRES_URL`] ?? url,
-    user: { env: `${prefix}_POSTGRES_${role(env)}_USER` },
-    password: { env: `${prefix}_POSTGRES_${role(env)}_PASSWORD` },
+    url: process.env[`${env.toUpperCase()}_POSTGRES_URL`] ?? url,
+    ...credentials(env, "postgres"),
     schemas: ["{{chant:schema}}"],
   };
 }

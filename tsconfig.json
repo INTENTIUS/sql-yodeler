@@ -12,7 +12,10 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // The starter templates' chant.config.ts imports credentials() from the
+    // package; in this repository that is the source (tsx reads these paths).
+    "paths": { "@intentius/sql-yodeler": ["./src/index.ts"] }
   },
   "include": ["src", "test", "scenarios", "examples/walkthrough", "vitest.config.ts"]
 }

@@ -79,12 +79,15 @@ async function users(ctx: Ctx): Promise<void> {
  * (GitHub re-runs it, Forgejo dispatches the workflow), which applies with
  * no new push. A forge without resume (GitLab here) is approved with chant
  * approve and run again by hand.
+ * Every pull request job tries a write first and must be refused (#50).
  * BREAK: `yodel approve dev --no-resume`, so no job starts again and nothing
  * applies within the wait (this part is judged on its own: the claim then
  * runs the job by hand and goes on); the pull request is merged without
  * approving its digest, so the apply after the merge applies nothing; the server is not changed by
- * hand, so the watch opens no issue; and the installed yodel is built to
- * drop the project's own jobs, so the pull request does not run it.
+ * hand, so the watch opens no issue; the installed yodel is built to
+ * drop the project's own jobs, so the pull request does not run it; and the
+ * reader's secrets hold the writer, so the pull request's write probe goes
+ * through and fails the job (judged on its own, as the resume is).
  */
 export function templateBody(makeForge: () => Forge): Body {
   return async (ctx: Ctx): Promise<void> => {
@@ -150,15 +153,15 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
   const approveJs = join(installed, "dist", "commands", "approve.js");
-  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"')) {
-    // The release in the template's range has no yodel ci (#65) or no yodel approve that resumes (#47) yet: this checkout's, packed and committed with the project.
+  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js"))) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47) or no credentials() (#50) yet: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
     const file = packed.out.trim().split("\n").at(-1) ?? "";
     if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
     await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
-    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65) or no resuming yodel approve (#47): the project takes this checkout's yodel, vendor/${file}`);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47) or no credentials() (#50): the project takes this checkout's yodel, vendor/${file}`);
   }
   // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
   mkdirSync(join(dir, "ci"), { recursive: true });
@@ -204,11 +207,13 @@ export const gitlab = {
   await sh("git", ["commit", "-qm", "feat: the schema"]);
   await upgraded(dir, sh);
 
-  // The repository, fresh, with the secrets the pipelines name.
+  // The repository, fresh, with the secrets the pipelines name. BREAK: the writer mapped into the jobs that read, the pull request's among them.
+  const read = ctx.broken ? WRITER : READER;
+  if (ctx.broken) ctx.log("BREAK: the reader's secrets hold the writer, so the pull request job holds the writer");
   const repo = await forge.repo(ctx, repoName, {
     [`DEV_${DIALECT}_URL`]: forge.jobUrl(d),
-    [`DEV_${DIALECT}_READER_USER`]: READER.user,
-    [`DEV_${DIALECT}_READER_PASSWORD`]: READER.password,
+    [`DEV_${DIALECT}_READER_USER`]: read.user,
+    [`DEV_${DIALECT}_READER_PASSWORD`]: read.password,
     [`DEV_${DIALECT}_WRITER_USER`]: WRITER.user,
     [`DEV_${DIALECT}_WRITER_PASSWORD`]: WRITER.password,
     ...(notify.part?.secrets ?? {}),
@@ -254,6 +259,7 @@ export const gitlab = {
   await sh("git", ["commit", "-qm", "feat: a note column"]);
   await sh("git", ["push", "-q", "origin", "add-note"]);
   const pr = await repo.openPr("add-note", await head(), "feat: a note column");
+  judgeWriteProbe(ctx, pr.checks.log);
   hold(pr.checks.log.includes("the project job, 42"), "the pull request did not run the project's own job, declared in ci/jobs.ts and rendered by yodel ci");
   hold(pr.checks.ok, `the pull request's lint and plan ended ${pr.checks.status}`);
   hold(pr.checks.log.includes("Every migration replays to its recorded schema."), "the pull request's lint job did not replay the migrations into its own server");
@@ -296,6 +302,25 @@ export const gitlab = {
   hold(clean.ok, `the drift watch ended ${clean.status} with dev put back`);
   const closed = await tracking();
   hold(closed.length === 1 && closed[0]?.number === issue.number && !closed[0].open, `the watch did not close #${String(issue.number)} once dev was put back: ${JSON.stringify(closed.map((i) => ({ n: i.number, open: i.open })))}`);
+}
+
+/**
+ * The pull request's plan job tries a write before its plan (#50): with the
+ * reader, the server refuses it and the job goes on. BREAK: the writer is
+ * mapped into the job, the write goes through and the probe fails the job,
+ * exit 4. Judged here, on its own: a broken run whose probe did not fail
+ * the job fails the claim (not caught); a caught one goes on, and the
+ * checks after it see the failed job too.
+ */
+function judgeWriteProbe(ctx: Ctx, log: string): void {
+  const refused = log.includes("write probe   cannot write");
+  const wrote = log.includes("dev: the credentials this process holds can write");
+  if (!ctx.broken) {
+    hold(refused && !wrote, "the pull request's plan job did not show that it cannot write (yodel config check dev --write-probe)");
+    return;
+  }
+  if (!wrote) throw new Error("BREAK: the writer mapped into the pull request job, and its write probe did not fail it; the write-probe part did not catch its break");
+  ctx.log("BREAK caught (write probe): the pull request job holding the writer was failed by yodel config check --write-probe");
 }
 
 /**

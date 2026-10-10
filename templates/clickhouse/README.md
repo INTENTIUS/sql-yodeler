@@ -66,6 +66,8 @@ If 127.0.0.1 reaches another server (a ClickHouse installed on this machine), `j
 
 Each environment has two ClickHouse users. `chant.config.ts` picks the reader unless `YODEL_CREDENTIALS=writer` (every environment) or `writer:<env>` (that one), and only an environment's wave job sets that, for its own environment.
 
+`credentials()` in `chant.config.ts` gives each profile both. yodel refuses the project (exit 4) when an environment's reader and writer are the same user or read the same variable, and every pull request plan job runs `yodel config check <env> --write-probe` first, which fails the job when its credentials can write. A password can be a short-lived token instead of a variable (`{ token: "command", command: ["./mint.sh"] }`, which prints the password; see SQL Yodeler's configuration docs); `npm run ci` then leaves its secret out of the jobs.
+
 | Variable | Held by |
 |---|---|
 | `<ENV>_CLICKHOUSE_URL` | every job for that environment |
