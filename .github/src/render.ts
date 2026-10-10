@@ -21,6 +21,7 @@ import type { Declarable } from "@intentius/chant/declarable";
 import * as ci from "./ci.js";
 import * as claims from "./claims.js";
 import * as claimsWeekly from "./claims-weekly.js";
+import * as pages from "./pages.js";
 import * as publish from "./publish.js";
 
 interface Declared {
@@ -29,7 +30,7 @@ interface Declared {
 }
 
 /** Output file name (without .yml) to its declaration. publish must stay publish: npm's trusted publisher names the file. */
-const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claimsWeekly, publish };
+const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claimsWeekly, pages, publish };
 
 export const workflowsDir = fileURLToPath(new URL("../workflows/", import.meta.url));
 

@@ -1,0 +1,62 @@
+# Rendered from .github/src/pages.ts by `npm run workflows`. Edit that file, not this one.
+#
+# Builds docs-site/ and publishes it to GitHub Pages, at
+# https://intentius.io/sql-yodeler/, on every push to main. The pages come
+# from docs/*.md at build time (docs-site/pages.mjs); the build fails when the
+# output has an internal link that leads nowhere
+# (docs-site/check-dist.mjs). The ci workflow runs the same build on every
+# pull request.
+
+name: pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: null
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+      - name: npm ci
+        working-directory: docs-site
+        run: npm ci
+      - name: Build the site
+        working-directory: docs-site
+        run: npm run build
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+        with:
+          path: docs-site/dist
+  deploy:
+    needs:
+      - build
+    if: '${{ !github.event.repository.private }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: '${{ steps.deployment.outputs.page_url }}'
+    steps:
+      - id: deployment
+        name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346
