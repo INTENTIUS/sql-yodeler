@@ -166,7 +166,7 @@ describe("the rebuild step's Op", () => {
       clickhouseRebuildPlan: fake("clickhouseRebuildPlan", { state: "rebuild" }),
       clickhouseRebuildCreate: fake("clickhouseRebuildCreate", {}),
       clickhouseRebuildDualWrite: fake("clickhouseRebuildDualWrite", {}),
-      clickhouseRebuildBackfill: fake("clickhouseRebuildBackfill", { partitions: 3, copied: 1, skipped: 2, cleared: 0 }),
+      clickhouseRebuildBackfill: fake("clickhouseRebuildBackfill", { partitions: 3, copied: 1, skipped: 2, cleared: 0, repaired: 0 }),
       clickhouseRebuildVerify: fake("clickhouseRebuildVerify", { rows: 30 }),
       clickhouseRebuildSwap: fake("clickhouseRebuildSwap", { swapped: true, oldTable: `${DB}.events__chant_old`, retainUntil: "2026-10-16T00:00:00.000Z" }),
       clickhouseRebuildRetain: fake("clickhouseRebuildRetain", { oldTable: `${DB}.events__chant_old`, retainUntil: "2026-10-16T00:00:00.000Z" }),
@@ -178,7 +178,7 @@ describe("the rebuild step's Op", () => {
     expect(ran).toEqual(Object.keys(activities));
     expect(JSON.parse(schema)).toEqual(build(BEFORE));
     expect(summary).toEqual({
-      op: "ClickHouseRebuildOp", table: `${DB}.events`, state: "rebuild", partitions: 3, copied: 1, skipped: 2, cleared: 0, verifiedRows: 30, swapped: true,
+      op: "ClickHouseRebuildOp", table: `${DB}.events`, state: "rebuild", partitions: 3, copied: 1, skipped: 2, cleared: 0, repaired: 0, verifiedRows: 30, swapped: true,
       oldTable: `${DB}.events__chant_old`, retainUntil: "2026-10-16T00:00:00.000Z",
     });
   });

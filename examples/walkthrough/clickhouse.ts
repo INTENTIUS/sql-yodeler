@@ -86,8 +86,9 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel plan dev", code: 0, expect: ["No changes."] },
 
     { say: "## 2. Adopting the database into versioned migrations" },
-    { say: "Some data arrives:" },
-    { sql: "INSERT INTO yodel_18_shop.events\nSELECT number, ['view', 'cart', 'buy'][number % 3 + 1], toDateTime('2026-03-01 00:00:00') + toIntervalHour(number * 7)\nFROM numbers(600)" },
+    { say: "Some data arrives, six months of it, the last weeks dated in the future (scheduled events):" },
+    { sql: "INSERT INTO yodel_18_shop.events\nSELECT number, ['view', 'cart', 'buy'][number % 3 + 1], toDateTime('2026-06-01 00:00:00') + toIntervalHour(number * 7)\nFROM numbers(600)" },
+    { sql: "SELECT count() AS rows, countIf(at >= now()) AS future FROM yodel_18_shop.events FORMAT TSVWithNames", showResult: true },
     {
       say: "To move to versioned migrations, `yodel init --from dev` reads the live database, writes its declarations to `src/`, checks that they plan clean against it, writes the baseline migration (the one that creates everything), and records the baseline applied in dev's history without running it. `src/schema.ts` already declares the schema, so it needs `--force` to write over it:",
     },
@@ -122,7 +123,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { say: "ClickHouse cannot change a table's sort key with `ALTER`. Change it in the declared schema:" },
     { edit: "src/schema.ts", from: "ORDER BY (kind, at)", to: "ORDER BY (kind, id)" },
     {
-      say: "`yodel new` writes the change as a `ClickHouseRebuildOp` step: a new table with the new key, a materialized view that writes rows at or after a cut-over time into it, a backfill of the rows before the cut-over partition by partition (a receipt per partition), a verification, and a swap.",
+      say: "`yodel new` writes the change as a `ClickHouseRebuildOp` step: a new table with the new key, a materialized view that writes rows at or after a cut-over time into it, a backfill of every row already in the table, partition by partition (a receipt per partition), a verification of every row, and a swap. Rows dated at or after the cut-over, like the future ones here, are copied too.",
     },
     { run: "npx yodel new events-by-id", code: 0, expect: ["ClickHouseRebuildOp"] },
     { cat: "migrations/{id:events-by-id}/migration.sql" },
@@ -145,6 +146,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { say: "The rebuild waits a minute for its cut-over before the backfill:" },
     { run: "npx yodel apply dev", code: 0, expect: ['"swapped":true'] },
     { sql: "SELECT sorting_key, total_rows FROM system.tables WHERE database = 'yodel_18_shop' AND name LIKE 'events%' ORDER BY name FORMAT TSVWithNames", showResult: true },
+    { say: "Every row is in the new table, the future-dated ones too:" },
+    { sql: "SELECT count() AS rows, countIf(at >= now()) AS future FROM yodel_18_shop.events FORMAT TSVWithNames", showResult: true },
     { say: "The old table stays as `events__chant_old` until the date in the step's note (7 days)." },
 
     { say: "## 5. A backfill step" },

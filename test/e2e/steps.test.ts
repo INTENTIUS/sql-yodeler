@@ -165,7 +165,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
     expect(await count(`EXISTS TABLE ${DB}.events__chant_new`)).toBe(0);
     expect(await historyRows(rekey.id)).toBe("['migration:-1:started','step:0:started','step:0:succeeded','migration:-1:succeeded']");
     const note = JSON.parse(await text(`SELECT note FROM ${HISTORY}.history WHERE migration_id = '${rekey.id}' AND kind = 'step' AND status = 'succeeded'`)) as Record<string, unknown>;
-    expect(note).toMatchObject({ op: "ClickHouseRebuildOp", table: `${DB}.events`, state: "rebuild", partitions: 3, copied: 3, skipped: 0, verifiedRows: 30, swapped: true, oldTable: `${DB}.events__chant_old` });
+    expect(note).toMatchObject({ op: "ClickHouseRebuildOp", table: `${DB}.events`, state: "rebuild", partitions: 3, copied: 3, skipped: 0, cleared: 0, repaired: 0, verifiedRows: 30, swapped: true, oldTable: `${DB}.events__chant_old` });
   }, 600_000);
 
   it("resumes a backfill step that failed part way from its receipts, never redoing a finished batch, and the history says it ran", async () => {

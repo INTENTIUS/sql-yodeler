@@ -167,14 +167,9 @@ The run happened in a temporary copy of this directory, a git repository with a 
 
     { say: "## 5. A column rename: a PostgresMigrationOp step" },
     {
-      say: "Renaming `customer_email` to `email` in place would break every reader still using the old name. Declare the new name with `-- previously: <old name>` on its line, and `yodel new` writes the change as a `PostgresMigrationOp` step: add the new column, keep both written with a trigger, backfill, verify, switch, and drop the old column. The step adds the new column at the end of the table, so declare it last; see [issue #47](https://github.com/INTENTIUS/sql-yodeler/issues/47) for what happens to drift otherwise.",
+      say: "Renaming `customer_email` to `email` in place would break every reader still using the old name. Declare the new name with `-- previously: <old name>` on its line, and `yodel new` writes the change as a `PostgresMigrationOp` step: add the new column, keep both written with a trigger, backfill, verify, switch, and drop the old column. The new name stays where the old one was declared:",
     },
-    { edit: "src/schema.ts", from: "      customer_email text NOT NULL,\n", to: "", show: false },
-    {
-      edit: "src/schema.ts",
-      from: "      refunded_at timestamp with time zone,\n",
-      to: "      refunded_at timestamp with time zone,\n      email text NOT NULL, -- previously: customer_email\n",
-    },
+    { edit: "src/schema.ts", from: "      customer_email text NOT NULL,\n", to: "      email text NOT NULL, -- previously: customer_email\n" },
     { run: "npx yodel new rename-email", code: 0, expect: ["PostgresMigrationOp"] },
     { cat: "migrations/{id:rename-email}/migration.sql" },
     { run: "npx yodel plan dev", code: 0, expect: ["yodel apply runs it as this step"] },
@@ -182,7 +177,11 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },
     { run: "npx yodel apply dev", code: 0, expect: ['"switched":true'] },
-    { run: "npx yodel drift dev", code: 0 },
+    {
+      say: "The expand added `email` at the end of the table, and Postgres has no `ALTER` that moves a column, so the live order is not the declared one. Drift compares the columns by name, so that is not drift:",
+    },
+    { sql: "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) AS live_columns FROM information_schema.columns WHERE table_schema = 'yodel_18_shop' AND table_name = 'orders'", showResult: true },
+    { run: "npx yodel drift dev", code: 0, expect: ["No drift"] },
 
     { say: "## 6. A destructive change, silenced with a reason" },
     { edit: "src/schema.ts", from: "      coupon text,\n", to: "", show: false },
@@ -209,8 +208,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "git switch -q -c gift", code: 0 },
     {
       edit: "src/schema.ts",
-      from: "      email text NOT NULL, -- previously: customer_email\n",
-      to: "      email text NOT NULL, -- previously: customer_email\n      gift boolean DEFAULT false NOT NULL,\n",
+      from: "      refunded_at timestamp with time zone,\n",
+      to: "      refunded_at timestamp with time zone,\n      gift boolean DEFAULT false NOT NULL,\n",
       show: false,
     },
     { run: "npx yodel new add-gift", code: 0 },

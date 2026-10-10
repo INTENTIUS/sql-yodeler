@@ -7,11 +7,11 @@ export const yodel18ShopSchema = schema`
 export const orders = table`
   CREATE TABLE ${yodel18ShopSchema}.orders (
       id bigint GENERATED ALWAYS AS IDENTITY,
+      email text NOT NULL, -- previously: customer_email
       status text DEFAULT 'placed'::text NOT NULL,
       amount numeric(12,2) NOT NULL,
       placed_at timestamp with time zone DEFAULT now() NOT NULL,
       refunded_at timestamp with time zone,
-      email text NOT NULL, -- previously: customer_email
       gift boolean DEFAULT false NOT NULL,
       CONSTRAINT orders_pkey PRIMARY KEY (id),
       CONSTRAINT orders_amount_positive CHECK (amount > 0)

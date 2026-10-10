@@ -18,15 +18,15 @@ Changing the sort key of the ClickHouse example's `events` table, `ORDER BY (kin
 
 ```console
 $ npx yodel new events-by-id
-Wrote migrations/20261009T2037-events-by-id/ (0 statements; follows 20261009T2037-add-country)
+Wrote migrations/20261009T2305-events-by-id/ (0 statements; follows 20261009T2305-add-country)
   This migration contains an Op step: ClickHouseRebuildOp for events (yodel_18_shop.events), SQLCH220.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = ClickHouseRebuildOp({ name: "rebuild-yodel-18-shop-events", env: "<env>", table: "yodel_18_shop.events", dualWrite: { mode: "materialized-view", cutoverColumn: "at" } });
 ```
 
 ```sql
--- yodel migration 20261009T2037-events-by-id
--- parent: 20261009T2037-add-country
+-- yodel migration 20261009T2305-events-by-id
+-- parent: 20261009T2305-add-country
 -- This migration contains an Op step, not only SQL:
 --   ClickHouseRebuildOp for events (yodel_18_shop.events), SQLCH220: not SQL; migration.json holds its declaration
 
@@ -41,16 +41,16 @@ The step is chant's `ClickHouseRebuildOp`, run by chant's local executor inside 
 
 1. creates `<table>__chant_new` with the new definition;
 2. creates a materialized view, `<table>__chant_dual`, that writes every row inserted at or after a cut-over time (now plus a minute, by the table's time column, `cutoverColumn`) into the new table;
-3. waits for the cut-over, then copies the rows from before it, partition by partition, writing a receipt for each partition;
-4. verifies that counts and checksums of the rows before the cut-over match in both tables, and fails the step with nothing swapped if they do not;
-5. swaps the tables (`EXCHANGE TABLES`), drops the view, and keeps the old table as `<table>__chant_old` until a retention date 7 days on.
+3. waits for the cut-over, then copies the table partition by partition, writing a receipt for each partition: the rows from before the cut-over, then the rows at or after it (future timestamps) that the view has not written, so every row the table held is copied once;
+4. verifies that counts and checksums of every row, per partition, match in both tables, and fails the step with nothing swapped if they do not;
+5. compares the two tables again just before the swap, and fails with nothing swapped if a row reached only the old table since the verification; otherwise swaps the tables (`EXCHANGE TABLES`), drops the view, and keeps the old table as `<table>__chant_old` until a retention date 7 days on.
 
 The rebuild's own gates are left out: its approval is the migration's. The replay check runs the same step in an empty database, which shows the statements it sends:
 
 ```console
 $ npx yodel lint --replay replay --reset
 ...
-replay: 20261009T2037-events-by-id: replaying
+replay: 20261009T2305-events-by-id: replaying
 -- yodel_18_shop.events needs a rebuild (SQLCH220 Change the sorting key); 4 column(s) copied
 --   SQLCH220 orderBy: ( kind , at ) -> ( kind , id )
 CREATE TABLE `yodel_18_shop`.`events__chant_new`
@@ -63,21 +63,22 @@ CREATE TABLE `yodel_18_shop`.`events__chant_new`
   ENGINE = MergeTree
   PARTITION BY toYYYYMM(at)
   ORDER BY (kind, id) COMMENT '[chant managed-by=chant rebuild=yodel_18_shop.events role=new]'
-CREATE MATERIALIZED VIEW `yodel_18_shop`.`events__chant_dual` TO `yodel_18_shop`.`events__chant_new` AS SELECT `id`, `kind`, `at`, `country` FROM `yodel_18_shop`.`events` WHERE `at` >= toDateTime64('2026-10-09 20:40:55.029', 3, 'UTC') COMMENT 'chant rebuild of yodel_18_shop.events: rows at or after the cut-over [chant managed-by=chant rebuild=yodel_18_shop.events role=dual cutover=2026-10-09T20%3A40%3A55.029Z]'
--- waiting 60s for the cut-over at 2026-10-09T20:40:55.029Z
--- waiting 50s for the cut-over at 2026-10-09T20:40:55.029Z
--- waiting 40s for the cut-over at 2026-10-09T20:40:55.029Z
--- waiting 30s for the cut-over at 2026-10-09T20:40:55.029Z
--- waiting 20s for the cut-over at 2026-10-09T20:40:55.029Z
--- waiting 10s for the cut-over at 2026-10-09T20:40:55.029Z
+CREATE MATERIALIZED VIEW `yodel_18_shop`.`events__chant_dual` TO `yodel_18_shop`.`events__chant_new` AS SELECT `id`, `kind`, `at`, `country` FROM `yodel_18_shop`.`events` WHERE `at` >= toDateTime64('2026-10-09 23:08:34.000', 3, 'UTC') COMMENT 'chant rebuild of yodel_18_shop.events: rows at or after the cut-over [chant managed-by=chant rebuild=yodel_18_shop.events role=dual cutover=2026-10-09T23%3A08%3A34.000Z]'
+-- waiting 61s for the cut-over at 2026-10-09T23:08:34.000Z
+-- waiting 51s for the cut-over at 2026-10-09T23:08:34.000Z
+-- waiting 41s for the cut-over at 2026-10-09T23:08:34.000Z
+-- waiting 31s for the cut-over at 2026-10-09T23:08:34.000Z
+-- waiting 21s for the cut-over at 2026-10-09T23:08:34.000Z
+-- waiting 11s for the cut-over at 2026-10-09T23:08:34.000Z
+-- waiting 1s for the cut-over at 2026-10-09T23:08:34.000Z
 -- backfill of yodel_18_shop.events: 0 partition(s), 0 copied, 0 already copied, 0 cleared first
--- yodel_18_shop.events: 0 partition(s), 0 row(s) before the cut-over at 2026-10-09T20:40:55.029Z, counts and checksums equal in the old and new tables
+-- yodel_18_shop.events: 0 partition(s), 0 row(s) (0 of them before the cut-over at 2026-10-09T23:08:34.000Z), counts and checksums equal in the old and new tables
 EXCHANGE TABLES `yodel_18_shop`.`events` AND `yodel_18_shop`.`events__chant_new`
 DROP VIEW `yodel_18_shop`.`events__chant_dual` SYNC
 RENAME TABLE `yodel_18_shop`.`events__chant_new` TO `yodel_18_shop`.`events__chant_old`
-ALTER TABLE `yodel_18_shop`.`events__chant_old` MODIFY COMMENT 'chant rebuild of yodel_18_shop.events: the old table, kept until 2026-10-16T20:40:55.165Z [chant managed-by=chant rebuild=yodel_18_shop.events role=old retain-until=2026-10-16T20%3A40%3A55.165Z]'
+ALTER TABLE `yodel_18_shop`.`events__chant_old` MODIFY COMMENT 'chant rebuild of yodel_18_shop.events: the old table, kept until 2026-10-16T23:08:34.107Z [chant managed-by=chant rebuild=yodel_18_shop.events role=old retain-until=2026-10-16T23%3A08%3A34.107Z]'
 ALTER TABLE `yodel_18_shop`.`events` MODIFY COMMENT '[chant managed-by=chant]'
-replay: 20261009T2037-events-by-id: matches its recorded schema
+replay: 20261009T2305-events-by-id: matches its recorded schema
 ...
 ```
 
@@ -88,20 +89,17 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:1956d6b1748a90c3114a31c4b5f9e827970c8c5c0097deb5cb9dd9642a44d3e5, by yodel at 2026-10-09T20:38:00.313Z
-20261009T2037-events-by-id: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:66e0a06c490d0d74ca60e2fa774bbe3d1f1436b0fc8528f63da8f1ca85d699bd, by yodel at 2026-10-09T23:05:52.756Z
+20261009T2305-events-by-id: applying
   step 0: ClickHouseRebuildOp for events (yodel_18_shop.events)
-  step 0: ok {"op":"ClickHouseRebuildOp","table":"yodel_18_shop.events","state":"rebuild","partitions":6,"copied":6,"skipped":0,"cleared":0,"verifiedRows":600,"swapped":true,"oldTable":"yodel_18_shop.events__chant_old","retainUntil":"2026-10-16T20:39:05.097Z"}
-20261009T2037-events-by-id: applied
+  step 0: ok {"op":"ClickHouseRebuildOp","table":"yodel_18_shop.events","state":"rebuild","partitions":6,"copied":6,"skipped":0,"cleared":0,"repaired":0,"verifiedRows":600,"swapped":true,"oldTable":"yodel_18_shop.events__chant_old","retainUntil":"2026-10-16T23:06:57.237Z"}
+20261009T2305-events-by-id: applied
 ...
 ```
 
 A rebuild that failed or was killed resumes on the next apply from the backfill's receipts: every partition with a receipt is skipped. To start it over instead, drop `<table>__chant_new` and `<table>__chant_dual`.
 
-Two things to know before relying on it:
-
-- Rows already in the table whose cut-over column is at or after the cut-over time (future timestamps) are neither copied by the backfill nor written by the view, and the verification counts only rows before the cut-over, so the swap goes ahead without them; they stay only in `__chant_old`. See [issue #45](https://github.com/INTENTIUS/sql-yodeler/issues/45). The example's rows all have past timestamps.
-- `yodel new` picks materialized-view mode when the table has a time column to cut over on. A rebuild in app mode (the application writes both tables) is refused by `yodel apply`.
+`yodel new` picks materialized-view mode when the table has a time column to cut over on. A rebuild in app mode (the application writes both tables) is refused by `yodel apply`.
 
 The topology the rebuild renders for is the environment's, the same as the statements around it ([Topology](topology.md)). `yodel lint` reports every rebuild as `ch-rebuild`, an error unless silenced or lowered ([Lint](lint.md)).
 
@@ -130,7 +128,7 @@ The ClickHouse example's backfill fills a column added two migrations earlier, o
 import { EffectReceipt } from "@intentius/chant";
 import { Op, activity, effect, phase } from "@intentius/chant/op";
 
-const months = ["202603", "202604", "202605", "202606", "202607", "202608"];
+const months = ["202606", "202607", "202608", "202609", "202610", "202611"];
 
 const batch = (month: string) =>
   effect(EffectReceipt(`fill-country-${month}`, { effect: `fill-country/${month}`, flavor: "existence" }), [
@@ -155,14 +153,14 @@ Run again, `yodel new` copies the file into the migration's directory as `backfi
 
 ```console
 $ npx yodel new fill-country --backfill backfills/country.ts
-Wrote migrations/20261009T2039-fill-country/ (0 statements; follows 20261009T2037-events-by-id)
+Wrote migrations/20261009T2306-fill-country/ (0 statements; follows 20261009T2305-events-by-id)
   This migration ends with a backfill step: the Op backfill.ts exports, copied into the migration's directory.
     yodel apply runs its effect() batches after the statements before it, resuming from their receipts after a failure.
 ```
 
 ```sql
--- yodel migration 20261009T2039-fill-country
--- parent: 20261009T2037-events-by-id
+-- yodel migration 20261009T2306-fill-country
+-- parent: 20261009T2305-events-by-id
 -- This migration contains an Op step, not only SQL:
 --   a backfill: the Op backfill.ts exports, its effect() batches resumable from their receipts
 
@@ -176,17 +174,17 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:eaf4af6d1b7133e0863c24b0f42df7b08d673aaca833ba6b159f33052ff8a88f, by yodel at 2026-10-09T20:39:20.182Z
-20261009T2039-fill-country: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:4a61386905e697a530a2ffd63f09217788ce839fa9f420efeceda30af5cdf3b0, by yodel at 2026-10-09T23:07:05.748Z
+20261009T2306-fill-country: applying
   step 0: backfill backfill.ts
-    ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202603 AND country = ''
-    ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202604 AND country = ''
-    ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202605 AND country = ''
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202606 AND country = ''
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202607 AND country = ''
     ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202608 AND country = ''
+    ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202609 AND country = ''
+    ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202610 AND country = ''
+    ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = 202611 AND country = ''
   step 0: ok {"op":"backfill","file":"backfill.ts","name":"backfill-fill-country","effects":6,"skipped":0,"ran":6}
-20261009T2039-fill-country: applied
+20261009T2306-fill-country: applied
 ...
 ```
 
@@ -236,7 +234,7 @@ Renaming a column in place breaks every reader still using the old name the mome
 
 ```console
 $ npx yodel new rename-email
-Wrote migrations/20261009T1955-rename-email/ (0 statements; follows 20261009T1954-validate-amount)
+Wrote migrations/20261009T2309-rename-email/ (0 statements; follows 20261009T2309-validate-amount)
   This migration contains a manual step: orders (yodel_18_shop.orders), SQLPG203, SQLPG204. No statement and no Op makes it:
     yodel_18_shop.orders needs expand and contract, which no in-place statement makes, so nothing was sent for it. SQLPG203 Add a NOT NULL column with no default (columns.email - -> email text): ADD COLUMN ... NOT NULL with no default fails on a table that has rows. Add it nullable, backfill it, then set NOT NULL. https://www.postgresql.org/docs/18/sql-altertable.html No migration Op makes this change yet: make it by hand as expand and contract (add the new, write both, backfill, move readers, then drop the old).
   hint: orders: customer_email is dropped and email added with the same type in the same place; if it is a rename, write -- previously: customer_email on its line
@@ -246,15 +244,15 @@ With the line (`email text NOT NULL, -- previously: customer_email`), it is a `P
 
 ```console
 $ npx yodel new rename-email
-Wrote migrations/20261009T2038-rename-email/ (0 statements; follows 20261009T2037-validate-amount)
+Wrote migrations/20261009T2309-rename-email/ (0 statements; follows 20261009T2309-validate-amount)
   This migration contains an Op step: PostgresMigrationOp for orders (yodel_18_shop.orders), SQLPG205.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = PostgresMigrationOp({ name: "migrate-yodel-18-shop-orders-email", env: "<env>", table: "yodel_18_shop.orders", column: "email" });
 ```
 
 ```sql
--- yodel migration 20261009T2038-rename-email
--- parent: 20261009T2037-validate-amount
+-- yodel migration 20261009T2309-rename-email
+-- parent: 20261009T2309-validate-amount
 -- This migration contains an Op step, not only SQL:
 --   PostgresMigrationOp for orders (yodel_18_shop.orders), SQLPG205: not SQL; migration.json holds its declaration
 
@@ -269,11 +267,11 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7dd885c06a5ffdaeb426e45fd6ce5fad997b1f2e59018df13a59c34d60b0b77b, by yodel at 2026-10-09T20:38:19.678Z
-20261009T2038-rename-email: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7, by yodel at 2026-10-09T23:09:37.180Z
+20261009T2309-rename-email: applying
   step 0: PostgresMigrationOp for orders (yodel_18_shop.orders)
-  step 0: ok {"op":"PostgresMigrationOp","table":"yodel_18_shop.orders","column":"email","state":"migrate","change":"rename","filled":1,"skipped":0,"backfilledRows":301,"carried":0,"verifiedRows":301,"switched":true,"oldColumn":"yodel_18_shop.orders.customer_email","retainUntil":"2026-10-09T20:38:25.564Z","dropped":true}
-20261009T2038-rename-email: applied
+  step 0: ok {"op":"PostgresMigrationOp","table":"yodel_18_shop.orders","column":"email","state":"migrate","change":"rename","filled":1,"skipped":0,"backfilledRows":301,"carried":0,"verifiedRows":301,"switched":true,"oldColumn":"yodel_18_shop.orders.customer_email","retainUntil":"2026-10-09T23:09:40.905Z","dropped":true}
+20261009T2309-rename-email: applied
 ...
 ```
 
@@ -281,7 +279,7 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7dd885c06a5ffdaeb426
 
 A `PostgresMigrationOp` step that failed or was stopped resumes on the next apply: each phase reads the server again and does what is left. To start over instead, drop the new column, its trigger and function (named in their comments).
 
-The expand adds the new column at the end of the table. Declare the renamed column last, where it ends up; otherwise `yodel drift` reports the column order as drift after the rename ([issue #47](https://github.com/INTENTIUS/sql-yodeler/issues/47)). The example does this.
+The expand adds the new column at the end of the table, and no `ALTER` moves it, so the live column order differs from the declared one. `yodel drift` compares Postgres columns by name, so the order is not drift: declare the renamed column where the old one was.
 
 ## Manual steps
 

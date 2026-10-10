@@ -111,6 +111,9 @@ export interface RebuildSummary {
   skipped?: number;
   /** Partitions found partly copied and cleared before copying again. */
   cleared?: number;
+  /** Rows copied by both the backfill and the dual-write view, deleted and copied again. */
+  repaired?: number;
+  /** Rows compared in the whole table, old against new. */
   verifiedRows?: number;
   swapped?: boolean;
   oldTable?: string;
@@ -132,6 +135,7 @@ export function summarize(summary: RebuildSummary, fn: string, result: unknown):
     put("copied", num(r.copied));
     put("skipped", num(r.skipped));
     put("cleared", num(r.cleared));
+    put("repaired", num(r.repaired));
   }
   if (fn === "clickhouseRebuildVerify") put("verifiedRows", num(r.rows));
   if (fn === "clickhouseRebuildSwap") {

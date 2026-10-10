@@ -44,7 +44,7 @@ Findings from the Postgres example. A CHECK constraint added in place:
 
 ```console
 $ npx yodel lint
-20261009T2037-coupons
+20261009T2308-coupons
   error    pg-rewrite: step 1: SQLPG218 Add a CHECK constraint on yodel_18_shop.orders: blocks reads and writes on the table while it runs (ADD CONSTRAINT ... CHECK reads every row under ACCESS EXCLUSIVE. Declare it NOT VALID, then remove NOT VALID to validate it under SHARE UPDATE EXCLUSIVE (SQLPG220).)
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -58,11 +58,11 @@ an index built without `CONCURRENTLY`:
 
 ```console
 $ npx yodel lint
-20261009T2038-drop-coupon
+20261009T2309-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
-20261009T2038-index-placed-at
+20261009T2309-index-placed-at
   error    pg-lock: step 0: SQLPG241 Create an index without CONCURRENTLY on yodel_18_shop.orders_placed_at_idx: builds an index without CONCURRENTLY: SHARE on the table, blocking every write until the build ends; declare the index CONCURRENTLY
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -76,7 +76,7 @@ and a column dropped:
 
 ```console
 $ npx yodel lint
-20261009T2038-drop-coupon
+20261009T2309-drop-coupon
   error    destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -109,8 +109,8 @@ A line above a statement in its `migration.sql` silences one of the classifier r
 The reason is required. For an Op step, the line goes above the step's comment. From the Postgres example:
 
 ```sql
--- yodel migration 20261009T2038-drop-coupon
--- parent: 20261009T2038-rename-email
+-- yodel migration 20261009T2309-drop-coupon
+-- parent: 20261009T2309-rename-email
 
 -- orders (yodel_18_shop.orders): SQLPG204 metadata, destructive
 -- yodel:allow destructive no order ever had a coupon; checked on dev
@@ -121,8 +121,8 @@ The line is part of `migration.sql`, so it changes the migration's checksum, and
 
 ```console
 $ npx yodel lint
-20261009T2037-events-by-id
-  error    checksum: 20261009T2037-events-by-id: its files hash to sha256:ae876bda3c522b1ad17e12f610ef998efbd99a2e76520e1bfa330eb610c2f652, but migration.json records sha256:527bd001468ad3101a7552c3d2aa1ccf10dba756e4a9d8bd5fb2ac2fb7fbb35d; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261009T2037-events-by-id; if it is, undo the edit, or record it with yodel repair 20261009T2037-events-by-id --reason ... <env>
+20261009T2305-events-by-id
+  error    checksum: 20261009T2305-events-by-id: its files hash to sha256:045a2d98251ff9e79f29d6da82772903c17bba7243617029f48c75c7582915ba, but migration.json records sha256:1046c16b090af747fdca0aad693a90bf8997eeef9d159f9efb1a84cb1b2f250e; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261009T2305-events-by-id; if it is, undo the edit, or record it with yodel repair 20261009T2305-events-by-id --reason ... <env>
   silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds yodel_18_shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 
@@ -133,9 +133,9 @@ $ npx yodel lint
 For a migration not applied anywhere yet, `--update-checksum <id>` (repeatable) writes the new checksum into its `migration.json` before linting:
 
 ```console
-$ npx yodel lint --update-checksum 20261009T2038-drop-coupon
-20261009T2038-drop-coupon: checksum sha256:8f0efe377243da48c7539dc97922acec38613be1e0a3f16b3c3231431d9f1264 is now sha256:00447ccbf8b770c597f5847b98f88e8e0adc03f0943254aab459bf93904368fb
-20261009T2038-drop-coupon
+$ npx yodel lint --update-checksum 20261009T2309-drop-coupon
+20261009T2309-drop-coupon: checksum sha256:b7008a8e51316135db56b86b4d89e3413f3a3f0b3a3248800463b63d56bcd222 is now sha256:038b4a7c927f0e279cbf839044f8a948bd821b4c02ba5c0e028f2a5959c613ee
+20261009T2309-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
@@ -185,14 +185,14 @@ $ npx yodel lint --replay replay --reset
 ...
 Replay of 5 migrations (clickhouse) into http://192.168.14.189:8123 (sql.profiles.replay)
   databases: yodel_18_shop (emptied first)
-  ok      20261009T2036-baseline (2 statements)
-  ok      20261009T2037-add-country (1 statement)
-  ok      20261009T2037-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (yodel_18_shop.events) (swapped))
-  ok      20261009T2039-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
-  ok      20261009T2039-add-source (1 statement)
+  ok      20261009T2305-baseline (2 statements)
+  ok      20261009T2305-add-country (1 statement)
+  ok      20261009T2305-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (yodel_18_shop.events) (swapped))
+  ok      20261009T2306-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
+  ok      20261009T2307-add-source (1 statement)
 Every migration replays to its recorded schema.
 
-20261009T2037-events-by-id
+20261009T2305-events-by-id
   silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds yodel_18_shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 

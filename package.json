@@ -34,8 +34,8 @@
     "claims": "npm run build && tsx scenarios/run.ts"
   },
   "dependencies": {
-    "@intentius/chant": "^0.114.0",
-    "@intentius/chant-lexicon-sql": "^0.114.0",
+    "@intentius/chant": "^0.114.1",
+    "@intentius/chant-lexicon-sql": "^0.114.1",
     "tsx": "^4.23.15"
   },
   "devDependencies": {

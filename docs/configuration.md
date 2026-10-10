@@ -2,7 +2,7 @@
 
 ## Installing
 
-`@intentius/sql-yodeler` is not published to npm. It installs from git, or from a clone of this repository, linked or packed. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import: `npm install @intentius/chant@0.114.0 @intentius/chant-lexicon-sql@0.114.0`.
+`@intentius/sql-yodeler` is not published to npm. It installs from git, or from a clone of this repository, linked or packed. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import: `npm install @intentius/chant@0.114.1 @intentius/chant-lexicon-sql@0.114.1`.
 
 ### From git
 

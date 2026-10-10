@@ -11,7 +11,7 @@
 import { EffectReceipt } from "@intentius/chant";
 import { Op, activity, effect, phase } from "@intentius/chant/op";
 
-const months = ["202603", "202604", "202605", "202606", "202607", "202608"];
+const months = ["202606", "202607", "202608", "202609", "202610", "202611"];
 
 const batch = (month: string) =>
   effect(EffectReceipt(`fill-country-${month}`, { effect: `fill-country/${month}`, flavor: "existence" }), [

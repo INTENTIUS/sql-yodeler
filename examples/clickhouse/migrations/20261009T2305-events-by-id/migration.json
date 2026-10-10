@@ -1,0 +1,103 @@
+{
+  "format": 1,
+  "id": "20261009T2305-events-by-id",
+  "parent": "20261009T2305-add-country",
+  "checksum": "sha256:045a2d98251ff9e79f29d6da82772903c17bba7243617029f48c75c7582915ba",
+  "createdAt": "2026-10-09T23:05:44Z",
+  "dialect": "clickhouse",
+  "defaultDatabase": "default",
+  "refused": true,
+  "hints": [],
+  "steps": [
+    {
+      "kind": "op",
+      "object": "events",
+      "type": "ClickHouse::Table",
+      "name": "yodel_18_shop.events",
+      "changes": [
+        {
+          "after": "( kind , id )",
+          "before": "( kind , at )",
+          "class": "rebuild",
+          "field": "orderBy",
+          "rule": "SQLCH220"
+        }
+      ],
+      "declaration": "export const { op } = ClickHouseRebuildOp({ name: \"rebuild-yodel-18-shop-events\", env: \"<env>\", table: \"yodel_18_shop.events\", dualWrite: { mode: \"materialized-view\", cutoverColumn: \"at\" } });",
+      "detail": "needs a rebuild, which ALTER cannot make: SQLCH220 Change the sorting key on orderBy (( kind , at ) -> ( kind , id )): The sorting key is the on-disk order of every part (and in ReplacingMergeTree the deduplication identity); beyond appending new columns (SQLCH216) it cannot change in place. https://clickhouse.com/docs/sql-reference/statements/alter/order-by. Run it as the rebuild migration Op: ClickHouseRebuildOp({ table: \"yodel_18_shop.events\", ... }) from @intentius/chant-lexicon-sql/clickhouse",
+      "importPath": "@intentius/chant-lexicon-sql/clickhouse",
+      "op": "ClickHouseRebuildOp",
+      "options": {
+        "dualWrite": {
+          "cutoverColumn": "at",
+          "mode": "materialized-view"
+        },
+        "env": "<env>",
+        "name": "rebuild-yodel-18-shop-events",
+        "table": "yodel_18_shop.events"
+      }
+    }
+  ],
+  "schema": {
+    "applyOrder": [
+      "yodel18ShopDb",
+      "events"
+    ],
+    "dialect": "clickhouse",
+    "objects": [
+      {
+        "comment": "The SQL Yodeler ClickHouse example",
+        "ddl": "CREATE DATABASE yodel_18_shop\n  ENGINE = Atomic\n  COMMENT 'The SQL Yodeler ClickHouse example'",
+        "dependsOn": [],
+        "engine": {
+          "name": "Atomic"
+        },
+        "export": "yodel18ShopDb",
+        "name": "yodel_18_shop",
+        "sqlName": "yodel_18_shop",
+        "type": "ClickHouse::Database"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "type": "UInt64"
+          },
+          {
+            "name": "kind",
+            "type": "LowCardinality(String)"
+          },
+          {
+            "name": "at",
+            "type": "DateTime"
+          },
+          {
+            "default": {
+              "expr": "''",
+              "kind": "DEFAULT"
+            },
+            "name": "country",
+            "type": "LowCardinality(String)"
+          }
+        ],
+        "constraints": [],
+        "database": "yodel_18_shop",
+        "ddl": "CREATE TABLE yodel_18_shop.events\n  (\n      id UInt64,\n      kind LowCardinality(String),\n      at DateTime,\n      country LowCardinality(String) DEFAULT ''\n  )\n  ENGINE = MergeTree\n  PARTITION BY toYYYYMM(at)\n  ORDER BY (kind, id)",
+        "dependsOn": [
+          "yodel18ShopDb"
+        ],
+        "engine": {
+          "name": "MergeTree"
+        },
+        "export": "events",
+        "indexes": [],
+        "name": "events",
+        "orderBy": "(kind, id)",
+        "partitionBy": "toYYYYMM(at)",
+        "projections": [],
+        "sqlName": "yodel_18_shop.events",
+        "type": "ClickHouse::Table"
+      }
+    ]
+  }
+}
