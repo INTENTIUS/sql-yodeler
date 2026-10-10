@@ -26,7 +26,6 @@ import { computeChecksum } from "./checksum.js";
 import { emptyBuild, migrationId, refusedSteps, renderMigrationSql } from "./create.js";
 import { MIGRATION_FORMAT, serializeDocument, sortKeys, type MigrationDocument, type MigrationFiles } from "./document.js";
 import type { Migration } from "./directory.js";
-import { relabelTriggerCreates } from "./routines.js";
 
 /** `sha256:<hex>` of a recorded schema, over its JSON with every object's keys sorted. */
 export function schemaSha(schema: BuildOutput): string {
@@ -66,7 +65,6 @@ export function createCheckpoint(options: { name: string; parent: Migration; now
   } catch (e) {
     throw new YodelError(e instanceof Error ? e.message : String(e));
   }
-  statements = relabelTriggerCreates(statements, before, schema);
   const refused = refusedSteps(statements.steps);
   if (refused.length > 0) {
     throw new YodelError(`${parent.id}'s recorded schema cannot be created by statements alone (${refused.map((s) => `${s.object}: ${s.kind} step`).join(", ")}); a checkpoint holds statements only`);
