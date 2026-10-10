@@ -58,7 +58,7 @@ lint:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - yodel ci --check
-    - yodel lint
+    - yodel lint --format gitlab --output gl-code-quality-report.json
     - node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "replay-clickhouse", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-clickhouse:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
     - yodel lint --replay replay --reset
   services:
@@ -68,6 +68,10 @@ lint:
         CLICKHOUSE_SKIP_USER_SETUP: '1'
   variables:
     REPLAY_CLICKHOUSE_URL: http://replay-clickhouse:8123
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
 
 plan-dev:
   extends: .yodel

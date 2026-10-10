@@ -113,7 +113,8 @@ function directoryFindings(problems: readonly MigrationProblem[], history: LintO
     switch (p.kind) {
       case "fork":
         // The rule already says "fork"; the directory problem's own "fork: " prefix would say it twice.
-        out.push({ rule: "fork", message: p.message.replace(/^fork: /, "") });
+        // Placed on the newest child, the migration a rebase moves: the one a forge annotates (#129).
+        out.push({ rule: "fork", message: p.message.replace(/^fork: /, ""), ...(p.children.length > 0 ? { migration: p.children[p.children.length - 1] } : {}) });
         break;
       case "checksum": {
         if (history) {

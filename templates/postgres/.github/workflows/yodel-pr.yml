@@ -47,7 +47,7 @@ jobs:
       - name: The pipelines are up to date
         run: yodel ci --check
       - name: yodel lint
-        run: yodel lint
+        run: yodel lint --format github
       - name: Wait for the replay server (replay-postgres)
         run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "replay-postgres", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-postgres:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
       - name: yodel lint --replay

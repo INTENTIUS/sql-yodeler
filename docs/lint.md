@@ -359,6 +359,14 @@ Every migration replays to its recorded schema.
 5 migrations: 0 errors, 0 warnings, 1 silenced.
 ```
 
+## Findings on the pull request: --format
+
+`yodel lint --format github` prints the usual report, then one workflow command per finding, such as `::error file=migrations/<id>/migration.sql,line=3,title=yodel lint destructive::...`. GitHub Actions and Forgejo Actions read those lines and show each finding on its migration file in the pull request, on the statement's line when the rule knows it. A fork is shown on the newer of the two migrations, the one to rebase. A warning is a `::warning`, and a silenced finding a `::notice` that carries its reason.
+
+`yodel lint --format gitlab` prints the same report and writes GitLab's code quality report to `gl-code-quality-report.json` (or the file `--output` names), even when there are no findings. An error is `major`, a warning `minor` and a silenced finding `info`.
+
+File paths are relative to the forge's checkout (`GITHUB_WORKSPACE`, `CI_PROJECT_DIR`), or to the project's directory outside CI. `yodel ci` renders each forge's lint job with its format, and on GitLab keeps the report as the job's `artifacts:reports:codequality`, when the job fails too. `--json` is `--format json`.
+
 ## Tests on the replayed database: yodel test
 
 The replay check shows each migration gives the schema it recorded. It doesn't show that the data survives a migration, that a backfill fills what it should, or that a view returns the right rows: the replayed database has no data, and the replay skips backfills. `yodel test` runs tests for those, written in `tests/*.test.ts`:

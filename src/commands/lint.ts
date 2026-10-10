@@ -1,14 +1,16 @@
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { scanMigrations } from "../migrations/index.js";
 import { inspect, migrationsDir, openVersioned } from "../versioned/index.js";
-import { chantLevel, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
+import { chantLevel, CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
-const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json] [--dir <project>] [--update-checksum <id>]... [--rules]";
+const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json | --format <format> [--output <file>]] [--dir <project>] [--update-checksum <id>]... [--rules]";
 
 const help = `${usage}
 
@@ -98,7 +100,20 @@ Options:
                           Refused without it, --reset or not
   --keep                  with --replay: leave the replayed database in place
   --rules                 list the rules and their levels, and exit
-  --json                  print the findings as JSON
+  --json                  print the findings as JSON (--format json)
+  --format <format>       text (the default), json, or the findings as a
+                          forge shows them on the migration files (#129):
+                          github   the text, then a workflow command per
+                                   finding (::error file=...,line=...::),
+                                   read by GitHub and Forgejo Actions
+                          gitlab   the text, and GitLab's code quality
+                                   report written to --output, for the
+                                   job's artifacts:reports:codequality
+                          yodel ci renders each forge's lint job with its own
+  --output <file>         with --format gitlab: where the report goes
+                          (default ${CODE_QUALITY_FILE}, from the working
+                          directory); it is written
+                          whatever the findings, so the artifact is always there
   -C, --dir <dir>         the project directory (default: the working directory)
 
 Exit codes:
@@ -118,6 +133,8 @@ interface LintArgs {
   resetShared: string[];
   keep: boolean;
   json: boolean;
+  format: LintFormat;
+  output: string;
   dir: string;
   update: string[];
   rules: boolean;
@@ -137,6 +154,8 @@ function parseLintArgs(args: string[]): LintArgs {
         "reset-shared": { type: "string", multiple: true },
         keep: { type: "boolean" },
         json: { type: "boolean" },
+        format: { type: "string" },
+        output: { type: "string" },
         dir: { type: "string", short: "C" },
         "update-checksum": { type: "string", multiple: true },
         rules: { type: "boolean" },
@@ -149,6 +168,10 @@ function parseLintArgs(args: string[]): LintArgs {
   const update = v["update-checksum"];
   const replay = typeof v.replay === "string" ? v.replay : undefined;
   const resetShared = Array.isArray(v["reset-shared"]) ? v["reset-shared"].filter((r): r is string => typeof r === "string") : [];
+  const format = typeof v.format === "string" ? v.format : v.json === true ? "json" : "text";
+  if (!(LINT_FORMATS as readonly string[]).includes(format)) throw new YodelError(`--format ${format}: it is ${LINT_FORMATS.join(", ")}\n${usage}`);
+  if (v.json === true && format !== "json") throw new YodelError(`--json is --format json; give one of them\n${usage}`);
+  if (typeof v.output === "string" && format !== "gitlab") throw new YodelError(`--output goes with --format gitlab\n${usage}`);
   if (replay === undefined && (v.reset === true || v.keep === true || resetShared.length > 0)) throw new YodelError(`--reset, --reset-shared and --keep go with --replay <env>\n${usage}`);
   return {
     env: typeof v.env === "string" ? v.env : undefined,
@@ -156,7 +179,9 @@ function parseLintArgs(args: string[]): LintArgs {
     reset: v.reset === true,
     resetShared,
     keep: v.keep === true,
-    json: v.json === true,
+    json: format === "json",
+    format: format as LintFormat,
+    output: typeof v.output === "string" ? v.output : CODE_QUALITY_FILE,
     dir: typeof v.dir === "string" ? v.dir : process.cwd(),
     update: Array.isArray(update) ? update.filter((u): u is string => typeof u === "string") : [],
     rules: v.rules === true,
@@ -241,7 +266,13 @@ export const lint: Command = {
 
       const report = await lintMigrations(dir, options);
       if (a.json) io.out(`${JSON.stringify({ ...lintJson(report), ...(replay ? { replay: replayJson(replay) } : {}) }, null, 2)}\n`);
-      else io.out(`${replay ? `${renderReplay(replay)}\n` : ""}${renderLint(report)}`);
+      else {
+        io.out(`${replay ? `${renderReplay(replay)}\n` : ""}${renderLint(report)}`);
+        // The forge's checkout, which a forge's file paths are relative to; the project's directory elsewhere.
+        const root = process.env.GITHUB_WORKSPACE || process.env.CI_PROJECT_DIR || project.dir;
+        if (a.format === "github") io.out(workflowCommands(report, root));
+        if (a.format === "gitlab") writeFileSync(resolve(a.output), `${JSON.stringify(codeQuality(report, root), null, 2)}\n`);
+      }
       return lintExitCode(report);
     }),
 };
