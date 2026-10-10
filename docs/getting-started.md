@@ -8,11 +8,12 @@ This page takes you from an empty directory to two migrations applied to a Click
 
 ## What chant is
 
-SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You declare your schema with chant's `sql` lexicon, and the `yodel` CLI does the rest. You need chant's own CLI for three things only:
+SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You declare your schema with chant's `sql` lexicon, and the `yodel` CLI does the rest. You need chant's own CLI for two things only:
 
 - `chant init --from ...` makes a new project from a template.
 - `chant emulator up --lexicon sql` starts a local ClickHouse and Postgres in Docker.
-- `chant approve ...` approves a plan before `yodel apply` runs it (`yodel approve <env>` does the same at the terminal, without the chant names).
+
+You approve a plan before `yodel apply` runs it with `yodel approve <env>`: it shows the plan, asks you to type the environment's name, and records chant's approval (`chant approve`) for you. A script has no terminal to ask, so it runs the `chant approve ...` command that `yodel apply` prints, which records the same approval.
 
 The chant CLI is the npm package `@intentius/chant`. Before your project exists, run it as `npx @intentius/chant@latest` (with `@latest`, npx does not reuse an older copy it cached). Inside the project, `npm install` puts the version the project pins in `node_modules`, so `npx chant` works there. (Plain `npx chant` outside a project runs an unrelated package with the same name.)
 

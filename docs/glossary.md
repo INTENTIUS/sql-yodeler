@@ -16,7 +16,7 @@ SQL Yodeler is built on chant. These are the chant terms the docs and yodel's ou
 | Op | a file in `ops/` that declares a run in steps. `ops/migrate-<env>.op.ts` is what `yodel apply <env>` runs: plan, wait for approval, apply. See [Approval](approval.md). |
 | gate | the step in an Op that waits for a person's approval. `yodel apply` stops there (exit 3) until the plan is approved. |
 | plan digest | a hash of what `yodel apply` would do and the state it starts from (`jcs1-sha256:...`). An approval names a digest, and holds only while the plan still hashes to it. |
-| `chant approve` | records a person's approval of a plan digest at a gate: `npx chant approve migrate-dev approve-migrate-dev --plan <digest>`. yodel prints the command; a person runs it. |
+| `chant approve` | records a person's approval of a plan digest at a gate: `npx chant approve migrate-dev approve-migrate-dev --plan <digest>`. yodel prints the command for a script to run. At a terminal, `yodel approve <env>` does the same: it shows the plan, asks for the environment's name and records the approval. |
 | `chant/lifecycle` | the git branch where approvals are kept, as commits. Push it (`git push origin chant/lifecycle`) so CI sees an approval made on your machine. |
 | `chant run` | runs an Op. `yodel apply` runs the migrations Op itself, so you seldom need it; `npx chant run watch-dev` runs a drift watch once. |
 | emulator | a local ClickHouse and Postgres in Docker for trying yodel: `npx chant emulator up --lexicon sql`. ClickHouse on `http://127.0.0.1:8123` (user `default`, no password), Postgres on `127.0.0.1:5432` (user `postgres`, password `chant`). |
