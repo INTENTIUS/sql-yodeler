@@ -91,6 +91,19 @@ export function selectApplyOp(
   return { name: op.config.name, filePath: op.filePath, target, gate };
 }
 
+/**
+ * Why the project's Ops could not be found. chant discovers Ops through git
+ * (the files git knows), so a project that is not in a git repository has
+ * none; say so, and what to run (#19).
+ */
+export function discoveryError(dir: string, e: unknown): YodelError {
+  const message = e instanceof Error ? e.message : String(e);
+  if (/not in a git repository|not a git repository/i.test(message)) {
+    return new YodelError(`yodel apply finds the project's Ops through git, and ${dir} is not in a git repository: run git init, then commit the project (git add -A && git commit -m init)`);
+  }
+  return new YodelError(`could not discover Ops in ${dir}: ${message}`);
+}
+
 /** Discovers the project's Ops the way `chant run` does and picks the ApplyOp for `env`. */
 export async function findApplyOp(project: Project, env: Environment, name?: string): Promise<ApplyOpRef> {
   const { discoverOps } = await import("@intentius/chant/op/discover");
@@ -98,7 +111,7 @@ export async function findApplyOp(project: Project, env: Environment, name?: str
   try {
     found = await discoverOps({ cwd: project.dir });
   } catch (e) {
-    throw new YodelError(`could not discover Ops in ${project.dir}: ${e instanceof Error ? e.message : String(e)}`);
+    throw discoveryError(project.dir, e);
   }
   if (found.errors.length > 0 && found.ops.size === 0) {
     throw new YodelError(`could not discover Ops in ${project.dir}:\n${found.errors.join("\n")}`);

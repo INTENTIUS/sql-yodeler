@@ -18,6 +18,8 @@
 
 import type { Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 
+import type { LevelSetting, LintRuleId } from "../lint/rules.js";
+
 export type { Topology };
 
 /**
@@ -48,8 +50,16 @@ export interface EnvironmentConfig {
 export interface YodelConfig {
   /** Keyed by the environment's name in `sql.profiles`. */
   environments?: Record<string, EnvironmentConfig>;
-  /** Reserved for `yodel lint`'s rule levels. */
-  lint?: Record<string, unknown>;
+  /** `yodel lint`'s rule levels: `{ rules: { destructive: "warning" } }`. A misspelled rule name is a type error. */
+  lint?: LintConfig;
+}
+
+/** The rules `lint.rules` can set: every lint rule, and the replay check's. */
+export type LintRuleName = LintRuleId | "replay";
+
+export interface LintConfig {
+  /** Each rule's level. The integrity rules (fork, directory, checksum, unreadable-object) are always errors. */
+  rules?: Partial<Record<LintRuleName, LevelSetting>>;
 }
 
 /** Returns `config` as is; it types the default export of `yodel.config.ts`. */

@@ -4,6 +4,9 @@ import { commands } from "./commands/index.js";
 import { version } from "./version.js";
 import { EXIT_CODES, PLAN_PENDING_NOTE } from "./exit.js";
 
+/** Where the docs are published from docs/. */
+export const DOCS_URL = "https://intentius.io/sql-yodeler/";
+
 export function help(list: readonly Command[] = commands): string {
   const width = Math.max(...list.map((c) => c.name.length));
   const lines = list.map((c) => {
@@ -21,6 +24,9 @@ export function help(list: readonly Command[] = commands): string {
     "Options:",
     "  -h, --help     show this help",
     "  -v, --version  print the version",
+    "",
+    "yodel <command> --help (or yodel help <command>) shows a command's options.",
+    `Docs: ${DOCS_URL}`,
     "",
     "Exit codes (yodel <command> --help lists a command's own):",
     ...EXIT_CODES.map(([code, meaning]) => wrap(`  ${String(code)}  ${meaning}`, "     ")),
@@ -77,6 +83,20 @@ export async function main(
   }
 
   const name = argv[verbAt];
+  if (name === "help") {
+    // `yodel help` is `yodel --help`; `yodel help <command>` is `yodel <command> --help`.
+    const topic = argv.slice(verbAt + 1).find((a) => !a.startsWith("-"));
+    if (topic === undefined) {
+      io.out(help(list));
+      return 0;
+    }
+    const target = list.find((c) => c.name === topic);
+    if (!target) {
+      io.err(`yodel: unknown command "${topic}"\n\n${help(list)}`);
+      return 1;
+    }
+    return target.run(["--help"], io);
+  }
   const command = list.find((c) => c.name === name);
   if (!command) {
     io.err(`yodel: unknown command "${String(name)}"\n\n${help(list)}`);

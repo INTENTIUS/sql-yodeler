@@ -12,11 +12,12 @@ const help = `${usage("status")}
 
 Lists the environment's migrations against its history table
 (yodel.config.ts history.database, else YODEL_HISTORY_DATABASE, default
-yodeler) and its topology: applied, pending, out of order (pending, but before an applied migration in the chain), failed part way
-(with the statement it resumes at), and checksum mismatches (an applied
-migration whose files changed, or that is gone from the directory). When
-yodel apply would run, prints the plan digest it would ask approval for.
-Reads only; takes no lock.
+yodeler) and its topology: applied, pending, out of order (pending, but
+before an applied migration in the chain), failed part way (with the
+statement it resumes at), and checksum mismatches (an applied migration
+whose files changed, or that is gone from the directory). When yodel apply
+would run, prints the plan digest it would ask approval for. Reads only;
+takes no lock.
 
 Options:
   --json           print the status as JSON

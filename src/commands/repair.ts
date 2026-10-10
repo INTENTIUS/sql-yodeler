@@ -9,16 +9,19 @@ import { appliedBy, newRunContext, withLock } from "../history/index.js";
 import { closeVersioned, migrationsDir, openVersioned, type VersionedEnv } from "../versioned/index.js";
 import { checkRepair, repairRow } from "../rebase/repair.js";
 
-const usage = 'usage: yodel repair <id> --reason "<text>" <env> [--json] [--dir <project>]';
+/** A migration directory's name: `<YYYYMMDDTHHMM>-<name>`. */
+const MIGRATION_ID = /^\d{8}T\d{4}-/;
+
+const usage = 'usage: yodel repair <env> <id> --reason "<text>" [--json] [--dir <project>]\n       (or yodel repair <id> --reason "<text>" <env>)';
 
 const help = `${usage}
 
 Records an intended edit to a migration that is already applied in <env>:
 appends a row to the environment's history table (yodel.config.ts
 history.database, else YODEL_HISTORY_DATABASE, default yodeler; on
-Postgres the schema of that name) with the
-checksum the migration's files have now and the reason, under the apply lock. After it, yodel status and yodel apply compare
-the files with the new checksum. Nothing is run on the server: the edit is
+Postgres the schema of that name) with the checksum the migration's files
+have now and the reason, under the apply lock. After it, yodel status and
+yodel apply compare the files with the new checksum. Nothing is run on the server: the edit is
 recorded, not applied. Repair each environment the migration ran in.
 
 When migration.json's own checksum field is stale too (it is not part of
@@ -51,8 +54,10 @@ function parseRepairArgs(args: string[]): { id: string; env: string; reason: str
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
   }
   const { values, positionals } = parsed;
-  const [id, env, ...rest] = positionals;
-  if (id === undefined || env === undefined || rest.length > 0) throw new YodelError(usage);
+  if (positionals.length !== 2) throw new YodelError(usage);
+  // <env> <id>, as every other command takes the environment first, or <id> ... <env> (#19): the id is the one shaped like one.
+  const [first = "", second = ""] = positionals;
+  const [id, env] = MIGRATION_ID.test(first) && !MIGRATION_ID.test(second) ? [first, second] : [second, first];
   const reason = typeof values.reason === "string" ? values.reason.trim() : "";
   if (reason === "") throw new YodelError(`a repair needs a reason: --reason "<why the files changed>"\n${usage}`);
   return { id, env, reason, json: values.json === true, dir: typeof values.dir === "string" ? values.dir : process.cwd() };

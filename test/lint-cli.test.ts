@@ -59,7 +59,7 @@ describe("yodel lint (the command)", () => {
 
     const text = await yodel(p.at());
     expect(text.code).toBe(3);
-    expect(text.out).toContain(`error    fork: fork: ${a.id} and ${b.id} both follow ${first.id}`);
+    expect(text.out).toContain(`error    fork: ${a.id} and ${b.id} both follow ${first.id}`);
     expect(text.out).toContain("3 migrations: 1 error, 0 warnings, 0 silenced.");
 
     const doc = json(await yodel(p.at("--json"))) as LintDoc;

@@ -16,7 +16,7 @@ Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
 
 Changed out of band:
   events (ClickHouse::Table)
-    columns[4].default.expr: declared 'web', live 'app'
+    column source default.expr: declared 'web', live 'app'
 [exit 2]
 ```
 

@@ -246,11 +246,15 @@ export async function explainMove(input: ExplainInput): Promise<MoveExplanation>
       changes.push({ part: "pending", message: `committed to since approval: ${list(committed.map((c) => `${c.id} (${c.commit} at ${c.at})`))}` });
     }
   }
+  // Migrations applied since approval change the live schema themselves; yodel cannot rebuild the live schema as it was, so it says the change is the expected one rather than one out of band (#19).
+  const appliedSince = changes.some((c) => c.part === "history");
   changes.push({
     part: "live",
-    message:
-      "no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in " +
-      "the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did)",
+    message: appliedSince
+      ? "as expected after the history change above: applying a migration changes the live schema, and yodel cannot rebuild the live schema as it " +
+        "was at approval, so it cannot confirm that nothing else in it changed"
+      : "no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in " +
+        "the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did)",
   });
   return done(false, changes);
 }
