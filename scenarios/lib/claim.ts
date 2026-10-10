@@ -67,7 +67,13 @@ export interface Claim {
    * is nothing to run yet. A dialect not listed does not apply.
    */
   dialects: Partial<Record<Dialect, Body | { needs: string }>>;
-  /** Shared things a run holds while it runs (besides its own database): runs naming the same one never overlap. */
+  /**
+   * Shared things a run holds while it runs (besides its own database): runs
+   * naming the same one never overlap. `<dialect>:<thing>` is held by that
+   * dialect's runs only (`ch:udf`: ClickHouse functions belong to the
+   * server, not a database, so a run that reads every function waits for
+   * the runs that make and drop their own).
+   */
   shares?: string[];
   /** Minutes before the runner kills a run whose log stopped growing. Default: the runner's. */
   stallMinutes?: number;
