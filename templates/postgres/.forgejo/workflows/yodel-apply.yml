@@ -27,6 +27,8 @@ jobs:
       cancel-in-progress: false
     env:
       YODEL_CREDENTIALS: writer
+      YODEL_LOCK_WAIT: '10m'
+      YODEL_STAND_DOWN: '1'
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_WRITER_USER: '${{ secrets.DEV_POSTGRES_WRITER_USER }}'
       DEV_POSTGRES_WRITER_PASSWORD: '${{ secrets.DEV_POSTGRES_WRITER_PASSWORD }}'
@@ -50,6 +52,8 @@ jobs:
       cancel-in-progress: false
     env:
       YODEL_CREDENTIALS: writer
+      YODEL_LOCK_WAIT: '10m'
+      YODEL_STAND_DOWN: '1'
       PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
       PROD_POSTGRES_WRITER_USER: '${{ secrets.PROD_POSTGRES_WRITER_USER }}'
       PROD_POSTGRES_WRITER_PASSWORD: '${{ secrets.PROD_POSTGRES_WRITER_PASSWORD }}'

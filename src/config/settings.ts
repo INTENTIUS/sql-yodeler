@@ -7,6 +7,9 @@
  * | topology         | `environments.<env>.topology`          | `sql.profiles.<env>.topology`     | `YODEL_TOPOLOGY`        | `single` |
  * | history database | `environments.<env>.history.database`  |                                   | `YODEL_HISTORY_DATABASE`| `yodeler`|
  * | lock TTL         | `environments.<env>.lockTtl` (seconds) |                                   | `YODEL_LOCK_TTL`        | 900      |
+ * | lock wait        | `environments.<env>.lockWait` (seconds)|                                   | `YODEL_LOCK_WAIT`       | 0        |
+ *
+ * `yodel apply --lock-wait <duration>` sets the lock wait over all three.
  */
 
 import { toTopology, topologyLabel, type Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
@@ -29,6 +32,27 @@ export interface EnvironmentSettings {
   historyTopology: HistoryTopology;
   historyDatabase: string;
   lockTtlMs: number;
+  /** How long an apply waits for a lock another apply holds; 0 gives up at once (exit 5). */
+  lockWaitMs: number;
+}
+
+/** The variable that sets the lock wait (a duration, as {@link parseDuration} reads it). */
+export const LOCK_WAIT_ENV = "YODEL_LOCK_WAIT";
+
+const UNITS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+
+/**
+ * A duration in milliseconds: `90` (seconds), `500ms`, `30s`, `10m`, `1h`,
+ * or a sum of them (`1m30s`). `what` names it in the error.
+ */
+export function parseDuration(text: string, what: string): number {
+  const t = text.trim();
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(Number(t) * 1000);
+  const parts = [...t.matchAll(/(\d+(?:\.\d+)?)(ms|s|m|h)/g)];
+  if (t === "" || parts.map((m) => m[0]).join("") !== t) {
+    throw new YodelError(`${what} must be a duration such as 90 (seconds), 30s, 10m or 1h, got ${JSON.stringify(text)}`);
+  }
+  return Math.round(parts.reduce((sum, m) => sum + Number(m[1]) * (UNITS[m[2] ?? "s"] ?? 1000), 0));
 }
 
 function parse(value: string | Topology, where: string): Topology {
@@ -73,12 +97,17 @@ export function environmentSettings(project: Pick<Project, "config" | "yodel">, 
     lockTtlMs = ttl * 1000;
   }
 
+  let lockWaitMs = 0;
+  if (own?.lockWait !== undefined) lockWaitMs = own.lockWait * 1000;
+  else if (env[LOCK_WAIT_ENV]) lockWaitMs = parseDuration(env[LOCK_WAIT_ENV], LOCK_WAIT_ENV);
+
   return {
     topology,
     topologySource,
     historyTopology: historyTopologyOf(topology),
     historyDatabase: own?.history?.database ?? (env.YODEL_HISTORY_DATABASE || DEFAULT_HISTORY_DATABASE),
     lockTtlMs,
+    lockWaitMs,
   };
 }
 

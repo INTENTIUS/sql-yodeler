@@ -8,7 +8,7 @@ claims: []
 
 Each scenario claim (`scenarios/claims/`) is a promise the docs make, run against chant's emulator. A claim runs twice: plain, where it should pass, and broken (`BREAK=1`), where the claim's own check should catch the fault it plants. `npm run claims` runs them; see the comment at the top of `scenarios/run.ts`.
 
-The record was last written at 2026-10-10 03:08 UTC, at commit `322e789`. A row run in an earlier run keeps that run's commit and date.
+The record was last written at 2026-10-10 06:38 UTC, at commit `856a189`. A row run in an earlier run keeps that run's commit and date.
 
 A row marked "not recorded" has not been run into the record. CI does not run the template claim, which needs a Forgejo with a runner.
 
@@ -49,5 +49,6 @@ Each docs page names the claims that prove it, and `npm run check` fails when a 
 | template-github | Postgres | a project from the starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge | not recorded | not recorded | | |  |
 | template-gitlab | ClickHouse | a project from the starter template, on GitLab CI: apply only after approval, lint with replay and the plan comment on a merge request, and the approved change applied on merge | not recorded | not recorded | | |  |
 | template-gitlab | Postgres | a project from the starter template, on GitLab CI: apply only after approval, lint with replay and the plan comment on a merge request, and the approved change applied on merge | not recorded | not recorded | | |  |
-| lock-retry | Postgres | Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [migrations](migrations.md) |
+| lock-retry | ClickHouse | Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit | pass | caught | `856a189` | 2026-10-10 06:38 UTC | [migrations](migrations.md) |
+| lock-retry | Postgres | Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit | pass | caught | `856a189` | 2026-10-10 06:38 UTC | [migrations](migrations.md) |
 | column-change | Postgres | Postgres: a column rename runs as a PostgresMigrationOp step (expand, backfill, switch, contract) and keeps every value | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [steps](steps.md) |

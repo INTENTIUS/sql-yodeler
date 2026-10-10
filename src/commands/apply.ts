@@ -9,7 +9,8 @@ import { runnable } from "../chant/runnable.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
-import { declarativeTopologyRefusal } from "../config/settings.js";
+import { declarativeTopologyRefusal, LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
+import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
@@ -61,7 +62,7 @@ async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered:
   }
 }
 
-const usage = "usage: yodel apply <env> [--json] [--dir <project>] [--op <name>] [--allow-out-of-order] [--plan]";
+const usage = "usage: yodel apply <env> [--json] [--dir <project>] [--op <name>] [--allow-out-of-order] [--plan] [--lock-wait <duration>] [--stand-down]";
 
 const help = `${usage}
 
@@ -114,6 +115,16 @@ Options:
   --allow-out-of-order  versioned: apply out-of-order migrations too
   --plan                versioned: print the pending migrations and the plan
                         digest, apply nothing
+  --lock-wait <d>       versioned: when another apply holds the lock, wait up
+                        to <d> (90, 30s, 10m, 1h) for it, naming the holder,
+                        before giving up with exit 5. Default: yodel.config.ts
+                        lockWait (seconds), else YODEL_LOCK_WAIT, else 0
+  --stand-down          versioned: when the branch this run is for has a newer
+                        commit on origin (GITHUB_REF_NAME, CI_COMMIT_BRANCH,
+                        else the checked-out branch), apply nothing and exit 0:
+                        that commit's own apply applies this environment.
+                        Asked before the lock and while waiting for it. Also
+                        YODEL_STAND_DOWN=1
   -C, --dir <dir>       the project directory (default: the working directory)
 
 The migrations Op runs two steps of its own, not for direct use:
@@ -123,7 +134,8 @@ The migrations Op runs two steps of its own, not for direct use:
              of the Op's gate for it (the Op's Apply step)
 
 Exit codes:
-  0  applied, or nothing to apply
+  0  applied, or nothing to apply, or (--stand-down) stood down for a newer
+     commit, applying nothing
   2  a change needs its own Op (declarative), or a pending migration has a
      manual step or an Op step apply does not run (versioned: it runs
      ClickHouseRebuildOp in materialized-view mode and backfill steps on
@@ -134,7 +146,7 @@ Exit codes:
      migration gone from the directory, an out-of-order migration
      without --allow-out-of-order, a pre-migration check that failed, or a
      policy rule that denies the plan with no override
-  5  versioned: another apply holds the lock
+  5  versioned: another apply holds the lock (after --lock-wait, if given)
   1  anything else failed: a statement (the history records where; rerun to
      resume), a plan that moved since approval, a bad config
 `;
@@ -148,6 +160,9 @@ interface ApplyArgs {
   plan: boolean;
   digest: boolean;
   execute: boolean;
+  /** `--lock-wait`, in ms; undefined when not given. */
+  lockWaitMs: number | undefined;
+  standDown: boolean;
 }
 
 function parseApplyArgs(args: string[]): ApplyArgs {
@@ -165,6 +180,8 @@ function parseApplyArgs(args: string[]): ApplyArgs {
         plan: { type: "boolean" },
         digest: { type: "boolean" },
         execute: { type: "boolean" },
+        "lock-wait": { type: "string" },
+        "stand-down": { type: "boolean" },
       },
     });
   } catch (e) {
@@ -185,6 +202,8 @@ function parseApplyArgs(args: string[]): ApplyArgs {
     plan: flag("plan"),
     digest: flag("digest"),
     execute: flag("execute"),
+    lockWaitMs: typeof values["lock-wait"] === "string" ? parseDuration(values["lock-wait"], "--lock-wait") : undefined,
+    standDown: flag("stand-down") || standDownFromEnv(process.env),
   };
 }
 
@@ -199,8 +218,8 @@ export const apply: Command = {
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
       if (hasMigrations(project)) return versionedApply(project, env, a, io);
-      if (a.plan || a.digest || a.execute || a.allowOutOfOrder) {
-        throw new YodelError(`--plan, --digest, --execute and --allow-out-of-order are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+      if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down")) {
+        throw new YodelError(`--plan, --digest, --execute, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
       }
       const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
       if (refusal) throw refusal;
@@ -239,6 +258,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const result = await executeApply(venv, ordered, {
       approvedDigest: approved,
       allowOutOfOrder: a.allowOutOfOrder,
+      ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
+      ...(a.standDown ? { standDown: standingDown(project, env) } : {}),
       approve: async (digest) => {
         const by = await verifyApproval(ledger, op, digest);
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
@@ -257,8 +278,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
           }
         : {}),
     });
-    if (a.json) io.out(`${JSON.stringify({ environment: env.name, status: "applied", planDigest: approved, ...result }, null, 2)}\n`);
-    else io.out(result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
+    if (a.json) io.out(`${JSON.stringify({ environment: env.name, status: result.stoodDown ? "stood-down" : "applied", planDigest: approved, ...result }, null, 2)}\n`);
+    else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
     return 0;
   }
 
@@ -278,6 +299,13 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   if (report.status.pending.length === 0) {
     if (!a.json) io.out(`${env.name}${report.server ? ` (${describeServer(report.server)})` : ""} is up to date: every migration is applied.\n`);
     return emit({ status: "unchanged" }, 0);
+  }
+
+  const standDown = a.standDown ? standingDown(project, env) : undefined;
+  const stood = await standDown?.();
+  if (stood) {
+    if (!a.json) io.out(`${stood}\n`);
+    return emit({ status: "stood-down", stoodDown: stood }, 0);
   }
 
   // The first pending migration's checks (#52) read the data as it is now: one that fails refuses before anyone is asked to approve. The Apply step runs every migration's again under the lock.
@@ -313,7 +341,13 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   if (!a.json && checked) for (const o of checked.checks) io.out(`check ${o.name} of ${checked.migration} passed (${o.detail}); it runs again under the lock before the first statement\n`);
   if (!a.json) for (const line of describeResults(policy)) io.out(`${line}\n`);
   if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
-  const run = await runMigrateOp(project, op, { allowOutOfOrder: a.allowOutOfOrder, onOutput: (t) => { io.err(t); } });
+  // The Op's Apply step (yodel apply --execute) takes these from its environment.
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...(a.lockWaitMs !== undefined ? { [LOCK_WAIT_ENV]: `${String(a.lockWaitMs)}ms` } : {}),
+    ...(a.standDown ? { [STAND_DOWN_ENV]: "1" } : {}),
+  };
+  const run = await runMigrateOp(project, op, { allowOutOfOrder: a.allowOutOfOrder, env: childEnv, onOutput: (t) => { io.err(t); } });
   if (run.status === "gated") {
     const stale = await movedSinceApproval(project, venv, ordered, op, run.planDigest ?? report.digest);
     if (stale && !a.json) io.out(`\n${stale.line}\n`);
@@ -340,6 +374,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     }
     if (a.json) io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "failed", op: op.name, exitCode: code, chantExitCode: run.code }, null, 2)}\n`);
     return code;
+  }
+  // The Apply step stood down (a newer commit came while it waited for the lock): what it applied is nothing, and that is not a failure.
+  const stoodLate = after.status.pending.length > 0 ? await standDown?.() : undefined;
+  if (stoodLate) {
+    if (!a.json) io.out(`\n${stoodLate}\n`);
+    return emit({ status: "stood-down", stoodDown: stoodLate, op: op.name }, 0);
   }
   if (a.json) {
     io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "applied", op: op.name, appliedNow: report.status.pending.map((p) => p.id) }, null, 2)}\n`);
@@ -398,4 +438,12 @@ async function declarativeApply(project: Project, env: Environment, a: ApplyArgs
   } finally {
     build.dispose();
   }
+}
+
+/** `--stand-down`'s question: the line to stand down with, when a newer commit on the run's branch will apply `env`. */
+function standingDown(project: Project, env: Environment): () => Promise<string | undefined> {
+  return async () => {
+    const n = await newerCommit(project.dir);
+    return n ? standDownLine(env.name, n) : undefined;
+  };
 }

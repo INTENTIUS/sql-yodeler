@@ -114,8 +114,15 @@ export class Project {
     return env;
   }
 
-  yodel(args: string[], options: { env?: Record<string, string | undefined>; timeoutMs?: number } = {}): Promise<Ran> {
-    return run("yodel", args, { cwd: this.dir, env: this.envFor(options.env), ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) });
+  yodel(args: string[], options: { env?: Record<string, string | undefined>; timeoutMs?: number; onOutput?: (chunk: string) => void; bin?: readonly string[] } = {}): Promise<Ran> {
+    // `bin`: another yodel to run instead of the project's, as [command, ...leading args] (a claim's broken build).
+    const [cmd = "yodel", ...lead] = options.bin ?? ["yodel"];
+    return run(cmd, [...lead, ...args], {
+      cwd: this.dir,
+      env: this.envFor(options.env),
+      ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options.onOutput ? { onOutput: options.onOutput } : {}),
+    });
   }
 
   chant(args: string[]): Promise<Ran> {

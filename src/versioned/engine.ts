@@ -59,7 +59,9 @@ import {
   statementSha,
   withLock,
   appliedBy,
+  LockHeldError,
   type ClickHousePort,
+  type Lock,
   type HistoryLocation,
   type HistoryState,
   type HistoryStoreLike,
@@ -94,6 +96,8 @@ export interface VersionedEnv {
   /** Identifies the server, for the local lock's file name. */
   serverKey: string;
   lockTtlMs: number;
+  /** How long an apply waits for a lock another apply holds (`../config/settings.ts`); 0 gives up at once. */
+  lockWaitMs?: number;
   /** The project directory: an Op step reads chant.config.ts from it. */
   projectDir?: string;
   /** The server, for the receipt store a backfill step keeps its receipts in. */
@@ -125,6 +129,7 @@ export async function openVersioned(project: Project, env: Environment, processE
       scope: { databases: pg.schemas, historyDatabase: settings.historyDatabase },
       serverKey: pg.endpoint.url,
       lockTtlMs: settings.lockTtlMs,
+      lockWaitMs: settings.lockWaitMs,
       projectDir: project.dir,
       server: async () => ({ dialect: "postgres", address: serverAddress("postgres", pg.endpoint.url), version: await softly(() => postgresVersion(pg.client)) }),
     };
@@ -146,6 +151,7 @@ export async function openVersioned(project: Project, env: Environment, processE
     scope,
     serverKey: endpoint.url,
     lockTtlMs: settings.lockTtlMs,
+    lockWaitMs: settings.lockWaitMs,
     projectDir: project.dir,
     endpoint,
     topology: settings.topology,
@@ -261,13 +267,74 @@ export interface ExecuteOptions {
   runStep?: StepRunner;
   /** The receipt store a backfill step uses. Default: chant's, on the server. */
   receipts?: ReceiptStore;
+  /** How long to wait for a lock another apply holds. Default: the environment's ({@link VersionedEnv.lockWaitMs}). */
+  lockWaitMs?: number;
+  /**
+   * `--stand-down`: asked before the lock is taken and between tries while
+   * it waits; a line (`./stand-down.ts`) when a newer commit will apply the
+   * environment, and this run then applies nothing.
+   */
+  standDown?: () => Promise<string | undefined>;
+  /** How long to sleep between tries for a held lock. Default 1 s. */
+  lockPollMs?: number;
+}
+
+/** How long a run waited for the lock, and who held it. */
+export interface LockWait {
+  ms: number;
+  /** Who held it when the run first found it held, as the lock names its owner. */
+  heldBy: string;
+  where: string;
 }
 
 export interface ExecuteResult {
   applied: string[];
   /** Statements not sent because an earlier run had already succeeded with them. */
   skipped: Array<{ id: string; statement: number }>;
-  lock: { kind: "keeper" | "local" | "advisory"; where: string; notice?: string };
+  lock: { kind: "keeper" | "local" | "advisory"; where: string; notice?: string; waited?: LockWait };
+  /** Set when the run stood down (`--stand-down`) and applied nothing: why. */
+  stoodDown?: string;
+}
+
+const seconds = (ms: number): string => (ms % 1000 === 0 ? `${String(ms / 1000)}s` : `${(ms / 1000).toFixed(1)}s`);
+
+/**
+ * Takes the lock, waiting up to `waitMs` while another apply holds it: a
+ * line naming the holder when the wait starts and whenever the holder
+ * changes, a try every `pollMs`. A lock still held at the end of the wait
+ * is the {@link LockHeldError} it was (exit 5), saying how long it waited.
+ * With `standDown`, a newer commit ends the wait: `{ stoodDown }`.
+ */
+export async function acquireWaiting(
+  venv: Pick<VersionedEnv, "driver">,
+  holder: string,
+  options: { waitMs: number; pollMs?: number; log: (line: string) => void; standDown?: (() => Promise<string | undefined>) | undefined },
+): Promise<{ lock: Lock; waited?: LockWait } | { stoodDown: string }> {
+  const started = Date.now();
+  let first: LockHeldError | undefined;
+  let last = "";
+  for (;;) {
+    try {
+      const lock = await venv.driver.acquireLock(holder);
+      if (!first) return { lock };
+      const ms = Date.now() - started;
+      options.log(`lock: taken after waiting ${seconds(ms)}`);
+      return { lock, waited: { ms, heldBy: first.holder, where: first.where } };
+    } catch (e) {
+      if (!(e instanceof LockHeldError)) throw e;
+      first ??= e;
+      const left = options.waitMs - (Date.now() - started);
+      if (left <= 0) {
+        if (options.waitMs <= 0) throw e;
+        throw new LockHeldError(e.holder, e.expiresAt, e.where, e.clear, `waited ${seconds(options.waitMs)} (--lock-wait), and it is still held`);
+      }
+      if (e.holder !== last) options.log(`lock: held by ${e.holder} (${e.where}); waiting up to ${seconds(left)} for it`);
+      last = e.holder;
+      const line = await options.standDown?.();
+      if (line) return { stoodDown: line };
+      await new Promise((r) => setTimeout(r, Math.min(options.pollMs ?? 1000, left)));
+    }
+  }
 }
 
 /**
@@ -276,14 +343,34 @@ export interface ExecuteResult {
  * approval, then runs each statement not yet succeeded.
  */
 export async function executeApply(venv: VersionedEnv, ordered: readonly Migration[], options: ExecuteOptions): Promise<ExecuteResult> {
-  const lock = await venv.driver.acquireLock(appliedBy(options.processEnv));
+  const standDown = async (): Promise<string | undefined> => {
+    const line = await options.standDown?.();
+    if (line) options.log(line);
+    return line;
+  };
+  const early = await standDown();
+  if (early) return { applied: [], skipped: [], lock: { kind: "local", where: "(not taken: this run stood down)" }, stoodDown: early };
+  const got = await acquireWaiting(venv, appliedBy(options.processEnv), {
+    waitMs: options.lockWaitMs ?? venv.lockWaitMs ?? 0,
+    ...(options.lockPollMs !== undefined ? { pollMs: options.lockPollMs } : {}),
+    log: options.log,
+    standDown: options.standDown ? standDown : undefined,
+  });
+  if ("stoodDown" in got) return { applied: [], skipped: [], lock: { kind: "local", where: "(not taken: this run stood down)" }, stoodDown: got.stoodDown };
+  const { lock, waited } = got;
   if (lock.notice) options.log(`lock: ${lock.notice}`);
   else options.log(`lock: held in ${lock.where}`);
+  const lockDoc: ExecuteResult["lock"] = { kind: lock.kind, where: lock.where, ...(lock.notice ? { notice: lock.notice } : {}), ...(waited ? { waited } : {}) };
 
   return withLock(lock, venv.lockTtlMs, async (beat) => {
     await venv.store.ensure();
     const { state, status } = await inspect(venv, ordered);
     const toApply = selectToApply(status, options.allowOutOfOrder);
+    // Nothing pending under the lock (another apply, which held it first, applied it all): nothing to send, so nothing to approve.
+    if (toApply.length === 0) {
+      options.log("nothing pending under the lock: every migration is applied");
+      return { applied: [], skipped: [], lock: lockDoc };
+    }
     const digest = await currentDigest(venv, status, toApply);
     if (!(await sameDigest(digest, options.approvedDigest))) {
       const { describeMove, explainAgainst } = await import("./explain.js");
@@ -298,7 +385,7 @@ export async function executeApply(venv: VersionedEnv, ordered: readonly Migrati
     // The policy (#53), judged again under the lock for the digest computed here: a denial with no override for it refuses.
     const overrides = options.policy ? await options.policy(digest, toApply) : [];
     const recorder = new HistoryRecorder(venv.store, newRunContext(options.approvedDigest, options.processEnv), state.maxSeq);
-    const result: ExecuteResult = { applied: [], skipped: [], lock: { kind: lock.kind, where: lock.where, ...(lock.notice ? { notice: lock.notice } : {}) } };
+    const result: ExecuteResult = { applied: [], skipped: [], lock: lockDoc };
     for (const p of toApply) {
       await applyMigration(venv, p, state.byId.get(p.id), recorder, beat, options, result, overrides);
       result.applied.push(p.id);

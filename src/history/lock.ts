@@ -82,8 +82,15 @@ export class LockHeldError extends YodelError {
     readonly expiresAt: string,
     readonly where: string,
     readonly clear: string,
+    /** Set when the run waited for it (`--lock-wait`): how long, in words. */
+    readonly waited?: string,
   ) {
-    super(`another apply holds the lock (${where}): owner ${holder}, until ${expiresAt} UTC. Wait for it, or once you know it is not running, clear it with: ${clear}`, LOCKED);
+    super(
+      `another apply holds the lock (${where}): owner ${holder}, ${where.startsWith("Postgres advisory lock") ? "since" : "until"} ${expiresAt} UTC. ` +
+        (waited ? `This run ${waited}. ` : "") +
+        `Wait for it, or once you know it is not running, clear it with: ${clear}`,
+      LOCKED,
+    );
     this.name = "LockHeldError";
   }
 }
