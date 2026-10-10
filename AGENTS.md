@@ -39,6 +39,8 @@ The docs, READMEs and issues describe what SQL Yodeler does. They do not compare
 
 `@intentius/sql-yodeler` is published to npm by `.github/workflows/publish.yml` when a `v<version>` tag is pushed. Nobody runs `npm publish` by hand. The workflow checks that the tag matches `package.json`, runs `npm ci`, `build` and `check`, and publishes with npm trusted publishing: npm trusts the workflow by its file name, `publish.yml`, so there is no npm token, and renaming the file breaks publishing until the trusted publisher on npmjs.com is changed too. npm attaches a provenance attestation that links the release to the workflow run. After the publish, a smoke job installs `@intentius/sql-yodeler@<version>` from the registry into an empty directory, retrying until the registry serves it, and checks that `npx yodel --version` prints the version.
 
+The image job then builds the CI image (`.github/image/Dockerfile`, declared in `.github/src/image.ts`: Node 22, yodel, chant and the sql lexicon) from that release for linux/amd64 and linux/arm64, pushes it to `ghcr.io/intentius/sql-yodeler:<version>` with provenance and an SBOM, and runs `yodel --version` from the pushed image. Nobody pushes the image by hand. The `image` job in `ci.yml` builds the same Dockerfile from `npm pack` of the pull request on every change.
+
 A release takes two runs of `npm run release` (`scripts/release.sh`, which needs `gh` signed in):
 
 1. `npm run release -- 0.1.1` while main's `package.json` is at an older version: it makes branch `release-0.1.1` from `origin/main` with the version bumped in `package.json` and `package-lock.json`, pushes it and opens a pull request, `chore: release 0.1.1`. That pull request follows the rules above: merged once `check` and `claims` are green.

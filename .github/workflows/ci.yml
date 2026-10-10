@@ -40,3 +40,27 @@ jobs:
       - name: Build the site
         working-directory: docs-site
         run: npm run build
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Build the image from npm pack of this checkout
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          ctx=$(mktemp -d)
+          npm pack --silent --pack-destination "$ctx"
+          docker build -f .github/image/Dockerfile --build-arg "YODEL_VERSION=$version" \
+            --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" -t yodel-ci "$ctx"
+      - name: yodel --version from the image
+        run: docker run --rm yodel-ci yodel --version
+      - name: The ClickHouse example builds and lints in the image, with no npm ci
+        run: |
+          cp -R examples/clickhouse "$RUNNER_TEMP/project"
+          rm -rf "$RUNNER_TEMP/project/node_modules"
+          docker run --rm -v "$RUNNER_TEMP/project:/work" -w /work yodel-ci sh -c 'chant build src --lexicon sql -o /tmp/schema.json && yodel lint'

@@ -4,6 +4,7 @@
  */
 
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
+import { IMAGE_REPOSITORY } from "./image.js";
 import { checkout, setupNode } from "./shared.js";
 
 export const comment = `Publishes @intentius/sql-yodeler to npm when a v<version> tag is pushed.
@@ -17,7 +18,13 @@ job's OIDC token for a short-lived publish token: no NPM_TOKEN secret. That
 needs \`id-token: write\`, npm 11.5.1 or later and Node 22.14 or later.
 
 Renaming this file breaks publishing until the trusted publisher is changed
-on npmjs.com to the new name.`;
+on npmjs.com to the new name.
+
+Once npm serves the release, the image job builds the CI image
+(.github/image/Dockerfile, declared in .github/src/image.ts) from it for
+linux/amd64 and linux/arm64, pushes it to ${IMAGE_REPOSITORY}:<version>
+with provenance and an SBOM, and runs \`yodel --version\` from the pushed
+image.`;
 
 const publish = new Job({
   "runs-on": "ubuntu-latest",
@@ -99,10 +106,56 @@ fi
   ],
 });
 
+// The CI image, from the release npm now serves (the smoke job waited for
+// it). Each platform's build fails unless \`yodel --version\` prints the
+// version, so nothing is pushed that does not hold it.
+const image = new Job({
+  needs: ["publish", "smoke"],
+  "runs-on": "ubuntu-latest",
+  "timeout-minutes": 30,
+  // The only job that writes packages: the image to this repository's.
+  permissions: { contents: "read", packages: "write" },
+  env: { IMAGE: `${IMAGE_REPOSITORY}:\${{ needs.publish.outputs.version }}`, VERSION: "${{ needs.publish.outputs.version }}" },
+  steps: [
+    checkout(),
+    // arm64 builds under emulation on the amd64 runner.
+    new Step({ uses: "docker/setup-qemu-action@v3" }),
+    new Step({ uses: "docker/setup-buildx-action@v3" }),
+    new Step({
+      name: "Log in to GHCR",
+      env: { GH_TOKEN: "${{ github.token }}" },
+      run: 'echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin',
+    }),
+    new Step({
+      name: "Build both platforms and push, with provenance and an SBOM",
+      run: `# A rerun after a push that went through pushes nothing.
+if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "$IMAGE is already pushed; nothing to build"
+  exit 0
+fi
+docker buildx build --push --platform linux/amd64,linux/arm64 --provenance=mode=max --sbom=true \\
+  --build-arg "YODEL_VERSION=$VERSION" -f .github/image/Dockerfile -t "$IMAGE" .github/image
+`,
+    }),
+    new Step({
+      name: "yodel --version from the pushed image",
+      run: `printed=$(docker run --rm --pull always "$IMAGE" yodel --version)
+echo "yodel --version: $printed"
+if [ "$printed" != "$VERSION" ]; then
+  echo "::error::$IMAGE printed $printed, not $VERSION"
+  exit 1
+fi
+digest=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest.Digest}}' | tr -d '"')
+echo "$IMAGE@$digest" | tee -a "$GITHUB_STEP_SUMMARY"
+`,
+    }),
+  ],
+});
+
 export const workflow = new Workflow({
   name: "publish",
   on: { push: { tags: ["v*"] } },
   permissions: { contents: "read" },
   concurrency: { group: "publish-${{ github.ref }}", "cancel-in-progress": false },
-  jobs: { publish, smoke },
+  jobs: { publish, smoke, image },
 });
