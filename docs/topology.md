@@ -1,3 +1,7 @@
+---
+claims: [topology]
+---
+
 # Topology
 
 A ClickHouse environment runs on one of four topologies. One migrations directory serves all of them: `yodel new` writes every statement for a single node and records nothing about where it will run, and `yodel apply` renders each statement for the environment's topology as it sends it. (Topology does not apply to Postgres.)

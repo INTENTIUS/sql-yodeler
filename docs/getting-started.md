@@ -1,3 +1,7 @@
+---
+claims: [new, lint-ci, approve-and-apply, drift]
+---
+
 # Your first migration
 
 This page takes you from an empty directory to two migrations applied to a ClickHouse database on your own machine. It needs Node 22.12 or later, npm, git, and Docker for the local database. Every command below ran as shown, and the output under it is what it printed; `<my-schema>` stands for the project's path.

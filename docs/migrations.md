@@ -1,3 +1,7 @@
+---
+claims: [new, resume, out-of-order, lock-retry]
+---
+
 # Migrations
 
 On the versioned path, `migrations/` holds the history of the schema as reviewed steps, and a table in each environment's database records what ran there. This page covers both, how `yodel apply` uses them, and what to do when they disagree. The output quoted here is from the two examples' runs; `...` marks lines of a command's output left out.

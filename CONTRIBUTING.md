@@ -82,6 +82,9 @@ The build fails on an internal link that leads nowhere.
 
 Each scenario claim (`scenarios/claims/`) is a promise the docs make, run against the emulator the way a team would use yodel, once plain and once with the property broken. `npm run claims` runs them; the comment at the top of `scenarios/run.ts` has the options. [Claims status](docs/claims.md) shows the last recorded verdicts. CI runs them on every pull request.
 
+
+Each page under `docs/` starts with front matter naming the claims that prove what it describes, `claims: [approve-and-apply, digest-moved]` (`claims: []` for a page that describes no behaviour). `npm run check` (test/docs-claims.test.ts, scenarios/docs-claims.ts) fails when a page names a claim that is not in `scenarios/claims/index.ts`, or one whose row for any of its dialects is failing, pending or not recorded in `scenarios/claims-record.json`. A page that describes something not proven yet takes `draft: true` as well: the site then says on the page which claims do not hold, and leaves it out of `llms.txt`. The site ends each page with "Proven by", from the record, and `npm run claims:page` lists each claim's pages on [Claims status](docs/claims.md).
+
 ## Benchmarks
 
 `npm run bench` measures what yodel costs as a schema and a history grow; see `bench/README.md`.

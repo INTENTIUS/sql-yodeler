@@ -1,3 +1,7 @@
+---
+claims: [adopt, new]
+---
+
 # Starting a project
 
 There are two ways in: a new project from a starter template, whose first migration creates everything, or `yodel init --from <env>`, which adopts a database that already exists.

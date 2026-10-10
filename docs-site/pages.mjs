@@ -63,6 +63,47 @@ function rewriteLinks(md, slugs) {
 		.join('\n');
 }
 
+/**
+ * A docs page's own front matter: the claims that prove it and whether it is
+ * a draft (scenarios/docs-claims.ts has the rules; npm run check enforces them).
+ */
+export function pageFront(md) {
+	const m = /^---\n([\s\S]*?)\n---\n/.exec(md);
+	const lines = m ? m[1].split('\n') : [];
+	const value = (key) => lines.find((l) => l.startsWith(`${key}:`))?.slice(key.length + 1).trim();
+	const inner = /^\[(.*)\]$/.exec(value('claims') ?? '[]')?.[1] ?? '';
+	return { claims: inner.split(',').map((c) => c.trim()).filter(Boolean), draft: value('draft') === 'true' };
+}
+
+const dialectName = { ch: 'ClickHouse', pg: 'Postgres' };
+const holds = (r) => r.plain === 'pass' && r.break === 'caught';
+
+/** The record's rows for each claim, from scenarios/claims-record.json. */
+function recordRows() {
+	const record = JSON.parse(read(new URL('scenarios/claims-record.json', repo)));
+	const out = new Map();
+	for (const r of record.rows) out.set(r.claim, [...(out.get(r.claim) ?? []), r]);
+	return out;
+}
+
+/** "Proven by" at the end of a page, and on a draft a note at the top naming what is not proven yet. */
+function claimsSections(front, rows) {
+	if (!front.claims.length) return { top: '', bottom: '' };
+	const lines = front.claims.map((name) => {
+		const rs = rows.get(name) ?? [];
+		const says = (rs[0]?.says ?? '').replace(/\|/g, '\\|');
+		const verdicts = rs.length ? rs.map((r) => `${dialectName[r.dialect] ?? r.dialect}: ${r.plain}, ${r.break}`).join('; ') : 'not recorded';
+		const last = rs.length ? rs.map((r) => `\`${r.commit ?? 'unknown'}\`, ${r.recorded.slice(0, 10)}`).filter((v, i, a) => a.indexOf(v) === i).join('; ') : '';
+		return `| \`${name}\` | ${says} | ${verdicts} | ${last} |`;
+	});
+	const bottom = `\n\n## Proven by\n\nThe scenario claims below run what this page describes against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). [Claims status](claims.md) lists every claim.\n\n| Claim | What it says | Plain, broken | Last run |\n|---|---|---|---|\n${lines.join('\n')}\n`;
+	const pending = front.claims.filter((name) => !(rows.get(name) ?? []).length || !(rows.get(name) ?? []).every(holds));
+	const top = front.draft && pending.length
+		? `:::caution[Not proven yet]\nThis page is a draft: ${pending.map((c) => `\`${c}\``).join(', ')} ${pending.length === 1 ? 'does' : 'do'} not pass plain and get caught broken in the claims record yet (pending or not recorded), so what it describes may not hold. It is left out of llms.txt until ${pending.length === 1 ? 'it does' : 'they do'}.\n:::\n\n`
+		: '';
+	return { top, bottom };
+}
+
 const frontmatter = (fields) => `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}\n---\n\n`;
 
 /** The README's first paragraph, without the sentences that point into the repository's design and research notes. */
@@ -107,15 +148,21 @@ export function writePages() {
 	mkdirSync(outDir, { recursive: true });
 	const described = descriptions();
 	const order = sidebar().flatMap((i) => (i.items ? i.items.map((j) => j.slug) : [i.slug]));
+	const rows = recordRows();
 	for (const { file, slug } of files) {
-		const { title, body } = splitTitle(read(new URL(file, docsDir)), file);
+		const text = read(new URL(file, docsDir));
+		const { title, body } = splitTitle(text, file);
+		const front = pageFront(text);
+		const { top, bottom } = claimsSections(front, rows);
 		const fields = {
 			title,
 			...(described[slug] ? { description: described[slug] } : {}),
 			...(pagePrompts[slug] ? { prompt: pagePrompts[slug] } : {}),
 			rank: order.indexOf(slug),
+			claims: front.claims,
+			...(front.draft ? { unproven: true } : {}),
 		};
-		writeFileSync(`${outDir}${slug}.md`, frontmatter(fields) + rewriteLinks(body, slugs));
+		writeFileSync(`${outDir}${slug}.md`, frontmatter(fields) + rewriteLinks(top + body.trimEnd() + bottom, slugs));
 	}
 	const first = sidebar()[0];
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');

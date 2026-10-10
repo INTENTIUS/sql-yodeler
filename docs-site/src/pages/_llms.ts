@@ -9,7 +9,7 @@ export async function pages() {
 	// The agents page first, the landing page next, then the sidebar's order.
 	const rank = (d: (typeof docs)[number]) => (d.id === 'agents' ? -2 : d.id === 'index' ? -1 : (d.data.rank ?? Number.MAX_SAFE_INTEGER));
 	return docs
-		.filter((d) => d.id !== '404')
+		.filter((d) => d.id !== '404' && !d.data.unproven)
 		.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))
 		.map((d) => ({
 			id: d.id,
