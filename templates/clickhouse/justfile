@@ -54,10 +54,10 @@ drift env="dev":
 status env="dev":
     npx yodel status {{env}}
 
-# Render the pipelines from scripts/ci.ts.
+# Render the pipelines (yodel ci).
 ci:
     npm run ci
 
-# Fail when a committed pipeline differs from what scripts/ci.ts renders.
+# Fail when a committed pipeline differs from what yodel ci renders.
 ci-check:
     npm run ci:check

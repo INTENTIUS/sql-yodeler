@@ -13,7 +13,7 @@
  *
  * The part runs only once the project can send an event: the yodel the
  * template installs from npm has notify, and the rendered apply jobs pass
- * the two variables (the templates' scripts/ci.ts). Until both are true it
+ * the two variables (yodel ci, src/ci/render.ts). Until both are true it
  * says why and is skipped, plain and under BREAK.
  */
 
@@ -55,7 +55,7 @@ function notRendered(dir: string): string | undefined {
     const at = join(dir, d);
     return existsSync(at) ? readdirSync(at, { recursive: true }).map((f) => join(at, String(f))).filter((f) => /apply/.test(f) && /\.ya?ml$/.test(f)) : [];
   });
-  if (!rendered.some((f) => readFileSync(f, "utf8").includes(WEBHOOK_KEY_VAR))) return `the rendered apply jobs do not pass ${WEBHOOK_KEY_VAR} (the templates' scripts/ci.ts)`;
+  if (!rendered.some((f) => readFileSync(f, "utf8").includes(WEBHOOK_KEY_VAR))) return `the rendered apply jobs do not pass ${WEBHOOK_KEY_VAR} (yodel ci, src/ci/render.ts)`;
   return undefined;
 }
 

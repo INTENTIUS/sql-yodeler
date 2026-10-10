@@ -15,7 +15,7 @@ export default {
     // The lint job's throwaway server (chant.config.ts), with the same history database.
     replay: { topology: "single", history: { database: "{{chant:history_database}}" } },
   },
-  // The apply pipeline's waves, in order: scripts/ci.ts renders one job per
+  // The apply pipeline's waves, in order: yodel ci renders one job per
   // wave, each needing the one before. A wave's gate says when it waits for
   // an approval: "always" (whenever it has a migration to apply),
   // "on-destructive" (a drop, a table rewrite or lock-heavy statement, a
@@ -28,4 +28,10 @@ export default {
     { env: "dev", gate: "always" },
     { env: "prod", gate: "always" },
   ],
+  // The pipelines `yodel ci` (npm run ci) renders: the forges to render for,
+  // and, when the project has jobs of its own, the module that declares them
+  // with chant's lexicons (jobs: "ci/jobs.ts", exporting `actions` for GitHub
+  // and Forgejo and `gitlab`). yodel ci adds them to the pull request pipeline
+  // after its own, so they survive every render.
+  ci: { forges: ["github", "gitlab", "forgejo"] },
 } satisfies YodelConfig;

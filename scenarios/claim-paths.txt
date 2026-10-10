@@ -75,9 +75,10 @@ scenarios/forges/gitlab.ts             template-gitlab
 scenarios/forges/gitlab.compose.ts     template-gitlab
 scenarios/forges/                      template template-github template-gitlab
 
-# The starter templates: only the template claims make a project from them,
-# and the waves claim renders its pipeline with their scripts/ci.ts.
-templates/postgres/scripts/ci.ts       waves template template-github template-gitlab
+# The starter templates: only the template claims make a project from them.
+# yodel ci renders their pipelines, and the waves claim renders its pipeline with it.
+src/ci/                                waves template template-github template-gitlab
+src/commands/ci.ts                     template template-github template-gitlab
 templates/                             template template-github template-gitlab
 
 # yodel init, and what --from adopts with.

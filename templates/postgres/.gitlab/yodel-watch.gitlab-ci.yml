@@ -1,5 +1,5 @@
-# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
-# Edit those and render again; npm run ci:check says when this file is stale.
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
 # chant Ops (#927, #2084, #2293) — one job per Op under stage "ops", each
 # selected by its own rules:. A merge_request_event or push job needs no
 # setup; its rule fires on the event itself.

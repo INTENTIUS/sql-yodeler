@@ -22,7 +22,7 @@ npx yodel apply dev
 
 For Postgres, use `templates/postgres` with `--param name=app-schema --param schema=app`.
 
-Each template gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `scripts/ci.ts` in the project renders the pipelines again after an environment is added (`npm run ci`). The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup.
+Each template gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `yodel ci` (`npm run ci`) renders the pipelines from the installed package, so upgrading yodel and rendering again brings its pipeline fixes, and the project's own jobs, declared in a module `yodel.config.ts` `ci.jobs` names, are kept. The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup.
 
 ## Documentation
 

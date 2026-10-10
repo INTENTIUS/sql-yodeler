@@ -95,6 +95,25 @@ export interface WaveConfig {
   requires?: string | false;
 }
 
+/** A forge `yodel ci` renders pipelines for. */
+export type CiForge = "github" | "gitlab" | "forgejo";
+
+export const CI_FORGES: readonly CiForge[] = ["github", "gitlab", "forgejo"];
+
+/** `yodel ci` (#65): what the project's pipelines are rendered for. */
+export interface CiConfig {
+  /** The forges to render for. Default: all three. A forge left out gets no files, and `yodel ci --check` does not read its old ones. */
+  forges?: CiForge[];
+  /**
+   * The project's own jobs: a module, relative to the project (such as
+   * `ci/jobs.ts`), exporting `actions` (jobs declared with the github
+   * lexicon, for GitHub and Forgejo) and `gitlab` (the gitlab lexicon's),
+   * each keyed by the job's name. `yodel ci` adds them to the pull request
+   * pipeline after yodel's own jobs, so they survive every render.
+   */
+  jobs?: string;
+}
+
 export interface YodelConfig {
   /** Keyed by the environment's name in `sql.profiles`. */
   environments?: Record<string, EnvironmentConfig>;
@@ -121,6 +140,8 @@ export interface YodelConfig {
    * {@link DdlSource}.
    */
   sources?: Record<string, DdlSource>;
+  /** `yodel ci`: the forges to render the pipelines for, and the project's own jobs; see {@link CiConfig}. */
+  ci?: CiConfig;
 }
 
 /**

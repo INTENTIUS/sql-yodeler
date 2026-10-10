@@ -1,5 +1,6 @@
 import type { Command } from "../command.js";
 import { apply } from "./apply.js";
+import { ci } from "./ci.js";
 import { approve } from "./approve.js";
 import { docs } from "./docs.js";
 import { drift } from "./drift.js";
@@ -27,6 +28,7 @@ export const commands: readonly Command[] = [
   report,
   drift,
   docs,
+  ci,
   rebase,
   repair,
   mcp,

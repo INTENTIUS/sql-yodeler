@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { CI_FORGES, WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 
@@ -126,6 +126,16 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
   });
 }
 
+function checkCi(value: unknown, where: string): void {
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs? }`);
+  for (const k of Object.keys(value)) if (k !== "forges" && k !== "jobs") throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs)`);
+  const forges = value.forges;
+  if (forges !== undefined && !(Array.isArray(forges) && forges.length > 0 && forges.every((f) => (CI_FORGES as readonly unknown[]).includes(f)))) {
+    throw new YodelError(`${where}.forges: a list of ${CI_FORGES.join(", ")}`);
+  }
+  if (value.jobs !== undefined && (typeof value.jobs !== "string" || value.jobs === "")) throw new YodelError(`${where}.jobs: the path of the module that declares the project's own jobs, such as "ci/jobs.ts"`);
+}
+
 /**
  * Checks a loaded config's shape. `environments` names each environment by
  * its `sql.profiles` name; one that chant.config.ts does not declare is an
@@ -134,8 +144,9 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
-    if (!["environments", "lint", "policy", "notify", "sources", "waves"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves)`);
+    if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci)`);
   }
+  if (value.ci !== undefined) checkCi(value.ci, `${path}: ci`);
   if (value.sources !== undefined) checkSources(value.sources, `${path}: sources`);
   if (value.notify !== undefined) {
     const problem = notifyConfigProblem(value.notify);
