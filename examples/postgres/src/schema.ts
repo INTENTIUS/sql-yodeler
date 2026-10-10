@@ -1,11 +1,11 @@
 import { index, schema, table } from "@intentius/chant-lexicon-sql/postgres";
 
-export const yodel18ShopSchema = schema`
-  CREATE SCHEMA yodel_18_shop;
-  COMMENT ON SCHEMA yodel_18_shop IS 'The SQL Yodeler Postgres example'`;
+export const shopSchema = schema`
+  CREATE SCHEMA shop;
+  COMMENT ON SCHEMA shop IS 'The SQL Yodeler Postgres example'`;
 
 export const orders = table`
-  CREATE TABLE ${yodel18ShopSchema}.orders (
+  CREATE TABLE ${shopSchema}.orders (
       id bigint GENERATED ALWAYS AS IDENTITY,
       email text NOT NULL, -- previously: customer_email
       status text DEFAULT 'placed'::text NOT NULL,

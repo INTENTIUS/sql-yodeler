@@ -18,13 +18,13 @@ export const walkthrough: Walkthrough = {
   reset: () => Promise.resolve(),
   steps: [
     {
-      run: "npx chant init --from {clone}/templates/clickhouse --param name=events-schema --param database=yodel_18_tpl --param history_database=yodel_18_tpl_history my-schema",
+      run: "npx chant init --from {clone}/templates/clickhouse --param name=events-schema --param database=events my-schema",
       code: 0,
       expect: ["Created:"],
-      quote: "adoption.md",
+      quote: "adoption.md#template-init",
     },
     { run: "ln -s ../node_modules my-schema/node_modules", code: 0, hide: true },
-    { run: "npx yodel new init", cwd: "my-schema", code: 0, expect: ["the first migration"], quote: "adoption.md" },
-    { run: "npx yodel lint", cwd: "my-schema", code: 0, expect: ["0 errors"], quote: "adoption.md" },
+    { run: "npx yodel new init", cwd: "my-schema", code: 0, expect: ["the first migration"], quote: "adoption.md#template-new" },
+    { run: "npx yodel lint", cwd: "my-schema", code: 0, expect: ["0 errors"], quote: "adoption.md#template-new" },
   ],
 };

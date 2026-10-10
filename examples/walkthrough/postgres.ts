@@ -32,8 +32,8 @@ async function sql(text: string): Promise<string> {
 const SCHEMA = `import { index, schema, table } from "@intentius/chant-lexicon-sql/postgres";
 
 export const shop = schema\`
-  CREATE SCHEMA yodel_18_shop;
-  COMMENT ON SCHEMA yodel_18_shop IS 'The SQL Yodeler Postgres example'\`;
+  CREATE SCHEMA shop;
+  COMMENT ON SCHEMA shop IS 'The SQL Yodeler Postgres example'\`;
 
 export const orders = table\`
   CREATE TABLE \${shop}.orders (
@@ -68,7 +68,7 @@ To run it yourself, from a clone of this repository:
 
 \`\`\`sh
 npm ci && npm run build          # in the repository root
-npx chant emulator up --lexicon sql  # or any Postgres you can drop schema yodel_18_shop on
+npx chant emulator up --lexicon sql  # or any Postgres you can drop schema shop on
 cd examples/postgres
 npm install                      # @intentius/sql-yodeler from file:../.., this clone
 export DEV_POSTGRES_URL=postgres://127.0.0.1:5432/postgres DEV_POSTGRES_USER=postgres DEV_POSTGRES_PASSWORD=...
@@ -88,9 +88,14 @@ The run happened in a temporary copy of this directory, a git repository with a 
     REPLAY_POSTGRES_USER: user(),
     REPLAY_POSTGRES_PASSWORD: password(),
   }),
+  // The server as a reader's emulator is: what the transcripts show does not depend on where the run was.
+  shown: () => {
+    const u = new URL(url());
+    return [[`${u.hostname}:${u.port || "5432"}`, "127.0.0.1:5432"]];
+  },
   sql,
   reset: async () => {
-    await sql("DROP SCHEMA IF EXISTS yodel_18_shop CASCADE; DROP SCHEMA IF EXISTS yodel_18_history CASCADE");
+    await sql("DROP SCHEMA IF EXISTS shop CASCADE; DROP SCHEMA IF EXISTS yodeler CASCADE");
   },
   steps: [
     { say: "## 1. A declared schema, applied without migrations" },
@@ -109,7 +114,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { say: "## 2. Adopting the schema into versioned migrations" },
     { say: "Orders arrive, one of them a free sample with an amount of 0:" },
     {
-      sql: "INSERT INTO yodel_18_shop.orders (customer_email, status, amount, placed_at)\nSELECT 'customer' || (n % 40) || '@example.com', (ARRAY['placed', 'paid', 'shipped'])[n % 3 + 1], (n * 7 % 500) + 0.99, timestamptz '2026-06-01' + n * interval '5 hours'\nFROM generate_series(1, 300) AS n;\nINSERT INTO yodel_18_shop.orders (customer_email, amount) VALUES ('sample@example.com', 0)",
+      sql: "INSERT INTO shop.orders (customer_email, status, amount, placed_at)\nSELECT 'customer' || (n % 40) || '@example.com', (ARRAY['placed', 'paid', 'shipped'])[n % 3 + 1], (n * 7 % 500) + 0.99, timestamptz '2026-06-01' + n * interval '5 hours'\nFROM generate_series(1, 300) AS n;\nINSERT INTO shop.orders (customer_email, amount) VALUES ('sample@example.com', 0)",
     },
     {
       say: "`yodel init --from dev` reads the live schema, writes its declarations to `src/`, checks they plan clean, writes the baseline migration and records it applied in dev's history without running it. `--force` because `src/schema.ts` is already there:",
@@ -130,7 +135,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
       to: "      coupon text,\n      CONSTRAINT orders_pkey PRIMARY KEY (id),\n      CONSTRAINT orders_amount_positive CHECK (amount > 0)\n",
     },
     { run: "npx yodel new coupons", code: 0, expect: ["2 statements"] },
-    { run: "npx yodel lint", code: 3, expect: ["pg-rewrite"] },
+    { run: "npx yodel lint", code: 3, expect: ["pg-rewrite"], quote: "lint.md#pg-rewrite" },
     { say: "Do as the finding says: delete the migration, declare the constraint `NOT VALID`, and write it again:" },
     { run: "rm -r migrations/{id:coupons}", code: 0 },
     { edit: "src/schema.ts", from: "CHECK (amount > 0)\n", to: "CHECK (amount > 0) NOT VALID\n", show: false },
@@ -159,45 +164,53 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },
     { say: "The free sample breaks the constraint. Statement 0 ran and is recorded; statement 1 failed:" },
-    { run: "npx yodel apply dev", code: 1, expect: ["failed at statement 1"] },
-    { run: "npx yodel status dev", code: 3, expect: ["resumes at statement 1"] },
+    { run: "npx yodel apply dev", code: 1, expect: ["failed at statement 1"], quote: { at: "migrations.md#failed", excerpt: { from: "lock: held", to: "Fix the cause" } } },
+    { run: "npx yodel status dev", code: 3, expect: ["resumes at statement 1"], quote: "migrations.md#failed-status" },
     { say: "Fix the data. The history changed since the approval (statement 0 ran), so the digest moved and the gate asks again:" },
-    { sql: "UPDATE yodel_18_shop.orders SET amount = 0.01 WHERE amount <= 0" },
+    { sql: "UPDATE shop.orders SET amount = 0.01 WHERE amount <= 0" },
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },
-    { run: "npx yodel apply dev", code: 0, expect: ["statement 0: succeeded in an earlier run; not sent"] },
+    { run: "npx yodel apply dev", code: 0, expect: ["statement 0: succeeded in an earlier run; not sent"], quote: { at: "migrations.md#resumed", excerpt: { from: "Running migrate-dev", to: ": applied" } } },
 
     { say: "## 5. A column rename: a PostgresMigrationOp step" },
     {
       say: "Renaming `customer_email` to `email` in place would break every reader still using the old name. Declare the new name with `-- previously: <old name>` on its line, and `yodel new` writes the change as a `PostgresMigrationOp` step: add the new column, keep both written with a trigger, backfill, verify, switch, and drop the old column. The new name stays where the old one was declared:",
     },
-    { edit: "src/schema.ts", from: "      customer_email text NOT NULL,\n", to: "      email text NOT NULL, -- previously: customer_email\n" },
-    { run: "npx yodel new rename-email", code: 0, expect: ["PostgresMigrationOp"] },
-    { cat: "migrations/{id:rename-email}/migration.sql" },
+    {
+      say: "`yodel new` cannot tell a rename from a dropped column and an added one unless the declaration says so. Without the line, the change is a manual step, with a hint:",
+    },
+    { edit: "src/schema.ts", from: "      customer_email text NOT NULL,\n", to: "      email text NOT NULL,\n", show: false },
+    { run: "npx yodel new rename-email", code: 0, expect: ["manual step", "previously: customer_email"], quote: "steps.md#rename-hint" },
+    { run: "rm -r migrations/{id:rename-email}", code: 0 },
+    { say: "With the line:" },
+    { edit: "src/schema.ts", from: "      email text NOT NULL,\n", to: "      email text NOT NULL, -- previously: customer_email\n" },
+    { run: "npx yodel new rename-email", code: 0, expect: ["PostgresMigrationOp"], quote: "steps.md#rename-new" },
+    { cat: "migrations/{id:rename-email}/migration.sql", quote: "steps.md#rename-sql" },
     { say: "`src/schema.ts` and the newest migration now agree, so a second `yodel new` writes nothing:" },
-    { run: "npx yodel new check", code: 0, expect: ["No changes"], quote: "migrations.md" },
+    { run: "npx yodel new check", code: 0, expect: ["No changes"], quote: "migrations.md#new-check" },
     { run: "npx yodel plan dev", code: 0, expect: ["yodel apply runs it as this step"] },
     { run: "git add -A && git commit -q -m 'feat: orders.email' && git push -q origin main", code: 0, hide: true },
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },
-    { run: "npx yodel apply dev", code: 0, expect: ['"switched":true'] },
+    { run: "npx yodel apply dev", code: 0, expect: ['"switched":true'], quote: { at: "steps.md#rename-apply", excerpt: { from: "Running migrate-dev", to: ": applied" } } },
     {
       say: "The expand added `email` at the end of the table, and Postgres has no `ALTER` that moves a column, so the live order is not the declared one. Drift compares the columns by name, so that is not drift:",
     },
-    { sql: "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) AS live_columns FROM information_schema.columns WHERE table_schema = 'yodel_18_shop' AND table_name = 'orders'", showResult: true },
+    { sql: "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) AS live_columns FROM information_schema.columns WHERE table_schema = 'shop' AND table_name = 'orders'", showResult: true },
     { run: "npx yodel drift dev", code: 0, expect: ["No drift"] },
 
     { say: "## 6. A destructive change, silenced with a reason" },
     { edit: "src/schema.ts", from: "      coupon text,\n", to: "", show: false },
     { run: "npx yodel new drop-coupon", code: 0 },
-    { run: "npx yodel lint", code: 3, expect: ["destructive"] },
+    { run: "npx yodel lint", code: 3, expect: ["destructive"], quote: "lint.md#destructive" },
     { say: "Nothing ever wrote a coupon. Say so above the statement:" },
     {
       edit: "migrations/{id:drop-coupon}/migration.sql",
-      from: "ALTER TABLE yodel_18_shop.orders DROP COLUMN coupon;",
-      to: "-- yodel:allow destructive no order ever had a coupon; checked on dev\nALTER TABLE yodel_18_shop.orders DROP COLUMN coupon;",
+      from: "ALTER TABLE shop.orders DROP COLUMN coupon;",
+      to: "-- yodel:allow destructive no order ever had a coupon; checked on dev\nALTER TABLE shop.orders DROP COLUMN coupon;",
+      quote: "lint.md#silence-sql",
     },
-    { run: "npx yodel lint --update-checksum {id:drop-coupon}", code: 0, expect: ["1 silenced"] },
+    { run: "npx yodel lint --update-checksum {id:drop-coupon}", code: 0, expect: ["1 silenced"], quote: "lint.md#update-checksum" },
     { run: "git add -A && git commit -q -m 'feat: drop orders.coupon' && git push -q origin main", code: 0, hide: true },
     { say: "The pull request comment (`yodel plan dev --comment` in CI) is this Markdown:" },
     { run: "npx yodel plan dev --format markdown", code: 0, expect: ["destructive"] },
@@ -205,7 +218,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "{approve}", code: 0 },
     { run: "npx yodel apply dev", code: 0, expect: ["Applied: "] },
     { say: "Every history row the migration wrote records the silence:" },
-    { sql: "SELECT kind, statement_index, status, silences FROM yodel_18_history.history WHERE migration_id LIKE '%drop-coupon' ORDER BY seq", showResult: true },
+    { sql: "SELECT kind, statement_index, status, silences FROM yodeler.history WHERE migration_id LIKE '%drop-coupon' ORDER BY seq", showResult: true },
 
     { say: "## 7. Two branches, a fork, a rebase and a repair" },
     { say: "Two changes are made on two branches. The first adds a column:" },
@@ -227,7 +240,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
       show: false,
     },
     { run: "npx yodel new index-placed-at", code: 0 },
-    { run: "npx yodel lint", code: 3, expect: ["pg-lock"] },
+    { run: "npx yodel lint", code: 3, expect: ["pg-lock"], quote: "lint.md#pg-lock" },
     { run: "rm -r migrations/{id:index-placed-at}", code: 0 },
     { edit: "src/schema.ts", from: "CREATE INDEX orders_placed_at_idx", to: "CREATE INDEX CONCURRENTLY orders_placed_at_idx" },
     { run: "npx yodel new index-placed-at", code: 0 },
@@ -240,37 +253,37 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel apply dev", code: 0, expect: ["Applied: "] },
     { say: "Both branches merge. Each migration follows `drop-coupon`, so the history forks, and lint says so:" },
     { run: "git switch -q main && git merge -q --no-edit gift && git merge -q --no-edit placed-at-index", code: 0 },
-    { run: "npx yodel lint", code: 3, expect: ["fork"] },
+    { run: "npx yodel lint", code: 3, expect: ["fork"], quote: "migrations.md#fork" },
     { say: "`yodel rebase` moves one migration onto the other and writes its statements and recorded schema again. With `--env dev` it reads dev's history first, and refuses to move a migration that ran there:" },
-    { run: "npx yodel rebase {id:index-placed-at} --onto {id:add-gift} --env dev", code: 4, expect: ["refused"] },
+    { run: "npx yodel rebase {id:index-placed-at} --onto {id:add-gift} --env dev", code: 4, expect: ["refused"], quote: "migrations.md#rebase-refused" },
     {
       say: "The clean fix is the one it names: move `add-gift` after `index-placed-at`. To show what yodel does when a migration that ran is moved anyway (a rebase run without `--env`), this walkthrough moves `index-placed-at`:",
     },
-    { run: "npx yodel rebase {id:index-placed-at} --onto {id:add-gift}", code: 0, expect: ["No history was checked"] },
+    { run: "npx yodel rebase {id:index-placed-at} --onto {id:add-gift}", code: 0, expect: ["No history was checked"], quote: "migrations.md#rebase" },
     { run: "git add -A && git commit -q -m 'chore: rebase index-placed-at onto add-gift' && git push -q origin main", code: 0, hide: true },
     { say: "Its files changed after it ran on dev, so dev's history no longer matches them. `yodel status` and `yodel apply` refuse (exit 4):" },
     { run: "npx yodel status dev", code: 4, expect: ["checksum"] },
-    { run: "npx yodel apply dev", code: 4 },
+    { run: "npx yodel apply dev", code: 4, quote: "migrations.md#checksum-refused" },
     { say: "The edit is intended: its statements are the same, only its parent changed. `yodel repair` records the new checksum, with the reason, in dev's history. Nothing runs on the server:" },
-    { run: "npx yodel repair {id:index-placed-at} --reason 'rebased onto add-gift after it ran on dev' dev", code: 0 },
+    { run: "npx yodel repair {id:index-placed-at} --reason 'rebased onto add-gift after it ran on dev' dev", code: 0, quote: "migrations.md#repair" },
     { say: "Now `add-gift` comes before a migration dev has applied. It is out of order, and apply refuses it rather than skip it:" },
     { run: "npx yodel status dev", code: 4, expect: ["ut of order"] },
-    { run: "npx yodel apply dev", code: 4, expect: ["--allow-out-of-order"] },
+    { run: "npx yodel apply dev", code: 4, expect: ["--allow-out-of-order"], quote: "migrations.md#out-of-order" },
     { say: "Adding a column after the index changes nothing the index needs, so apply it out of order:" },
     { run: "npx yodel apply dev --allow-out-of-order", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },
-    { run: "npx yodel apply dev --allow-out-of-order", code: 0, expect: ["Applied: "] },
+    { run: "npx yodel apply dev --allow-out-of-order", code: 0, expect: ["Applied: "], quote: { at: "migrations.md#out-of-order-apply", excerpt: { from: "Running migrate-dev", to: ": applied" } } },
     { say: "`yodel status` lists `index-placed-at` as applied when it ran, and the repair under it:" },
-    { run: "npx yodel status dev", code: 0, expect: ["repaired "] },
+    { run: "npx yodel status dev", code: 0, expect: ["repaired "], quote: "migrations.md#status" },
 
     { say: "## 8. Drift" },
     { say: "Someone changes a default by hand:" },
-    { sql: "ALTER TABLE yodel_18_shop.orders ALTER COLUMN status SET DEFAULT 'new'" },
+    { sql: "ALTER TABLE shop.orders ALTER COLUMN status SET DEFAULT 'new'" },
     { run: "npx yodel drift dev", code: 2, expect: ["Changed out of band"] },
     { say: "`ops/watch-dev.op.ts` runs the same check as a `WatchOp` on a schedule. Run once by hand:" },
     { run: "npx chant run watch-dev", code: 0, expect: ["Drift=true"] },
     { say: "`chant run` exits 0 when the watch completes, drift or not; the drift is the run's `Drift` outcome. Put the default back:" },
-    { sql: "ALTER TABLE yodel_18_shop.orders ALTER COLUMN status SET DEFAULT 'placed'" },
+    { sql: "ALTER TABLE shop.orders ALTER COLUMN status SET DEFAULT 'placed'" },
     { run: "npx yodel drift dev", code: 0 },
 
     { say: "## 9. The replay check" },

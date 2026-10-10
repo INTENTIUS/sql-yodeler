@@ -1,61 +1,120 @@
 /**
- * The output docs/ quotes from scripts that need no server is what those
- * scripts print today, and what docs/ quotes from the examples' runs is what
- * their READMEs show. (The examples' transcripts are checked against the
- * emulator by test/e2e/examples.test.ts.)
+ * Every transcript docs/ quotes is checked. A block from a walkthrough
+ * (examples/walkthrough/) follows a `<!-- quote: <walkthrough>#<id> -->` line
+ * naming the step it shows: from an example's run it must be what the
+ * example's README shows for the same steps (the examples' transcripts are
+ * checked against the emulator by test/e2e/examples.test.ts), and from a
+ * walkthrough that needs no server it must be what a fresh run prints. The
+ * few blocks from commands that need no server are run here.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { findBlock, load, quotes, runWalkthrough } from "../examples/walkthrough/run.js";
+import { excerpt, findMarked, load, marker, quoteGroups, quotes, runWalkthrough } from "../examples/walkthrough/run.js";
 import { render } from "../examples/walkthrough/topology.js";
 import { repoRoot, yodel } from "./helpers/run.js";
 // @ts-expect-error docs-site/prompts.mjs is plain JavaScript, with no types
 import { neverLine, pagePrompts, pageUrl, setupPrompt } from "../docs-site/prompts.mjs";
 
-/** The console block in `page` that starts with `$ <command>`, without the command line. */
-function block(page: string, command: string): string {
-  const text = readFileSync(join(repoRoot, "docs", page), "utf8");
+const page = (name: string) => readFileSync(join(repoRoot, "docs", name), "utf8");
+
+/** The console block in `text` that starts with `$ <command>`, without the command line. */
+function block(text: string, command: string, where: string): string {
   const start = text.indexOf(`$ ${command}\n`);
-  if (start === -1) throw new Error(`docs/${page} has no "$ ${command}" block`);
+  if (start === -1) throw new Error(`${where} has no "$ ${command}" block`);
   const body = text.slice(start + command.length + 3);
   return body.slice(0, body.indexOf("\n```"));
 }
 
+/** The body of the block after `mark` in `text`. */
+function marked(text: string, mark: string, where: string, from = 0): { body: string; end: number } {
+  const b = findMarked(text, mark, from);
+  if (!b) throw new Error(`${where} has no block after ${mark}`);
+  return { body: text.slice(b.start, b.end), end: b.end };
+}
+
+/** The blocks run here, by their first command, and the page each is on. */
+const RUN_HERE: Record<string, string> = {
+  "npx tsx examples/walkthrough/topology.ts": "topology.md",
+  "npx yodel lint --rules": "lint.md",
+  "yodel --help": "README.md",
+  "yodel plan dev": "configuration.md",
+};
+
 describe("docs", () => {
   it("topology.md shows what examples/walkthrough/topology.ts prints", () => {
-    expect(block("topology.md", "npx tsx examples/walkthrough/topology.ts")).toBe(render().trimEnd());
+    expect(block(page("topology.md"), "npx tsx examples/walkthrough/topology.ts", "docs/topology.md")).toBe(render().trimEnd());
   });
 
   it("lint.md shows what yodel lint --rules prints in examples/clickhouse", async () => {
     const ran = await yodel(["lint", "--rules", "--dir", join(repoRoot, "examples", "clickhouse")]);
     expect(ran.code, ran.err).toBe(0);
-    expect(block("lint.md", "npx yodel lint --rules")).toBe(ran.out.trimEnd());
+    expect(block(page("lint.md"), "npx yodel lint --rules", "docs/lint.md")).toBe(ran.out.trimEnd());
   });
 
-  it.each(["clickhouse", "postgres"])("what docs/ quotes from the %s example's run is what its README shows", async (dialect) => {
-    const w = await load(dialect);
-    const readme = readFileSync(join(repoRoot, "examples", dialect, "README.md"), "utf8");
-    // Consecutive quoted steps are one block in docs/ and one block each in the README.
-    const groups: Array<{ page: string; commands: string[] }> = [];
-    let open: { page: string; commands: string[] } | undefined;
-    for (const step of w.steps) {
-      if ("run" in step && step.quote) {
-        if (/\{[a-z]/.test(step.run)) throw new Error(`a quoted step's command must be literal: ${step.run}`);
-        if (open?.page !== step.quote) groups.push((open = { page: step.quote, commands: [] }));
-        open.commands.push(step.run);
-      } else open = undefined;
+  it("README.md shows what yodel --help prints", async () => {
+    const ran = await yodel(["--help"]);
+    expect(block(page("README.md"), "yodel --help", "docs/README.md")).toBe(ran.out.trimEnd());
+  });
+
+  it("configuration.md shows the refusal of a topology set only in yodel.config.ts", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-docs-topology-"));
+    try {
+      for (const f of ["chant.config.ts", "package.json", "src"]) cpSync(join(repoRoot, "examples", "clickhouse", f), join(dir, f), { recursive: true });
+      symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"), "dir");
+      writeFileSync(join(dir, "yodel.config.ts"), 'export default { environments: { dev: { topology: "single" } } };\n');
+      const ran = await yodel(["plan", "dev", "--dir", dir]);
+      expect(ran.code).toBe(1);
+      expect(block(page("configuration.md"), "yodel plan dev", "docs/configuration.md")).toBe(ran.err.trimEnd());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
-    const body = (text: string, command: string, where: string) => {
-      const b = findBlock(text, command);
-      if (!b) throw new Error(`${where} has no console block starting with "$ ${command}"`);
-      return text.slice(b.start, b.end);
-    };
+  });
+
+  it.each(["clickhouse", "postgres"])("what docs/ quotes from the %s example's run is what its README shows", async (name) => {
+    const w = await load(name);
+    const readme = readFileSync(join(repoRoot, "examples", name, "README.md"), "utf8");
+    const groups = quoteGroups(w.steps);
+    expect(groups.length).toBeGreaterThan(0);
     for (const g of groups) {
-      const page = readFileSync(join(repoRoot, "docs", g.page), "utf8");
-      const fromReadme = g.commands.map((c) => body(readme, c, `examples/${dialect}/README.md`)).join("\n");
-      expect(body(page, g.commands[0] ?? "", `docs/${g.page}`), `docs/${g.page}`).toBe(fromReadme);
+      const mark = marker(name, g.id);
+      let from = 0;
+      const shown = g.members.map((m) => {
+        const b = marked(readme, mark, `examples/${name}/README.md`, from);
+        from = b.end;
+        return excerpt(b.body, m.excerpt, "run" in m.step);
+      });
+      expect(marked(page(g.page), mark, `docs/${g.page}`).body, `docs/${g.page}: ${mark}`).toBe(shown.join("\n"));
+    }
+  });
+
+  it("every console block in docs/ follows a quote line naming a walkthrough step, or is run here", async () => {
+    const known = new Set<string>();
+    for (const name of ["clickhouse", "postgres", "template", "getting-started"]) for (const g of quoteGroups((await load(name)).steps)) known.add(`${g.page} ${marker(name, g.id)}`);
+    const problems: string[] = [];
+    for (const file of readdirSync(join(repoRoot, "docs")).filter((f) => f.endsWith(".md"))) {
+      const lines = page(file).split("\n");
+      lines.forEach((line, i) => {
+        const mark = /^<!-- quote: .* -->$/.exec(line)?.[0];
+        if (mark && !known.has(`${file} ${mark}`)) problems.push(`docs/${file}:${String(i + 1)}: ${mark} names no quoted step of that page`);
+        if (!/^`{3,}console$/.test(line)) return;
+        const first = (lines[i + 1] ?? "").replace(/^\$ /, "");
+        if (RUN_HERE[first] === file) return;
+        if (!/^<!-- quote: [\w-]+#[a-z0-9-]+ -->$/.test(lines[i - 1] ?? "")) problems.push(`docs/${file}:${String(i + 1)}: a console block with no quote line above it`);
+      });
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("getting-started.md has each quoted step of examples/walkthrough/getting-started.ts, with its exit code", async () => {
+    // Its steps need a server of their own, so this checks the commands and exit codes; run.ts getting-started --write refreshes the output.
+    for (const g of quoteGroups((await load("getting-started")).steps)) {
+      const text = marked(page(g.page), marker("getting-started", g.id), `docs/${g.page}`).body;
+      const parts = `\n${text}`.split("\n$ ").slice(1);
+      expect(parts.map((p) => p.split("\n")[0])).toEqual(g.members.map((m) => ("run" in m.step ? m.step.run : "")));
+      expect(parts.map((p) => /\n\[exit (\d+)\]$/.exec(p.trimEnd())?.[1] ?? "0")).toEqual(g.members.map((m) => ("run" in m.step ? String(m.step.code) : "")));
     }
   });
 
@@ -66,45 +125,11 @@ describe("docs", () => {
       const id = (text: string) => text.replace(/\b\d{8}T\d{4}-/g, "<id>-");
       const made = quotes(ran);
       expect(made.length).toBeGreaterThan(0);
-      for (const q of made) {
-        const page = readFileSync(join(repoRoot, "docs", q.page), "utf8");
-        const b = findBlock(page, q.command, q.nth);
-        expect(b, `docs/${q.page}: "$ ${q.command}"`).toBeDefined();
-        if (b) expect(id(page.slice(b.start, b.end))).toBe(id(q.text));
-      }
+      for (const q of made) expect(id(marked(page(q.page), marker("template", q.id), `docs/${q.page}`).body)).toBe(id(q.text));
     } finally {
       dispose();
     }
   }, 120_000);
-
-  it("getting-started.md has a block for each quoted step of examples/walkthrough/getting-started.ts, with its exit code", async () => {
-    // The steps need a server, so this checks the shape; run.ts getting-started --write refreshes the output.
-    const w = await load("getting-started");
-    const page = readFileSync(join(repoRoot, "docs", "getting-started.md"), "utf8");
-    const groups: Array<Array<{ run: string; code: number }>> = [];
-    let open: Array<{ run: string; code: number }> | undefined;
-    for (const step of w.steps) {
-      if ("run" in step && step.quote === "getting-started.md") {
-        if (/\{[a-z]/.test(step.run)) throw new Error(`a quoted step's command must be literal: ${step.run}`);
-        if (!open) groups.push((open = []));
-        open.push({ run: step.run, code: step.code });
-      } else open = undefined;
-    }
-    const seen = new Map<string, number>();
-    for (const g of groups) {
-      const first = g[0]?.run ?? "";
-      const nth = seen.get(first) ?? 0;
-      seen.set(first, nth + 1);
-      const b = findBlock(page, first, nth);
-      expect(b, `docs/getting-started.md: block ${String(nth + 1)} starting "$ ${first}"`).toBeDefined();
-      if (!b) continue;
-      const text = page.slice(b.start, b.end);
-      const commands = text.split("\n").filter((l) => l.startsWith("$ ")).map((l) => l.slice(2));
-      expect(commands).toEqual(g.map((s) => s.run));
-      const exits = text.split("\n$ ").map((part) => /\n\[exit (\d+)\]$/.exec(part.trimEnd())?.[1] ?? "0");
-      expect(exits).toEqual(g.map((s) => String(s.code)));
-    }
-  });
 
   describe("the prompts for coding agents (docs-site/prompts.mjs)", () => {
     const prompts = Object.entries(pagePrompts as Record<string, string>);

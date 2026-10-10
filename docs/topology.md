@@ -15,9 +15,11 @@ The object form, `{ kind: "cluster", cluster: "main", replicaPath: "...", replic
 
 Per environment, first one set wins: `environments.<env>.topology` in `yodel.config.ts`, then `sql.profiles.<env>.topology` in `chant.config.ts`, then `YODEL_TOPOLOGY`, then `single`. `yodel status` and `yodel plan` print it with where it came from:
 
+<!-- quote: clickhouse#status -->
 ```console
 $ npx yodel status dev
-Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history, topology single (default))
+Migrations in dev (history yodeler.history, topology single (default))
+...
 ```
 
 The declarative path (no `migrations/`) plans and applies through chant, which reads only `sql.profiles.<env>.topology`. A topology set only in `yodel.config.ts` is refused there; set it in `chant.config.ts` too. `yodel drift` reads through chant as well and refuses the same way, on either path: chant compares the server against the declaration rendered for the profile's topology, so a cluster's `ReplicatedMergeTree` would otherwise show as drift from the declared `MergeTree`. A rebuild step (`ClickHouseRebuildOp`) runs through chant as well, and yodel hands it the environment's topology, so it renders for the same topology as the statements around it.
@@ -29,37 +31,37 @@ The declarative path (no `migrations/`) plans and applies through chant, which r
 ```console
 $ npx tsx examples/walkthrough/topology.ts
 -- topology: single
-CREATE DATABASE yodel_18_shop ENGINE = Atomic;
-CREATE TABLE yodel_18_shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
-ALTER TABLE `yodel_18_shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
+CREATE DATABASE shop ENGINE = Atomic;
+CREATE TABLE shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
+ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
 -- the history: CREATE DATABASE IF NOT EXISTS `yodeler`
 --   its table's engine: MergeTree
 
 -- topology: cluster:main
-CREATE DATABASE yodel_18_shop ON CLUSTER `main` ENGINE = Atomic;
-CREATE TABLE yodel_18_shop.events ON CLUSTER `main` (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
-ALTER TABLE `yodel_18_shop`.`events` ON CLUSTER `main` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
+CREATE DATABASE shop ON CLUSTER `main` ENGINE = Atomic;
+CREATE TABLE shop.events ON CLUSTER `main` (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}') PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
+ALTER TABLE `shop`.`events` ON CLUSTER `main` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
 -- the history: CREATE DATABASE IF NOT EXISTS `yodeler` ON CLUSTER `main`
 --   its table's engine: ReplicatedMergeTree('/clickhouse/yodeler/yodeler/history', '{shard}-{replica}')
 
 -- topology: replicated
-CREATE DATABASE yodel_18_shop ENGINE = Replicated('/clickhouse/databases/yodel_18_shop', '{shard}', '{replica}');
-CREATE TABLE yodel_18_shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = ReplicatedMergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
-ALTER TABLE `yodel_18_shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
+CREATE DATABASE shop ENGINE = Replicated('/clickhouse/databases/shop', '{shard}', '{replica}');
+CREATE TABLE shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = ReplicatedMergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
+ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
 -- the history: CREATE DATABASE IF NOT EXISTS `yodeler` ENGINE = Replicated('/clickhouse/databases/yodeler', '{shard}', '{replica}')
 --   its table's engine: ReplicatedMergeTree
 
 -- topology: replicated:main
-CREATE DATABASE yodel_18_shop ON CLUSTER `main` ENGINE = Replicated('/clickhouse/databases/yodel_18_shop', '{shard}', '{replica}');
-CREATE TABLE yodel_18_shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = ReplicatedMergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
-ALTER TABLE `yodel_18_shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
+CREATE DATABASE shop ON CLUSTER `main` ENGINE = Replicated('/clickhouse/databases/shop', '{shard}', '{replica}');
+CREATE TABLE shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = ReplicatedMergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
+ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
 -- the history: CREATE DATABASE IF NOT EXISTS `yodeler` ON CLUSTER `main` ENGINE = Replicated('/clickhouse/databases/yodeler', '{shard}', '{replica}')
 --   its table's engine: ReplicatedMergeTree
 
 -- topology: cloud
-CREATE DATABASE yodel_18_shop ENGINE = Atomic;
-CREATE TABLE yodel_18_shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
-ALTER TABLE `yodel_18_shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
+CREATE DATABASE shop ENGINE = Atomic;
+CREATE TABLE shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at);
+ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
 -- the history: CREATE DATABASE IF NOT EXISTS `yodeler`
 --   its table's engine: MergeTree
 ```

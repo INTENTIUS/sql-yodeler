@@ -1,0 +1,85 @@
+{
+  "format": 1,
+  "id": "20261010T0438-add-country",
+  "parent": "20261010T0438-baseline",
+  "checksum": "sha256:793635c1814f3a36efdc18ac3a5207e1e3a1016d42c363b27b9603c64e45aa89",
+  "createdAt": "2026-10-10T04:38:18Z",
+  "dialect": "clickhouse",
+  "defaultDatabase": "default",
+  "refused": false,
+  "hints": [],
+  "steps": [
+    {
+      "kind": "statement",
+      "object": "events",
+      "type": "ClickHouse::Table",
+      "name": "shop.events",
+      "class": "metadata",
+      "rule": "SQLCH201",
+      "sql": "ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`",
+      "transactional": false
+    }
+  ],
+  "schema": {
+    "applyOrder": [
+      "shopDb",
+      "events"
+    ],
+    "dialect": "clickhouse",
+    "objects": [
+      {
+        "comment": "The SQL Yodeler ClickHouse example",
+        "ddl": "CREATE DATABASE shop\n  ENGINE = Atomic\n  COMMENT 'The SQL Yodeler ClickHouse example'",
+        "dependsOn": [],
+        "engine": {
+          "name": "Atomic"
+        },
+        "export": "shopDb",
+        "name": "shop",
+        "sqlName": "shop",
+        "type": "ClickHouse::Database"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "type": "UInt64"
+          },
+          {
+            "name": "kind",
+            "type": "LowCardinality(String)"
+          },
+          {
+            "name": "at",
+            "type": "DateTime"
+          },
+          {
+            "default": {
+              "expr": "''",
+              "kind": "DEFAULT"
+            },
+            "name": "country",
+            "type": "LowCardinality(String)"
+          }
+        ],
+        "constraints": [],
+        "database": "shop",
+        "ddl": "CREATE TABLE shop.events\n  (\n      id UInt64,\n      kind LowCardinality(String),\n      at DateTime,\n      country LowCardinality(String) DEFAULT ''\n  )\n  ENGINE = MergeTree\n  PARTITION BY toYYYYMM(at)\n  ORDER BY (kind, at)",
+        "dependsOn": [
+          "shopDb"
+        ],
+        "engine": {
+          "name": "MergeTree"
+        },
+        "export": "events",
+        "indexes": [],
+        "name": "events",
+        "orderBy": "(kind, at)",
+        "partitionBy": "toYYYYMM(at)",
+        "projections": [],
+        "sqlName": "shop.events",
+        "type": "ClickHouse::Table"
+      }
+    ]
+  }
+}

@@ -81,6 +81,7 @@ The template gives each environment two users: a reader (the default, used by pl
 
 `yodel new` writes the next migration from the change in `src/` since the last one. The first one creates everything. `yodel lint` checks the migrations offline:
 
+<!-- quote: getting-started#first-migration -->
 ```console
 $ npx yodel new init
 Wrote migrations/20261010T0423-init/ (2 statements; the first migration)
@@ -98,6 +99,7 @@ git add -A && git commit -m "feat: the first migration"
 
 `yodel plan` shows what `yodel apply` would run, and a digest of that plan:
 
+<!-- quote: getting-started#plan -->
 ```console
 $ npx yodel plan dev
 Plan for dev (clickhouse, history yodeler.history (single (yodel.config.ts))): 0 applied, 1 pending
@@ -126,6 +128,7 @@ Not approved yet. Approving binds exactly this digest; if anything it covers cha
 
 `yodel apply` runs only a plan someone approved. The first run stops at the approval and prints the command that gives it (exit 3):
 
+<!-- quote: getting-started#apply -->
 ```console
 $ npx yodel apply dev
 Migrations in dev (history yodeler.history, topology single (yodel.config.ts))
@@ -161,6 +164,7 @@ The warnings about a remote are expected: approvals live on a `chant/lifecycle` 
 
 To approve, run the printed `chant approve` command with `npx` in front, or let `yodel apply dev --digest` fill in the digest, as here. The approval holds for this exact plan only. Then run `yodel apply` again:
 
+<!-- quote: getting-started#approve -->
 ```console
 $ npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
 warning: No remote is configured, so nothing was pushed. The resolution is recorded locally on chant/lifecycle. Until it reaches the remote, a run in another checkout will not see it.
@@ -215,6 +219,7 @@ Add a column to the table in `src/schema.ts`:
 
 Then write the migration, check it and commit it:
 
+<!-- quote: getting-started#second-migration -->
 ```console
 $ npx yodel new add-country
 Wrote migrations/20261010T0424-add-country/ (1 statement; follows 20261010T0423-init)
@@ -228,6 +233,7 @@ git add -A && git commit -m "feat: events.country"
 
 The plan has the one new statement. The approval you gave for the first migration does not hold for this plan, and the plan says why:
 
+<!-- quote: getting-started#plan-second -->
 ```console
 $ npx yodel plan dev
 Plan for dev (clickhouse, history yodeler.history (single (yodel.config.ts))): 1 applied, 1 pending
@@ -246,6 +252,7 @@ What moved (as far as yodel can tell): history changed: applied since: 20261010T
 
 Approve and apply as before:
 
+<!-- quote: getting-started#approve-second -->
 ```console
 $ npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
 warning: No remote is configured, so nothing was pushed. The resolution is recorded locally on chant/lifecycle. Until it reaches the remote, a run in another checkout will not see it.

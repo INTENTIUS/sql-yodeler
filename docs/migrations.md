@@ -12,12 +12,13 @@ Each migration is a directory, `migrations/<YYYYMMDDTHHMM>-<name>/`, named by `y
 
 From the ClickHouse example:
 
+<!-- quote: clickhouse#add-country-sql -->
 ```sql
--- yodel migration 20261009T2305-add-country
--- parent: 20261009T2305-baseline
+-- yodel migration 20261010T0438-add-country
+-- parent: 20261010T0438-baseline
 
--- events (yodel_18_shop.events): SQLCH201 metadata
-ALTER TABLE `yodel_18_shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
+-- events (shop.events): SQLCH201 metadata
+ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`;
 ```
 
 The order migrations run in is the chain of parent ids. The timestamp in an id is for people reading a listing; it never decides the order. The first migration has no parent (`"parent": null`).
@@ -32,9 +33,10 @@ A migration's checksum covers its own files and nothing else: `migration.sql` wi
 
 `yodel new <name>` diffs the newest migration's recorded schema (an empty schema for the first) against a fresh build of `src/`, and writes the next migration. It reads no database. When nothing changed it writes nothing and exits 0:
 
+<!-- quote: postgres#new-check -->
 ```console
 $ npx yodel new check
-No changes: the declared schema matches the newest migration's recorded schema (20261010T0258-rename-email). Nothing written.
+No changes: the declared schema matches the newest migration's recorded schema (20261010T0443-rename-email). Nothing written.
 ```
 
 (From the Postgres example's run, just after it writes `rename-email`; `run.ts postgres --write` rewrites this quote with the README. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
@@ -66,15 +68,16 @@ The state of a migration or a statement is its row with the highest `seq`. The C
 
 ```sql
 SELECT migration_id, kind, statement_index, status, note, silences
-FROM yodel_18_history.history
+FROM yodeler.history
 WHERE migration_id LIKE '%events-by-id' OR migration_id LIKE '%fill-country'
 ORDER BY seq FORMAT Vertical
 ```
 
+<!-- quote: clickhouse#history-rows -->
 ```
 Row 1:
 ──────
-migration_id:    20261009T2305-events-by-id
+migration_id:    20261010T0438-events-by-id
 kind:            migration
 statement_index: -1
 status:          started
@@ -83,7 +86,7 @@ silences:        [{"step":0,"rule":"ch-rebuild","reason":"600 rows; the copy tak
 
 Row 2:
 ──────
-migration_id:    20261009T2305-events-by-id
+migration_id:    20261010T0438-events-by-id
 kind:            step
 statement_index: 0
 status:          started
@@ -92,16 +95,16 @@ silences:        [{"step":0,"rule":"ch-rebuild","reason":"600 rows; the copy tak
 
 Row 3:
 ──────
-migration_id:    20261009T2305-events-by-id
+migration_id:    20261010T0438-events-by-id
 kind:            step
 statement_index: 0
 status:          succeeded
-note:            {"op":"ClickHouseRebuildOp","table":"yodel_18_shop.events","state":"rebuild","partitions":6,"copied":6,"skipped":0,"cleared":0,"repaired":0,"verifiedRows":600,"swapped":true,"oldTable":"yodel_18_shop.events__chant_old","retainUntil":"2026-10-16T23:06:57.237Z"}
+note:            {"op":"ClickHouseRebuildOp","table":"shop.events","state":"rebuild","partitions":6,"copied":6,"skipped":0,"cleared":0,"repaired":0,"verifiedRows":600,"swapped":true,"oldTable":"shop.events__chant_old","retainUntil":"2026-10-17T04:39:51.575Z"}
 silences:        [{"step":0,"rule":"ch-rebuild","reason":"600 rows; the copy takes seconds"}]
 
 Row 4:
 ──────
-migration_id:    20261009T2305-events-by-id
+migration_id:    20261010T0438-events-by-id
 kind:            migration
 statement_index: -1
 status:          succeeded
@@ -110,7 +113,7 @@ silences:        [{"step":0,"rule":"ch-rebuild","reason":"600 rows; the copy tak
 
 Row 5:
 ──────
-migration_id:    20261009T2306-fill-country
+migration_id:    20261010T0440-fill-country
 kind:            migration
 statement_index: -1
 status:          started
@@ -119,7 +122,7 @@ silences:        []
 
 Row 6:
 ──────
-migration_id:    20261009T2306-fill-country
+migration_id:    20261010T0440-fill-country
 kind:            step
 statement_index: 0
 status:          started
@@ -128,7 +131,7 @@ silences:        []
 
 Row 7:
 ──────
-migration_id:    20261009T2306-fill-country
+migration_id:    20261010T0440-fill-country
 kind:            step
 statement_index: 0
 status:          succeeded
@@ -137,7 +140,7 @@ silences:        []
 
 Row 8:
 ──────
-migration_id:    20261009T2306-fill-country
+migration_id:    20261010T0440-fill-country
 kind:            migration
 statement_index: -1
 status:          succeeded
@@ -150,7 +153,7 @@ silences:        []
 One apply runs at a time per environment.
 
 - ClickHouse: a row in `<history database>.lock`, a `KeeperMap` table, so it lives in Keeper and every runner on any host sees it. It needs Keeper and the server setting `keeper_map_path_prefix`. The holder renews it while it works; a lock left by a dead runner expires after its TTL (`lockTtl`, `YODEL_LOCK_TTL`, default 900 seconds). A single node without Keeper gets a lock file on the runner's machine instead, which serializes applies from that machine only, and the run says so (`lock: no KeeperMap on this server ...; the lock is a file on this machine, so cross-runner locking needs Keeper`). A cluster, a `Replicated` database and Cloud refuse rather than fall back.
-- Postgres: a session advisory lock on a connection of its own, keyed by the history schema (`lock: held in Postgres advisory lock (...) for history schema yodel_18_history`). Postgres releases it when the session ends, however it ends, so it needs no expiry.
+- Postgres: a session advisory lock on a connection of its own, keyed by the history schema (`lock: held in Postgres advisory lock (...) for history schema yodeler`). Postgres releases it when the session ends, however it ends, so it needs no expiry.
 
 A run that finds the lock taken exits 5 and names the holder. To clear a lock by hand, once you know nothing is applying: on ClickHouse `ALTER TABLE <history database>.lock DELETE WHERE name = 'apply'` (or remove the lock file the refusal names); on Postgres end the holding session, `SELECT pg_terminate_backend(<pid>)`. `yodel status` and `yodel plan` take no lock.
 
@@ -158,35 +161,36 @@ A run that finds the lock taken exits 5 and names the holder. To clear a lock by
 
 `yodel apply <env>` runs the project's migrations Op ([Approval](approval.md)). Under the lock, its Apply step checks the plan digest again, checks every applied migration's checksum, then runs the pending migrations in chain order, statement by statement, writing a `started` row before each and a `succeeded` or `failed` row after. From the ClickHouse example:
 
+<!-- quote: clickhouse#apply -->
 ```console
 $ npx yodel apply dev
-Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history, topology single (default))
+Migrations in dev (history yodeler.history, topology single (default))
 
 Applied (1):
-  20261009T2305-baseline  2026-10-09 23:05:28.654129 by yodel@example
+  20261010T0438-baseline  2026-10-10 04:38:15.336067 by yodel@example
 
 Pending (1):
-  20261009T2305-add-country
+  20261010T0438-add-country
 
-Plan digest: jcs1-sha256:a9948d55a9e2c9dc97e6465bb7990df66afa63e5a3b9ff1b16618731fc9f3fc3
+Plan digest: jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf
 
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:a9948d55a9e2c9dc97e6465bb7990df66afa63e5a3b9ff1b16618731fc9f3fc3, by yodel at 2026-10-09T23:05:38.583Z
-20261009T2305-add-country: applying
-  statement 0: ok (SQLCH201 metadata, yodel_18_shop.events)
-20261009T2305-add-country: applied
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf, by yodel at 2026-10-10T04:38:29.140Z
+20261010T0438-add-country: applying
+  statement 0: ok (SQLCH201 metadata, shop.events)
+20261010T0438-add-country: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   849ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.2s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   192ms
-    [approved] yodel at 2026-10-09T23:05:38.583Z
+  ✓ gate:approve-migrate-dev()   254ms
+    [approved] yodel at 2026-10-10T04:38:29.140Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:a9948d55a9e2c9dc97e6465bb7990df66afa63e5a3b9ff1b16618731fc9f3fc3"})   1.6s
-Op "migrate-dev" completed in 2.8s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf"})   1.9s
+Op "migrate-dev" completed in 3.4s
 
-Applied: 20261009T2305-add-country.
+Applied: 20261010T0438-add-country.
 ```
 
 On ClickHouse each statement is rendered for the environment's topology as it is sent ([Topology](topology.md)). On Postgres:
@@ -201,49 +205,53 @@ A statement whose latest row is `succeeded` is never sent again. So when a state
 
 In the Postgres example a migration's second statement, `VALIDATE CONSTRAINT`, fails on a row the constraint does not allow. The part of the run after the gate:
 
+<!-- quote: postgres#failed -->
 ```console
 $ npx yodel apply dev
 ...
-lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92, by yodel at 2026-10-09T23:09:17.685Z
-20261009T2309-validate-amount: applying
-  statement 0: ok (SQLPG201 metadata, yodel_18_shop.orders)
+lock: held in Postgres advisory lock (1498367052, 748638931) for history schema yodeler
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:9c8a619b8bbc105fc465cc4ecf64abe12642552ccedd521191015509bf3cb826, by yodel at 2026-10-10T04:43:01.447Z
+20261010T0442-validate-amount: applying
+  statement 0: ok (SQLPG201 metadata, shop.orders)
   statement 1: failed: check constraint "orders_amount_positive" of relation "orders" is violated by some row
-yodel apply: 20261009T2309-validate-amount failed at statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
+yodel apply: 20261010T0442-validate-amount failed at statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 Fix the cause (on the server, or that statement in the migration's files), then run yodel apply again: it resumes at statement 1 and never sends again the statements that succeeded.
 ...
+[exit 1]
 ```
 
 `yodel status` shows where it stopped, and exits 3 (pending):
 
+<!-- quote: postgres#failed-status -->
 ```console
 $ npx yodel status dev
-Migrations in dev (postgres 18.6 at 127.0.0.1:5432/postgres, history yodel_18_history.history)
+Migrations in dev (history yodeler.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0442-baseline  2026-10-10 04:42:32.772462 by yodel@example
+  20261010T0442-coupons  2026-10-10 04:42:54.377216 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount  (failed part way at statement 1; resumes at statement 1)
+  20261010T0442-validate-amount  (failed part way at statement 1; resumes at statement 1)
       error: statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 
-Plan digest: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
+Plan digest: jcs1-sha256:bcf22ee48f757e0c502c100f72dfbf50ded56df449dce5e7e91f471b94462aca
 [exit 3]
 ```
 
 The history changed since the approval (statement 0 ran), so the plan digest moved and the gate asks for a new approval. After fixing the row and approving again, the next run sends only statement 1:
 
+<!-- quote: postgres#resumed -->
 ```console
 $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
-lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea, by yodel at 2026-10-09T23:09:26.530Z
-20261009T2309-validate-amount: resuming at statement 1
+lock: held in Postgres advisory lock (1498367052, 748638931) for history schema yodeler
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:bcf22ee48f757e0c502c100f72dfbf50ded56df449dce5e7e91f471b94462aca, by yodel at 2026-10-10T04:43:11.157Z
+20261010T0442-validate-amount: resuming at statement 1
   statement 0: succeeded in an earlier run; not sent
-  statement 1: ok (SQLPG220 validate, yodel_18_shop.orders)
-20261009T2309-validate-amount: applied
+  statement 1: ok (SQLPG220 validate, shop.orders)
+20261010T0442-validate-amount: applied
 ...
 ```
 
@@ -251,19 +259,20 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:a86038e389aa7bdc40ca
 
 `yodel status <env>` lists the environment's migrations against its history: applied, pending, out of order, failed part way (with the statement it resumes at), and checksum mismatches, and prints the plan digest `yodel apply` would ask approval for. It reads only and takes no lock. Exit codes: 0 every migration applied, 3 migrations pending, 4 a checksum mismatch or an out-of-order migration, 2 a pending migration has a step `yodel apply` does not run, 1 the status could not be read. `--json` prints it as JSON.
 
+<!-- quote: postgres#status -->
 ```console
 $ npx yodel status dev
-Migrations in dev (postgres 18.6 at 127.0.0.1:5432/postgres, history yodel_18_history.history)
+Migrations in dev (history yodeler.history)
 
 Applied (7):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
-  20261009T2309-add-gift  2026-10-09 23:10:22.374780 by yodel@example
-  20261009T2309-index-placed-at  2026-10-09 23:10:08.233569 by yodel@example
-      repaired 2026-10-09 23:10:13.083734 by yodel@example: rebased onto add-gift after it ran on dev
+  20261010T0442-baseline  2026-10-10 04:42:32.772462 by yodel@example
+  20261010T0442-coupons  2026-10-10 04:42:54.377216 by yodel@example
+  20261010T0442-validate-amount  2026-10-10 04:43:14.954814 by yodel@example
+  20261010T0443-rename-email  2026-10-10 04:43:29.626167 by yodel@example
+  20261010T0443-drop-coupon  2026-10-10 04:43:44.185649 by yodel@example
+  20261010T0443-add-gift  2026-10-10 04:44:17.785624 by yodel@example
+  20261010T0443-index-placed-at  2026-10-10 04:43:58.394117 by yodel@example
+      repaired 2026-10-10 04:44:03.067699 by yodel@example: rebased onto add-gift after it ran on dev
 
 Pending: none
 ```
@@ -272,23 +281,25 @@ Pending: none
 
 A pending migration that the chain puts before one already applied is out of order. It can happen when a migration that ran in an environment is moved in the chain afterwards, as below. `yodel apply` refuses it (exit 4) and never skips it:
 
+<!-- quote: postgres#out-of-order -->
 ```console
 $ npx yodel apply dev
-yodel apply: refused: 20261009T2309-add-gift is out of order: the chain puts it before 20261009T2309-index-placed-at, which is already applied. Nothing was applied. Pass --allow-out-of-order to apply it now (in chain order); it is never skipped.
+yodel apply: refused: 20261010T0443-add-gift is out of order: the chain puts it before 20261010T0443-index-placed-at, which is already applied. Nothing was applied. Pass --allow-out-of-order to apply it now (in chain order); it is never skipped.
 [exit 4]
 ```
 
 `--allow-out-of-order` applies it, in chain order, behind the same approval as any other run:
 
+<!-- quote: postgres#out-of-order-apply -->
 ```console
 $ npx yodel apply dev --allow-out-of-order
 ...
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
-lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b, by yodel at 2026-10-09T23:10:18.861Z
-20261009T2309-add-gift: applying (out of order, allowed)
-  statement 0: ok (SQLPG201 metadata, yodel_18_shop.orders)
-20261009T2309-add-gift: applied
+lock: held in Postgres advisory lock (1498367052, 748638931) for history schema yodeler
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:cff4cd946019b414655ac1cbde1fb30a59b8b628429bb3ae15e48e3e9efcbbcd, by yodel at 2026-10-10T04:44:13.787Z
+20261010T0443-add-gift: applying (out of order, allowed)
+  statement 0: ok (SQLPG201 metadata, shop.orders)
+20261010T0443-add-gift: applied
 ...
 ```
 
@@ -296,13 +307,14 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7db9aa24351d076d9677
 
 Two branches that each add a migration give one parent two children. Merged together, `yodel lint` fails on the fork (an error that cannot be lowered), naming both:
 
+<!-- quote: postgres#fork -->
 ```console
 $ npx yodel lint
 migrations/
-  error    fork: 20261009T2309-add-gift and 20261009T2309-index-placed-at both follow 20261009T2309-drop-coupon; rebase one onto the other
+  error    fork: fork: 20261010T0443-add-gift and 20261010T0443-index-placed-at both follow 20261010T0443-drop-coupon; rebase one onto the other
 
-20261009T2309-drop-coupon
-  silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
+20261010T0443-drop-coupon
+  silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
 7 migrations: 1 error, 0 warnings, 1 silenced.
@@ -313,18 +325,20 @@ migrations/
 
 A migration that ran somewhere must not be rebased: its statements already ran in that order. `--env <env>` (repeatable) reads each environment's history first and refuses to move a migration it records:
 
+<!-- quote: postgres#rebase-refused -->
 ```console
-$ npx yodel rebase 20261009T2309-index-placed-at --onto 20261009T2309-add-gift --env dev
-yodel rebase: refused: dev's history records 20261009T2309-index-placed-at (applied). Nothing was written. A migration that ran is never rebased: its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).
+$ npx yodel rebase 20261010T0443-index-placed-at --onto 20261010T0443-add-gift --env dev
+yodel rebase: refused: dev's history records 20261010T0443-index-placed-at (applied). Nothing was written. A migration that ran is never rebased: its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).
 [exit 4]
 ```
 
 The fix it names is to move the other migration instead: here `yodel rebase <add-gift> --onto <index-placed-at> --env dev`. Without `--env`, no history is checked, and the rebase says so:
 
+<!-- quote: postgres#rebase -->
 ```console
-$ npx yodel rebase 20261009T2309-index-placed-at --onto 20261009T2309-add-gift
-Rebased 20261009T2309-index-placed-at onto 20261009T2309-add-gift (it followed 20261009T2309-drop-coupon).
-  20261009T2309-index-placed-at: follows 20261009T2309-add-gift; 2 statements; checksum sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01 -> sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3
+$ npx yodel rebase 20261010T0443-index-placed-at --onto 20261010T0443-add-gift
+Rebased 20261010T0443-index-placed-at onto 20261010T0443-add-gift (it followed 20261010T0443-drop-coupon).
+  20261010T0443-index-placed-at: follows 20261010T0443-add-gift; 2 statements; checksum sha256:af051aa4ebc4a38c1b6db624bc88021cfc4ba3e6e5537ceab1f0df81556993d9 -> sha256:00832bdc5b8181480fc1a614e12d70388cb5510eb885963b606c81881879ca12
 No history was checked (--env): make sure none of these ran anywhere before merging.
 ```
 
@@ -334,20 +348,22 @@ No history was checked (--env): make sure none of these ran anywhere before merg
 
 An applied migration whose files changed no longer matches the checksum its history recorded, and `yodel status` and `yodel apply` refuse:
 
+<!-- quote: postgres#checksum-refused -->
 ```console
 $ npx yodel apply dev
 yodel apply: refused: the history does not match the migrations directory; nothing was applied:
-  20261009T2309-index-placed-at was applied with checksum sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01, but its files now hash to sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3; if the edit is intended, record it with yodel repair 20261009T2309-index-placed-at --reason ... <env>
+  20261010T0443-index-placed-at was applied with checksum sha256:af051aa4ebc4a38c1b6db624bc88021cfc4ba3e6e5537ceab1f0df81556993d9, but its files now hash to sha256:00832bdc5b8181480fc1a614e12d70388cb5510eb885963b606c81881879ca12; if the edit is intended, record it with yodel repair 20261010T0443-index-placed-at --reason ... <env>
 [exit 4]
 ```
 
 When the edit is intended (here, the rebase above; or a statement edited after a server upgrade made it invalid), `yodel repair <id> --reason "<text>" <env>` appends a row with the files' new checksum and the reason, under the apply lock. Nothing runs on the server: the edit is recorded, not applied. Repair each environment the migration ran in.
 
+<!-- quote: postgres#repair -->
 ```console
-$ npx yodel repair 20261009T2309-index-placed-at --reason 'rebased onto add-gift after it ran on dev' dev
-Repaired 20261009T2309-index-placed-at in dev's history (yodel_18_history).
-  old checksum: sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01
-  new checksum: sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3
+$ npx yodel repair 20261010T0443-index-placed-at --reason 'rebased onto add-gift after it ran on dev' dev
+Repaired 20261010T0443-index-placed-at in dev's history (yodeler).
+  old checksum: sha256:af051aa4ebc4a38c1b6db624bc88021cfc4ba3e6e5537ceab1f0df81556993d9
+  new checksum: sha256:00832bdc5b8181480fc1a614e12d70388cb5510eb885963b606c81881879ca12
   reason: rebased onto add-gift after it ran on dev
 ```
 

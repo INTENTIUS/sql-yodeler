@@ -15,8 +15,9 @@ npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/pos
 
 or from a clone, by path, shown here as `<clone>`. Inside the clone, `npx chant` is the clone's own chant:
 
+<!-- quote: template#template-init -->
 ```console
-$ npx chant init --from <clone>/templates/clickhouse --param name=events-schema --param database=yodel_18_tpl --param history_database=yodel_18_tpl_history my-schema
+$ npx chant init --from <clone>/templates/clickhouse --param name=events-schema --param database=events my-schema
 Created:
   .forgejo/workflows/watch-dev.yml
   .forgejo/workflows/watch-prod.yml
@@ -47,16 +48,17 @@ Created:
   .chant/workspace.lock.json
 
 Lineage: dir:<clone>/templates/clickhouse (a directory, recorded by digest only), recorded in .chant/workspace.lock.json
-Parameters: database="yodel_18_tpl", history_database="yodel_18_tpl_history", name="events-schema"
+Parameters: database="events", history_database="yodeler", name="events-schema"
 ```
 
 The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.1.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. The run quoted here linked the clone's `node_modules` into `my-schema` in place of `npm install`.
 
 The first migration creates what `src/schema.ts` declares. `yodel new` needs no server:
 
+<!-- quote: template#template-new -->
 ```console
 $ npx yodel new init
-Wrote migrations/20261010T0301-init/ (2 statements; the first migration)
+Wrote migrations/20261010T0437-init/ (2 statements; the first migration)
 $ npx yodel lint
 1 migration: 0 errors, 0 warnings, 0 silenced.
 ```
@@ -78,37 +80,39 @@ What it needs first: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect`
 
 Both examples adopt a database this way. The ClickHouse example's run, where the database was first made on the declarative path, so `src/schema.ts` was there and `--force` writes over it:
 
+<!-- quote: clickhouse#adopt -->
 ```console
 $ npx yodel init --from dev --force
 read 2 object(s) from dev
 wrote src/schema.ts
 planned against dev: no change
-wrote migrations/20261009T2305-baseline (2 statements)
+wrote migrations/20261010T0438-baseline (2 statements)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-recorded 20261009T2305-baseline applied in yodel_18_history.history as a baseline; none of its statements was run
+recorded 20261010T0438-baseline applied in yodeler.history as a baseline; none of its statements was run
 Adopted dev (clickhouse): 2 objects
-  Database yodel_18_shop
-  Table yodel_18_shop.events
+  Database shop
+  Table shop.events
 
 Declarations: src/schema.ts
-Baseline:     migrations/20261009T2305-baseline/ (2 statements, sha256:ed4d48a54c04dfe42f3d414e6094b1c164c240eeb47b1bb038b8b310428b3df5)
-Recorded:     applied in yodel_18_history.history as a baseline; none of its statements was run
+Baseline:     migrations/20261010T0438-baseline/ (2 statements, sha256:864e674b579b5a914fc6d0af2e8e73bae2802cf58d7bb1073f89630741204414)
+Recorded:     applied in yodeler.history as a baseline; none of its statements was run
 
 yodel plan dev shows no change, and yodel status dev lists the baseline applied.
 ```
 
 The declarations it wrote:
 
+<!-- quote: clickhouse#adopt-schema -->
 ```ts
 import { database, table } from "@intentius/chant-lexicon-sql/clickhouse";
 
-export const yodel18ShopDb = database`
-  CREATE DATABASE yodel_18_shop
+export const shopDb = database`
+  CREATE DATABASE shop
   ENGINE = Atomic
   COMMENT 'The SQL Yodeler ClickHouse example'`;
 
 export const events = table`
-  CREATE TABLE ${yodel18ShopDb}.events
+  CREATE TABLE ${shopDb}.events
   (
       id UInt64,
       kind LowCardinality(String),
@@ -121,12 +125,13 @@ export const events = table`
 
 and the history:
 
+<!-- quote: clickhouse#adopt-status -->
 ```console
 $ npx yodel status dev
-Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history, topology single (default))
+Migrations in dev (history yodeler.history, topology single (default))
 
 Applied (1):
-  20261009T2305-baseline  2026-10-09 23:05:28.654129 by yodel@example
+  20261010T0438-baseline  2026-10-10 04:38:15.336067 by yodel@example
 
 Pending: none
 ```

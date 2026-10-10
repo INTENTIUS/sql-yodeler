@@ -24,9 +24,13 @@
  * through a preload), so the names in approvals and in the history's
  * applied_by are the same on every machine and never the local user's.
  *
- * A run step with `quote` is also quoted in docs/<quote>: --write rewrites
- * that console block from the run, and test/docs.test.ts checks it against
- * the README (or, for a walkthrough with no README, against a fresh run).
+ * A run or cat step with `quote: "<page>#<id>"` is also quoted in
+ * docs/<page>, in the block that follows the line
+ * `<!-- quote: <walkthrough>#<id> -->`. Consecutive steps with the same quote
+ * are one block there, and a run step's `excerpt` keeps only part of its
+ * output. --write rewrites each such block from the run, and the README marks
+ * the same steps, so test/docs.test.ts checks every quote against the README
+ * (or, for a walkthrough with no README, against a fresh run).
  *
  *   npx tsx examples/walkthrough/run.ts template [--write]
  *
@@ -46,23 +50,41 @@ export type Step =
   /** Markdown, as is. */
   | { say: string }
   /** Writes a file (from `content`, or from the committed example when `content` is left out) and shows it. */
-  | { file: string; content?: string; show?: boolean }
+  | { file: string; content?: string; show?: boolean; quote?: Quoted }
   /** Replaces `from` with `to` in a file, and shows the file. */
-  | { edit: string; from: string; to: string; show?: boolean }
+  | { edit: string; from: string; to: string; show?: boolean; quote?: Quoted }
   /** Removes a file or directory. */
   | { rm: string }
   /** Shows a file the walkthrough made, e.g. a migration's migration.sql. `{id:<name>}` names a migration. */
-  | { cat: string; lang?: string }
+  | { cat: string; lang?: string; quote?: Quoted }
   /**
    * Runs a shell command in the project (in `cwd` under it, when given).
    * `{id:<name>}` is the id of the migration named <name>; `{approve}` is the
    * `chant approve` command the last run printed, run with npx; `{clone}` is
-   * this repository, shown as `<clone>`. `quote` names the docs/ page that
+   * this repository, shown as `<clone>`. `quote` names the docs/ block that
    * quotes the command and its output.
    */
-  | { run: string; code: number; expect?: Array<string | RegExp>; hide?: boolean; cwd?: string; quote?: string }
-  /** Runs SQL on the server, as someone working out of band would. */
-  | { sql: string; hide?: boolean; showResult?: boolean };
+  | { run: string; code: number; expect?: Array<string | RegExp>; hide?: boolean; cwd?: string; quote?: Quoted }
+  /** Runs SQL on the server, as someone working out of band would. A quote shows the result, so it needs `showResult`. */
+  | { sql: string; hide?: boolean; showResult?: boolean; quote?: Quoted };
+
+/**
+ * The part of a command's output a docs quote shows: from the first line that
+ * contains `from` (else the first line) to the first line at or after it that
+ * contains `to` (else the last). A cut is shown as `...`.
+ */
+export interface Excerpt {
+  from?: string;
+  to?: string;
+}
+
+/**
+ * Where a step is quoted in docs/: `<page>#<id>`, or that with the excerpt
+ * of the step's output the quote shows. A step can be quoted in more than
+ * one place.
+ */
+export type QuoteAt = string | { at: string; excerpt?: Excerpt };
+export type Quoted = QuoteAt | QuoteAt[];
 
 export interface Walkthrough {
   dialect: "clickhouse" | "postgres";
@@ -252,79 +274,141 @@ const consoleBlock = (r: Ran) => {
   return `$ ${r.command ?? ""}\n${(r.output ?? "").trimEnd()}${exit}`;
 };
 
+/** `lines` cut to `e`, a cut shown as `...`. */
+function cut(lines: string[], e: Excerpt, whole: string): string[] {
+  const find = (text: string, from: number) => lines.findIndex((l, i) => i >= from && l.includes(text));
+  const a = e.from === undefined ? 0 : find(e.from, 0);
+  if (a === -1) throw new Error(`excerpt: no line has ${JSON.stringify(e.from)} in:\n${whole}`);
+  const b = e.to === undefined ? lines.length - 1 : find(e.to, a);
+  if (b === -1) throw new Error(`excerpt: no line from ${JSON.stringify(e.from ?? "the start")} on has ${JSON.stringify(e.to)} in:\n${whole}`);
+  return [...(a > 0 ? ["..."] : []), ...lines.slice(a, b + 1), ...(b < lines.length - 1 ? ["..."] : [])];
+}
+
+/**
+ * What a quote shows of a step's block: a console block (`$ <command>`, the
+ * output, `[exit <code>]`) keeps its first and exit lines, and any other block
+ * is cut as a whole.
+ */
+export function excerpt(block: string, e: Excerpt | undefined, isConsole: boolean): string {
+  if (!e) return block;
+  const lines = block.split("\n");
+  if (!isConsole) return cut(lines, e, block).join("\n");
+  const head = lines[0] ?? "";
+  const body = lines.slice(1);
+  const exit = body.length && /^\[exit \d+\]$/.test(body.at(-1) ?? "") ? body.pop() : undefined;
+  return [head, ...cut(body, e, block), ...(exit ? [exit] : [])].join("\n");
+}
+
+/** `<page>#<id>`, split. */
+export function parseQuote(quote: string): { page: string; id: string } {
+  const m = /^([\w-]+\.md)#([a-z0-9-]+)$/.exec(quote);
+  if (!m?.[1] || !m[2]) throw new Error(`quote ${JSON.stringify(quote)}: write <page>.md#<id>`);
+  return { page: m[1], id: m[2] };
+}
+
+/** The line that marks a quoted block, in docs/ and in the README. */
+export const marker = (walkthrough: string, id: string) => `<!-- quote: ${walkthrough}#${id} -->`;
+
+/** A step's quotes, each as `{ at, excerpt }`. */
+export function quotesOf(step: Step): Array<{ at: string; excerpt?: Excerpt }> {
+  const q = "say" in step || "rm" in step ? undefined : step.quote;
+  if (!q) return [];
+  return (Array.isArray(q) ? q : [q]).map((x) => (typeof x === "string" ? { at: x } : x));
+}
+
+/** One quoted block: its page and id, and the steps it shows, in order. */
+export interface QuoteGroup {
+  page: string;
+  id: string;
+  members: Array<{ index: number; step: Step; excerpt?: Excerpt | undefined }>;
+}
+
+/** The quoted blocks of a list of steps: consecutive steps quoted at the same place are one block. */
+export function quoteGroups(steps: Step[]): QuoteGroup[] {
+  const groups = new Map<string, QuoteGroup & { last: number }>();
+  steps.forEach((step, index) => {
+    for (const q of quotesOf(step)) {
+      const g = groups.get(q.at);
+      if (g && g.last !== index - 1) throw new Error(`quote ${q.at} is on steps that are not consecutive`);
+      if (g) {
+        g.members.push({ index, step, excerpt: q.excerpt });
+        g.last = index;
+      } else {
+        groups.set(q.at, { ...parseQuote(q.at), members: [{ index, step, excerpt: q.excerpt }], last: index });
+      }
+      if ("sql" in step && !step.showResult) throw new Error(`quote ${q.at}: a quoted sql step needs showResult`);
+    }
+  });
+  return [...groups.values()].map((g) => ({ page: g.page, id: g.id, members: g.members }));
+}
+
+/** The block a step shows in the README (without its fence). */
+export function shownBlock(r: Ran): string {
+  const s = r.step;
+  if ("run" in s) return consoleBlock(r);
+  return (r.output ?? "").replace(/\n+$/, "");
+}
+
 export interface Quote {
   /** The docs/ page. */
   page: string;
-  /** The block's first command, as its `$ ` line shows it. */
-  command: string;
-  /** Which block on the page starting with that command: 0 for the first. */
-  nth: number;
+  /** The quote's id: the page's block is the one after {@link marker}. */
+  id: string;
   /** The block, without its fence. */
   text: string;
 }
 
-/**
- * The docs quotes a run makes: each run of consecutive steps quoted on the
- * same page is one console block.
- */
+/** The docs quotes a run makes. */
 export function quotes(ran: Ran[]): Quote[] {
-  const out: Array<{ page: string; ran: Ran[] }> = [];
-  let open: { page: string; ran: Ran[] } | undefined;
-  for (const r of ran) {
-    const s = r.step;
-    if ("run" in s && s.quote) {
-      if (open?.page !== s.quote) out.push((open = { page: s.quote, ran: [] }));
-      open.ran.push(r);
-    } else {
-      open = undefined;
-    }
-  }
-  const seen = new Map<string, number>();
-  return out.map((q) => {
-    const command = q.ran[0]?.command ?? "";
-    const key = `${q.page}\n${command}`;
-    const nth = seen.get(key) ?? 0;
-    seen.set(key, nth + 1);
-    return { page: q.page, command, nth, text: q.ran.map(consoleBlock).join("\n") };
-  });
+  return quoteGroups(ran.map((r) => r.step)).map((g) => ({
+    page: g.page,
+    id: g.id,
+    text: g.members.map((m) => excerpt(shownBlock(ran[m.index] as Ran), m.excerpt, "run" in m.step)).join("\n"),
+  }));
 }
 
-/** The `nth` console block in `text` whose first line is `$ <command>` (0, the first): where its body starts and ends. */
-export function findBlock(text: string, command: string, nth = 0): { start: number; end: number } | undefined {
-  const head = "```console\n$ " + command + "\n";
-  let at = text.indexOf(head);
-  for (let i = 0; i < nth && at !== -1; i++) at = text.indexOf(head, at + head.length);
+const MARKER_LINE = /^<!-- quote: [\w-]+#[a-z0-9-]+ -->\n/;
+
+/** The fenced block after the line `mark` (and any other marker lines) in `text`, from `from` on: where its body starts and ends. */
+export function findMarked(text: string, mark: string, from = 0): { start: number; end: number } | undefined {
+  const at = text.indexOf(`${mark}\n`, from);
   if (at === -1) return undefined;
-  const start = at + "```console\n".length;
-  const end = text.indexOf("\n```", start);
+  let pos = at + mark.length + 1;
+  for (let m = MARKER_LINE.exec(text.slice(pos)); m; m = MARKER_LINE.exec(text.slice(pos))) pos += m[0].length;
+  const fence = /^(`{3,})[\w-]*\n/.exec(text.slice(pos));
+  if (!fence?.[1]) throw new Error(`${mark} is not followed by a fenced block`);
+  const start = pos + fence[0].length;
+  const close = `\n${fence[1]}\n`;
+  const end = text.slice(start - 1).startsWith(close) ? start - 1 : text.indexOf(close, start);
   return end === -1 ? undefined : { start, end };
 }
 
 /** Rewrites each quoted block in docs/ from the run. */
-export function writeQuotes(ran: Ran[]): string[] {
+export function writeQuotes(name: string, ran: Ran[]): string[] {
   const pages: string[] = [];
   for (const q of quotes(ran)) {
     const path = join(repoRoot, "docs", q.page);
     const text = readFileSync(path, "utf8");
-    const b = findBlock(text, q.command, q.nth);
-    if (!b) throw new Error(`docs/${q.page} has no console block ${String(q.nth + 1)} starting with "$ ${q.command}"`);
+    const b = findMarked(text, marker(name, q.id));
+    if (!b) throw new Error(`docs/${q.page} has no block after ${marker(name, q.id)}`);
     writeFileSync(path, text.slice(0, b.start) + q.text + text.slice(b.end));
     pages.push(`docs/${q.page}`);
   }
   return pages;
 }
 
-/** The README: the intro, then each step as Markdown. */
-export function renderReadme(w: Walkthrough, ran: Ran[]): string {
+/** The README: the intro, then each step as Markdown, a quoted step's block after its markers. */
+export function renderReadme(name: string, w: Walkthrough, ran: Ran[]): string {
   const parts = [w.intro.trim()];
+  const mark = (s: Step) => quotesOf(s).map((q) => `${marker(name, parseQuote(q.at).id)}\n`).join("");
   for (const r of ran) {
     const s = r.step;
     if ("say" in s) parts.push(s.say.trim());
-    else if ("file" in s && s.show !== false) parts.push(`\`${s.file}\`:\n\n${fence(r.output ?? "", langOf(s.file))}`);
-    else if ("edit" in s && s.show !== false) parts.push(`\`${r.command ?? s.edit}\` now:\n\n${fence(r.output ?? "", langOf(s.edit))}`);
-    else if ("cat" in s) parts.push(`\`${r.command ?? ""}\`:\n\n${fence(r.output ?? "", s.lang ?? langOf(s.cat))}`);
-    else if ("sql" in s && !s.hide) parts.push(fence(s.sql.trim(), "sql") + (s.showResult ? `\n\n${fence(r.output ?? "")}` : ""));
-    else if ("run" in s && !s.hide) parts.push(fence(consoleBlock(r), "console"));
+    else if ("file" in s && s.show !== false) parts.push(`\`${s.file}\`:\n\n${mark(s)}${fence(r.output ?? "", langOf(s.file))}`);
+    else if ("edit" in s && s.show !== false) parts.push(`\`${r.command ?? s.edit}\` now:\n\n${mark(s)}${fence(r.output ?? "", langOf(s.edit))}`);
+    else if ("cat" in s) parts.push(`\`${r.command ?? ""}\`:\n\n${mark(s)}${fence(r.output ?? "", s.lang ?? langOf(s.cat))}`);
+    else if ("sql" in s && !s.hide) parts.push(fence(s.sql.trim(), "sql") + (s.showResult ? `\n\n${mark(s)}${fence(r.output ?? "")}` : ""));
+    else if ("run" in s && !s.hide) parts.push(mark(s) + fence(consoleBlock(r), "console"));
   }
   return `${parts.join("\n\n")}\n`;
 }
@@ -373,10 +457,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (write) {
       if (w.readme !== false) {
         keep(w, dir);
-        writeFileSync(join(exampleDir(w), "README.md"), renderReadme(w, ran));
+        writeFileSync(join(exampleDir(w), "README.md"), renderReadme(name, w, ran));
         console.log(`wrote ${relative(process.cwd(), join(exampleDir(w), "README.md"))}`);
       }
-      for (const page of writeQuotes(ran)) console.log(`wrote ${page}`);
+      for (const page of new Set(writeQuotes(name, ran))) console.log(`wrote ${page}`);
     }
   } finally {
     dispose();

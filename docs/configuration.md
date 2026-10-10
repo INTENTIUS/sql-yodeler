@@ -46,7 +46,7 @@ export default {
         url: process.env.DEV_POSTGRES_URL ?? "postgres://127.0.0.1:5432/postgres",
         user: { env: "DEV_POSTGRES_USER" },
         password: { env: "DEV_POSTGRES_PASSWORD" },
-        schemas: ["yodel_18_shop"],
+        schemas: ["shop"],
       },
     },
   },
