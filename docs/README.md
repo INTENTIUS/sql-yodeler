@@ -39,7 +39,7 @@ Schema management and migrations for ClickHouse and Postgres.
 Commands:
   init      adopt a live database: declarations and a baseline recorded applied
   plan      show what apply would change in an environment
-  apply     bring an environment to the declared schema or the pending migrations
+  apply     bring an environment to its declared schema or pending migrations
   approve   approve the plan yodel apply would run (a person at a terminal)
   override  override a policy rule for the current plan, with a reason
   new       write the next migration from the declared schema

@@ -191,7 +191,7 @@ function parseApplyArgs(args: string[]): ApplyArgs {
 /** `yodel apply <env>`; the exit codes are in `help`. */
 export const apply: Command = {
   name: "apply",
-  summary: "bring an environment to the declared schema or the pending migrations",
+  summary: "bring an environment to its declared schema or pending migrations",
   implemented: true,
   run: async (args, io) => {
     const code = await guarded("apply", io, args, help, async () => {
