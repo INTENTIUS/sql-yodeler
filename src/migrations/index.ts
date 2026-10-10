@@ -10,12 +10,14 @@
  *   verifyChecksum(m)                 recorded against recomputed
  *   createMigration(options)          the next migration from a build, offline (pure)
  *   writeMigration(dir, migration)    puts it on disk
+ *   createCheckpoint(options)         a checkpoint: the parent's recorded schema from nothing (#63)
  *
  * The file layout is in `./document.ts`, the checksum's exact definition in
  * `./checksum.ts`, the ordering rules in `./directory.ts`.
  */
 
 export * from "./checks.js";
+export * from "./checkpoint.js";
 export * from "./checksum.js";
 export * from "./create.js";
 export * from "./directory.js";

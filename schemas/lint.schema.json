@@ -152,6 +152,10 @@
         },
         "skipped": {
           "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "checkpoint": {
+          "description": "A checkpoint, replayed on its own into an empty database after the chain.",
+          "const": true
         }
       }
     },

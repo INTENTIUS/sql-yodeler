@@ -50,6 +50,7 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
     outOfOrder: outOfOrder(status).map((p) => p.id),
     partWay: partWay(status).map((p) => ({ id: p.id, resumeAt: p.partWay?.resumeAt, failedStatement: p.partWay?.failedStatement ?? null })),
     mismatches: status.mismatches,
+    ...(status.skipped ? { skipped: status.skipped } : {}),
     ...(r.digest ? { planDigest: r.digest } : {}),
     ...(r.refusal ? { refusal: r.refusal } : {}),
   };
@@ -82,6 +83,10 @@ export function renderStatus(r: StatusReport): string {
     if (p.refusedSteps.length > 0) marks.push(`${String(p.refusedSteps.length)} step(s) yodel apply does not run`);
     lines.push(`  ${p.id}${marks.length > 0 ? `  (${marks.join("; ")})` : ""}`);
     if (p.partWay?.error) lines.push(`      error: ${p.partWay.error.split("\n")[0] ?? ""}`);
+  }
+  if (status.skipped) {
+    lines.push("", `Skipped (${String(status.skipped.length)}), never run here:`);
+    for (const k of status.skipped) lines.push(`  ${k.id}  (${k.reason === "covered" ? `before ${k.checkpoint ?? "the checkpoint"}, the checkpoint this environment starts from` : "a checkpoint; this environment ran the migrations it creates"})`);
   }
   const late = outOfOrder(status);
   if (late.length > 0) lines.push("", `Out of order (${String(late.length)}): ${late.map((p) => p.id).join(", ")}; apply with --allow-out-of-order`);

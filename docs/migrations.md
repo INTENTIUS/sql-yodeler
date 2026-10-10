@@ -1,5 +1,5 @@
 ---
-claims: [new, resume, out-of-order, lock-retry, approval]
+claims: [new, resume, out-of-order, lock-retry, approval, lint]
 ---
 
 # Migrations
@@ -381,6 +381,25 @@ No history was checked (--env): make sure none of these ran anywhere before merg
 ```
 
 `yodel rebase` also refuses (exit 4, nothing written) when both branches change the same object differently (resolve it by hand: delete the migration and run `yodel new` again), when a migration it would rewrite was edited by hand (unless `--force`, which drops the edits), or when the moved migration adds nothing on its new parent. A `-- yodel:allow` line ([Lint](lint.md)) does not count as an edit by hand: the rebase writes it again above the same statement, and says how many it carried over. When the statement a line silenced is gone from the rebased migration or changed, the rebase refuses (exit 4, nothing written) and names the line; remove it, record the checksum with `yodel lint --update-checksum <id>`, rebase, and silence what the new statements need.
+
+## Checkpoints: yodel checkpoint
+
+A long chain makes every new environment, and every replay, run every migration from the first. `yodel checkpoint <name>` writes a migration after the newest one whose statements create the newest migration's recorded schema from nothing (what `yodel new` writes for a first migration). Its recorded schema is its parent's, and its `migration.json` marks it a checkpoint with the SHA-256 of that schema: `"checkpoint": { "schema": "sha256:..." }`. It reads no database and does not build `src/`. Its `migration.sql` starts `-- yodel checkpoint <id>`.
+
+How `yodel apply` and `yodel status` treat one:
+
+- An environment whose history is empty starts at the newest checkpoint. The migrations before it are skipped there, never run; after the checkpoint, the chain goes on as usual.
+- An environment whose history records a checkpoint started there, and goes on skipping the migrations before it.
+- Any other environment, one that ran the migrations a checkpoint stands for, skips the checkpoint.
+
+A skipped migration is neither applied nor pending, so it is never out of order. `yodel status` lists them under "Skipped" (`skipped` in `--json`, each `covered` by the checkpoint it names, or a `checkpoint` the environment does not start from).
+
+The checkpoint is a migration like any other, so its checksum covers its statements, its mark and its recorded schema. `yodel lint` adds two checks:
+
+- rule `checkpoint` (an error, offline): its recorded schema still hashes to its mark, and so does its parent's. An edit to either, even with the checksum recorded again, fails here.
+- `--replay <env>` replays the chain without the checkpoint, then the checkpoint alone into the emptied database, and compares the result with its recorded schema. Statements that do not create that schema fail the replay (rule `replay`), naming the checkpoint.
+
+With both, a fresh environment that starts from the checkpoint ends at the schema an environment that ran the chain has. Write another checkpoint later the same way; a fresh environment starts at the newest. `yodel checkpoint` refuses (exit 4) when the newest migration is a checkpoint already.
 
 ## yodel repair
 

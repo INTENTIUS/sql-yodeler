@@ -137,7 +137,7 @@ function report(io: Io, json: boolean, a: Adopted): void {
 /** `yodel init --from <env>`; the exit codes are in `help`. */
 export const init: Command = {
   name: "init",
-  summary: "adopt a live database: declarations and a baseline recorded applied",
+  summary: "adopt a live database: declarations and an applied baseline",
   implemented: true,
   run: (args, io) =>
     guarded("init", io, args, help, async () => {

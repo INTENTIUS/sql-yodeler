@@ -26,6 +26,7 @@ export const COMMAND_SCHEMAS = {
   plan: "plan",
   apply: "apply",
   new: "new",
+  checkpoint: "checkpoint",
   lint: "lint",
   "lint --rules": "lint-rules",
   status: "status",

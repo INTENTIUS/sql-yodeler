@@ -11,7 +11,7 @@
 import { diffStatements, type MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { BuildOutput } from "../chant/build.js";
 import type { Project } from "../project.js";
-import { computeChecksum, emptyBuild, scanMigrations, type Migration, type MigrationProblem, type MigrationScan } from "../migrations/index.js";
+import { checkpointProblems, computeChecksum, emptyBuild, scanMigrations, type Migration, type MigrationProblem, type MigrationScan } from "../migrations/index.js";
 import type { VersionedStatus } from "../versioned/state.js";
 import { levelOf, type LintSettings } from "./config.js";
 import { LINT_RULES, type LintLevel, type LintRule } from "./rules.js";
@@ -216,6 +216,12 @@ function schemaFindings(migrations: readonly Migration[], dialect: Dialect | und
   return out;
 }
 
+/** Each checkpoint's recorded schema against the one it was written from (#63): rule `checkpoint`. */
+function checkpointFindings(migrations: readonly Migration[]): RawFinding[] {
+  const byId = new Map(migrations.map((m) => [m.id, m]));
+  return migrations.flatMap((m) => checkpointProblems(m, byId).map((message) => ({ rule: "checkpoint", migration: m.id, message })));
+}
+
 const stepName = (s: MigrationStep): string | undefined => (typeof (s as { name?: unknown }).name === "string" ? s.name : undefined);
 
 /** Lints the migrations in `dir`. Never throws on what it finds; a finding is a result. */
@@ -224,7 +230,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
   const extra = options.rules ?? [];
   const rules: Record<string, LintRule> = { ...LINT_RULES, ...Object.fromEntries(extra.map((r) => [r.rule.id, r.rule])) };
   const dialect = options.dialect;
-  const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history, scan.migrations), ...schemaFindings(scan.migrations, dialect)];
+  const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history, scan.migrations), ...schemaFindings(scan.migrations, dialect), ...checkpointFindings(scan.migrations)];
 
   const silenceable = new Set(Object.values(rules).filter((r) => r.silenceable).map((r) => r.id));
   const silences: Record<string, Silence[]> = {};
