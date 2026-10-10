@@ -76,6 +76,13 @@ plan-dev:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - yodel plan dev --comment
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+  artifacts:
+    name: yodel-report-plan-dev
+    when: always
+    paths:
+      - yodel-report/
 
 plan-prod:
   extends: .yodel
@@ -84,3 +91,10 @@ plan-prod:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - yodel plan prod --comment
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+  artifacts:
+    name: yodel-report-plan-prod
+    when: always
+    paths:
+      - yodel-report/

@@ -65,7 +65,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
-import { emitYAMLEntry } from "@intentius/chant/yaml";
+import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
 import {
   Concurrency,
   Job as ActionsJob,
@@ -77,6 +77,7 @@ import {
 import { githubSerializer } from "@intentius/chant-lexicon-github/serializer";
 import { forgejoSerializer } from "@intentius/chant-lexicon-forgejo/serializer";
 import {
+  Artifacts as GitLabArtifacts,
   Image,
   Job as GitLabJob,
   Rule,
@@ -216,6 +217,31 @@ export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 export const CI_CHECK = "npm run ci:check";
 
 /**
+ * Webhook events (yodel.config.ts `notify`): the variables the apply, plan
+ * and watch jobs pass from the forge's secrets. yodel sends nothing while
+ * they are unset (empty), so an unconfigured repository needs neither.
+ * GitLab jobs have the project's variables already.
+ */
+export const WEBHOOK_VARIABLES = ["YODEL_WEBHOOK_URL", "YODEL_WEBHOOK_KEY"];
+
+/** Where the plan and apply jobs write `yodel report`, kept as the job's artifact. */
+export const REPORT_DIR = "yodel-report";
+
+/**
+ * `yodel report <env>` as JSON and as the HTML run view, into REPORT_DIR.
+ * It runs whatever the job's outcome, and a gap it reports (exit 4) does not
+ * fail the job: the report is for reading. `yodel` is the project's, named
+ * by path, since GitLab's after_script does not keep before_script's PATH.
+ */
+export const reportCommand = (env: string): string =>
+  `mkdir -p ${REPORT_DIR}; ./node_modules/.bin/yodel report ${env} --json > ${REPORT_DIR}/${env}.json || true; ./node_modules/.bin/yodel report ${env} --html ${REPORT_DIR}/${env}.html || true`;
+
+/** The artifact a job keeps its report in. */
+export const reportArtifact = (job: string): string => `yodel-report-${job}`;
+
+const UPLOAD_ARTIFACT = "actions/upload-artifact@v4";
+
+/**
  * The comment at the top of every file. Added here, not by chant: neither the
  * github nor the gitlab lexicon's serializer writes YAML comments
  * (INTENTIUS/chant#3667, INTENTIUS/chant#3669).
@@ -250,6 +276,14 @@ type AWorkflow = InstanceType<typeof ActionsWorkflow>;
 function renderActions(forge: Actions, workflow: AWorkflow): string {
   const serializer = forge === "github" ? githubSerializer : forgejoSerializer;
   return oneFile(forge, serializer.serialize(new Map([["workflow", workflow]])));
+}
+
+/** The report steps of a job: `yodel report` into REPORT_DIR and the artifact, whatever the job's outcome. */
+function reportSteps(env: string, job: string): AStep[] {
+  return [
+    new Step({ name: `yodel report ${env}`, if: "always()", run: reportCommand(env) }),
+    new Step({ name: "Keep the report", if: "always()", uses: UPLOAD_ARTIFACT, with: { name: reportArtifact(job), path: REPORT_DIR, "if-no-files-found": "ignore" } }),
+  ];
 }
 
 /** `inContainer`: the job runs in IMAGE, which has node, so it needs no setup-node. */
@@ -311,11 +345,12 @@ export function actionsReview(forge: Actions, { dialect, names: envs, replay }: 
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
       ...runner(inContainer(forge)),
-      env: secrets(readerVariables(env, dialect)),
+      env: secrets([...readerVariables(env, dialect), ...WEBHOOK_VARIABLES]),
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
         ...setupSteps(inContainer(forge)),
         new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
+        ...reportSteps(env, `plan-${env}`),
       ],
     });
   }
@@ -386,7 +421,17 @@ export function gitlabPipeline({ dialect, names: envs, replay, waves }: Environm
     }),
   );
   for (const env of envs) {
-    jobs.set(`plan-${env}`, new GitLabJob({ extends: ".yodel", stage: "review", rules: mr(), script: [`yodel plan ${env} --comment`] }));
+    jobs.set(
+      `plan-${env}`,
+      new GitLabJob({
+        extends: ".yodel",
+        stage: "review",
+        rules: mr(),
+        script: [`yodel plan ${env} --comment`],
+        after_script: [reportCommand(env)],
+        artifacts: new GitLabArtifacts({ name: reportArtifact(`plan-${env}`), when: "always", paths: [`${REPORT_DIR}/`] }),
+      }),
+    );
   }
   const serialize = (entities: Map<string, Declarable>): string => oneFile("gitlab", gitlabSerializer.serialize(entities));
   // Exception (INTENTIUS/chant#3669): the gitlab serializer writes no
@@ -498,7 +543,7 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
   const variables = (forge: Forge) => (env: string) => ({
     YODEL_CREDENTIALS: "writer",
     ...APPLY_LOCK,
-    ...(forge === "gitlab" ? {} : secrets(writerVariables(env, dialect))),
+    ...(forge === "gitlab" ? {} : secrets([...writerVariables(env, dialect), ...WEBHOOK_VARIABLES])),
   });
   const header = [
     ...HEADER,
@@ -527,10 +572,50 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
     if (!result.success || !result.files) throw new Error(`${forge}: ${result.error ?? "generateOpWavesPipeline rendered nothing"}`);
     for (const file of result.files) {
       const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
-      out.push({ path: at, content: withHeader(header, file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`) });
+      out.push({ path: at, content: withHeader(header, withWaveReports(forge, file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`, waves)) });
     }
   }
   return out;
+}
+
+/**
+ * The wave jobs' report: chant's generateOpWavesPipeline takes run lines
+ * after the wave's command but no step that runs when it fails (a wave that
+ * waits exits 3), and no artifact, so they are added to its output here.
+ * The output is parsed and emitted again; the emitter is checked to give
+ * back chant's text unchanged before anything is added, so a change in
+ * chant's emitter fails here instead of rendering something else.
+ */
+function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[]): string {
+  const envOf = (job: string) => waves.find((w, i) => job === `wave-${String(i + 1)}-${w.env}`)?.env;
+  const body = yaml.search(/^[^#\n]/m);
+  const header = yaml.slice(0, body);
+  const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
+  if (forge === "gitlab") {
+    const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
+    if (emit(doc) !== yaml) throw new Error("gitlab: the apply waves do not emit back to chant's text");
+    for (const [name, job] of Object.entries(doc)) {
+      const env = envOf(name);
+      if (!env || typeof job !== "object" || job === null) continue;
+      Object.assign(job, { after_script: [reportCommand(env)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] } });
+    }
+    return emit(doc);
+  }
+  const at = yaml.indexOf("\njobs:\n");
+  if (at < 0) throw new Error(`${forge}: the apply waves have no jobs`);
+  const jobs = doc.jobs as Record<string, { steps: Array<Record<string, unknown>> }>;
+  const emit = () => `${yaml.slice(0, at + 1)}${emitYAMLEntry("jobs", jobs)}\n`;
+  if (emit() !== yaml) throw new Error(`${forge}: the apply waves do not emit back to chant's text`);
+  for (const [name, job] of Object.entries(jobs)) {
+    const env = envOf(name);
+    if (!env) continue;
+    job.steps.push(
+      { name: `yodel report ${env}`, if: "always()", run: reportCommand(env) },
+      // chant's forgejo output is already in Forgejo's dialect, so the action is named as the forgejo lexicon names it.
+      { name: "Keep the report", if: "always()", uses: forge === "forgejo" ? `https://code.forgejo.org/${UPLOAD_ARTIFACT}` : UPLOAD_ARTIFACT, with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
+    );
+  }
+  return emit();
 }
 
 /** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
@@ -568,7 +653,7 @@ export function watchSpec(env: string, dialect: Dialect, forge: Forge): { name: 
   // The job's token, for the tracking issue: GitHub grants it issues: write here, Forgejo's can write already.
   return {
     name: `watch-${env}`,
-    variables: { ...secrets(readerVariables(env, dialect)), GITHUB_TOKEN: "${{ github.token }}" },
+    variables: { ...secrets([...readerVariables(env, dialect), ...WEBHOOK_VARIABLES]), GITHUB_TOKEN: "${{ github.token }}" },
     ...(forge === "github" ? { permissions: { issues: "write" } } : {}),
   };
 }

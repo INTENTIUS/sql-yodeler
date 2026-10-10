@@ -21,9 +21,13 @@ import {
   readerVariables,
   readWaves,
   REPLAY,
+  REPORT_DIR,
+  reportArtifact,
+  reportCommand,
   review,
   WAVES_SPEC,
   wavesSpec,
+  WEBHOOK_VARIABLES,
   writerVariables,
   type Dialect,
 } from "../templates/clickhouse/scripts/ci.js";
@@ -184,6 +188,25 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     expect(justfile).not.toMatch(/^\s+(npx @intentius\/)?chant approve/m);
     const readme = readFileSync(join(dir, "README.md"), "utf8");
     for (const t of targets.filter((t) => t !== "default")) expect(readme, t).toMatch(new RegExp(`^\\| \`just ${t}[\` ]`, "m"));
+  });
+
+  it("keeps yodel report as an artifact of every plan and wave job, and passes the webhook's variables", () => {
+    for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
+      const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { env?: Record<string, string>; steps: Array<{ if?: string; run?: string; uses?: string; with?: Record<string, string> }> }> };
+      for (const [name, job] of Object.entries(doc.jobs).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
+        const env = name.replace(/^plan-|^wave-\d+-/, "");
+        expect(job.steps.find((s) => s.run === reportCommand(env))?.if, `${f} ${name}`).toBe("always()");
+        expect(job.steps.find((s) => s.uses?.includes("actions/upload-artifact@"))?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
+        for (const v of WEBHOOK_VARIABLES) expect(job.env?.[v], `${f} ${name}`).toBe(`\${{ secrets.${v} }}`);
+      }
+    }
+    for (const f of [".gitlab-ci.yml", ".gitlab/yodel-apply.gitlab-ci.yml"]) {
+      const doc = load(readFileSync(join(dir, f), "utf8")) as Record<string, { after_script?: string[]; artifacts?: { when?: string; paths?: string[] } }>;
+      for (const [name, job] of Object.entries(doc).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
+        expect(job.after_script, `${f} ${name}`).toEqual([reportCommand(name.replace(/^plan-|^wave-\d+-/, ""))]);
+        expect(job.artifacts, `${f} ${name}`).toMatchObject({ when: "always", paths: [`${REPORT_DIR}/`] });
+      }
+    }
   });
 
   it("lints and runs the replay check on pull requests", () => {

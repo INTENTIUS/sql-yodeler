@@ -87,6 +87,8 @@ On your machine, put an environment's variables in `.env` (or export them) to ru
 | a push to main | `wave-<k>-<env>`, one per wave of `yodel.config.ts` `waves`, each needing the one before | `chant run wave`: `yodel apply <env> --wave-plan`, the wave's gate, `yodel apply <env> --wave-apply` | writer |
 | on each watch's schedule (and by hand) | `watch-<env>` | `chant run watch-<env>`, then `yodel drift <env> --issue`: drift against the newest applied migration, and the environment's tracking issue | reader |
 
+Each plan and wave job also runs `yodel report <env>` (JSON and the HTML run view) into `yodel-report/`, whatever the job's outcome, and keeps it as the job's artifact (`yodel-report-<job>`). The wave, plan and watch jobs pass `YODEL_WEBHOOK_URL` and `YODEL_WEBHOOK_KEY` from the forge's secrets for webhook events (`notify` in `yodel.config.ts`); while they are unset, yodel sends nothing.
+
 ### Approving
 
 Each environment is a wave of the apply pipeline, with a gate policy in `yodel.config.ts`: `always` (the default) waits for an approval whenever there is a migration to apply, `on-destructive` only when a pending step drops something, rewrites or locks a table, rebuilds, or is an Op or manual step, and `never` never waits. The pipeline reads the gate from the commit before the push, so a pull request cannot loosen its own. When the wave will wait, the pull request comment ends with the command:

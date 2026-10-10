@@ -36,6 +36,8 @@ jobs:
       DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
       DEV_CLICKHOUSE_WRITER_USER: '${{ secrets.DEV_CLICKHOUSE_WRITER_USER }}'
       DEV_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.DEV_CLICKHOUSE_WRITER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
@@ -45,6 +47,16 @@ jobs:
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: Plan, gate and apply wave 1 (dev)
         run: chant run wave --spec yodel-waves.json --wave 1
+      - name: yodel report dev
+        if: always()
+        run: mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+      - name: Keep the report
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: yodel-report-wave-1-dev
+          path: yodel-report
+          if-no-files-found: ignore
   wave-2-prod:
     runs-on: docker
     needs:
@@ -57,6 +69,8 @@ jobs:
       PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
       PROD_CLICKHOUSE_WRITER_USER: '${{ secrets.PROD_CLICKHOUSE_WRITER_USER }}'
       PROD_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_WRITER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
@@ -66,3 +80,13 @@ jobs:
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: Plan, gate and apply wave 2 (prod)
         run: chant run wave --spec yodel-waves.json --wave 2
+      - name: yodel report prod
+        if: always()
+        run: mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+      - name: Keep the report
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: yodel-report-wave-2-prod
+          path: yodel-report
+          if-no-files-found: ignore

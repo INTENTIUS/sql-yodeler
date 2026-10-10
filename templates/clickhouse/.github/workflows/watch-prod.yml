@@ -23,6 +23,8 @@ jobs:
       PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
       PROD_CLICKHOUSE_READER_USER: '${{ secrets.PROD_CLICKHOUSE_READER_USER }}'
       PROD_CLICKHOUSE_READER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_READER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
       GITHUB_TOKEN: '${{ github.token }}'
     steps:
       - uses: actions/checkout@v7
