@@ -36,6 +36,8 @@ export interface Drift {
   unobserved: UnobservedResource[];
   /** Postgres: a read gave up at the lock timeout, and what it waited on (#18). */
   lockWait?: string | undefined;
+  /** Each changed table's declared column names, by position, so `columns[3]` reads as the column's name (#19). */
+  columns?: Record<string, string[]>;
 }
 
 /** Exit code: an owned object changed or is gone. */
@@ -85,6 +87,49 @@ export async function readDrift(project: Project, env: Environment, options: { e
   return driftFromLifecycle(env.name, doc);
 }
 
+const COLUMN_PATH = /^columns\[(\d+)\]/;
+
+/**
+ * The declared column names of each changed object whose drift is named by
+ * column position (chant's ClickHouse tables keep columns as a list, so a
+ * change reads `columns[3].default.expr`). Read from the project's build,
+ * with the dialect's own tag, the way chant reads the declaration.
+ */
+export async function declaredColumns(project: Project, drift: Drift, build: () => Promise<{ output: { objects: Array<{ export: string; ddl: string }> }; dispose: () => void }>): Promise<Record<string, string[]>> {
+  const wanted = new Set(drift.changed.filter((e) => e.changes.some((c) => COLUMN_PATH.test(c.path))).map((e) => e.name));
+  if (wanted.size === 0) return {};
+  const b = await build();
+  try {
+    const tag =
+      project.dialect === "postgres"
+        ? (await import("@intentius/chant-lexicon-sql/postgres/entities")).table
+        : (await import("@intentius/chant-lexicon-sql/clickhouse/entities")).table;
+    const out: Record<string, string[]> = {};
+    for (const o of b.output.objects) {
+      if (!wanted.has(o.export)) continue;
+      try {
+        const strings = Object.assign([o.ddl], { raw: [o.ddl] }) as unknown as TemplateStringsArray;
+        const columns = (tag(strings).props as { columns?: unknown }).columns;
+        if (Array.isArray(columns)) out[o.export] = columns.map((c) => { const n = (c as { name?: unknown }).name; return typeof n === "string" ? n : ""; });
+      } catch {
+        // Not a table this tag reads: its paths stay as chant gives them.
+      }
+    }
+    return out;
+  } finally {
+    b.dispose();
+  }
+}
+
+/** `columns[3].default.expr` as `column country: default.expr`, when the declaration names column 3. */
+export function describePath(path: string, columns: readonly string[] | undefined): string {
+  const m = COLUMN_PATH.exec(path);
+  const name = m && columns ? columns[Number(m[1])] : undefined;
+  if (!m || !name) return path;
+  const rest = path.slice(m[0].length).replace(/^\./, "");
+  return `column ${name}${rest ? ` ${rest}` : ""}`;
+}
+
 const show = (v: unknown) => (v === undefined ? "(none)" : typeof v === "string" ? v : JSON.stringify(v));
 
 /** The drift as text. */
@@ -98,7 +143,8 @@ export function renderDrift(drift: Drift, server?: ServerInfo): string {
     for (const e of drift.changed) {
       lines.push(`  ${e.name} (${e.type})`);
       for (const c of e.changes) {
-        lines.push(c.kind === "absent" ? `    ${c.path}: declared ${show(c.declared)}, absent live` : `    ${c.path}: declared ${show(c.declared)}, live ${show(c.live)}`);
+        const path = describePath(c.path, drift.columns?.[e.name]);
+        lines.push(c.kind === "absent" ? `    ${path}: declared ${show(c.declared)}, absent live` : `    ${path}: declared ${show(c.declared)}, live ${show(c.live)}`);
       }
     }
   }

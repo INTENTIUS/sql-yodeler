@@ -299,7 +299,7 @@ Two branches that each add a migration give one parent two children. Merged toge
 ```console
 $ npx yodel lint
 migrations/
-  error    fork: fork: 20261009T2309-add-gift and 20261009T2309-index-placed-at both follow 20261009T2309-drop-coupon; rebase one onto the other
+  error    fork: 20261009T2309-add-gift and 20261009T2309-index-placed-at both follow 20261009T2309-drop-coupon; rebase one onto the other
 
 20261009T2309-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered

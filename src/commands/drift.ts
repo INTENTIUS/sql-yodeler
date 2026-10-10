@@ -2,7 +2,8 @@ import type { Command } from "../command.js";
 import { guarded, parseEnvArgs, usage } from "../env-args.js";
 import { loadProject, resolveEnvironment } from "../project.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
-import { driftExitCode, readDrift, renderDrift } from "../chant/drift.js";
+import { declaredColumns, driftExitCode, readDrift, renderDrift } from "../chant/drift.js";
+import { buildSchema } from "../chant/build.js";
 import { probeServer, softly } from "../server.js";
 import type { Environment, Project } from "../project.js";
 import { describeHolders, describeMs, isLockTimeout, lockHolders, lockTimeoutOptions } from "../versioned/postgres/waits.js";
@@ -57,7 +58,7 @@ Exit codes:
 /** `yodel drift <env>`; the exit codes are in `help`. */
 export const drift: Command = {
   name: "drift",
-  summary: "report declared objects changed out of band or gone from an environment",
+  summary: "report declared objects changed out of band or gone",
   implemented: true,
   run: (args, io) =>
     guarded("drift", io, args, help, async () => {
@@ -71,6 +72,8 @@ export const drift: Command = {
       const pg = project.dialect === "postgres" ? await postgresLockSettings(project, env) : undefined;
       const result = await readDrift(project, env, pg ? { env: { ...process.env, PGOPTIONS: lockTimeoutOptions(pg.lockTimeoutMs, process.env.PGOPTIONS) } } : {});
       if (pg && result.unobserved.some((u) => isLockTimeout(u.detail) || isLockTimeout(u.reason))) result.lockWait = await lockWait(pg);
+      const columns = await declaredColumns(project, result, () => buildSchema(project)).catch(() => ({}));
+      if (Object.keys(columns).length > 0) result.columns = columns;
       const code = driftExitCode(result);
       if (json) io.out(`${JSON.stringify({ ...result, dialect: project.dialect, ...(server ? { server } : {}), drifted: code === 2 }, null, 2)}\n`);
       else io.out(renderDrift(result, server));

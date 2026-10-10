@@ -318,7 +318,7 @@ describe("yodel repair", () => {
     expect(noReason.err).toContain("a repair needs a reason");
     const usage = await yodel(["repair", "20261009T1000-one", "--reason", "x"]);
     expect(usage.code).toBe(1);
-    expect(usage.err).toContain('usage: yodel repair <id> --reason "<text>" <env>');
+    expect(usage.err).toContain('usage: yodel repair <env> <id> --reason "<text>"');
 
   });
 });

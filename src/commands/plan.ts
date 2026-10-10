@@ -14,8 +14,10 @@ import { resolveForgeTarget, type ForgeFlags } from "../pr/forge.js";
 import { commentClient, findComment, upsertComment } from "../pr/comment.js";
 
 const usage =
-  "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json] [--allow-out-of-order] [--op <name>]\n" +
-  "                        [--comment [--forge github|gitlab|forgejo] [--repo <repo>] [--pr <n>] [--api-url <url>] [--token-env <VAR>]]";
+  "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json]\n" +
+  "                        [--allow-out-of-order] [--op <name>]\n" +
+  "                        [--comment [--forge github|gitlab|forgejo]\n" +
+  "                         [--repo <repo>] [--pr <n>] [--api-url <url>] [--token-env <VAR>]]";
 
 const help = `${usage}
 
@@ -32,23 +34,28 @@ When chant's gate ledger holds an approval of the migrations Op's gate for
 another digest, it says what moved since. Reads only.
 
 Options:
-  --json               print the plan as JSON (the same as --format json)
-  --format <f>         text (default), markdown (the pull request comment), json
-  --allow-out-of-order versioned: the plan yodel apply --allow-out-of-order would run
-  --op <name>          versioned: the migrations Op, when more than one applies <env>
-  --comment            versioned: post the markdown as one comment on the pull
-                       (merge) request, updating the one posted before; prints
-                       the text plan. The forge, repository, request and API
-                       come from the CI job's environment (GitHub Actions,
-                       GitLab CI, Forgejo Actions) unless given:
-    --forge <f>        github, gitlab or forgejo
-    --repo <repo>      owner/name (GitHub, Forgejo) or the project id (GitLab)
-    --pr <n>           the pull request number or merge request iid
-    --api-url <url>    the REST API base (https://api.github.com,
-                       https://gitlab.example/api/v4, https://forgejo.example/api/v1)
-    --token-env <VAR>  the variable holding the token (default GITHUB_TOKEN;
-                       GITLAB_TOKEN; FORGEJO_TOKEN, else GITHUB_TOKEN)
-  -C, --dir <dir>      the project directory (default: the working directory)
+  --json                print the plan as JSON (the same as --format json)
+  --format <f>          text (default), markdown (the pull request comment),
+                        json
+  --allow-out-of-order  versioned: the plan yodel apply --allow-out-of-order
+                        would run
+  --op <name>           versioned: the migrations Op, when more than one
+                        applies <env>
+  --comment             versioned: post the markdown as one comment on the
+                        pull (merge) request, updating the one posted before;
+                        prints the text plan. The forge, repository, request
+                        and API come from the CI job's environment
+                        (GitHub Actions, GitLab CI, Forgejo Actions) unless
+                        given:
+    --forge <f>         github, gitlab or forgejo
+    --repo <repo>       owner/name (GitHub, Forgejo) or the project id (GitLab)
+    --pr <n>            the pull request number or merge request iid
+    --api-url <url>     the REST API base (https://api.github.com,
+                        https://gitlab.example/api/v4,
+                        https://forgejo.example/api/v1)
+    --token-env <VAR>   the variable holding the token (default GITHUB_TOKEN;
+                        GITLAB_TOKEN; FORGEJO_TOKEN, else GITHUB_TOKEN)
+  -C, --dir <dir>       the project directory (default: the working directory)
 
 Exit codes:
   0  every change can be made in place, or there is none; versioned: apply

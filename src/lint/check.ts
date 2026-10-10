@@ -11,7 +11,7 @@
 import { diffStatements, type MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { BuildOutput } from "../chant/build.js";
 import type { Project } from "../project.js";
-import { emptyBuild, scanMigrations, type Migration, type MigrationProblem, type MigrationScan } from "../migrations/index.js";
+import { computeChecksum, emptyBuild, scanMigrations, type Migration, type MigrationProblem, type MigrationScan } from "../migrations/index.js";
 import type { VersionedStatus } from "../versioned/state.js";
 import { levelOf, type LintSettings } from "./config.js";
 import { LINT_RULES, type LintLevel, type LintRule } from "./rules.js";
@@ -88,12 +88,28 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).spl
 
 const UPDATE = "if it is not applied in any environment, record its new checksum with yodel lint --update-checksum <id>; if it is, undo the edit, or record it with yodel repair <id> --reason ... <env>";
 
-function directoryFindings(problems: readonly MigrationProblem[], history: LintOptions["history"]): RawFinding[] {
+/** The `-- yodel:allow` lines silences.ts reads. */
+const ALLOW_LINE = /^\s*--\s*yodel:allow\b.*(?:\r?\n|$)/gm;
+
+/**
+ * Whether the only change to `m` since its checksum was recorded is added
+ * `-- yodel:allow` lines: its files without them hash to the recorded
+ * checksum. Then nothing it runs changed, and the fix is to record the
+ * checksum (#19).
+ */
+export function onlySilencesAdded(m: Migration | undefined, recorded: string): boolean {
+  if (!m || !recorded) return false;
+  const sql = m.files.sql.replace(ALLOW_LINE, "");
+  return sql !== m.files.sql && computeChecksum({ ...m.files, sql }) === recorded;
+}
+
+function directoryFindings(problems: readonly MigrationProblem[], history: LintOptions["history"], migrations: readonly Migration[] = []): RawFinding[] {
   const out: RawFinding[] = [];
   for (const p of problems) {
     switch (p.kind) {
       case "fork":
-        out.push({ rule: "fork", message: p.message });
+        // The rule already says "fork"; the directory problem's own "fork: " prefix would say it twice.
+        out.push({ rule: "fork", message: p.message.replace(/^fork: /, "") });
         break;
       case "checksum": {
         if (history) {
@@ -107,6 +123,10 @@ function directoryFindings(problems: readonly MigrationProblem[], history: LintO
               message: `${p.message}. It is not applied in ${history.environment}, so the edit is allowed there; record the new checksum with yodel lint --update-checksum ${p.id}`,
             });
           }
+          break;
+        }
+        if (onlySilencesAdded(migrations.find((m) => m.id === p.id), p.check.recorded)) {
+          out.push({ rule: "checksum", migration: p.id, message: `${p.id}: the only change since its checksum was recorded is its added -- yodel:allow lines, and nothing it runs changed; record them with yodel lint --update-checksum ${p.id} (and, where it is already applied, yodel repair <env> ${p.id} --reason ...)` });
           break;
         }
         out.push({ rule: "checksum", migration: p.id, message: `${p.message}; ${UPDATE.replaceAll("<id>", p.id)}` });
@@ -203,7 +223,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
   const extra = options.rules ?? [];
   const rules: Record<string, LintRule> = { ...LINT_RULES, ...Object.fromEntries(extra.map((r) => [r.rule.id, r.rule])) };
   const dialect = options.dialect;
-  const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history), ...schemaFindings(scan.migrations, dialect)];
+  const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history, scan.migrations), ...schemaFindings(scan.migrations, dialect)];
 
   const silenceable = new Set(Object.values(rules).filter((r) => r.silenceable).map((r) => r.id));
   const silences: Record<string, Silence[]> = {};

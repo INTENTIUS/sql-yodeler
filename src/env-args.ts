@@ -56,7 +56,7 @@ export function usage(verb: string, extra: readonly string[] = []): string {
  */
 export async function guarded(verb: string, io: Io, args: readonly string[], help: string, body: () => Promise<number>): Promise<number> {
   if (wantsHelp(args)) {
-    io.out(help);
+    io.out(formatHelp(help));
     return 0;
   }
   try {
@@ -69,4 +69,31 @@ export async function guarded(verb: string, io: Io, args: readonly string[], hel
     io.err(`yodel ${verb}: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
     return 1;
   }
+}
+
+/**
+ * Wraps each line of a help text longer than `width` columns, continuing
+ * where its text starts: after `usage: yodel <verb> `, in an option's or an
+ * exit code's description column, else at the line's own indent.
+ */
+export function formatHelp(text: string, width = 80): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.length <= width) return line;
+      const usage = /^usage: yodel \S+ /.exec(line);
+      const column = /^(\s*(?:-\S.*?|\d)\s{2,})(?=\S)/.exec(line);
+      const indent = " ".repeat(usage ? usage[0].length : column ? (column[1] ?? "").length : (/^\s*/.exec(line)?.[0].length ?? 0));
+      const out: string[] = [];
+      let current = "";
+      for (const word of line.split(/(?<=\S) (?=\S)/)) {
+        if (current && current.length + 1 + word.length > width) {
+          out.push(current);
+          current = indent + word.trimStart();
+        } else current = current ? `${current} ${word}` : word;
+      }
+      if (current) out.push(current);
+      return out.join("\n");
+    })
+    .join("\n");
 }

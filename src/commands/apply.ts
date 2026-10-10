@@ -97,9 +97,9 @@ Options:
 
 The migrations Op runs two steps of its own, not for direct use:
   --digest   print the plan digest alone (the Op's Plan step)
-  --execute  apply under the lock, if the digest is still the one in ${APPROVED_PLAN_ENV}
-             and chant's gate ledger holds an approval of the Op's gate for it
-             (the Op's Apply step)
+  --execute  apply under the lock, if the digest is still the one in
+             ${APPROVED_PLAN_ENV} and chant's gate ledger holds an approval
+             of the Op's gate for it (the Op's Apply step)
 
 Exit codes:
   0  applied, or nothing to apply

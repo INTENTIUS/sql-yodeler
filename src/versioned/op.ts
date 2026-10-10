@@ -30,7 +30,7 @@ import { fileURLToPath } from "node:url";
 import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { chantInstall, runChant } from "../chant/process.js";
-import { GATED, readApplyRun, type ApplyRun } from "../chant/apply.js";
+import { discoveryError, GATED, readApplyRun, type ApplyRun } from "../chant/apply.js";
 
 /** The env var the Apply step reads the approved digest from. */
 export const APPROVED_PLAN_ENV = "YODEL_APPROVED_PLAN";
@@ -125,7 +125,7 @@ export async function findMigrateOp(project: Project, env: Environment, name?: s
   try {
     found = await discoverOps({ cwd: project.dir });
   } catch (e) {
-    throw new YodelError(`could not discover Ops in ${project.dir}: ${e instanceof Error ? e.message : String(e)}`);
+    throw discoveryError(project.dir, e);
   }
   if (found.errors.length > 0 && found.ops.size === 0) throw new YodelError(`could not discover Ops in ${project.dir}:\n${found.errors.join("\n")}`);
   return selectMigrateOp(found.ops, project, env, name);

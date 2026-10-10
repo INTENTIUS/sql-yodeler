@@ -133,7 +133,7 @@ function allRules(): Record<string, LintRule> {
 
 function listRules(io: Io, json: boolean, project: Project): number {
   const rules = allRules();
-  const settings = lintSettings(project.yodel?.config.lint, rules, project.yodel?.path);
+  const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, rules, project.yodel?.path);
   const rows = Object.values(rules).map((r) => ({ ...r, configured: settings.levels[r.id] ?? r.level }));
   if (json) {
     io.out(`${JSON.stringify(rows, null, 2)}\n`);
@@ -157,7 +157,7 @@ export const lint: Command = {
       const a = parseLintArgs(args);
       const project = await loadProject(a.dir);
       if (a.rules) return listRules(io, a.json, project);
-      const settings = lintSettings(project.yodel?.config.lint, allRules(), project.yodel?.path);
+      const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, allRules(), project.yodel?.path);
       const dir = migrationsDir(project);
 
       const options: LintOptions = { dialect: project.dialect, project, settings, rules: projectRules };
