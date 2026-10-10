@@ -12,8 +12,10 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OpStep, ManualStep, StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
-import { driftFromLifecycle } from "../src/chant/drift.js";
+import { driftFingerprint, driftFromLifecycle } from "../src/chant/drift.js";
 import { planJson, type Plan } from "../src/chant/plan.js";
+import { applyJson, type DeclarativeOutcome, type VersionedOutcome } from "../src/commands/apply.js";
+import { driftJson } from "../src/commands/drift.js";
 import { initJson } from "../src/commands/init.js";
 import { repairJson } from "../src/commands/repair.js";
 import type { Adopted } from "../src/init/adopt.js";
@@ -203,32 +205,38 @@ describe("each command's --json output validates against its schema", () => {
   });
 
   it("apply: versioned (each outcome), --execute and declarative", () => {
-    // The documents yodel apply builds in src/commands/apply.ts, from the same parts.
-    const status = statusJson(statusReport("clickhouse"));
-    for (const extra of [
+    // Through applyJson, which yodel apply prints with.
+    const report = statusReport("clickhouse");
+    const outcomes: VersionedOutcome[] = [
       { status: "planned" },
       { status: "unchanged" },
-      { status: "denied", policy: [{ ...policy[1], outcome: "denied", reasons: ["a rebuild is not online"] }] },
+      { status: "refused" },
       { status: "refused", preChecks: { migration: "20261010T0910-rebuild", checks: [{ name: "no-nulls", passed: false, detail: "3 rows" }] } },
-      { status: "gated", op: "migrate-dev", gate: "approve", moved: { approved: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: true, changes: [], askedAgain: { at: "2026-10-10T09:30:00Z" } }, approve: "chant approve migrate-dev approve --plan sha256:d", gatePlanDigest: "sha256:d" },
+      { status: "denied", policy: [{ id: "online-only", outcome: "denied", reasons: ["a rebuild is not online"] }] },
+      { status: "stood-down", stoodDown: "standing down: main on origin is at b, newer than this run's a" },
+      { status: "stood-down", stoodDown: "standing down", op: "migrate-dev" },
+      { status: "gated", op: "migrate-dev", gate: "approve", moved: { approved: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: true, changes: [], askedAgain: { at: "2026-10-10T09:30:00Z", digest: "sha256:old" } }, approve: "chant approve migrate-dev approve --plan sha256:d", gatePlanDigest: "sha256:d" },
       { status: "failed", op: "migrate-dev", exitCode: 5, chantExitCode: 1 },
       { status: "applied", op: "migrate-dev", appliedNow: ["20261010T0910-rebuild"] },
-    ]) {
-      expectValid("apply", { ...status, mode: "versioned", ...extra });
-    }
-    expectValid("apply", { environment: "dev", status: "applied", planDigest: "sha256:d", applied: ["a"], skipped: [{ id: "a", statement: 0 }], lock: { kind: "keeper", where: "/yodel/locks/dev" } });
+    ];
+    for (const outcome of outcomes) expectValid("apply", applyJson({ mode: "versioned", report, outcome }));
+    const lock = { kind: "keeper" as const, where: "/yodel/locks/dev" };
+    expectValid("apply", applyJson({ mode: "execute", environment: "dev", planDigest: "sha256:d", result: { applied: ["a"], skipped: [{ id: "a", statement: 0 }], lock } }));
+    expectValid("apply", applyJson({ mode: "execute", environment: "dev", planDigest: "sha256:d", result: { applied: ["a"], skipped: [], lock: { ...lock, notice: "local lock", waited: { ms: 5000, heldBy: "ci@other", where: "/yodel/locks/dev" } } } }));
+    expectValid("apply", applyJson({ mode: "execute", environment: "dev", planDigest: "sha256:d", result: { applied: [], skipped: [], lock: { kind: "local", where: "(not taken: this run stood down)" }, stoodDown: "standing down" } }));
     const plan = planJson(declarative("clickhouse"));
-    const base = { environment: "dev", dialect: "clickhouse", server, op: "apply-dev" };
-    for (const extra of [
+    const declared: DeclarativeOutcome[] = [
       { status: "refused", plan },
       { status: "unchanged", plan },
       { status: "gated", gate: "approve", approve: "chant approve apply-dev approve --plan sha256:d", planDigest: "sha256:d", plan },
       { status: "failed", exitCode: 1, plan },
       { status: "incomplete", plan, remaining: plan },
       { status: "applied", plan },
-    ]) {
-      expectValid("apply", { ...base, ...extra });
+    ];
+    for (const outcome of declared) {
+      expectValid("apply", applyJson({ mode: "declarative", environment: "dev", dialect: "clickhouse", server, op: "apply-dev", outcome }));
     }
+    expectValid("apply", applyJson({ mode: "declarative", environment: "dev", dialect: "postgres", op: "apply-dev", outcome: { status: "applied", plan: planJson(declarative("postgres")) } }));
   });
 
   it("lint, on a fork and with silences, and with each replay outcome", async () => {
@@ -275,6 +283,7 @@ describe("each command's --json output validates against its schema", () => {
   }, 60_000);
 
   it("drift", () => {
+    // Through driftJson, which yodel drift prints with.
     const doc = {
       environment: "dev",
       lexicons: {
@@ -287,9 +296,15 @@ describe("each command's --json output validates against its schema", () => {
     const result = driftFromLifecycle("dev", doc);
     result.columns = { events: ["id", "ts"] };
     result.lockWait = "waited 5s (lockTimeoutMs) for a lock on shop.orders";
-    // The document src/commands/drift.ts prints.
-    expectValid("drift", { ...result, dialect: "clickhouse", server, drifted: true });
-    expectValid("drift", { ...driftFromLifecycle("dev", { lexicons: { sql: {} } }), dialect: "postgres", drifted: false });
+    result.against = { source: "history", migration: "20261010T0900-init" };
+    const parts = { dialect: "clickhouse" as const, server, drifted: true, fingerprint: driftFingerprint(result) };
+    const issue = { number: 7, title: "drift on dev", body: "", state: "open" as const, url: "https://forge/o/r/issues/7" };
+    for (const action of [undefined, { action: "none" as const }, { action: "opened" as const, issue }, { action: "left" as const, why: "the drift could not be read" }, { action: "left" as const, why: "x", issue }]) {
+      expectValid("drift", driftJson(result, { ...parts, issue: action }));
+    }
+    expectValid("drift", driftJson(result, { ...parts, issueError: "403 from the forge" }));
+    const clean = { ...driftFromLifecycle("dev", { lexicons: { sql: {} } }), against: { source: "src" as const } };
+    expectValid("drift", driftJson(clean, { dialect: "postgres", drifted: false, fingerprint: driftFingerprint(clean) }));
   });
 
   it("init", () => {

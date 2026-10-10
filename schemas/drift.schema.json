@@ -31,6 +31,31 @@
       "type": "object",
       "additionalProperties": { "$ref": "common.schema.json#/$defs/stringList" }
     },
-    "drifted": { "description": "A declared object changed or is gone: the command exits 2.", "type": "boolean" }
+    "against": {
+      "description": "What the server was compared with: src, the project's declarations; or history, the schema the newest applied migration records (migration null when none is applied yet).",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["source"], "properties": { "source": { "const": "src" } } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "migration"],
+          "properties": { "source": { "const": "history" }, "migration": { "type": ["string", "null"] } }
+        }
+      ]
+    },
+    "drifted": { "description": "A declared object changed or is gone: the command exits 2.", "type": "boolean" },
+    "fingerprint": { "description": "A hash of the environment and what drifted: the same for the same drift, run after run.", "type": "string" },
+    "issue": {
+      "description": "--issue: what yodel did with the environment's tracking issue, and the issue when there is one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": { "enum": ["opened", "updated", "unchanged", "closed", "left", "none"] },
+        "number": { "type": "integer" },
+        "url": { "type": "string" }
+      }
+    },
+    "issueError": { "description": "--issue: the tracking issue could not be written, and why.", "type": "string" }
   }
 }
