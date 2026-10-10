@@ -138,7 +138,7 @@ ci: { forges: ["github", "gitlab", "forgejo"], resume: { schedule: "*/10 * * * *
 
 ## Waves: a gate per environment
 
-The starter templates' apply pipeline is a list of waves, one per environment, in the order `yodel.config.ts` gives them. Each wave has its own gate policy:
+In SQL Yodeler a wave is one environment (for a tenant set, one environment over many databases or schemas); terragucci uses the word for a batch of Terraform roots applied behind one approval. The starter templates' apply pipeline is a list of waves, one per environment, in the order `yodel.config.ts` gives them. Each wave has its own gate policy:
 
 ```ts
 waves: [
