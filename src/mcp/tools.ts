@@ -202,7 +202,7 @@ export function yodelTools(dir: string): YodelTool[] {
         const schema = `${schemaId("mcp")}#/$defs/explain`;
         const exit = EXIT_CODES.find(([code]) => String(code) === topic);
         if (exit) {
-          return { schema: SCHEMA_VERSION, tool: "explain", command: "yodel --help", exit: 0, resultsSchema: schema, results: { topic, kind: "exit-code", code: exit[0], meaning: exit[1], docs: `${DOCS_URL}#the-commands` } };
+          return { schema: SCHEMA_VERSION, tool: "explain", command: "yodel --help", exit: 0, resultsSchema: schema, results: { topic, kind: "exit-code", code: exit[0], meaning: exit[1], docs: `${DOCS_URL}cli/#exit-codes` } };
         }
         const e = await envelope("explain", "lint", ["--rules", ...dirArgs(dir)], schema, (r) => {
           const rule = (r as Array<{ id: string }>).find((x) => x.id === topic);

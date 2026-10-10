@@ -39,7 +39,7 @@ function marked(text: string, mark: string, where: string, from = 0): { body: st
 const RUN_HERE: Record<string, string> = {
   "npx tsx examples/walkthrough/topology.ts": "topology.md",
   "npx yodel lint --rules": "lint.md",
-  "yodel --help": "README.md",
+  "yodel --help": "cli.md",
   "yodel plan dev": "configuration.md",
 };
 
@@ -54,9 +54,9 @@ describe("docs", () => {
     expect(block(page("lint.md"), "npx yodel lint --rules", "docs/lint.md")).toBe(ran.out.trimEnd());
   });
 
-  it("README.md shows what yodel --help prints", async () => {
+  it("cli.md shows what yodel --help prints", async () => {
     const ran = await yodel(["--help"]);
-    expect(block(page("README.md"), "yodel --help", "docs/README.md")).toBe(ran.out.trimEnd());
+    expect(block(page("cli.md"), "yodel --help", "docs/cli.md")).toBe(ran.out.trimEnd());
   });
 
   it("configuration.md shows the refusal of a topology set only in yodel.config.ts", async () => {

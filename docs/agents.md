@@ -47,14 +47,14 @@ A task page's own prompt sits under its title as "Optional: hand this page to yo
 
 ## Rules for the agent
 
-- `npx yodel <command> --help` lists each command's options and exit codes; [the commands](README.md#the-commands) says what the exit codes mean.
+- `npx yodel <command> --help` lists each command's options and exit codes; [the exit codes](cli.md#exit-codes) says what they mean.
 - Print the approve command a plan shows, and never run it. The approval is bound to that plan's digest, and it is the user's.
 - Never edit a migration that is committed on the default branch: write a new one with `npx yodel new <name>`. `npx yodel lint` reports an edited one as a `checksum` error.
 - Print the `yodel override` command a plan shows for a denied policy rule, and never run it. An override is the user's decision, with the user's reason.
 - Never edit `.chant/allowed_signers`, the file that lists whose sealed approvals count. Adding or removing a signer is the user's change.
 - Silence a lint finding (`-- yodel:allow <rule> <reason>`) only with a reason the user gives.
 - Credentials go in the forge's secrets, never in a file or a commit.
-- Read a command's result from its `--json` output, never from its text. Each document has a JSON Schema; [the commands](README.md#the-commands) lists them.
+- Read a command's result from its `--json` output, never from its text. Each document has a JSON Schema; [JSON output](cli.md#json-output) lists them.
 
 ## Read-only tools (yodel mcp)
 

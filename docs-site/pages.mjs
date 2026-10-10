@@ -193,7 +193,7 @@ title: ${JSON.stringify(index.title)}
 head:
   - tag: title
     content: ${JSON.stringify(`${index.title}: schema management and migrations for ClickHouse and Postgres`)}
-description: "What SQL Yodeler is, the docs pages, and the yodel commands with their exit codes"
+description: "What SQL Yodeler is, and the docs pages"
 template: splash
 hero:
   tagline: ${JSON.stringify(tagline())}
