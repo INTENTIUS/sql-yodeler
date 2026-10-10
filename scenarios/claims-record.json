@@ -457,31 +457,31 @@
     {
       "claim": "waves",
       "dialect": "ch",
-      "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit",
+      "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, and applies only what the wave before applied",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 93,
-        "break": 67
+        "plain": 576,
+        "break": 283
       },
-      "recorded": "2026-10-10T06:39:01.261Z",
-      "commit": "f872b3d",
+      "recorded": "2026-10-10T07:12:25.871Z",
+      "commit": "2607992",
       "dirty": false
     },
     {
       "claim": "waves",
       "dialect": "pg",
-      "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit",
+      "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, and applies only what the wave before applied",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 93,
-        "break": 62
+        "plain": 575,
+        "break": 282
       },
-      "recorded": "2026-10-10T06:39:01.261Z",
-      "commit": "f872b3d",
+      "recorded": "2026-10-10T07:12:25.871Z",
+      "commit": "2607992",
       "dirty": false
     }
   ]
