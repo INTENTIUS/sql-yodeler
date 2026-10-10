@@ -1,5 +1,6 @@
 ---
 claims: [approval]
+type: concepts
 ---
 
 # Reports and the audit log

@@ -1,5 +1,6 @@
 ---
 claims: [declarative, new, approval, waves, adopt]
+type: concepts
 ---
 
 # The two workflows

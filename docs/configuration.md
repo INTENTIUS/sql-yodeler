@@ -1,5 +1,6 @@
 ---
 claims: [topology, declarative, approval]
+type: reference
 ---
 
 # Installing and configuring

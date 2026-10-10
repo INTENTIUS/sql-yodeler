@@ -1,5 +1,6 @@
 ---
 claims: [new, lint, approval, drift]
+type: tutorial
 ---
 
 # Your first migration

@@ -62,6 +62,7 @@ export function renderPage(record: ClaimsRecord | undefined, claims: readonly Cl
   const out: string[] = [
     "---",
     "claims: []",
+    "type: proof",
     "---",
     "",
     "# Claims status",

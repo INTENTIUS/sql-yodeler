@@ -1,5 +1,6 @@
 ---
 claims: [rebuild, resume, column-change]
+type: concepts
 ---
 
 # Steps

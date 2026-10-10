@@ -1,5 +1,6 @@
 ---
 claims: [template, template-github, template-gitlab]
+type: howto
 draft: true
 ---
 

@@ -1,5 +1,6 @@
 ---
 claims: [drift]
+type: concepts
 ---
 
 # Drift

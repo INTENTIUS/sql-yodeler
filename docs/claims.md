@@ -1,5 +1,6 @@
 ---
 claims: []
+type: proof
 ---
 
 # Claims status

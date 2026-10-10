@@ -1,5 +1,6 @@
 ---
 claims: [lint, new]
+type: reference
 ---
 
 # Lint

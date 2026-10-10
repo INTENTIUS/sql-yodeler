@@ -1,5 +1,6 @@
 ---
 claims: [approval, pr-comment, waves]
+type: concepts
 ---
 
 # Approval

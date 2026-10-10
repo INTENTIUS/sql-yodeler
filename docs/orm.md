@@ -1,5 +1,6 @@
 ---
 claims: [declarative]
+type: howto
 ---
 
 # Schema from an ORM
