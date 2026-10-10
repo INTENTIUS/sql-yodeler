@@ -1,5 +1,6 @@
 ---
 claims: []
+type: reference
 ---
 
 # Glossary

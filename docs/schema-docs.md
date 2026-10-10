@@ -1,5 +1,6 @@
 ---
 claims: []
+type: howto
 ---
 
 # Schema docs

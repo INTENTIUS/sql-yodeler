@@ -1,5 +1,6 @@
 ---
 claims: [adopt, resume, out-of-order]
+type: howto
 ---
 
 # Coming from another migration tool

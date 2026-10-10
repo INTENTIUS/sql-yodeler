@@ -1,5 +1,6 @@
 ---
 claims: [declarative, adopt]
+type: concepts
 ---
 
 # Access control

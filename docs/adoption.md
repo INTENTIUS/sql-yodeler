@@ -1,5 +1,6 @@
 ---
 claims: [adopt, new]
+type: howto
 ---
 
 # Starting a project

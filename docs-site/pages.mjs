@@ -6,8 +6,10 @@
 // links into the rest of the repository (examples, source files) become their
 // plain text. Each page's editUrl points "Edit page" at its docs/ file (none
 // for claims.md, which npm run claims:page writes). The landing page is the
-// README's intro over docs/README.md, and the sidebar follows the order of
-// docs/README.md's table, then any page the table does not list. The 404
+// README's intro over docs/README.md. The sidebar groups the pages by the
+// `type:` in their front matter (Tutorial, How-to, Concepts, Reference,
+// Proof), each group in the order of docs/README.md's table, and the build
+// fails on a page with no type or an unknown one. The 404
 // page is written here too, with the hat.
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -75,15 +77,16 @@ function rewriteLinks(md, slugs) {
 }
 
 /**
- * A docs page's own front matter: the claims that prove it and whether it is
- * a draft (scenarios/docs-claims.ts has the rules; npm run check enforces them).
+ * A docs page's own front matter: the claims that prove it, whether it is a
+ * draft (scenarios/docs-claims.ts has the rules; npm run check enforces them),
+ * and its type, which puts it in a sidebar group.
  */
 export function pageFront(md) {
 	const m = /^---\n([\s\S]*?)\n---\n/.exec(md);
 	const lines = m ? m[1].split('\n') : [];
 	const value = (key) => lines.find((l) => l.startsWith(`${key}:`))?.slice(key.length + 1).trim();
 	const inner = /^\[(.*)\]$/.exec(value('claims') ?? '[]')?.[1] ?? '';
-	return { claims: inner.split(',').map((c) => c.trim()).filter(Boolean), draft: value('draft') === 'true' };
+	return { claims: inner.split(',').map((c) => c.trim()).filter(Boolean), draft: value('draft') === 'true', type: value('type') };
 }
 
 const dialectName = { ch: 'ClickHouse', pg: 'Postgres' };
@@ -155,28 +158,56 @@ export function descriptions() {
 	return out;
 }
 
-/** The sidebar: docs/README.md's table order, then the pages it does not list, under "For contributors". */
+/** The sidebar groups, in order, by the `type:` a page's front matter gives. */
+const groups = [
+	['tutorial', 'Tutorial'],
+	['howto', 'How-to'],
+	['concepts', 'Concepts'],
+	['reference', 'Reference'],
+	['proof', 'Proof'],
+];
+
+/** Each page's type, by slug; throws naming the file when a page has none or one not in `groups`. */
+function pageTypes() {
+	const out = {};
+	for (const { file, slug } of docFiles()) {
+		const { type } = pageFront(read(new URL(file, docsDir)));
+		if (!groups.some(([t]) => t === type)) {
+			throw new Error(`docs/${file}: ${type ? `type: ${type} is not one of` : 'no type: in its front matter; give it one of'} ${groups.map(([t]) => t).join(', ')}`);
+		}
+		out[slug] = type;
+	}
+	return out;
+}
+
+/**
+ * The sidebar: one group per page type, in the order of `groups`. Within a
+ * group, pages follow docs/README.md's table, then any page it does not list.
+ */
 export function sidebar() {
 	const files = docFiles();
-	const slugs = new Set(files.map((f) => f.slug));
+	const types = pageTypes();
 	const items = [];
 	for (const m of read(new URL('README.md', docsDir)).matchAll(/^\|\s*\[([^\]]+)\]\(([\w-]+)\.md\)/gm)) {
 		const slug = m[2].toLowerCase();
-		if (slugs.has(slug) && !items.some((i) => i.slug === slug)) items.push({ label: m[1], slug });
+		if (slug in types && !items.some((i) => i.slug === slug)) items.push({ label: m[1], slug });
 	}
-	const rest = files
-		.filter(({ slug }) => !items.some((i) => i.slug === slug))
-		.map(({ file, slug }) => ({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug }));
-	return rest.length ? [...items, { label: 'For contributors', items: rest }] : items;
+	for (const { file, slug } of files) {
+		if (!items.some((i) => i.slug === slug)) items.push({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug });
+	}
+	return groups
+		.map(([type, label]) => ({ label, items: items.filter((i) => types[i.slug] === type) }))
+		.filter((g) => g.items.length);
 }
 
 export function writePages() {
 	const files = docFiles();
 	const slugs = new Set(files.map((f) => f.slug));
+	// The sidebar's order, which also fails the build on a page without a type.
+	const order = sidebar().flatMap((g) => g.items.map((i) => i.slug));
 	rmSync(outDir, { recursive: true, force: true });
 	mkdirSync(outDir, { recursive: true });
 	const described = descriptions();
-	const order = sidebar().flatMap((i) => (i.items ? i.items.map((j) => j.slug) : [i.slug]));
 	const rows = recordRows();
 	for (const { file, slug } of files) {
 		const text = read(new URL(file, docsDir));
@@ -194,7 +225,7 @@ export function writePages() {
 		};
 		writeFileSync(`${outDir}${slug}.md`, frontmatter(fields) + rewriteLinks(top + body.trimEnd() + bottom, slugs));
 	}
-	const first = sidebar()[0];
+	const first = sidebar()[0].items[0];
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');
 	const head = `---
 title: ${JSON.stringify(index.title)}

@@ -1,5 +1,6 @@
 ---
 claims: [new, resume, out-of-order, lock-retry, approval, lint]
+type: concepts
 ---
 
 # Migrations

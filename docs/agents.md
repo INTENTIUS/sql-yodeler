@@ -1,5 +1,6 @@
 ---
 claims: []
+type: howto
 ---
 
 # Set up with a coding agent

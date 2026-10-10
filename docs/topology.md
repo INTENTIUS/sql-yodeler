@@ -1,5 +1,6 @@
 ---
 claims: [topology]
+type: reference
 ---
 
 # Topology
