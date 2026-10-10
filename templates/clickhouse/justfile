@@ -1,0 +1,63 @@
+# The routine path for this schema. `just` with no target lists the targets.
+# Each one is a one-line wrapper: README.md gives the command beside each, and
+# running that command does the same without just.
+#
+# .env, when there is one, is read for every target: the credentials of the
+# environments you run against from this machine (`just up` says what dev on
+# the emulator needs). .gitignore keeps it out of git.
+
+set dotenv-load := true
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# List the targets.
+default:
+    @just --list --unsorted
+
+# Start the local database (chant's emulator), and say whether dev reaches it.
+up:
+    npx @intentius/chant emulator up --lexicon sql
+    npx tsx scripts/local.ts
+
+# Stop the local database.
+down:
+    npx @intentius/chant emulator down --lexicon sql
+
+# Write the next migration from src/: just new add-orders
+new name:
+    npx yodel new {{name}}
+
+# Lint the migrations, offline.
+lint:
+    npx yodel lint
+
+# Replay every migration into a throwaway server (Docker) and compare each with its recorded schema.
+replay:
+    npm run replay
+
+# What applying to env would do, and the plan digest to approve.
+plan env="dev":
+    npx yodel plan {{env}}
+
+# Print the command that approves env's plan, for a person to run. It never runs it.
+approve env="dev":
+    @npx yodel plan {{env}} --json | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => { const a = JSON.parse(s.slice(s.indexOf("{"))).approve; console.log(a ? `To approve, run (and push chant/lifecycle when the project has a remote):\n  ${a.replace(/^chant /, "npx @intentius/chant ")}\n  git push origin chant/lifecycle` : "Nothing to approve: no plan is pending."); })'
+
+# Apply env's approved plan, with env's writer credentials.
+apply env="dev":
+    YODEL_CREDENTIALS=writer npx yodel apply {{env}}
+
+# Compare env's live schema with src/.
+drift env="dev":
+    npx yodel drift {{env}}
+
+# The migrations applied to env and the ones pending.
+status env="dev":
+    npx yodel status {{env}}
+
+# Render the pipelines from scripts/ci.ts.
+ci:
+    npm run ci
+
+# Fail when a committed pipeline differs from what scripts/ci.ts renders.
+ci-check:
+    npm run ci:check

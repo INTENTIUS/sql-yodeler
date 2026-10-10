@@ -30,6 +30,7 @@ Created:
   .gitlab-ci.yml
   .gitlab/yodel-watch.gitlab-ci.yml
   chant.config.ts
+  justfile
   migrations/.gitkeep
   ops/migrate-dev.op.ts
   ops/migrate-prod.op.ts
@@ -38,6 +39,7 @@ Created:
   package.json
   README.md
   scripts/ci.ts
+  scripts/local.ts
   scripts/watch-outcome.ts
   src/schema.ts
   tsconfig.json
