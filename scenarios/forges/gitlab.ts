@@ -150,7 +150,7 @@ export function gitlabForge(): Forge {
           if (p && DONE.includes(p.status)) {
             const { jobs, log } = await traces(p.id);
             if (p.status !== "success") printFailed(jobs, log);
-            return { ok: p.status === "success", status: p.status, log };
+            return { ok: p.status === "success", status: p.status, log, failed: jobs.filter((j) => j.status !== "success").map((j) => j.name) };
           }
           if (Date.now() > deadline) throw new Error(`no finished ${source} pipeline for ${sha} after 30 minutes (${state})`);
           await sleep(5_000);
@@ -199,6 +199,12 @@ export function gitlabForge(): Forge {
           const after = Math.max(0, ...before.map((p) => p.id));
           await must("POST", `/projects/${pid}/pipeline_schedules/${String(schedule)}/play`);
           return waitPipeline(sha, "schedule", after);
+        },
+        // The variables are the project's; a writer's is scoped to dev, so its scope is named.
+        async setSecrets(values) {
+          for (const [key, value] of Object.entries(values)) {
+            await must("PUT", `/projects/${pid}/variables/${key}${/_WRITER_/.test(key) ? "?filter[environment_scope]=dev" : ""}`, { value });
+          }
         },
         async issues(): Promise<ForgeIssue[]> {
           const list = await must<Array<{ iid: number; title: string; description: string | null; state: string }>>("GET", `/projects/${pid}/issues?state=all&per_page=100`);

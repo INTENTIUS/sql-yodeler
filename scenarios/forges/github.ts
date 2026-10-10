@@ -28,7 +28,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { dockerSerializer } from "@intentius/chant-lexicon-docker";
@@ -102,7 +102,12 @@ export function githubForge(): Forge {
       const remote = `http://x-access-token:${token}@127.0.0.1:${port}/${USER}/${name}.git`;
       const repository = { name, full_name: `${USER}/${name}`, owner: { login: USER }, default_branch: "main" };
       const secretFile = join(forgeDir, "secrets.env");
-      writeFileSync(secretFile, Object.entries({ ...secrets, GITHUB_TOKEN: token }).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
+      const held: Record<string, string> = { ...secrets, GITHUB_TOKEN: token };
+      // act reads the file on each run, so a secret set again holds from the next run on.
+      const writeSecrets = () => {
+        writeFileSync(secretFile, Object.entries(held).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
+      };
+      writeSecrets();
 
       let n = 0;
       /**
@@ -125,6 +130,8 @@ export function githubForge(): Forge {
         await git("-C", dir, "remote", "set-url", "origin", `http://localhost:${port}/${USER}/${name}.git`);
         // A push from the job (a wave's pending record) carries the token, as checkout's credentials do on GitHub.
         await git("-C", dir, "config", `http.http://localhost:${port}/.extraHeader`, `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`);
+        // Jobs in the CI image (yodel.config.ts ci.image, #66) run in containers, which reach the mock on the Docker host.
+        const apiAt = apiHost === "localhost" && readFileSync(join(dir, ".github", "workflows", workflow), "utf8").includes("container: ghcr.io/intentius/sql-yodeler") ? "host.docker.internal" : apiHost;
         const eventFile = join(ctx.work, `act-${String(n)}-event.json`);
         writeFileSync(eventFile, JSON.stringify({ ...payload, repository }));
         ctx.log(`act ${event} ${workflow} on ${name}@${sha.slice(0, 8)} (${branch})`);
@@ -138,7 +145,7 @@ export function githubForge(): Forge {
             "--rm",
             "--github-instance", `localhost:${port}`,
             ...ACTIONS.flatMap((a) => ["--replace-ghe-action-with-github-com", a]),
-            "--env", `GITHUB_API_URL=http://${apiHost}:${port}/api/v3`,
+            "--env", `GITHUB_API_URL=http://${apiAt}:${port}/api/v3`,
             "--env", "GITHUB_SERVER_URL=https://github.com",
             "--env", `GITHUB_RUN_ID=${String(runId)}`,
             "--env", `GITHUB_RUN_ATTEMPT=${String(attempt)}`,
@@ -152,7 +159,10 @@ export function githubForge(): Forge {
         const status = ran.code === 0 ? "success" : ran.timedOut ? "timed out" : `failure (act exited ${String(ran.code)})`;
         ctx.log(`act ${event} on ${sha.slice(0, 8)} (run ${String(runId)}, attempt ${String(attempt)}): ${status}`);
         await api("PUT", `/repos/${USER}/${name}/actions/runs/${String(runId)}`, { status: "completed", conclusion: ran.code === 0 ? "success" : "failure", run_attempt: attempt });
-        return { ok: ran.code === 0, status, log: ran.out + ran.err, id: runId };
+        const log = ran.out + ran.err;
+        // act ends each job's lines with "[<workflow>/<job>] 🏁  Job failed" (or succeeded).
+        const failed = [...new Set([...log.matchAll(/\[[^/\]]+\/([^\]]+?)\s*\] 🏁 {2}Job failed/g)].map((m) => m[1] ?? ""))];
+        return { ok: ran.code === 0, status, log, failed, id: runId };
       };
       const pushRun = (sha: string, rerun?: { id: number; attempt: number }) =>
         act("push", "yodel-apply.yml", "main", sha, { ref: "refs/heads/main", before: "0".repeat(40), after: sha }, "localhost", rerun);
@@ -187,10 +197,15 @@ export function githubForge(): Forge {
           // A pr-review wave (#48) adds the workflow that records the plans the head makes.
           if (!existsSync(join(ctx.work, `act-${String(n)}`, ".github", "workflows", "yodel-apply-plans.yml"))) return { id: pr.number, checks };
           const plans = await act("pull_request", "yodel-apply-plans.yml", head, sha, event);
-          return { id: pr.number, checks: { ok: checks.ok && plans.ok, status: plans.ok ? checks.status : `${checks.status}; plans ${plans.status}`, log: `${checks.log}\n${plans.log}` } };
+          return { id: pr.number, checks: { ok: checks.ok && plans.ok, status: plans.ok ? checks.status : `${checks.status}; plans ${plans.status}`, log: `${checks.log}\n${plans.log}`, failed: [...(checks.failed ?? []), ...(plans.failed ?? [])] } };
         },
         async review(id, sha, as) {
           await api("POST", `/repos/${USER}/${name}/pulls/${String(id)}/reviews`, { event: "APPROVE", commit_id: sha, user: as === "author" ? USER : REVIEWER });
+        },
+        setSecrets(values) {
+          Object.assign(held, values);
+          writeSecrets();
+          return Promise.resolve();
         },
         async comments(id) {
           return (await api<Array<{ body: string }>>("GET", `/repos/${USER}/${name}/issues/${String(id)}/comments?per_page=100`)).map((c) => c.body);

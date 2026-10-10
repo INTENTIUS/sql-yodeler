@@ -7,9 +7,15 @@
  *   YODEL_CLAIMS_FORGEJO_URL        default http://localhost:3300
  *   YODEL_CLAIMS_FORGEJO_USER       default yodel34
  *   YODEL_CLAIMS_FORGEJO_PASSWORD   required: without it the claim fails (--skip template skips it)
- *   YODEL_CLAIMS_FORGEJO_REVIEWER   the second writer who reviews pull requests (#48), default <user>-reviewer;
- *                                   made (or its password reset) through the admin API when
- *   YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD is not set
+ *   YODEL_CLAIMS_FORGEJO_REVIEWER   the second writer who reviews pull requests (#48), default <user>-reviewer
+ *   YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD
+ *                                   its password. Without it the claim makes the reviewer (or resets
+ *                                   its password) through the admin API, which needs <user> to be a
+ *                                   Forgejo admin. Otherwise make the account once, e.g.
+ *                                   `docker exec -u git <forgejo container> forgejo admin user create
+ *                                   --username yodel34-reviewer --password <p> --email
+ *                                   yodel34-reviewer@example.invalid --must-change-password=false`,
+ *                                   and set both variables.
  *   YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL  the emulator as a job sees it, default http://clickhouse:8123
  *   YODEL_CLAIMS_FORGEJO_POSTGRES_URL    default postgres://pgdb:5432/postgres
  */
@@ -70,6 +76,22 @@ async function jobs(repo: string, runId: number): Promise<Job[]> {
   return Array.isArray(json) ? json : (json.jobs ?? []);
 }
 
+const FINISHED = ["success", "failure", "cancelled", "skipped"];
+
+/**
+ * A run's jobs once every one has finished. Forgejo marks a run failed as
+ * soon as one job fails, while the others may still be running, so a log
+ * read then misses their ends.
+ */
+async function finishedJobs(repo: string, runId: number): Promise<Job[]> {
+  const deadline = Date.now() + 10 * 60_000;
+  for (;;) {
+    const all = await jobs(repo, runId);
+    if (all.every((j) => FINISHED.includes(j.status)) || Date.now() > deadline) return all;
+    await new Promise((res) => setTimeout(res, 3_000));
+  }
+}
+
 async function jobText(repo: string, jobId: number): Promise<string> {
   const res = await fetch(`${forgejo.url}/api/v1/repos/${repo}/actions/jobs/${String(jobId)}/logs`, { headers: { Authorization: auth() } });
   return res.text();
@@ -112,10 +134,11 @@ async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after
     last = state;
     if (!r && startBy !== undefined && Date.now() > startBy) return undefined;
     if (r && ["success", "failure", "cancelled", "skipped"].includes(r.status)) {
+      const all = await finishedJobs(repo, r.id);
       if (r.status !== "success") await printLogs(ctx, repo, r.id);
       let log = "";
-      for (const job of await jobs(repo, r.id)) log += await jobText(repo, job.id);
-      return { ok: r.status === "success", status: r.status, log, id: r.id };
+      for (const job of all) log += await jobText(repo, job.id);
+      return { ok: r.status === "success", status: r.status, log, failed: all.filter((j) => j.status !== "success").map((j) => j.name), id: r.id };
     }
     if (Date.now() > deadline) throw new Error(`no finished ${event} run for ${sha} after 20 minutes (${state})`);
     await new Promise((res) => setTimeout(res, 5_000));
@@ -135,12 +158,17 @@ async function waitAll(ctx: Ctx, repo: string, sha: string, event: string): Prom
     if (runs.every((r) => ["success", "failure", "cancelled", "skipped"].includes(r.status))) {
       if (runs.length <= 1) return first;
       let log = "";
+      const failedJobs: string[] = [];
       for (const r of runs) {
+        const all = await finishedJobs(repo, r.id);
         if (r.status !== "success") await printLogs(ctx, repo, r.id);
-        for (const job of await jobs(repo, r.id)) log += await jobText(repo, job.id);
+        for (const job of all) {
+          log += await jobText(repo, job.id);
+          if (job.status !== "success") failedJobs.push(job.name);
+        }
       }
       const failed = runs.filter((r) => r.status !== "success");
-      return { ok: failed.length === 0, status: failed.length === 0 ? "success" : failed.map((r) => `run ${String(r.id)} ${r.status}`).join(", "), log };
+      return { ok: failed.length === 0, status: failed.length === 0 ? "success" : failed.map((r) => `run ${String(r.id)} ${r.status}`).join(", "), log, failed: failedJobs };
     }
     if (Date.now() > deadline) throw new Error(`the ${event} runs on ${sha} did not all finish in 20 minutes`);
     await new Promise((res) => setTimeout(res, 5_000));
@@ -156,7 +184,7 @@ async function ensureReviewer(): Promise<void> {
     const reset = await api("PATCH", `/admin/users/${encodeURIComponent(reviewer.user)}`, { login_name: reviewer.user, source_id: 0, password: reviewer.password, must_change_password: false });
     if (reset.status < 300) return;
   }
-  throw new Error(`the pr-review part needs a second Forgejo user: ${forgejo.user} could not make ${reviewer.user} (${String(made.status)}); set YODEL_CLAIMS_FORGEJO_REVIEWER and YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD`);
+  throw new Error(`the pr-review part needs a second Forgejo user: ${forgejo.user} could not make ${reviewer.user} (${String(made.status)}${made.status === 403 ? ", not a Forgejo admin" : ""}); make the account once and set YODEL_CLAIMS_FORGEJO_REVIEWER and YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD (scenarios/forges/forgejo.ts says how)`);
 }
 
 /**
@@ -241,6 +269,12 @@ export function forgejoForge(): Forge {
               return;
             }
             throw new Error(`${reviewer.user}'s review of #${String(id)}: ${String(done.status)} ${JSON.stringify(done.json)}`);
+          }
+        },
+        async setSecrets(values) {
+          for (const [k, v] of Object.entries(values)) {
+            const put = await api("PUT", `/repos/${repo}/actions/secrets/${k}`, { data: v });
+            if (put.status >= 300) throw new Error(`setting secret ${k}: ${String(put.status)}`);
           }
         },
         async comments(id) {
