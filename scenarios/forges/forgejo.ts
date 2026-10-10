@@ -11,6 +11,10 @@
  *   YODEL_CLAIMS_FORGEJO_POSTGRES_URL    default postgres://pgdb:5432/postgres
  */
 
+import { randomBytes } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Ctx } from "../lib/claim.js";
 import type { Forge, ForgeIssue, ForgeRepo, ForgeRun } from "./forge.js";
 
@@ -76,9 +80,16 @@ async function lastRunId(repo: string, sha: string): Promise<number> {
   return Math.max(0, ...(json.workflow_runs ?? []).map((r) => r.id));
 }
 
-/** Waits for the newest run of `event` on `sha` (with an id above `after`) to finish; prints its failed jobs' logs. */
-async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after = 0): Promise<ForgeRun> {
+/**
+ * Waits for the newest run of `event` on `sha` (with an id above `after`) to
+ * finish; prints its failed jobs' logs. With `startWithinMs`, undefined when
+ * no such run has started by then.
+ */
+async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after?: number): Promise<ForgeRun>;
+async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after: number, startWithinMs: number): Promise<ForgeRun | undefined>;
+async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after = 0, startWithinMs?: number): Promise<ForgeRun | undefined> {
   const deadline = Date.now() + 20 * 60_000;
+  const startBy = startWithinMs === undefined ? undefined : Date.now() + startWithinMs;
   let last = "";
   for (;;) {
     const { json } = await api<{ workflow_runs?: RunDoc[] }>("GET", `/repos/${repo}/actions/runs?head_sha=${sha}`);
@@ -88,18 +99,39 @@ async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after
     if (state !== last) ctx.log(`${event} on ${sha.slice(0, 8)}: ${state}`);
     else process.stdout.write(".\n");
     last = state;
+    if (!r && startBy !== undefined && Date.now() > startBy) return undefined;
     if (r && ["success", "failure", "cancelled", "skipped"].includes(r.status)) {
       if (r.status !== "success") await printLogs(ctx, repo, r.id);
       let log = "";
       for (const job of await jobs(repo, r.id)) log += await jobText(repo, job.id);
-      return { ok: r.status === "success", status: r.status, log };
+      return { ok: r.status === "success", status: r.status, log, id: r.id };
     }
     if (Date.now() > deadline) throw new Error(`no finished ${event} run for ${sha} after 20 minutes (${state})`);
     await new Promise((res) => setTimeout(res, 5_000));
   }
 }
 
+/**
+ * A module for node's --import that sends fetches of the forge's own URL (the
+ * ROOT_URL its jobs see, such as http://forgejo:3000, which names the
+ * forge's API in the pending record a waiting job writes) to the URL this
+ * host reaches it at: what a hosts entry would do on an approver's machine.
+ */
+function hostsPreload(work: string, from: string, to: string): string {
+  const file = join(work, "forgejo-hosts.mjs");
+  writeFileSync(
+    file,
+    `const [from, to] = ${JSON.stringify([from, to])};
+const fetch0 = globalThis.fetch;
+globalThis.fetch = (input, init) => fetch0(typeof input === "string" && input.startsWith(from) ? to + input.slice(from.length) : input, init);
+`,
+  );
+  return pathToFileURL(file).href;
+}
+
 export function forgejoForge(): Forge {
+  /** The tokens made for a resume, removed on close. */
+  const tokens: string[] = [];
   return {
     name: "Forgejo",
     jobUrl: (d) => (d === "ch" ? (process.env.YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL ?? "http://clickhouse:8123") : (process.env.YODEL_CLAIMS_FORGEJO_POSTGRES_URL ?? "postgres://pgdb:5432/postgres")),
@@ -117,6 +149,22 @@ export function forgejoForge(): Forge {
       return {
         remote: `${forgejo.url.replace("://", `://${encodeURIComponent(forgejo.user)}:${encodeURIComponent(forgejo.password)}@`)}/${repo}.git`,
         pushed: (sha) => waitRun(ctx, repo, sha, "push"),
+        /** A token with write:repository alone, which a dispatch needs (#47). */
+        async resumeEnv() {
+          const tokenName = `yodel-47-resume-${randomBytes(4).toString("hex")}`;
+          const made = await api<{ sha1?: string }>("POST", `/users/${encodeURIComponent(forgejo.user)}/tokens`, { name: tokenName, scopes: ["write:repository"] });
+          if (made.status !== 201 || !made.json.sha1) throw new Error(`making a write:repository token: ${String(made.status)} ${JSON.stringify(made.json)}`);
+          tokens.push(tokenName);
+          // The jobs see the forge at its ROOT_URL, which this host may not resolve.
+          const { json: info } = await api<{ html_url?: string }>("GET", `/repos/${repo}`);
+          const root = info.html_url?.slice(0, info.html_url.length - repo.length - 1) ?? forgejo.url;
+          const env: Record<string, string> = { CHANT_FORGE_TOKEN: made.json.sha1 };
+          if (root.replace(/\/+$/, "") !== forgejo.url) env.NODE_OPTIONS = `--import ${hostsPreload(ctx.work, root.replace(/\/+$/, ""), forgejo.url)}`;
+          return env;
+        },
+        async resumed(sha, waited, withinMs) {
+          return waitRun(ctx, repo, sha, "workflow_dispatch", waited.id ?? (await lastRunId(repo, sha)), withinMs);
+        },
         async applyAgain(sha) {
           const dispatched = await api("POST", `/repos/${repo}/actions/workflows/yodel-apply.yml/dispatches`, { ref: "main" });
           if (dispatched.status >= 300) throw new Error(`dispatching yodel-apply: ${String(dispatched.status)} ${JSON.stringify(dispatched.json)}`);
@@ -149,6 +197,8 @@ export function forgejoForge(): Forge {
         },
       };
     },
-    close: () => Promise.resolve(),
+    async close() {
+      for (const name of tokens.splice(0)) await api("DELETE", `/users/${encodeURIComponent(forgejo.user)}/tokens/${encodeURIComponent(name)}`);
+    },
   };
 }

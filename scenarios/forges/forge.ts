@@ -18,6 +18,8 @@ export interface ForgeRun {
   status: string;
   /** Every job's log, joined. */
   log: string;
+  /** The forge's id of the run, where a resume names it. */
+  id?: number;
 }
 
 export interface ForgeRepo {
@@ -37,6 +39,18 @@ export interface ForgeRepo {
   watch(sha: string): Promise<ForgeRun>;
   /** The repository's issues, open and closed (not pull requests). */
   issues(): Promise<ForgeIssue[]>;
+  /**
+   * What `yodel approve` resumes a waiting job with (#47): the token, with
+   * the least access the forge's resume needs, and whatever else the
+   * approver's machine needs to reach the forge's API as the job named it.
+   * A forge without it is approved with chant approve and run again by hand.
+   */
+  resumeEnv?(): Promise<Record<string, string>>;
+  /**
+   * The run the forge started again for `waited` after its approval
+   * resumed it, once finished; undefined when none started within `withinMs`.
+   */
+  resumed?(sha: string, waited: ForgeRun, withinMs: number): Promise<ForgeRun | undefined>;
 }
 
 export interface ForgeIssue {

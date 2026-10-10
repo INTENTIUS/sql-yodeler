@@ -33,6 +33,9 @@ export default {
   // image (node, yodel, chant and the lexicons, no npm ci in any job), add
   // image: "ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>", pinned by
   // the digest the release's image job prints, with <version> the yodel this
-  // project installs.
+  // project installs. yodel approve <env> starts a waiting wave's job again
+  // itself; to have a schedule do it too (an approval made with chant approve
+  // alone, or a resume that failed), add resume: { schedule: "*/10 * * * *" }:
+  // yodel ci --help says which token each forge needs.
   ci: { forges: ["github", "gitlab", "forgejo"] },
 } satisfies YodelConfig;

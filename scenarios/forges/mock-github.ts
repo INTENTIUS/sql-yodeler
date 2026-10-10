@@ -14,6 +14,9 @@
  *   PATCH  /api/v3/repos/:o/:r/issues/comments/:id
  *   GET|POST /api/v3/repos/:o/:r/issues               (state open, closed or all; per_page and page)
  *   PATCH  /api/v3/repos/:o/:r/issues/:n             title, body, state
+ *   GET    /api/v3/repos/:o/:r/actions/runs/:id      a run act ran, as the claim reported it
+ *   POST   /api/v3/repos/:o/:r/actions/runs/:id/rerun-failed-jobs   asks for a re-run: the run is queued
+ *   PUT    /api/v3/repos/:o/:r/actions/runs/:id      (the mock's own) the claim reports a run act ran
  *
  * Pull requests and issues share one numbering, as on GitHub.
  *   GET|POST /:o/:r.git/...                          git; a push needs the token
@@ -62,6 +65,14 @@ interface Repo {
   issues: Issue[];
   /** The last number given to a pull request or an issue. */
   last: number;
+  /** The workflow runs act ran, by id, as the claim reported them; a re-run request queues one. */
+  runs?: Record<string, Run>;
+}
+interface Run {
+  id: number;
+  status: "queued" | "in_progress" | "completed";
+  conclusion: "success" | "failure" | null;
+  run_attempt: number;
 }
 
 const repos = new Map<string, Repo>();
@@ -206,6 +217,34 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
     repos.delete(`${o}/${r}`);
     json(res, 204);
     return;
+  }
+  if (rest[0] === "actions" && rest[1] === "runs" && rest[2] !== undefined) {
+    const runs = (st.runs ??= {});
+    const id = rest[2];
+    if (rest.length === 3 && req.method === "PUT") {
+      runs[id] = { id: Number(id), status: data.status as Run["status"], conclusion: (data.conclusion ?? null) as Run["conclusion"], run_attempt: Number(data.run_attempt ?? 1) };
+      json(res, 200, runs[id]);
+      return;
+    }
+    const run = runs[id];
+    if (!run) {
+      json(res, 404, { message: "Not Found" });
+      return;
+    }
+    if (rest.length === 3 && req.method === "GET") {
+      json(res, 200, run);
+      return;
+    }
+    if (rest.length === 4 && rest[3] === "rerun-failed-jobs" && req.method === "POST") {
+      // GitHub refuses a re-run of a run that is going, or that passed.
+      if (run.status !== "completed" || run.conclusion === "success") {
+        json(res, 403, { message: `run ${id} cannot be re-run (${run.status}, ${String(run.conclusion)})` });
+        return;
+      }
+      runs[id] = { ...run, status: "queued", conclusion: null, run_attempt: run.run_attempt + 1 };
+      json(res, 201, {});
+      return;
+    }
   }
   if (rest[0] === "branches" && req.method === "GET") {
     const name = rest.slice(1).join("/");

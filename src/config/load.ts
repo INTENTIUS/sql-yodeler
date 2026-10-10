@@ -130,8 +130,12 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume)`);
+  const resume = value.resume;
+  if (resume !== undefined && !(isRecord(resume) && Object.keys(resume).every((k) => k === "schedule") && typeof resume.schedule === "string" && resume.schedule.trim().split(/\s+/).length === 5)) {
+    throw new YodelError(`${where}.resume: { schedule } with a five-field cron, such as { schedule: "*/10 * * * *" }`);
+  }
   if (value.image !== undefined && (typeof value.image !== "string" || !CI_IMAGE.test(value.image))) {
     throw new YodelError(`${where}.image: the CI image pinned by its digest, ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest> (the release's image job writes the digest to its summary)`);
   }

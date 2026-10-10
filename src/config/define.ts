@@ -119,6 +119,17 @@ export interface CiConfig {
    * no `npm ci`. Default: `node:22-bookworm`, and each job runs `npm ci`.
    */
   image?: string;
+  /**
+   * A scheduled job that starts again an apply wave whose approval has
+   * arrived (#47): `chant run resume --op yodel-apply`, which re-runs the
+   * GitHub run, dispatches the Forgejo workflow or retries the GitLab job.
+   * It approves nothing. `schedule` is a five-field cron, such as
+   * `"*\/10 * * * *"`. GitHub uses the job's token (`actions: write`);
+   * Forgejo the `CHANT_FORGE_TOKEN` secret (`write:repository`); GitLab runs
+   * it in a pipeline schedule you create, with `GITLAB_TOKEN` (the `api`
+   * scope, Developer role). Without it, `yodel approve` resumes the job.
+   */
+  resume?: { schedule: string };
 }
 
 export interface YodelConfig {
