@@ -1,6 +1,6 @@
 {
   "name": "@intentius/sql-yodeler",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Schema management and migrations for ClickHouse and Postgres, on chant's sql lexicon",
   "license": "Apache-2.0",
   "repository": {
