@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { credentials, credentialsOf, roleOf, roleVariables, sharedCredentials, type Credentials } from "../src/credentials.js";
+import { credentials, credentialsOf, isPermissionDenied, permissionRefusal, readerRefusal, roleOf, roleVariables, sharedCredentials, writerPrefix, type Credentials } from "../src/credentials.js";
+import { runnableAsWriter } from "../src/chant/runnable.js";
 import { repoRoot, yodel } from "./helpers/run.js";
 
 const temps: string[] = [];
@@ -160,5 +161,66 @@ describe("a project's reader and writer", () => {
 
     // Rendered again, nothing moves.
     expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
+  });
+});
+
+describe("a command that writes, run as the reader (#159)", () => {
+  const reader = () => withEnv({ YODEL_CREDENTIALS: undefined }, () => Promise.resolve({ url: "clickhouse://127.0.0.1:8123", ...credentials("dev", "clickhouse") }));
+  const writer = () => withEnv({ YODEL_CREDENTIALS: "writer:dev" }, () => Promise.resolve({ url: "clickhouse://127.0.0.1:8123", ...credentials("dev", "clickhouse") }));
+  const plain = { url: "clickhouse://127.0.0.1:8123", user: { env: "CH_USER" } };
+
+  it("prints the command to run again with YODEL_CREDENTIALS=writer:<env> when the profile has a writer", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-hint-"));
+    temps.push(dir);
+    // Printed as the reader or the writer alike: a shell the line is pasted into may hold neither.
+    expect(runnableAsWriter("yodel apply dev", dir, await reader())).toBe("YODEL_CREDENTIALS=writer:dev yodel apply dev");
+    expect(runnableAsWriter("yodel apply dev", dir, await writer())).toBe("YODEL_CREDENTIALS=writer:dev yodel apply dev");
+    expect(writerPrefix(plain)).toBe("");
+    expect(runnableAsWriter("yodel apply dev", dir, plain)).toBe("yodel apply dev");
+  });
+
+  it("is refused in one line naming the reader's user and YODEL_CREDENTIALS=writer:<env>; the writer is not", async () => {
+    const line = readerRefusal(await reader(), "npx yodel apply dev", { DEV_CLICKHOUSE_READER_USER: "reader" });
+    expect(line).toBe(
+      "refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_CREDENTIALS is not set. Run it as the writer: YODEL_CREDENTIALS=writer:dev npx yodel apply dev. Nothing was done.",
+    );
+    expect(readerRefusal(await reader(), "yodel apply dev", { YODEL_CREDENTIALS: "writer:prod" })).toContain("because YODEL_CREDENTIALS is writer:prod, not writer or writer:dev");
+    expect(readerRefusal(await writer(), "yodel apply dev", {})).toBeUndefined();
+    expect(readerRefusal(plain, "yodel apply dev", {})).toBeUndefined();
+  });
+
+  it("turns the server's refusal of a privilege into one line naming the user, and leaves any other error alone", async () => {
+    const ch = Object.assign(new Error("ClickHouse 403"), {
+      serverMessage: "Code: 497. DB::Exception: reader: Not enough privileges. To execute this query, it's necessary to have the grant CREATE DATABASE ON yodeler.*. (ACCESS_DENIED) (version 26.8.15.10 (official build))\n",
+    });
+    const pg = Object.assign(new Error("permission denied for schema yodeler"), { code: "42501" });
+    expect(isPermissionDenied(ch)).toBe(true);
+    expect(isPermissionDenied(pg)).toBe(true);
+    expect(isPermissionDenied(new Error("connect ECONNREFUSED 127.0.0.1:8123"))).toBe(false);
+    expect(isPermissionDenied(Object.assign(new Error("Code: 516. DB::Exception: reader: Authentication failed"), { serverMessage: "Code: 516. AUTHENTICATION_FAILED" }))).toBe(false);
+
+    const asReader = permissionRefusal(ch, await reader(), "npx yodel apply dev", { DEV_CLICKHOUSE_READER_USER: "reader" });
+    expect(asReader).toBe(
+      "refused: the server refused npx yodel apply dev, which connected as dev's reader, DEV_CLICKHOUSE_READER_USER (reader): Code: 497. DB::Exception: reader: Not enough privileges. To execute this query, it's necessary to have the grant CREATE DATABASE ON yodeler.*. (ACCESS_DENIED). Run it as the writer: YODEL_CREDENTIALS=writer:dev npx yodel apply dev.",
+    );
+    expect(asReader).not.toContain("\n");
+    const asPlain = permissionRefusal(pg, plain, "yodel apply dev", { CH_USER: "app" });
+    expect(asPlain).toBe("refused: the server refused yodel apply dev, which connected as CH_USER (app): permission denied for schema yodeler. Grant that user what the server names, or connect as a user that has it.");
+    expect(permissionRefusal(new Error("boom"), plain, "yodel apply dev")).toBeUndefined();
+  });
+
+  it("refuses yodel apply, revert and init as the reader, exit 4, before reading the server, with no stack trace", async () => {
+    const dir = template();
+    const vars = { YODEL_CREDENTIALS: undefined, DEV_POSTGRES_READER_USER: "app_r", DEV_POSTGRES_WRITER_USER: "app_w" };
+    for (const args of [["apply", "dev"], ["apply", "dev", "--execute"], ["revert", "dev", "20261010T0000-x"], ["init", "--from", "dev", "--force"], ["init", "--baseline", "dev"]]) {
+      const ran = await withEnv(vars, () => yodel([...args, "--dir", dir]));
+      expect(ran.code, `${args.join(" ")}: ${ran.err}`).toBe(4);
+      expect(ran.err).toMatch(/^yodel \w+: refused: (npx )?yodel .* writes, and this process holds dev's reader, DEV_POSTGRES_READER_USER \(app_r\), because YODEL_CREDENTIALS is not set\. Run it as the writer: YODEL_CREDENTIALS=writer:dev .*\. Nothing was done\.\n$/);
+      expect(ran.out).toBe("");
+    }
+    // Reading is the reader's: --plan is not refused for the credentials (it fails here for the project having no migrations).
+    const planned = await withEnv(vars, () => yodel(["apply", "dev", "--plan", "--dir", dir]));
+    expect(planned.code).toBe(1);
+    expect(planned.err).not.toContain("this process holds");
   });
 });

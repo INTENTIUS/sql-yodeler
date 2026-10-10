@@ -5,7 +5,9 @@ import { loadProject, resolveEnvironment, YodelError, type Project } from "../pr
 import { migrationId } from "../migrations/index.js";
 import { adopt, BASELINE_NAME, planBaseline, projectBaseline, type Adopted } from "../init/index.js";
 import { GATED } from "../chant/apply.js";
-import { runnable } from "../chant/runnable.js";
+import { runnable, runnableAsWriter } from "../chant/runnable.js";
+import { permissionRefusal, readerRefusal } from "../credentials.js";
+import { EXIT_REFUSED } from "../exit.js";
 import { isApplied } from "../history/index.js";
 import { closeVersioned, findMigrateOp, inspect, openVersioned, readChain, runMigrateOp } from "../versioned/index.js";
 
@@ -82,7 +84,9 @@ Exit codes:
      history already records migrations, the environment holds nothing, or
      a ClickHouse profile with no databases or with the history's database;
      --baseline: the project has no migrations, <env>'s history records
-     any, or <env>'s live schema is not the baseline's
+     any, or <env>'s live schema is not the baseline's; or the run holds
+     <env>'s reader (YODEL_CREDENTIALS is not writer or writer:<env>), or
+     the server refused the user a privilege
   5  another apply holds the lock; nothing recorded, nothing kept
   1  anything else failed, and nothing was kept: a bad config, a server it
      cannot read, a build or a plan that is not clean after the import
@@ -194,7 +198,7 @@ async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Pr
     if (ran.status === "gated") {
       if (!a.json) {
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this record${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
-        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnable(`yodel init --baseline ${env.name}`, project.dir)} again.\n`);
+        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again.\n`);
       }
       return emit({ status: "gated", op: op.name, gate: op.gate, ...(ran.approve ? { approve: ran.approve } : {}), ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
     }
@@ -224,10 +228,20 @@ export const init: Command = {
     guarded("init", io, args, help, async () => {
       const a = parseInitArgs(args);
       const project = await loadProject(a.dir);
-      if (a.baseline !== undefined) return recordIn(project, a.baseline, a, io);
-      const env = resolveEnvironment(project, a.from ?? "");
-      const adopted = await adopt(project, env, { force: a.force, name: a.name, log: (l) => { io.err(`${l}\n`); } });
-      report(io, a.json, adopted);
-      return 0;
+      const env = resolveEnvironment(project, a.baseline ?? a.from ?? "");
+      // init writes the history (#159): the reader refuses before anything is read, naming the variable that picks the writer.
+      const command = runnable(a.baseline !== undefined ? `yodel init --baseline ${env.name}` : `yodel init --from ${env.name}${a.force ? " --force" : ""}`, project.dir);
+      const asReader = readerRefusal(env.profile, command);
+      if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+      try {
+        if (a.baseline !== undefined) return await recordIn(project, a.baseline, a, io);
+        const adopted = await adopt(project, env, { force: a.force, name: a.name, log: (l) => { io.err(`${l}\n`); } });
+        report(io, a.json, adopted);
+        return 0;
+      } catch (e) {
+        const denied = permissionRefusal(e, env.profile, command);
+        if (denied) throw new YodelError(denied, EXIT_REFUSED);
+        throw e;
+      }
     }),
 };

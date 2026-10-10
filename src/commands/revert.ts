@@ -2,9 +2,10 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
 import { GATED } from "../chant/apply.js";
-import { runnable } from "../chant/runnable.js";
+import { runnable, runnableAsWriter } from "../chant/runnable.js";
+import { permissionRefusal, readerRefusal } from "../credentials.js";
 import { LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
 import { MIGRATION_ID } from "../migrations/index.js";
 import { describeServer } from "../server.js";
@@ -83,7 +84,8 @@ Exit codes:
   4  refused, nothing reverted: <id> is not applied in <env>, a migration
      after it is, the history does not match the migrations directory, or
      a policy rule denies the revert and no override is recorded for its
-     digest
+     digest, the run holds <env>'s reader (YODEL_CREDENTIALS is not writer
+     or writer:<env>), or the server refused the user a privilege
   5  another apply holds the lock
   1  anything else failed: a statement (the history records where; rerun to
      resume), a revert whose plan moved since approval, a bad config
@@ -203,6 +205,20 @@ export const revert: Command = {
 async function run(a: RevertArgs, io: Io): Promise<number> {
   const project = await loadProject(a.dir);
   const env = resolveEnvironment(project, a.env);
+  // The reader cannot write (#159): a revert refuses before the gate, naming the variable that picks the writer.
+  const command = runnable(`yodel revert ${a.env} ${a.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir);
+  const asReader = a.dryRun ? undefined : readerRefusal(env.profile, command);
+  if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+  try {
+    return await revertIn(project, env, a, io);
+  } catch (e) {
+    const denied = permissionRefusal(e, env.profile, command);
+    if (denied) throw new YodelError(denied, EXIT_REFUSED);
+    throw e;
+  }
+}
+
+async function revertIn(project: Project, env: Environment, a: RevertArgs, io: Io): Promise<number> {
   const ordered = readChain(project);
   const step = a.step !== undefined ? readRevertStep(a.step, project.dir) : undefined;
   const venv = await openVersioned(project, env);
@@ -255,7 +271,7 @@ async function run(a: RevertArgs, io: Io): Promise<number> {
     if (ran.status === "gated") {
       if (!a.json) {
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this revert${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
-        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnable(`yodel revert ${env.name} ${plan.migration.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir)} again.\n`);
+        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel revert ${env.name} ${plan.migration.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir, env.profile)} again.\n`);
       }
       return emit({ status: "gated", op: op.name, gate: op.gate, ...(ran.approve ? { approve: ran.approve } : {}), ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
     }

@@ -6,7 +6,8 @@ import { loadProject, resolveEnvironment, YodelError, type Environment, type Pro
 import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, unreadableOf, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
-import { runnable } from "../chant/runnable.js";
+import { runnable, runnableAsWriter } from "../chant/runnable.js";
+import { permissionRefusal, readerRefusal } from "../credentials.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
@@ -171,6 +172,13 @@ Two paths, chosen by the project:
   database, then runs the project's ApplyOp for the environment behind its
   plan-bound gate.
 
+Both paths write. For a profile made with credentials(), yodel apply runs
+as the writer only under YODEL_CREDENTIALS=writer or writer:<env>; as the
+reader it refuses before the gate (exit 4), and the command it prints to
+run again after a gate stop carries YODEL_CREDENTIALS=writer:<env>. A server
+that refuses a write for want of a privilege is told in one line naming the
+user (exit 4).
+
 Options:
   --json                print the outcome as JSON
   --op <name>           the Op to run, when more than one applies <env>
@@ -220,7 +228,9 @@ Exit codes:
      policy rule that denies the plan with no override, or a pending
      migration the environment this one requires (yodel.config.ts
      waves[].requires, default the wave before) does not record as applied
-     with the same checksum
+     with the same checksum. Either path: the run holds <env>'s reader
+     (YODEL_CREDENTIALS is not writer or writer:<env>), which refuses before
+     the gate, or the server refused the user a privilege
   5  versioned: another apply holds the lock (after --lock-wait, if given)
   1  anything else failed: a statement (the history records where; rerun to
      resume), a plan that moved since approval, a bad config
@@ -303,23 +313,41 @@ export const apply: Command = {
     const code = await guarded("apply", io, args, help, async () => {
       const a = parseApplyArgs(args);
       const project = await loadProject(a.dir);
-      if (splitSlot(a.env)) return slotWave(project, a, io);
-      const env = resolveEnvironment(project, a.env);
-      if (!env.tenant && project.yodel?.config.environments?.[env.name]?.tenants) {
-        throw new YodelError(`${env.name} is a tenant set (yodel.config.ts environments.${env.name}.tenants): apply a tenant, yodel apply ${env.name}/<tenant>, or every tenant through ${env.name}'s wave in the apply pipeline`);
+      const slot = splitSlot(a.env);
+      const profile = resolveEnvironment(project, slot?.env ?? a.env).profile;
+      // The reader cannot write (#159): a run that writes refuses before the gate, naming the variable that picks the writer.
+      const command = `yodel apply ${a.env}`;
+      const writes = !a.plan && !a.digest && a.wavePlan === undefined;
+      const asReader = writes ? readerRefusal(profile, runnable(command, project.dir)) : undefined;
+      if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+      try {
+        return await applyIn(project, a, args, io);
+      } catch (e) {
+        const denied = permissionRefusal(e, profile, runnable(command, project.dir));
+        if (denied) throw new YodelError(denied, EXIT_REFUSED);
+        throw e;
       }
-      if (hasMigrations(project)) return versionedApply(project, env, a, io);
-      if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down") || a.wavePlan !== undefined || a.waveApply !== undefined) {
-        throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
-      }
-      const refusal = declarativeRefusal(project, env.name);
-      if (refusal) throw refusal;
-      return declarativeApply(project, env, a, io);
     });
     if (args.includes("--execute")) recordStepExit(code);
     return code;
   },
 };
+
+/** `yodel apply` once the project is loaded and its credentials can write. */
+async function applyIn(project: Project, a: ApplyArgs, args: readonly string[], io: Io): Promise<number> {
+  if (splitSlot(a.env)) return slotWave(project, a, io);
+  const env = resolveEnvironment(project, a.env);
+  if (!env.tenant && project.yodel?.config.environments?.[env.name]?.tenants) {
+    throw new YodelError(`${env.name} is a tenant set (yodel.config.ts environments.${env.name}.tenants): apply a tenant, yodel apply ${env.name}/<tenant>, or every tenant through ${env.name}'s wave in the apply pipeline`);
+  }
+  if (hasMigrations(project)) return versionedApply(project, env, a, io);
+  if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down") || a.wavePlan !== undefined || a.waveApply !== undefined) {
+    throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+  }
+  const refusal = declarativeRefusal(project, env.name);
+  if (refusal) throw refusal;
+  return declarativeApply(project, env, a, io);
+}
 
 /**
  * A slot of a tenant set's wave read at run time (#56), `<env>/@<i>of<n>`:
@@ -686,7 +714,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         io.out(
           `Approve it with:\n  ${runnable(approve, project.dir)}\n` +
             `or, at a terminal, with ${runnable(`yodel approve ${env.name}${sealed ? " --sign" : ""}`, project.dir)}, which shows the plan and asks you first;\n` +
-            `then run ${runnable(`yodel apply ${env.name}`, project.dir)} again.\n`,
+            `then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`,
         );
       }
     }
@@ -769,7 +797,7 @@ async function declarativeRun(
     if (run.status === "gated") {
       if (!json) {
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan.\n`);
-        if (run.approve) io.out(`Approve it with:\n  ${runnable(run.approve, project.dir)}\nthen run ${runnable(`yodel apply ${env.name}`, project.dir)} again.\n`);
+        if (run.approve) io.out(`Approve it with:\n  ${runnable(run.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`);
       }
       return report({ status: "gated", gate: op.gate, ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before) }, GATED);
     }

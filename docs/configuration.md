@@ -82,6 +82,14 @@ A process connects as the reader unless `YODEL_CREDENTIALS` is `writer` (every e
 
 Every command refuses the project, exit 4, when an environment's reader and writer are one identity: both read their user from the same variable, the two variables hold the same user name, or both read their password from the same variable. A job holding such a reader could write.
 
+A command that writes (`yodel apply`, `yodel revert`, `yodel init`) refuses, exit 4, before its gate and before it connects, when it would run as an environment's reader:
+
+```text
+yodel apply: refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_CREDENTIALS is not set. Run it as the writer: YODEL_CREDENTIALS=writer:dev npx yodel apply dev. Nothing was done.
+```
+
+`yodel apply --plan` and `--digest`, and `yodel revert --dry-run`, only read, and run as the reader. Each command yodel prints for a person to run that writes (`then run ... again` after a gate stop, `yodel approve`'s `Apply it with`, `yodel override`'s) starts with `YODEL_CREDENTIALS=writer:<env>` for a profile made with `credentials()`. A server that refuses a write for want of a privilege (a profile without `credentials()`, or a writer missing a grant) is reported the same way, in one line naming the user and the server's message, exit 4.
+
 ```text
 yodel status: refused: sql.profiles.prod: the reader (PROD_POSTGRES_READER_USER) and the writer (PROD_POSTGRES_WRITER_USER) are the same user, app, so a job that holds the reader can write. Give each role its own database user.
 ```
