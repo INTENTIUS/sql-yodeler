@@ -29,16 +29,16 @@
  * to repeat (an idempotent `UPDATE`, or a delete of its rows before the
  * insert), as the rebuild's backfill does per partition.
  *
- * The receipts are rows on the environment's server, addressed
+ * The receipts are rows on the environment's server, kept by the sql
+ * lexicon's receipt store (`sqlReceiptStore`), addressed
  * `yodel/<env>/<migration id>/<effect>`, so the same effect name in two
  * migrations is two receipts:
  *
- * - ClickHouse: chant's receipts table (`chant_receipts.receipts`, the one
- *   `ClickHouseRebuildOp` uses).
- * - Postgres: `<history schema>.__chant_receipts`, chant's Postgres receipt
- *   table (the one `PostgresMigrationOp` keeps in the migrated table's
- *   schema), in the schema yodel's history is in. Each batch runs in one
- *   transaction on the apply's connection, and its receipt is written last
+ * - ClickHouse: `chant_receipts.receipts` (the table `ClickHouseRebuildOp`
+ *   keeps its partition receipts in).
+ * - Postgres: `<history schema>.__chant_receipts`, in the schema yodel's
+ *   history is in, over the apply's connection. Each batch runs in one
+ *   transaction on that connection, and its receipt is written last
  *   inside it: the batch's statements and its receipt commit together or
  *   not at all, so a run killed anywhere leaves no batch half done, and a
  *   resumed backfill runs no batch twice. A batch's statements must be ones
@@ -60,6 +60,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { OpConfig } from "@intentius/chant/op/types";
 import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
+import type { ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
@@ -198,22 +199,24 @@ export function prefixedStore(store: ReceiptStore, prefix: string): ReceiptStore
   };
 }
 
-/** The receipt store on a ClickHouse server: chant's, in `chant_receipts.receipts`. */
-export async function serverReceipts(endpoint: { url: string; user?: string; password?: string }, environment: string): Promise<ReceiptStore> {
-  const { clickhouseReceiptStore } = await import("@intentius/chant-lexicon-sql/clickhouse/rebuild/receipts");
-  return clickhouseReceiptStore(endpoint, { stack: "yodel", env: environment });
-}
+/** Where a backfill's receipts are kept: the environment's ClickHouse server, or the apply's Postgres connection and the schema to keep them in. */
+export type ReceiptServer = { clickhouse: ClickHouseEndpoint } | { postgres: PgClient; schema: string };
 
 /**
- * The receipt store on a Postgres server: chant's, in `<schema>.__chant_receipts`,
- * over `client` (so a receipt written inside a batch's transaction commits
- * with it). Creates the table when it is not there.
+ * The sql lexicon's receipt store on the environment's server, under the
+ * stack `yodel`. On Postgres it writes over the apply's connection (so a
+ * receipt written inside a batch's transaction commits with it, and the
+ * store never closes it), and the table is made here, before any batch's
+ * transaction opens.
  */
-export async function postgresServerReceipts(client: PgClient, schema: string, environment: string): Promise<ReceiptStore> {
-  const { postgresReceiptStore } = await import("@intentius/chant-lexicon-sql/postgres/migrate/receipts");
-  // The store never closes the apply's connection.
-  const store = postgresReceiptStore({ query: (sql, params) => client.query(sql, params), end: () => Promise.resolve() }, schema, { stack: "yodel", env: environment });
-  await store.ensure();
+export async function serverReceipts(server: ReceiptServer, environment: string): Promise<ReceiptStore> {
+  const { sqlReceiptStore } = await import("@intentius/chant-lexicon-sql/receipts");
+  const where =
+    "clickhouse" in server
+      ? { clickhouse: { endpoint: server.clickhouse } }
+      : { postgres: { query: <T>(sql: string, params?: readonly unknown[]) => server.postgres.query<T>(sql, params), end: () => Promise.resolve() }, schema: server.schema };
+  const store = sqlReceiptStore({ environment, stack: "yodel", config: {}, ...where });
+  if ("postgres" in server) await store.ensure();
   return store;
 }
 

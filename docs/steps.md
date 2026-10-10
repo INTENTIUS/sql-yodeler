@@ -51,7 +51,7 @@ The step is chant's `ClickHouseRebuildOp`, run by chant's local executor inside 
 4. verifies that counts and checksums of every row, per partition, match in both tables, and fails the step with nothing swapped if they do not;
 5. compares the two tables again just before the swap, and fails with nothing swapped if a row reached only the old table since the verification; otherwise swaps the tables (`EXCHANGE TABLES`), drops the view, and keeps the old table as `<table>__chant_old` until a retention date 7 days on.
 
-The rebuild's own gates are left out: its approval is the migration's. The replay check runs the same step in an empty database, which shows the statements it sends:
+yodel builds the Op with `gates: "outer"`, so it has no gate and no Drop phase of its own: its approval is the migration's. The replay check runs the same step in an empty database, which shows the statements it sends:
 
 <!-- quote: clickhouse#replay-rebuild -->
 ```console
@@ -105,7 +105,7 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:9189fe68c92a7b40c811
 ...
 ```
 
-A rebuild that failed or was killed resumes on the next apply from the backfill's receipts: every partition with a receipt is skipped. To start it over instead, drop `<table>__chant_new` and `<table>__chant_dual`.
+The Op is also built with `onFailure: "keep"`, so a rebuild that failed or was killed keeps its new table and resumes on the next apply from the backfill's receipts: every partition with a receipt is skipped. To start it over instead, drop `<table>__chant_new` and `<table>__chant_dual` (a refusal or a failed verification names them). On a cluster of more than one shard the rebuild copies and verifies every shard; see [Topology](topology.md).
 
 `yodel new` picks materialized-view mode when the table has a time column to cut over on. A rebuild in app mode (the application writes both tables) is refused by `yodel apply`.
 
@@ -209,7 +209,7 @@ The rules for a backfill module:
 - No gates: the migration's approval covers it.
 - It counts in the migration's checksum, so editing `backfill.ts` after the migration ran is a checksum mismatch.
 
-The receipts are rows on the environment's server, addressed `yodel/<env>/<migration id>/<effect>`, so the same effect name in two migrations is two receipts. On ClickHouse they are in chant's receipts table (`chant_receipts.receipts`, the one the rebuild uses).
+The receipts are rows on the environment's server, addressed `yodel/<env>/<migration id>/<effect>`, so the same effect name in two migrations is two receipts. They are kept by the sql lexicon's receipt store (`sqlReceiptStore` from `@intentius/chant-lexicon-sql/receipts`). On ClickHouse they are in `chant_receipts.receipts`, the table the rebuild keeps its partition receipts in.
 
 ### Backfills on Postgres
 

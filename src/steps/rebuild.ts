@@ -15,30 +15,32 @@
  *   `schema`), written to a temporary build file, not a fresh `chant build`:
  *   the table is rebuilt as this migration declares it, however far the
  *   declared schema has moved on since.
- * - Its gates are left out. The swap gate's approval is the migration's:
- *   the step's options are in the migration's checksum, which is in the plan
- *   digest the migrations Op's gate approved. The verification still runs
- *   before the swap, and a difference fails the step with nothing swapped.
- *   The old table is kept, `<table>__chant_old`, until its retention date
- *   (7 days); the Op's drop gate and Drop phase are not part of the step.
- * - Its onFailure (which drops the new table) is left out, so a step that
- *   failed or was killed part way resumes from the backfill's receipts on
- *   the next `yodel apply`: every partition with a receipt is skipped. To
- *   start the rebuild over instead, drop `<table>__chant_new` and
- *   `<table>__chant_dual`.
+ * - It is built with `gates: "outer"`: the swap gate's approval is the
+ *   migration's (the step's options are in the migration's checksum, which
+ *   is in the plan digest the migrations Op's gate approved), so the Op has
+ *   no gate and no Drop phase. The verification still runs before the swap,
+ *   and a difference fails the step with nothing swapped. The old table is
+ *   kept, `<table>__chant_old`, until its retention date (7 days).
+ * - It is built with `onFailure: "keep"`, so a step that failed or was
+ *   killed part way keeps `<table>__chant_new` and `<table>__chant_dual` and
+ *   resumes from the backfill's receipts on the next `yodel apply`: every
+ *   partition with a receipt is skipped. To start the rebuild over instead,
+ *   drop those two tables (a refusal names them).
  *
  * The activities render their DDL for the topology chant resolves from
  * `sql.profiles.<env>.topology`. When the environment's topology comes from
  * elsewhere (`yodel.config.ts`, or `YODEL_TOPOLOGY`, #9), the step hands
  * every rebuild activity chant's config with that topology set on the
  * profile ({@link rebuildChantConfig}), so the rebuild renders for the same
- * topology as the migration's statements.
+ * topology as the migration's statements. On a cluster of more than one
+ * shard the Op copies and verifies every shard; it needs the `{shard}` macro
+ * on each server, distinct per shard, and refuses the cluster without it.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { OpConfig, PhaseDefinition } from "@intentius/chant/op/types";
+import type { OpConfig } from "@intentius/chant/op/types";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
 import type { Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
@@ -71,16 +73,6 @@ export async function rebuildChantConfig(projectDir: string, environment: string
   return withProfileTopology(project.config, environment, settings.topology);
 }
 
-/** The activity of the phase left out: the old table's drop, which waits for its retention and its own gate. */
-const LEFT_OUT = new Set(["clickhouseRebuildDrop"]);
-
-/** `ClickHouseRebuildOp`'s phases as a step runs them: no gates, no Drop, no onFailure. */
-export function stepPhases(config: OpConfig): PhaseDefinition[] {
-  return config.phases
-    .map((p) => ({ ...p, steps: p.steps.filter((s) => s.kind !== "gate" && !(s.kind === "activity" && LEFT_OUT.has(s.fn))) }))
-    .filter((p) => p.steps.length > 0);
-}
-
 /** The Op a rebuild step runs. `buildPath` is the recorded schema's file; `projectDir` holds chant.config.ts. */
 export async function rebuildOpConfig(options: RebuildOptions, ctx: { environment: string; projectDir: string; buildPath: string }): Promise<OpConfig> {
   const { ClickHouseRebuildOp } = await import("@intentius/chant-lexicon-sql/clickhouse/rebuild/op");
@@ -92,11 +84,10 @@ export async function rebuildOpConfig(options: RebuildOptions, ctx: { environmen
     build: false,
     output: ctx.buildPath,
     path: ctx.projectDir,
+    gates: "outer",
+    onFailure: "keep",
   });
-  const full = (op as unknown as { props: OpConfig }).props;
-  const rest: OpConfig = { ...full, phases: stepPhases(full) };
-  delete rest.onFailure;
-  return rest;
+  return (op as unknown as { props: OpConfig }).props;
 }
 
 export interface RebuildSummary {

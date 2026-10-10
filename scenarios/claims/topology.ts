@@ -122,13 +122,11 @@ export default defineConfig({
  * apply sends them `ON CLUSTER` with ReplicatedMergeTree; rows go in through
  * the Distributed table, one half to each shard. The history is one
  * ReplicatedMergeTree for the whole cluster, read from the second shard.
- * yodel drift finds nothing after the applies, and names the TTL changed
- * and the Distributed table dropped out of band, both `ON CLUSTER` (a change
- * on one shard alone is not seen until INTENTIUS/chant#3664).
- * Pending on INTENTIUS/chant#3663, and run only with
- * YODEL_CLAIMS_SHARDED_REBUILD=1: a sort-key change as a ClickHouseRebuildOp
- * step on every shard, each keeping its own rows. Today the step copies the
- * first shard only, and the second loses its rows from the live table.
+ * A sort-key change is a ClickHouseRebuildOp step that copies and verifies
+ * every shard (each server has its own `{shard}` macro), each shard keeping
+ * its own rows. yodel drift finds nothing after the applies, names the TTL
+ * changed on shard s2 alone (seen on s2's server), and then the TTL changed
+ * and the Distributed table dropped out of band, both `ON CLUSTER`.
  * BREAK: yodel.config.ts gives the environment the single-node topology,
  * so the tables are made on the first server only.
  */
@@ -192,7 +190,6 @@ export const eventsAll = table\`
   ENGINE = Distributed('${SHARDED_CLUSTER}', '${n}', 'events', id)\`;
 `,
   );
-  // The Distributed arguments are quoted as the server shows them: unquoted, yodel drift reports them changed (INTENTIUS/chant#3664).
   p.write(`ops/migrate-${env}.op.ts`, op(env));
   await p.newMigration("create");
   p.edit("src/schema.ts", / {4}ts {3}DateTime\n/g, "    ts   DateTime,\n    country LowCardinality(String) DEFAULT ''\n");
@@ -216,9 +213,8 @@ export const eventsAll = table\`
   const before = await Promise.all(servers.map(([, at]) => local(at)));
   hold(JSON.stringify(before) === JSON.stringify(["20 420", "20 420", "20 400"]), `the shards' rows (count, sum of ids) on s1, s1 again and s2: ${JSON.stringify(before)}, not half each`);
 
-  // The rebuild step on more than one shard copies only the shard yodel talks to (INTENTIUS/chant#3663): pending until chant fixes it.
-  const rebuildOnShards = process.env.YODEL_CLAIMS_SHARDED_REBUILD === "1";
-  if (rebuildOnShards) {
+  // The rebuild step copies and verifies every shard: each keeps its own rows.
+  {
     p.edit("src/schema.ts", "ORDER BY (kind, ts)", "ORDER BY (country, kind, ts)");
     const rekey = await p.newMigration("rekey");
     await p.commit("rekey");
@@ -233,14 +229,23 @@ export const eventsAll = table\`
     const after = await Promise.all(servers.map(([, at]) => local(at)));
     hold(JSON.stringify(after) === JSON.stringify(before), `the shards' rows after the rebuild: ${JSON.stringify(after)}, were ${JSON.stringify(before)}`);
     hold((await q(r3, `SELECT count() FROM ${n}.events_all`))[0] === "40", "the Distributed table does not read 40 rows after the rebuild");
-  } else ctx.log("pending: the rebuild step on a sharded cluster needs INTENTIUS/chant#3663; YODEL_CLAIMS_SHARDED_REBUILD=1 runs it");
+  }
   await q(r3, `SYSTEM SYNC REPLICA ${history}.history`);
-  const migrations = rebuildOnShards ? "3" : "2";
+  const migrations = "3";
   const historyRows = await q(r3, `SELECT engine FROM system.tables WHERE database = '${history}' AND name = 'history' UNION ALL SELECT toString(count()) FROM ${history}.history WHERE kind = 'migration' AND status = 'succeeded'`);
   hold(historyRows.includes("ReplicatedMergeTree") && historyRows.includes(migrations), `the history on s2: ${JSON.stringify(historyRows)}, not a ReplicatedMergeTree with ${migrations} migrations`);
 
   const clean = await p.yodel(["drift", env, "--json"]);
   hold(clean.code === 0, `yodel drift ${env} exited ${String(clean.code)} with nothing changed: ${clean.out.slice(0, 600)}`);
+  // A change on shard s2 alone, not ON CLUSTER: drift reads every server and names where it saw it.
+  await q(r3, `ALTER TABLE ${n}.events MODIFY TTL ts + INTERVAL 30 DAY`);
+  const s2Host = (await q(r3, "SELECT hostName()"))[0] ?? "";
+  const oneShard = await p.yodel(["drift", env, "--json"]);
+  const oneDoc = parse<{ drifted: boolean; changed: Array<{ name: string; changes: Array<{ path: string; seenOn?: string }> }> }>(oneShard);
+  hold(oneShard.code === 2 && oneDoc.drifted, `yodel drift ${env} exited ${String(oneShard.code)} after a TTL changed on shard s2 alone`);
+  const ttl = oneDoc.changed.find((c) => c.name === "events")?.changes.find((x) => x.path === "ttl");
+  hold(ttl !== undefined, `yodel drift does not name events' ttl changed on shard s2 alone: ${JSON.stringify(oneDoc.changed)}`);
+  hold(ttl.seenOn === s2Host, `yodel drift says the ttl change was seen on ${String(ttl.seenOn)}, not on s2 (${s2Host})`);
   await q(r1, `ALTER TABLE ${n}.events ON CLUSTER ${SHARDED_CLUSTER} MODIFY TTL ts + INTERVAL 30 DAY`);
   await q(r1, `DROP TABLE ${n}.events_all ON CLUSTER ${SHARDED_CLUSTER} SYNC`);
   const drifted = await p.yodel(["drift", env, "--json"]);
