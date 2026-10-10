@@ -32,7 +32,7 @@ describe("ddlToDeclarations", () => {
 
   it("refuses a statement it cannot declare, naming it", async () => {
     await expect(ddlToDeclarations("postgres", `${prisma}\nINSERT INTO "customers" ("email") VALUES ('a');\nALTER TABLE "customers" DROP COLUMN "tier";`, { origin: "prisma" })).rejects.toThrow(
-      /2 statement\(s\)[\s\S]*not a CREATE statement: INSERT INTO[\s\S]*an ALTER TABLE other than ADD of a table constraint: ALTER TABLE "customers" DROP/,
+      /prisma: 2 statements chant cannot read[\s\S]*not a statement that declares an object: INSERT INTO[\s\S]*an ALTER TABLE other than ADD of a table constraint[^\n]*: ALTER TABLE "customers" DROP[\s\S]*A DDL source holds/,
     );
   });
 
@@ -84,6 +84,19 @@ describe("yodel new with a DDL source", () => {
       const twice = await yodel(["new", "again", "--dir", dir]);
       expect(twice.code).toBe(1);
       expect(twice.err).toMatch(/yodel_e2e_fixture\.orders is declared twice: by src\/ \(export orders\) and by the source "prisma"/);
+    } finally {
+      dispose();
+    }
+  }, 120_000);
+
+  it("needs no source for a plain .sql file in src/: chant's build reads it", async () => {
+    const { dir, dispose } = projectFrom("postgres");
+    try {
+      writeFileSync(join(dir, "src", "extra.sql"), "CREATE TABLE yodel_e2e_fixture.extra (\n  id bigint PRIMARY KEY,\n  note text\n);\n");
+      const made = await yodel(["new", "extra", "--json", "--dir", dir]);
+      expect(made.code, made.err).toBe(0);
+      const [migration] = readMigrations(join(dir, "migrations"));
+      expect(migration?.files.sql).toMatch(/CREATE TABLE yodel_e2e_fixture\.extra/);
     } finally {
       dispose();
     }

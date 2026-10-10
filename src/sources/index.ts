@@ -29,7 +29,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { BuildOutput } from "../chant/build.js";
 import { YodelError, type Project } from "../project.js";
-import { ddlToDeclarations, type DdlObject } from "./ddl.js";
+import { ddlObjects, ddlToDeclarations, type DdlObject } from "./ddl.js";
 
 /** One source, in yodel.config.ts `sources.<name>`. */
 export interface DdlSource {
@@ -144,7 +144,7 @@ export function duplicateExport(buildOutput: string, synced: readonly SyncedSour
 async function builtName(dialect: BuildOutput["dialect"], type: string | undefined, ddl: string): Promise<string | undefined> {
   try {
     const first = ddl.split(/;\s*\n\s*COMMENT ON\b/i)[0] ?? ddl;
-    const [object] = (await ddlToDeclarations(dialect, first, { origin: "build" })).objects;
+    const [object] = await ddlObjects(dialect, first, { origin: "build" });
     return object && (type === undefined || object.type === type) ? object.name : undefined;
   } catch {
     return undefined;
