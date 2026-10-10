@@ -614,7 +614,8 @@ async function prReviewPart(m: Modes): Promise<void> {
   await onMain(m, "chore: dev's wave approved by the pull request's review");
   const pr = await columnPr(m, "reviewed_note");
   hold(pr.checks.ok, `the pr-review part's pull request checks ended ${pr.checks.status}`);
-  hold(pr.checks.log.includes("--record-plans"), "the pull request did not run chant run wave --record-plans");
+  // chant run wave --record-plans prints each wave's digest at the head (its step's name, not the command, is what a forge's log shows).
+  hold(/wave \d+ \(dev\) at [0-9a-f]{7,40}: jcs1-sha256:[0-9a-f]{64}/.test(pr.checks.log), "the pull request did not run chant run wave --record-plans: no wave's digest at the head in its log");
   // The plans job holds readers only, and shows it with the write probe, as the plan job does (#50, #130).
   hold(pr.checks.log.split("write probe   cannot write").length - 1 >= 2, "the pull request's plans job (yodel-apply-plans) did not show that it cannot write (yodel config check --write-probe), as the plan job does");
   const sha = await m.head();
