@@ -81,6 +81,9 @@ describe("yodel new --replace (#19)", () => {
   const schema = join(dir, "src", "schema.ts");
 
   it("redoes the newest migration from its parent, under its name only", async () => {
+    const none = await yodel(["new", "create", "--replace", "--dir", dir]);
+    expect(none.code).toBe(4);
+    expect(none.err.trim()).toBe("yodel new: --replace redoes the newest migration, and there is none yet; run yodel new create");
     expect((await yodel(["new", "create", "--dir", dir])).code).toBe(0);
     writeFileSync(schema, readFileSync(schema, "utf8").replace("    ts   DateTime\n", "    ts   DateTime,\n    note String DEFAULT ''\n"));
     expect((await yodel(["new", "add-note", "--dir", dir])).code).toBe(0);
@@ -90,6 +93,9 @@ describe("yodel new --replace (#19)", () => {
     const wrong = await yodel(["new", "other", "--replace", "--dir", dir]);
     expect(wrong.code).toBe(4);
     expect(wrong.err).toContain("which is not named other");
+    // The refusal is the one line, not --check's help (#119).
+    expect(wrong.err).not.toContain("--check");
+    expect(wrong.err.trim().split("\n")).toHaveLength(1);
 
     const ran = await yodel(["new", "add-note", "--replace", "--json", "--dir", dir]);
     expect(ran.code, ran.err).toBe(0);

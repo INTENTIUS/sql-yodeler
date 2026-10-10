@@ -360,27 +360,9 @@ export const REPLACE_REFUSED = 4;
 /** The newest migration, when --replace may redo it: named `name`, and applied in none of `envs`. */
 async function replaceable(project: Project, ordered: readonly Migration[], name: string, envs: readonly string[], io: Io): Promise<Migration> {
   const newest = newestMigration(ordered);
-  if (!newest) throw new YodelError(`--check <sql> adds a pre-migration check to migration.json: a read-only
-query that must return no rows. yodel apply runs it against the environment
-before the gate and again under the lock just before the migration's first
-statement; a check that fails refuses the run (exit 4) and names it.
-Written "<name>: <sql>" it is named <name>, else check-1, check-2 and so on.
-For "returns true" or a count within bounds, edit its "expect" in
-migration.json (docs/migrations.md); the checks count in the checksum and
-the plan digest.
-
---replace redoes the newest migration, and there is none yet; run yodel new ${name}`, REPLACE_REFUSED);
+  if (!newest) throw new YodelError(`--replace redoes the newest migration, and there is none yet; run yodel new ${name}`, REPLACE_REFUSED);
   if (newest.id.slice(newest.id.indexOf("-") + 1) !== name) {
-    throw new YodelError(`--check <sql> adds a pre-migration check to migration.json: a read-only
-query that must return no rows. yodel apply runs it against the environment
-before the gate and again under the lock just before the migration's first
-statement; a check that fails refuses the run (exit 4) and names it.
-Written "<name>: <sql>" it is named <name>, else check-1, check-2 and so on.
-For "returns true" or a count within bounds, edit its "expect" in
-migration.json (docs/migrations.md); the checks count in the checksum and
-the plan digest.
-
---replace redoes the newest migration, ${newest.id}, which is not named ${name}; nothing written`, REPLACE_REFUSED);
+    throw new YodelError(`--replace redoes the newest migration, ${newest.id}, which is not named ${name}; nothing written`, REPLACE_REFUSED);
   }
   for (const envName of envs) {
     const env = resolveEnvironment(project, envName);

@@ -4,7 +4,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
 import { appliedBy, withLock } from "../history/index.js";
 import { closeVersioned, findMigrateOp, gitLedger, NOT_APPROVED, openVersioned, verifyApproval, type VersionedEnv } from "../versioned/index.js";
-import { cleanupDigest, describeRetained, dropRetained, findRetained, retainedServer, type Retained } from "../cleanup/index.js";
+import { cleanupDigest, cleanupGate, describeRetained, dropRetained, findRetained, retainedServer, type Retained } from "../cleanup/index.js";
 
 const usage = "usage: yodel cleanup <env> [--list] [--op <name>] [--json] [--dir <project>]";
 
@@ -24,10 +24,11 @@ whether it has passed. Nothing is dropped before its date.
 
 When something is due, the drop is a plan like an apply's: its digest
 covers each due object (a table by its UUID, a column by its table and
-attribute number) and its date. Without an approval of the environment's
-migrations Op gate for that digest, yodel cleanup lists what it would drop,
-prints the digest and the chant approve command, and drops nothing (exit
-3). Approve it, run yodel cleanup <env> again, and it drops them under the
+attribute number) and its date. Without an approval for that digest on
+the migrations Op's cleanup gate (its gate's name with -cleanup, e.g.
+approve-migrate-prod-cleanup, apart from the apply's approvals), yodel
+cleanup lists what it would drop, prints the digest and the chant approve
+command, and drops nothing (exit 3). Approve it, run yodel cleanup <env> again, and it drops them under the
 apply lock, after reading them again: if anything due changed, the digest
 differs and the approval does not count.
 
@@ -115,7 +116,9 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
   }
 
   const digest = await cleanupDigest(env.name, retained);
-  const op = await findMigrateOp(project, env, a.op);
+  const migrate = await findMigrateOp(project, env, a.op);
+  // Its own gate on the migrations Op, so an apply's approval is never confused with it.
+  const op = { ...migrate, gate: cleanupGate(migrate.gate) };
   const ledger = await gitLedger(project.dir);
   const approve = `chant approve ${op.name} ${op.gate} --plan ${digest}`;
   try {

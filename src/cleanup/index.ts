@@ -169,6 +169,13 @@ async function postgresRetained(server: Extract<RetainedServer, { dialect: "post
   return { now: new Date(now).toISOString(), retained };
 }
 
+/**
+ * The gate a cleanup's approval is recorded on: the migrations Op's gate
+ * name with `-cleanup`, its own, so `yodel plan` never takes a cleanup's
+ * approval for the newest approval of an apply (#119).
+ */
+export const cleanupGate = (gate: string): string => `${gate}-cleanup`;
+
 /** The digest an approval of a cleanup binds: the environment and every due object, by its identity and date. */
 export async function cleanupDigest(environment: string, retained: readonly Retained[]): Promise<string> {
   const { computePlanDigest } = await import("@intentius/chant/op");

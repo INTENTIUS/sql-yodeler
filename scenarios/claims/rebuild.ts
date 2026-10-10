@@ -44,9 +44,13 @@ export async function asStepPart(ctx: Ctx, p: Project): Promise<void> {
 
 interface CleanupDoc {
   retained?: Array<{ name: string; due: boolean }>;
+  planDigest?: string;
   approve?: string;
   dropped?: string[];
 }
+
+/** The digest of the drop the cleanup part approved, for the cleanup-gate part. */
+const cleanupApproved = new WeakMap<Project, string>();
 
 /**
  * The old table the rebuild kept is dropped by yodel cleanup once its
@@ -83,9 +87,32 @@ export async function cleanupPart(ctx: Ctx, p: Project): Promise<void> {
   if (gated.doc.approve) {
     hold(gated.code === 3 && (await ctx.db.tableExists("events__chant_old")), `yodel cleanup dropped ${name} without an approval (exit ${String(gated.code)})`);
     await p.approve(gated.doc.approve);
+    if (gated.doc.planDigest) cleanupApproved.set(p, gated.doc.planDigest);
   }
   const done = await cleanup();
   hold(done.code === 0 && done.doc.dropped?.includes(name) === true && !(await ctx.db.tableExists("events__chant_old")), `yodel cleanup did not drop ${name} once its date had passed and the drop was approved (exit ${String(done.code)}, dropped ${JSON.stringify(done.doc.dropped)})`);
+}
+
+/**
+ * A cleanup's approval is recorded on a gate of its own, the migrations
+ * Op's gate name with -cleanup (#119): after the cleanup part's drop was
+ * approved and run, yodel plan names the newest approval of the migrations
+ * gate as the apply's, never the cleanup's.
+ * BREAK: the cleanup's digest is approved on the migrations gate, as yodel
+ * recorded it before #119.
+ */
+export async function cleanupGatePart(ctx: Ctx, p: Project): Promise<void> {
+  const digest = cleanupApproved.get(p) ?? `jcs1-sha256:${"0".repeat(64)}`;
+  if (ctx.broken) {
+    await p.approve(`chant approve migrate-${p.env} approve-migrate-${p.env} --plan ${digest}`);
+    ctx.log("BREAK: the cleanup's digest is approved on the migrations gate");
+  }
+  const plan = await p.yodel(["plan", p.env, "--json"]);
+  if (plan.code !== 0) throw new Error(`yodel plan exited ${String(plan.code)}: ${plan.err}`);
+  const doc = JSON.parse(plan.out) as { gate?: string; approval?: { digest?: string } };
+  hold(doc.approval?.digest !== digest, `yodel plan names the cleanup's approval (${digest}) as the newest approval of ${doc.gate ?? "the migrations gate"}`);
+  const text = await p.yodel(["plan", p.env]);
+  hold(!text.out.includes(digest), `yodel plan's text names the cleanup's approval (${digest}):\n${text.out}`);
 }
 
 /**
@@ -113,10 +140,11 @@ export async function refusedPart(ctx: Ctx, p: Project): Promise<void> {
   hold((await ctx.db.count(`SELECT count() FROM ${ctx.db.history}.history WHERE migration_id = '${id}'`)) === 0, `the history records ${id}`);
 }
 
-/** The parts, in order, on one project: an approved rebuild, the old table it kept cleaned up, then a second rebuild refused. */
+/** The parts, in order, on one project: an approved rebuild, the old table it kept cleaned up (its approval apart from the apply's), then a second rebuild refused. */
 const parts = [
   ["as-step", asStepPart],
   ["cleanup", cleanupPart],
+  ["cleanup-gate", cleanupGatePart],
   ["refused", refusedPart],
 ] as const;
 
@@ -126,7 +154,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const rebuild: Claim = {
   name: "rebuild",
-  says: "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval",
+  says: "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own",
   dialects: { ch: body },
   parts: parts.map(([name]) => name),
 };
