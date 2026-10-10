@@ -11,6 +11,8 @@ The ClickHouse schema of database `{{chant:database}}`, managed with SQL Yodeler
 | `ops/migrate-<env>.op.ts` | the Op `yodel apply <env>` runs: plan, a gate bound to the plan digest, apply |
 | `ops/watch-<env>.op.ts` | the drift watch, a chant `WatchOp` on a schedule |
 | `scripts/ci.ts` | renders the pipelines below (`npm run ci`), and runs the lint job's replay check on your machine (`npm run replay`) |
+| `scripts/local.ts` | after `just up`: says whether dev's server is the emulator, and what `.env` needs for dev on it |
+| `justfile` | the routine commands as `just` targets (below) |
 | `.github/workflows/`, `.forgejo/workflows/`, `.gitlab-ci.yml`, `.gitlab/` | the pipelines for GitHub Actions, Forgejo Actions and GitLab CI |
 
 The history table and the apply lock live in database `{{chant:history_database}}`, set per environment in `yodel.config.ts` with each environment's ClickHouse topology (`single` here; a cluster is `cluster:<name>`).
@@ -19,11 +21,37 @@ The history table and the apply lock live in database `{{chant:history_database}
 
 ```sh
 npm install                 # writes package-lock.json; commit it, CI runs npm ci
-npx yodel new init          # the first migration, from src/schema.ts
-git add -A && git commit -m "feat: the schema"
+just up                     # the local database (chant's emulator); prints what .env needs for dev
+just new init               # the first migration, from src/schema.ts
+git init -q && git add -A && git commit -m "feat: the schema"
+just plan                   # what applying to dev would do, and the plan digest
+just approve                # prints the command that approves that digest: run it yourself
+just apply                  # applies the approved plan to dev
 ```
 
-Then create the users and the forge's secrets (below), and push. Every change after that is a pull request: edit `src/schema.ts`, run `npx yodel new <name>`, commit both.
+Then create the users and the forge's secrets (below), and push. Every change after that is a pull request: edit `src/schema.ts`, run `just new <name>`, commit both.
+
+## The targets
+
+`just` is optional. Each target is a thin wrapper in `justfile`, and the command beside it here does the same without `just`. `[env]` defaults to `dev`. Every target reads `.env` when there is one (`.gitignore` keeps it out of git): put the variables of the environments you reach from this machine there, as `just up` prints them for dev on the emulator.
+
+| Target | Runs |
+|---|---|
+| `just` | `just --list`: the targets, one line each |
+| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which warns when dev's address (`127.0.0.1`) reaches another server on this machine instead of the emulator |
+| `just down` | `npx @intentius/chant emulator down --lexicon sql` |
+| `just new <name>` | `npx yodel new <name>` |
+| `just lint` | `npx yodel lint` |
+| `just replay` | `npm run replay` (see [The replay check](#the-replay-check)) |
+| `just plan [env]` | `npx yodel plan <env>` |
+| `just approve [env]` | prints the approve command from `npx yodel plan <env> --json`, as `npx @intentius/chant approve ...`, and `git push origin chant/lifecycle`; it never runs them |
+| `just apply [env]` | `YODEL_CREDENTIALS=writer npx yodel apply <env>` |
+| `just drift [env]` | `npx yodel drift <env>` |
+| `just status [env]` | `npx yodel status <env>` |
+| `just ci` | `npm run ci` |
+| `just ci-check` | `npm run ci:check` |
+
+If 127.0.0.1 reaches another server (a ClickHouse installed on this machine), `just up` says so; point dev at the emulator through another address of this machine in `.env`: `DEV_CLICKHOUSE_URL=http://<address>:8123`, with the address from `ipconfig getifaddr en0` on macOS.
 
 ## Credentials
 
@@ -45,7 +73,7 @@ GRANT SELECT, SHOW ON {{chant:history_database}}.* TO app_reader;
 
 The writer needs to create and alter objects in both databases (`GRANT ALL ON {{chant:database}}.*`, the same on `{{chant:history_database}}.*`, and `CREATE DATABASE` for the first apply).
 
-On your machine, export the reader's variables to run `npx yodel plan dev` or `npx yodel drift dev`.
+On your machine, put an environment's variables in `.env` (or export them) to run `just plan <env>` or `just drift <env>`; `just apply <env>` needs the writer's.
 
 ## What runs where
 
@@ -95,13 +123,13 @@ GitLab CI:
 
 The `replay` profile in `chant.config.ts` is not an environment: it is a throwaway server, and `--reset` drops what the history names there before replaying. In CI it is the service the lint job starts from the image chant's emulator runs.
 
-On your machine, run `npm run replay` (`scripts/ci.ts`; it needs Docker). It starts a server of its own from the same image on a free port, points `replay` at it with `REPLAY_CLICKHOUSE_URL`, runs `yodel lint --replay replay --reset`, and removes the server. Do not point `replay` at the emulator dev uses: the history names dev's database, `{{chant:database}}`, and `--reset` would drop it. Without `REPLAY_CLICKHOUSE_URL` the profile names no server (`replay.invalid`), so a plain `npx yodel lint --replay replay` reaches nothing.
+On your machine, run `just replay` (`npm run replay`, in `scripts/ci.ts`; it needs Docker). It starts a server of its own from the same image on a free port, points `replay` at it with `REPLAY_CLICKHOUSE_URL`, runs `yodel lint --replay replay --reset`, and removes the server. Do not point `replay` at the emulator dev uses: the history names dev's database, `{{chant:database}}`, and `--reset` would drop it. Without `REPLAY_CLICKHOUSE_URL` the profile names no server (`replay.invalid`), so a plain `npx yodel lint --replay replay` reaches nothing.
 
 Delete the profile and `npm run ci` to stop running the check.
 
 ## Adding an environment
 
-Add its profile to `chant.config.ts` (in the order merges apply them) and its entry to `yodel.config.ts`, copy `ops/migrate-dev.op.ts` and `ops/watch-dev.op.ts` to the new name and change `dev` in them, then `npm run ci`. `npm run ci:check` fails when the pipelines are stale.
+Add its profile to `chant.config.ts` (in the order merges apply them) and its entry to `yodel.config.ts`, copy `ops/migrate-dev.op.ts` and `ops/watch-dev.op.ts` to the new name and change `dev` in them, then `just ci` (`npm run ci`). `just ci-check` (`npm run ci:check`) fails when the pipelines are stale.
 
 ## The sql-yodeler dependency
 

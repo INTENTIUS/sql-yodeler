@@ -155,6 +155,16 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     expect(readFileSync(join(dir, "README.md"), "utf8")).not.toContain("npx yodel lint --replay replay --reset");
   });
 
+  it("has a just target for each routine step, and its README gives the command beside each", () => {
+    const justfile = readFileSync(join(dir, "justfile"), "utf8");
+    const targets = [...justfile.matchAll(/^([a-z][a-z-]*)(?: [^:]*)?:$/gm)].map((m) => m[1] ?? "");
+    expect(targets).toEqual(["default", "up", "down", "new", "lint", "replay", "plan", "approve", "apply", "drift", "status", "ci", "ci-check"]);
+    // approve prints the command; it never runs chant approve itself.
+    expect(justfile).not.toMatch(/^\s+(npx @intentius\/)?chant approve/m);
+    const readme = readFileSync(join(dir, "README.md"), "utf8");
+    for (const t of targets.filter((t) => t !== "default")) expect(readme, t).toMatch(new RegExp(`^\\| \`just ${t}[\` ]`, "m"));
+  });
+
   it("lints and runs the replay check on pull requests", () => {
     for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
       const text = readFileSync(join(dir, f), "utf8");
@@ -168,7 +178,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
 describe("the templates' scripts", () => {
   it("are the same in every template", () => {
-    for (const f of ["scripts/ci.ts", "scripts/watch-outcome.ts", "ops/migrate-dev.op.ts", "ops/watch-dev.op.ts"]) {
+    for (const f of ["justfile", "scripts/ci.ts", "scripts/local.ts", "scripts/watch-outcome.ts", "ops/migrate-dev.op.ts", "ops/watch-dev.op.ts"]) {
       expect(readFileSync(join(templateDir("postgres"), f), "utf8"), f).toBe(readFileSync(join(templateDir("clickhouse"), f), "utf8"));
     }
   });
