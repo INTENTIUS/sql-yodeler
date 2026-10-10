@@ -63,7 +63,10 @@
  * land would race the approvals people push to chant/lifecycle.
  *
  * Every job installs @intentius/sql-yodeler from npm with `npm ci`, which
- * needs no token.
+ * needs no token, in IMAGE. With yodel.config.ts `ci.image` (#66), the CI
+ * image ghcr.io/intentius/sql-yodeler pinned by its digest, every job runs
+ * in that image instead, which carries node, yodel, chant and the lexicons
+ * on PATH, and no job runs `npm ci` ({@link Toolchain}).
  */
 
 import { existsSync } from "node:fs";
@@ -106,6 +109,28 @@ export interface RenderedFile {
 
 /** The image every job runs in, where the forge runs jobs in a container. It needs git, so not -slim. */
 export const IMAGE = "node:22-bookworm";
+
+/** The CI image (#66): yodel, chant and the sql lexicon, published for each release. */
+export const YODEL_IMAGE = "ghcr.io/intentius/sql-yodeler";
+
+/**
+ * What the jobs run in. By default IMAGE, and each job installs the
+ * project's packages with `npm ci` and puts node_modules/.bin on PATH. With
+ * `ci.image` the yodel image (pinned by digest): its yodel, chant and tsx
+ * are on PATH, and a checkout resolves chant and the lexicons from the
+ * image's /node_modules, so nothing is installed.
+ */
+export interface Toolchain {
+  image: string;
+  /** The yodel image: no `npm ci`, and every job in the container. */
+  yodelImage: boolean;
+}
+
+export const toolchainOf = (envs: Pick<Environments, "image">): Toolchain => (envs.image ? { image: envs.image, yodelImage: true } : { image: IMAGE, yodelImage: false });
+
+/** The steps that install the project's packages and put their bins on PATH, as each forge writes them. */
+const installLines = (tc: Toolchain, forge: Forge): string[] =>
+  tc.yodelImage ? [] : ["npm ci", forge === "gitlab" ? 'export PATH="$PWD/node_modules/.bin:$PATH"' : 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"'];
 export const MAIN = "main";
 
 /** The forgejo lexicon rewrites it to https://code.forgejo.org/actions/checkout@v7 on Forgejo. */
@@ -125,6 +150,8 @@ export interface Environments {
   forges?: readonly Forge[];
   /** The project's own jobs (yodel.config.ts `ci.jobs`), merged after yodel's. */
   jobs?: ProjectJobs;
+  /** yodel.config.ts `ci.image`: the yodel image every job runs in, by digest. */
+  image?: string;
   /** The apply pipeline's waves, in order. */
   waves: readonly Wave[];
   /** chant.config.ts declares the `replay` profile, so the lint job runs the replay check. */
@@ -243,10 +270,13 @@ export const REPORT_DIR = "yodel-report";
  * `yodel report <env>` as JSON and as the HTML run view, into REPORT_DIR.
  * It runs whatever the job's outcome, and a gap it reports (exit 4) does not
  * fail the job: the report is for reading. `yodel` is the project's, named
- * by path, since GitLab's after_script does not keep before_script's PATH.
+ * by path, since GitLab's after_script does not keep before_script's PATH;
+ * in the yodel image, the image's, which is on PATH.
  */
-export const reportCommand = (env: string): string =>
-  `mkdir -p ${REPORT_DIR}; ./node_modules/.bin/yodel report ${env} --json > ${REPORT_DIR}/${env}.json || true; ./node_modules/.bin/yodel report ${env} --html ${REPORT_DIR}/${env}.html || true`;
+export const reportCommand = (env: string, tc: Toolchain = { image: IMAGE, yodelImage: false }): string => {
+  const yodel = tc.yodelImage ? "yodel" : "./node_modules/.bin/yodel";
+  return `mkdir -p ${REPORT_DIR}; ${yodel} report ${env} --json > ${REPORT_DIR}/${env}.json || true; ${yodel} report ${env} --html ${REPORT_DIR}/${env}.html || true`;
+};
 
 /** The artifact a job keeps its report in. */
 export const reportArtifact = (job: string): string => `yodel-report-${job}`;
@@ -291,51 +321,47 @@ function renderActions(forge: Actions, workflow: AWorkflow): string {
 }
 
 /** The report steps of a job: `yodel report` into REPORT_DIR and the artifact, whatever the job's outcome. */
-function reportSteps(env: string, job: string): AStep[] {
+function reportSteps(env: string, job: string, tc: Toolchain): AStep[] {
   return [
-    new Step({ name: `yodel report ${env}`, if: "always()", run: reportCommand(env) }),
+    new Step({ name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) }),
     new Step({ name: "Keep the report", if: "always()", uses: UPLOAD_ARTIFACT, with: { name: reportArtifact(job), path: REPORT_DIR, "if-no-files-found": "ignore" } }),
   ];
 }
 
-/** `inContainer`: the job runs in IMAGE, which has node, so it needs no setup-node. */
-function setupSteps(inContainer: boolean): AStep[] {
+/** `inContainer`: the job runs in the toolchain's image, which has node, so it needs no setup-node. */
+function setupSteps(inContainer: boolean, tc: Toolchain): AStep[] {
   // Step inputs are strings in the lexicon's schema (INTENTIUS/chant#3670); the actions read them as strings either way.
   const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": "0" } })];
   if (!inContainer) steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": "22", cache: "npm" } }));
-  steps.push(
-    new Step({ run: "npm ci" }),
-    new Step({ run: 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"' }),
-    new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }),
-  );
+  steps.push(...installLines(tc, "github").map((run) => new Step({ run })), new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }));
   return steps;
 }
 
-/** Forgejo runs every job in IMAGE; GitHub on the runner's VM, unless the job asks for the container. */
-const inContainer = (forge: Actions): boolean => forge === "forgejo";
-const runner = (container: boolean) => ({ "runs-on": "ubuntu-latest", ...(container ? { container: IMAGE } : {}) });
+/** Forgejo runs every job in the image; GitHub on the runner's VM, unless the job asks for the container or the image is yodel's. */
+const inContainer = (forge: Actions, tc: Toolchain): boolean => forge === "forgejo" || tc.yodelImage;
+const runner = (container: boolean, tc: Toolchain) => ({ "runs-on": "ubuntu-latest", ...(container ? { container: tc.image } : {}) });
 
 /** The token `yodel plan --comment` posts with: the job's own. */
 function commentToken(forge: Actions): Record<string, string> {
   return forge === "github" ? { GITHUB_TOKEN: "${{ github.token }}" } : { FORGEJO_TOKEN: "${{ github.token }}" };
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean): AJob {
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain): AJob {
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
   // which collides with any database already on that port (act, a
   // self-hosted runner).
-  const container = replay || inContainer(forge);
+  const container = replay || inContainer(forge, tc);
   const steps = [
-    ...setupSteps(container),
+    ...setupSteps(container, tc),
     new Step({ name: "The pipelines are up to date", run: CI_CHECK }),
     new Step({ name: "yodel lint", run: LINT }),
   ];
-  if (!replay) return new ActionsJob({ ...runner(container), steps });
+  if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
   const svc = REPLAY_SERVICE[dialect];
   return new ActionsJob({
-    ...runner(container),
+    ...runner(container, tc),
     services: {
       [svc.name]: new ActionsService({
         image: svc.image,
@@ -352,18 +378,20 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean): AJob {
   });
 }
 
-export function actionsReview(forge: Actions, { dialect, names: envs, replay, waves, jobs: own }: Environments): RenderedFile {
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay) };
+export function actionsReview(forge: Actions, envs_: Environments): RenderedFile {
+  const { dialect, names: envs, replay, waves, jobs: own } = envs_;
+  const tc = toolchainOf(envs_);
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc) };
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
-      ...runner(inContainer(forge)),
+      ...runner(inContainer(forge, tc), tc),
       // The plan shows where each migration has run: the required environment's reader too.
       env: secrets([...[env, ...requiredOf(waves, env)].flatMap((e) => readerVariables(e, dialect)), ...WEBHOOK_VARIABLES]),
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
-        ...setupSteps(inContainer(forge)),
+        ...setupSteps(inContainer(forge, tc), tc),
         new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
-        ...reportSteps(env, `plan-${env}`),
+        ...reportSteps(env, `plan-${env}`, tc),
       ],
     });
   }
@@ -399,7 +427,9 @@ export const GITLAB_APPLY_FILE = ".gitlab/yodel-apply.gitlab-ci.yml";
 /** The stage of each wave's job in GITLAB_APPLY_FILE, as chant names it. */
 const waveStages = (waves: readonly Wave[]): string[] => waves.map((w, i) => `wave-${String(i + 1)}-${w.env}`);
 
-export function gitlabPipeline({ dialect, names: envs, replay, waves, jobs: own }: Environments): RenderedFile {
+export function gitlabPipeline(envs_: Environments): RenderedFile {
+  const { dialect, names: envs, replay, waves, jobs: own } = envs_;
+  const tc = toolchainOf(envs_);
   const mr = () => [new Rule({ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' })];
   const workflow = new GitLabWorkflow({
     rules: [
@@ -412,8 +442,8 @@ export function gitlabPipeline({ dialect, names: envs, replay, waves, jobs: own 
   jobs.set(
     ".yodel",
     new GitLabJob({
-      image: new Image({ name: IMAGE }),
-      before_script: ["npm ci", 'export PATH="$PWD/node_modules/.bin:$PATH"', FETCH_APPROVALS],
+      image: new Image({ name: tc.image }),
+      before_script: [...installLines(tc, "gitlab"), FETCH_APPROVALS],
     }),
   );
   const svc = REPLAY_SERVICE[dialect];
@@ -440,7 +470,7 @@ export function gitlabPipeline({ dialect, names: envs, replay, waves, jobs: own 
         stage: "review",
         rules: mr(),
         script: [`yodel plan ${env} --comment`],
-        after_script: [reportCommand(env)],
+        after_script: [reportCommand(env, tc)],
         artifacts: new GitLabArtifacts({ name: reportArtifact(`plan-${env}`), when: "always", paths: [`${REPORT_DIR}/`] }),
       }),
     );
@@ -564,7 +594,9 @@ interface WavesPipelineResult {
 }
 
 /** The waves spec file and the apply pipeline on each forge. */
-export async function applyPipelines(dir: string, { dialect, waves }: Environments): Promise<RenderedFile[]> {
+export async function applyPipelines(dir: string, envs: Environments): Promise<RenderedFile[]> {
+  const { dialect, waves } = envs;
+  const tc = toolchainOf(envs);
   const { generateOpWavesPipeline } = (await import("@intentius/chant/op")) as unknown as {
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<WavesPipelineResult>;
   };
@@ -594,14 +626,13 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
     "# a migration that environment's history does not record as applied.",
   ];
   for (const forge of FORGES) {
-    const path = forge === "gitlab" ? 'export PATH="$PWD/node_modules/.bin:$PATH"' : 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"';
     const result = await generateOpWavesPipeline(
       wavesSpec(waves, variables(forge)),
       forge,
       {
         specFile: WAVES_SPEC,
-        image: IMAGE,
-        beforeScript: ["npm ci", path, FETCH_APPROVALS],
+        image: tc.image,
+        beforeScript: [...installLines(tc, forge), FETCH_APPROVALS],
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
       },
       dir,
@@ -609,7 +640,7 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
     if (!result.success || !result.files) throw new Error(`${forge}: ${result.error ?? "generateOpWavesPipeline rendered nothing"}`);
     for (const file of result.files) {
       const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
-      out.push({ path: at, content: withHeader(header, withWaveReports(forge, file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`, waves)) });
+      out.push({ path: at, content: withHeader(header, withWaveReports(forge, file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`, waves, tc)) });
     }
   }
   return out;
@@ -623,7 +654,7 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
  * back chant's text unchanged before anything is added, so a change in
  * chant's emitter fails here instead of rendering something else.
  */
-function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[]): string {
+function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc: Toolchain): string {
   const envOf = (job: string) => waves.find((w, i) => job === `wave-${String(i + 1)}-${w.env}`)?.env;
   const body = yaml.search(/^[^#\n]/m);
   const header = yaml.slice(0, body);
@@ -634,7 +665,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[]): st
     for (const [name, job] of Object.entries(doc)) {
       const env = envOf(name);
       if (!env || typeof job !== "object" || job === null) continue;
-      Object.assign(job, { after_script: [reportCommand(env)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] } });
+      Object.assign(job, { after_script: [reportCommand(env, tc)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] } });
     }
     return emit(doc);
   }
@@ -647,7 +678,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[]): st
     const env = envOf(name);
     if (!env) continue;
     job.steps.push(
-      { name: `yodel report ${env}`, if: "always()", run: reportCommand(env) },
+      { name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) },
       // chant's forgejo output is already in Forgejo's dialect, so the action is named as the forgejo lexicon names it.
       { name: "Keep the report", if: "always()", uses: forge === "forgejo" ? `https://code.forgejo.org/${UPLOAD_ARTIFACT}` : UPLOAD_ARTIFACT, with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
     );
@@ -695,19 +726,20 @@ export function watchSpec(env: string, dialect: Dialect, forge: Forge): { name: 
   };
 }
 
-export async function watchPipelines(dir: string, { dialect, names: envs }: Environments): Promise<RenderedFile[]> {
+export async function watchPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
+  const { dialect, names: envs } = envs_;
+  const tc = toolchainOf(envs_);
   const { generateOpsPipeline } = (await import("@intentius/chant/op")) as unknown as {
     generateOpsPipeline: (ops: unknown[], lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<OpsPipelineResult>;
   };
   const out: RenderedFile[] = [];
   const emit = async (forge: Forge, specs: unknown[], extraScript: string[]) => {
-    const path = forge === "gitlab" ? 'export PATH="$PWD/node_modules/.bin:$PATH"' : 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"';
     const result = await generateOpsPipeline(
       specs,
       forge,
       {
-        image: IMAGE,
-        beforeScript: ["npm ci", path, FETCH_APPROVALS, NO_PUSH],
+        image: tc.image,
+        beforeScript: [...installLines(tc, forge), FETCH_APPROVALS, NO_PUSH],
         extraScript,
         ...(forge === "gitlab" ? { opsStage: "ops", opsFileName: GITLAB_WATCH_FILE } : {}),
       },
@@ -747,7 +779,15 @@ export async function environments(dir: string): Promise<Environments> {
     }
   }
   const ci = (await readConfig(dir))?.ci;
-  return { dialect, names: envs, replay, waves: await readWaves(dir, envs), forges: ci?.forges ?? FORGES, ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}) };
+  return {
+    dialect,
+    names: envs,
+    replay,
+    waves: await readWaves(dir, envs),
+    forges: ci?.forges ?? FORGES,
+    ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
+    ...(ci?.image ? { image: ci.image } : {}),
+  };
 }
 
 /** yodel.config.ts, checked; undefined when the project has none. */

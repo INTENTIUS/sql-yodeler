@@ -112,6 +112,13 @@ export interface CiConfig {
    * pipeline after yodel's own jobs, so they survive every render.
    */
   jobs?: string;
+  /**
+   * The image every job runs in (#66): the CI image
+   * `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`, pinned by its
+   * digest, which carries node, yodel, chant and the lexicons. Jobs then run
+   * no `npm ci`. Default: `node:22-bookworm`, and each job runs `npm ci`.
+   */
+  image?: string;
 }
 
 export interface YodelConfig {
