@@ -261,6 +261,8 @@ export const adopt: Claim = {
   name: "adopt",
   says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
   dialects: { ch: body, pg: body },
+  // init --from reads every function on the ClickHouse server, so another run's function, made or dropped mid-import, would be adopted or planned as a create.
+  shares: ["ch:udf"],
   parts: partNames(parts),
   partDialects: partDialects(parts),
 };

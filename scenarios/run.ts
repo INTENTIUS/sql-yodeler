@@ -53,8 +53,8 @@
  * YODEL_CLAIMS_LOG_DIR (default scenarios/.logs/<time>). Runs go
  * YODEL_CLAIMS_JOBS at a time (default 6). A run holds its own database
  * (the plain and the broken run each have one, so they run at once) and
- * whatever its claim lists in `shares`; a run waits while another holds
- * any of them. The slowest claims start first. A run whose log has not grown for YODEL_CLAIMS_STALL_MIN
+ * whatever its claim lists in `shares` (one named `<dialect>:<thing>` only
+ * on that dialect); a run waits while another holds any of them. The slowest claims start first. A run whose log has not grown for YODEL_CLAIMS_STALL_MIN
  * minutes (default 5, or the claim's own stallMinutes), or that runs past
  * YODEL_CLAIMS_TIMEOUT_MIN (default 20), has its process group killed and
  * fails as stalled, its last lines printed. Verdict lines print as runs
@@ -242,7 +242,7 @@ for (const c of selected) {
       continue;
     }
     for (const m of modes) {
-      queue.push({ claim: c.name, dialect: d, mode: m, holds: [`db:${c.name}:${d}:${m}`, ...(c.shares ?? [])], stallMin: c.stallMinutes ?? stallMin, log: join(logDir, `${c.name}.${d}.${m}.log`) });
+      queue.push({ claim: c.name, dialect: d, mode: m, holds: [`db:${c.name}:${d}:${m}`, ...(c.shares ?? []).filter((x) => !/^(ch|pg):/.test(x) || x.startsWith(`${d}:`))], stallMin: c.stallMinutes ?? stallMin, log: join(logDir, `${c.name}.${d}.${m}.log`) });
     }
   }
 }

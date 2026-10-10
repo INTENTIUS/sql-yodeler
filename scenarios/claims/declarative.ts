@@ -317,6 +317,8 @@ export const declarative: Claim = {
   name: "declarative",
   says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
   dialects: { ch: body, pg: body },
+  // It makes and drops a ClickHouse function, which adopt's import would read.
+  shares: ["ch:udf"],
   parts: partNames(parts),
   partDialects: partDialects(parts),
 };
