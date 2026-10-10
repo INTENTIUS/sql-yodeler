@@ -298,6 +298,8 @@ export interface RunBackfillOptions extends Omit<RunOpOptions, "activities" | "c
   postgres?: PgBackfillServer | undefined;
   receipts: ReceiptStore;
   log?: (line: string) => void;
+  /** On a tenant (#56): renames the template in each statement the backfill sends. */
+  rename?: ((sql: string) => string) | undefined;
 }
 
 /** Runs a backfill step to the end, counting batches as they skip or finish. */
@@ -330,8 +332,9 @@ export async function runBackfill(file: string, run: RunBackfillOptions): Promis
     },
     receiptStaleness: (args) => store.receiptStaleness(args as unknown as Parameters<typeof store.receiptStaleness>[0]),
     [SQL_ACTIVITY]: async (args) => {
-      const sql = args.sql;
-      if (typeof sql !== "string" || sql.trim() === "") throw new Error(`${SQL_ACTIVITY}: needs { sql: "<statement>" }`);
+      const written = args.sql;
+      if (typeof written !== "string" || written.trim() === "") throw new Error(`${SQL_ACTIVITY}: needs { sql: "<statement>" }`);
+      const sql = run.rename ? run.rename(written) : written;
       const settings = isRecord(args.settings) ? (Object.fromEntries(Object.entries(args.settings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined;
       run.log?.(`    ${sql.split("\n")[0] ?? ""}`);
       return { rows: await session.sql(sql, settings) };

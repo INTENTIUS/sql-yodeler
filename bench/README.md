@@ -14,7 +14,7 @@ npm run bench -- --dialects ch                 ClickHouse only (ch, pg)
 
 Options: `--keep` leaves the databases and the scratch projects behind for a
 look; `--replay-max <n>` caps the replayed history (default 1,000
-migrations); `--backfill-rows <n>` sets the backfill's rows (default
+migrations); `--fanout-max <n>` caps the fan-out's tenants (default 1,000); `--backfill-rows <n>` sets the backfill's rows (default
 1,000 per object, at most 1,000,000); `--batches <n>` its batches (default 10).
 
 The default size is the smallest, so a plain `npm run bench` is a check that
@@ -36,7 +36,10 @@ address, and `psql` on PATH. The endpoints, and their defaults:
 
 A run writes only to databases (ClickHouse) and schemas (Postgres) named
 `yodel_35_<dialect>_<size>` and those names with `_history`, `_oracle`,
-`_r`, `_r_history` and `_r_oracle` after them. It drops them before it
+`_r`, `_r_history` and `_r_oracle` after them; the fan-out's under
+`yodel_35_<dialect>_<size>_f` (its tenants `_f_t0000` on, their histories
+`_f_history_<tenant>`, their oracle copies `<tenant>_oracle`, and
+`_f_registry`). It drops them before it
 starts and again when it ends. On ClickHouse the backfill's receipts go to
 chant's own `chant_receipts.receipts`, and the run deletes its environments'
 rows from it when it ends.
@@ -59,6 +62,7 @@ yodel's overhead and not the server's speed.
 | `resume` | the second migration made to fail at its middle statement (that table's column made by hand first), then resumed once the column is gone; against a third migration of the same shape run clean. Also counts statements sent again on the resume (it should be 0) | the clean migration's statements sent straight |
 | `backfill` | a hand-written backfill step over every row of a table, in batches: rows per second clean, then another column's backfill interrupted at its middle batch and resumed from its receipts | the same batch statements sent straight to a copy of the table |
 | `replay` | `yodel lint --replay <env>` over a history of `min(size, --replay-max)` migrations, each adding a table, generated with `yodel new` first | every migration's statements sent straight into a fresh database |
+| `fanout` | a tenant set (#56) of `min(size, --fanout-max)` empty tenants, one table each, through its wave as a wave job runs it (`chant run wave` over `yodel-waves.json`): the deciding run (it plans every tenant and waits), one `chant approve` of the set digest, and the apply run (it plans again and applies each tenant under its own lock); per tenant, the time its lock was held. Twice: the set as a list (a run per tenant) and read by a query from a registry table when the wave runs (one run for every tenant). Also `yodel plan <set> --format markdown`, the set's one comment | every tenant's statements sent straight to a copy of it, one after another |
 
 The lock and per-statement figures come from the history's `recorded_at`:
 a statement's time is from its `started` row to its `succeeded` or `failed`

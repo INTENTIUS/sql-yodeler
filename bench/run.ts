@@ -28,13 +28,14 @@ import {
   retarget,
   scalar,
   secs,
+  spread,
   serverVersions,
   tableName,
   type Dialect,
   type HistoryRow,
 } from "./lib.js";
 
-export const MEASUREMENTS = ["new", "plan", "apply", "pr", "resume", "backfill", "replay"] as const;
+export const MEASUREMENTS = ["new", "plan", "apply", "pr", "resume", "backfill", "replay", "fanout"] as const;
 type Measurement = (typeof MEASUREMENTS)[number];
 
 const SMALL = [10];
@@ -49,6 +50,7 @@ interface Options {
   dialects: Dialect[];
   keep: boolean;
   replayMax: number;
+  fanoutMax: number;
   backfillRows: number | null;
   batches: number;
 }
@@ -63,6 +65,7 @@ function options(argv: string[]): Options {
       dialects: { type: "string", default: "ch,pg" },
       keep: { type: "boolean", default: false },
       "replay-max": { type: "string", default: "1000" },
+      "fanout-max": { type: "string", default: "1000" },
       "backfill-rows": { type: "string" },
       batches: { type: "string", default: "10" },
       help: { type: "boolean", short: "h", default: false },
@@ -84,6 +87,7 @@ function options(argv: string[]): Options {
     dialects: dialects as Dialect[],
     keep: values.keep,
     replayMax: Number(values["replay-max"]),
+    fanoutMax: Number(values["fanout-max"]),
     backfillRows: values["backfill-rows"] ? Number(values["backfill-rows"]) : null,
     batches: Number(values.batches),
   };
@@ -137,6 +141,7 @@ class Scenario {
 
   async cleanup(): Promise<void> {
     for (const n of this.names) await drop(this.dialect, n);
+    if (this.wants("fanout")) for (const n of this.fanoutNames()) await drop(this.dialect, n);
     // ClickHouse keeps every environment's receipts in chant's own chant_receipts.receipts; the bench removes its environments' rows.
     if (this.dialect === "ch" && (await scalar("ch", "EXISTS TABLE chant_receipts.receipts")) === "1") {
       await clickhouse(`ALTER TABLE chant_receipts.receipts DELETE WHERE startsWith(address, 'yodel/${this.db}') SETTINGS mutations_sync = 2`);
@@ -432,10 +437,103 @@ export const op = Op({ name: "backfill-${col}", overview: "${col} from v, a batc
     };
   }
 
+  /** The fan-out's template, its tenants, and their histories and oracle copies. */
+  fanoutNames(): string[] {
+    const base = `${this.db}_f`;
+    const tenants = this.fanoutTenants();
+    return [base, `${base}_history`, `${base}_registry`, ...tenants, ...tenants.map((t) => `${base}_history_${t}`), ...tenants.map((t) => `${t}_oracle`)];
+  }
+
+  fanoutTenants(): string[] {
+    const k = Math.min(this.size, this.o.fanoutMax);
+    return Array.from({ length: k }, (_, i) => `${this.db}_f_t${String(i).padStart(4, "0")}`);
+  }
+
+  /**
+   * The fan-out (#56): a tenant set of min(size, --fanout-max) tenants, one
+   * table each, applied by its wave behind one approval, the way a wave job
+   * runs it (chant run wave over yodel-waves.json): once as a list (a run
+   * per tenant), once read by a query (one run that plans and applies every
+   * tenant). Each from empty tenants.
+   */
+  async fanout(): Promise<void> {
+    const d = this.dialect;
+    const base = `${this.db}_f`;
+    const tenants = this.fanoutTenants();
+    const p = await Project.create(d, join(this.work, "fanout"), base, 1, this.log);
+    const set = p.env;
+    const { wavesSpec } = await import("../src/ci/render.js");
+    const configure = (expr: string, targets: string[]) => {
+      p.write("yodel.config.ts", `export default {\n  environments: { "${set}": { tenants: ${expr} } },\n  waves: [{ env: "${set}", gate: "always" }],\n};\n`);
+      p.write("yodel-waves.json", `${JSON.stringify(wavesSpec([{ env: set, gate: "always", targets }]), null, 2)}\n`);
+    };
+    const wave = ["run", "wave", "--spec", "yodel-waves.json", "--wave", "1"];
+    const registry = `${base}_registry`;
+    let create = "";
+    const modes: Record<string, unknown> = {};
+    for (const mode of ["list", "query"] as const) {
+      for (const t of tenants) for (const n of [t, `${p.history}_${t}`]) await drop(d, n);
+      if (mode === "list") configure(JSON.stringify(tenants), tenants.map((t) => `${set}/${t}`));
+      else {
+        await drop(d, registry);
+        await exec(d, d === "ch" ? `CREATE DATABASE ${registry}` : `CREATE SCHEMA ${registry}`);
+        await exec(d, d === "ch" ? `CREATE TABLE ${registry}.tenants (name String) ENGINE = MergeTree ORDER BY name` : `CREATE TABLE ${registry}.tenants (name text PRIMARY KEY)`);
+        await exec(d, `INSERT INTO ${registry}.tenants (name) VALUES ${tenants.map((t) => `('${t}')`).join(", ")}`);
+        configure(`{ query: "SELECT name FROM ${registry}.tenants" }`, [`${set}/@1of1`]);
+      }
+      await p.commit(`the tenant set, as a ${mode}`);
+      // The wave's policy is read at the commit before: the migration is the commit after the spec.
+      if (!create) {
+        create = (await p.newMigration("create")).id;
+        await p.commit("create");
+      }
+      const comment = await p.yodel(["plan", set, "--format", "markdown"]);
+      if (comment.code !== 0) throw new Measured(`${mode}: yodel plan ${set} --format markdown exited ${String(comment.code)}`);
+      const decide = await p.chant(wave);
+      if (decide.code !== 3) throw new Measured(`${mode}: the wave did not wait for its approval (exit ${String(decide.code)})`);
+      const command = /chant approve \S+ \S+ --plan \S+/.exec(`${decide.out}\n${decide.err}`)?.[0];
+      if (!command) throw new Measured(`${mode}: the waiting wave printed no chant approve command`);
+      const approved = await p.chant(command.split(" ").slice(1));
+      if (approved.code !== 0) throw new Error(`${command} exited ${String(approved.code)}`);
+      const applied = await p.chant(wave);
+      if (applied.code !== 0) throw new Measured(`${mode}: the approved wave exited ${String(applied.code)}`);
+      const inList = tenants.map((t) => `'${t}'`).join(", ");
+      const have = Number(await scalar(d, d === "ch" ? `SELECT count() FROM system.tables WHERE database IN (${inList}) AND name = '${tableName(0)}'` : `SELECT count(*) FROM information_schema.tables WHERE table_schema IN (${inList}) AND table_name = '${tableName(0)}'`));
+      if (have !== tenants.length) throw new Measured(`${mode}: ${String(have)} of ${String(tenants.length)} tenants have the table`);
+      const held: number[] = [];
+      for (const t of tenants) {
+        const rows = await historyRows(d, `${p.history}_${t}`);
+        held.push(lockFigures(rows, new Set(rows.map((r) => r.run_id))).lock_held_lower_bound_seconds);
+      }
+      modes[mode] = {
+        runs: mode === "list" ? tenants.length : 1,
+        plan_comment: { seconds: comment.seconds, bytes: Buffer.byteLength(comment.out) },
+        decide_seconds: decide.seconds,
+        approve_seconds: approved.seconds,
+        apply_seconds: applied.seconds,
+        wall_seconds: round(decide.seconds + approved.seconds + applied.seconds),
+        per_tenant_wall_seconds: round((decide.seconds + applied.seconds) / tenants.length),
+        lock_held_per_tenant: spread(held),
+      };
+    }
+    // The oracle: the migration's statements sent straight to a copy of each tenant.
+    for (const t of tenants) await drop(d, `${t}_oracle`);
+    const straight = await oracle(d, tenants.flatMap((t) => p.statements(create).map((s) => retarget(s, base, `${t}_oracle`))), this.work, this.log);
+    this.measurement.fanout = {
+      what: "a tenant set of `tenants` empty tenants (#56), one table each, applied by its wave through chant run wave: decide (plans every tenant and waits), one chant approve of the set digest, apply (plans again and applies each tenant under its own lock). `list` renders a run per tenant; `query` reads the set from a registry table when the wave runs, one run for every tenant. `plan_comment` is yodel plan <set> --format markdown, the one comment for the set",
+      tenants: tenants.length,
+      statements_per_tenant: p.statements(create).length,
+      list: modes.list,
+      query: modes.query,
+      oracle: straight,
+      oracle_of: "every tenant's statements sent straight to a copy of it, one after another",
+    };
+  }
+
   async runAll(): Promise<void> {
     await this.cleanup();
     try {
-      const main = MEASUREMENTS.filter((m) => m !== "replay" && this.wants(m));
+      const main = MEASUREMENTS.filter((m) => m !== "replay" && m !== "fanout" && this.wants(m));
       if (main.length > 0) {
         try {
           await this.main();
@@ -445,6 +543,7 @@ export const op = Op({ name: "backfill-${col}", overview: "${col} from v, a batc
         }
       }
       if (this.wants("replay")) await this.stage("replay", () => this.replay());
+      if (this.wants("fanout")) await this.stage("fanout", () => this.fanout());
     } finally {
       if (!this.o.keep) {
         await this.cleanup();

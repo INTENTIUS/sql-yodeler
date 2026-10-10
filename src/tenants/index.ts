@@ -100,7 +100,8 @@ export async function expandTargets(project: Project, names: readonly string[]):
 /**
  * A tenant's driver: the environment's, with the template's name replaced
  * by the tenant's in every statement and check it sends. An Op step (a
- * rebuild, a backfill) names its tables itself and does not run on a tenant.
+ * rebuild, a backfill) gets the tenant in its context, and its runner
+ * renames what the step names (`../steps/index.ts`).
  */
 export function tenantDriver(driver: VersionedDriver, tenant: TenantOf): VersionedDriver {
   const rename = (sql: string) => renameIdentifier(sql, tenant.template, tenant.name);
@@ -112,8 +113,6 @@ export function tenantDriver(driver: VersionedDriver, tenant: TenantOf): Version
     ...driver,
     readCheck: (sql, w) => driver.readCheck(rename(sql), where(w)),
     runStatement: (step, run) => driver.runStatement({ ...step, sql: rename(step.sql) }, run),
-    stepContext: () => {
-      throw new YodelError(`an Op step does not run on a tenant (${tenantTarget(tenant.env, tenant.name)}): only statements are renamed from ${tenant.template} to ${tenant.name}`);
-    },
+    stepContext: () => ({ ...driver.stepContext(), tenant }),
   };
 }

@@ -3,7 +3,8 @@
  * project without one gets `undefined` and every setting's default.
  */
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
@@ -236,7 +237,9 @@ export async function loadYodelConfig(dir: string, profiles?: readonly string[])
   if (!existsSync(path)) return undefined;
   let mod: { default?: unknown };
   try {
-    mod = (await import(pathToFileURL(path).href)) as { default?: unknown };
+    // The file's hash in the URL: a process that loads it again after an edit (the MCP server, a claim) reads the edit, not the first import.
+    const version = createHash("sha256").update(readFileSync(path)).digest("hex").slice(0, 16);
+    mod = (await import(`${pathToFileURL(path).href}?yodel=${version}`)) as { default?: unknown };
   } catch (e) {
     throw new YodelError(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }

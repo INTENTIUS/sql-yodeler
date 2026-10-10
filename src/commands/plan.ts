@@ -15,6 +15,8 @@ import { collectVersionedPlan } from "../pr/model.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
 import { resolveForgeTarget, type ForgeFlags } from "../pr/forge.js";
 import { commentClient, findComment, upsertComment } from "../pr/comment.js";
+import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
+import { tenantSetOf } from "../tenants/index.js";
 
 const usage =
   "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json]\n" +
@@ -35,6 +37,12 @@ checksum mismatches, out-of-order migrations), and the plan digest yodel
 apply asks approval for, with the chant approve command that approves it.
 When chant's gate ledger holds an approval of the migrations Op's gate for
 another digest, it says what moved since. Reads only.
+
+An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
+is planned tenant by tenant, each against its own history, and shown as one
+plan: tenants with the same migrations pending once, as a group, then the
+wave's one approval of the set digest over every tenant. --comment posts it
+as one comment for the set. <env>/<tenant> plans one tenant.
 
 Options:
   --json                print the plan as JSON (the same as --format json)
@@ -175,6 +183,7 @@ async function declarativePlan(project: Project, env: Environment, json: boolean
 }
 
 async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
+  if (!env.tenant && tenantSetOf(project, env.name)) return tenantSetPlan(project, env, a, io);
   const marker = commentMarker(env.name);
   // Resolve the forge first: a job missing its token fails before it reads the server.
   const target = a.comment ? resolveForgeTarget(a.forge, process.env) : undefined;
@@ -197,4 +206,21 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   // A plan that is refused, or that the policy denies, is news before anyone merges it (#61).
   await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
   return code;
+}
+
+/** `yodel plan <set>` (#56): every tenant, grouped, and one comment for the set. */
+async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
+  const target = a.comment ? resolveForgeTarget(a.forge, process.env) : undefined;
+  const client = target ? commentClient(target) : undefined;
+  const marker = commentMarker(env.name);
+  const existing = client ? await findComment(client, marker) : undefined;
+  const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
+  if (client && target) {
+    const posted = await upsertComment(client, marker, renderTenantSetMarkdown(result), existing);
+    io.err(`yodel plan: ${posted.action} the plan comment on ${target.forge} ${target.repo}#${String(target.pr)}${posted.comment.url ? ` (${posted.comment.url})` : ` (comment ${String(posted.comment.id)})`}\n`);
+  }
+  if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
+  else if (a.format === "markdown") io.out(renderTenantSetMarkdown(result));
+  else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
+  return tenantSetExitCode(result);
 }

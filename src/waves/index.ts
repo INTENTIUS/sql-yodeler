@@ -164,6 +164,50 @@ export async function planWave(project: Project, venv: VersionedEnv, ordered: re
   };
 }
 
+/**
+ * The wave plan digest `--wave-plan` would write for `venv` now, without
+ * running the `before` steps: what `yodel plan` and `yodel approve` show of
+ * a tenant set's wave (#56), where each tenant is a run. A plan with nothing
+ * pending requires nothing, as {@link planWave} has it; a pending migration
+ * the required environment has not applied makes it `blocked`, where
+ * `planWave` would refuse.
+ */
+export async function viewWavePlan(project: Project, venv: VersionedEnv, ordered: readonly Migration[], options: { allowOutOfOrder?: boolean } = {}): Promise<{
+  planDigest: string;
+  destructive: boolean;
+  empty: boolean;
+  pending: string[];
+  destructiveSteps: DestructiveStep[];
+  promotions: Promotion[];
+  blocked: boolean;
+}> {
+  const { status } = await inspect(venv, ordered, { sync: false });
+  const toApply = selectToApply(status, options.allowOutOfOrder === true);
+  const promotions = toApply.length > 0 ? await readPromotions(project, venv.environment, ordered, toApply) : [];
+  const blocked = promotions.some((p) => p.migrations.some((m) => m.ran !== "applied"));
+  const migrations = await currentDigest(venv, status, toApply);
+  const { gate } = await gateAtBase(project, venv.environment);
+  const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", toApply);
+  const destructive = steps.length > 0;
+  return {
+    planDigest: await wavePlanDigest({ environment: venv.environment, migrations, gate, destructive, requires: promotionEvidence(promotions) }),
+    destructive,
+    empty: toApply.length === 0,
+    pending: toApply.map((p) => p.id),
+    destructiveSteps: steps,
+    promotions,
+    blocked,
+  };
+}
+
+/** `--wave-apply` found the wave plan moved since the wave was decided: nothing was applied. */
+export class WavePlanMoved extends YodelError {
+  constructor(message: string) {
+    super(message, 1);
+    this.name = "WavePlanMoved";
+  }
+}
+
 /** `--wave-plan <file>`: writes the plan file. */
 export async function writeWavePlan(project: Project, venv: VersionedEnv, ordered: readonly Migration[], file: string, options: { allowOutOfOrder: boolean }): Promise<WavePlanFile> {
   const plan = await planWave(project, venv, ordered, options);
@@ -293,7 +337,7 @@ export const wavePlanPath = (op: string, wave: number, target: string): string =
  * the plan files the runs before it wrote; at any other run it is
  * undefined.
  */
-export async function forecastWave(cwd: string, specFile: string, plan: WavePlanFile): Promise<WaveForecast | undefined> {
+export async function forecastWave(cwd: string, specFile: string, plan: Pick<WavePlanFile, "planDigest" | "destructive" | "empty" | "environment" | "held">): Promise<WaveForecast | undefined> {
   const spec = readJson<WavesSpec & { gate?: string }>(resolve(cwd, specFile), "the waves spec");
   const { k, name } = waveOf(spec, plan.environment, specFile);
   const { waveSetDigest, waveGateName } = await import("@intentius/chant/gated-waves");

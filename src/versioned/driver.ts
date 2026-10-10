@@ -44,8 +44,8 @@ export interface VersionedDriver {
   readCheck(sql: string, where: { defaultDatabase?: string | undefined; defaultSchema?: string | undefined }): Promise<Array<Record<string, unknown>>>;
   /** Sends one statement and writes its `succeeded` row through `run`; throws with the server's message when it fails. */
   runStatement(step: StatementStep, run: StatementRun): Promise<void>;
-  /** What an Op step's runner gets from the dialect: the ClickHouse port and endpoint; the Postgres lock timeout, and the connection, timeouts and receipts schema a backfill uses. */
-  stepContext(): Pick<StepContext, "port" | "endpoint" | "lockTimeoutMs" | "postgres">;
+  /** What an Op step's runner gets from the dialect: the ClickHouse port and endpoint; the Postgres lock timeout, and the connection, timeouts and receipts schema a backfill uses; and on a tenant (#56), which tenant. */
+  stepContext(): Pick<StepContext, "port" | "endpoint" | "lockTimeoutMs" | "postgres" | "tenant">;
   /** Closes what the driver opened (a Postgres connection). Safe to call twice. */
   close(): Promise<void>;
 }

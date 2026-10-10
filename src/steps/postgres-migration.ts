@@ -54,6 +54,7 @@ import type { ActivityStep, OpConfig } from "@intentius/chant/op/types";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
 import type { PgMigrationOptions } from "./kinds.js";
+import type { ProjectConfig } from "../project.js";
 import { runOp, StepOpFailed, type RunOpOptions } from "./run.js";
 
 /** The retention a step runs with when its options set none: the contract runs in the same apply. */
@@ -160,6 +161,8 @@ export interface RunPgMigrationOptions extends Omit<RunOpOptions, "activities" |
   /** Activities to use in place of the lexicon's, for a test. */
   activities?: Record<string, ActivityFn>;
   log?: (line: string) => void;
+  /** The chant config the activities bind with (a tenant's, #56). Default: they load chant.config.ts. */
+  config?: ProjectConfig | undefined;
 }
 
 /** Runs a `PostgresMigrationOp` step to the end. The summary fills in as the activities return, so a failure still says how far it got. */
@@ -175,12 +178,15 @@ export async function runPgMigration(
     const config = await pgMigrationOpConfig(options, { environment: run.environment, projectDir: run.projectDir, buildPath, lockTimeoutMs: run.lockTimeoutMs });
     const lexicon = run.activities ?? ((await import("@intentius/chant-lexicon-sql/op/activities")) as unknown as Record<string, ActivityFn>);
     const wrapped: Record<string, ActivityFn> = {};
-    for (const fn of SUMMARIZED) {
-      const inner = lexicon[fn];
+    // A migration activity takes its config as a third argument (chant's PostgresMigrationDeps).
+    const deps = run.config ? { config: run.config } : undefined;
+    const summarized: readonly string[] = SUMMARIZED;
+    for (const fn of Object.keys(lexicon).filter((f) => f.startsWith("postgresMigration") && (deps !== undefined || summarized.includes(f)))) {
+      const inner = lexicon[fn] as ((args: Record<string, unknown>, signal?: AbortSignal, deps?: unknown) => Promise<unknown>) | undefined;
       if (!inner) continue;
       wrapped[fn] = async (args, signal) => {
-        const result = await inner(args, signal);
-        summarizePg(summary, fn, result);
+        const result = await (deps ? inner(args, signal, deps) : inner(args, signal));
+        if (summarized.includes(fn)) summarizePg(summary, fn, result);
         return result;
       };
     }
