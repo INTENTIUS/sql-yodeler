@@ -4,7 +4,7 @@
 
 Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.
 
-SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for three things only: `chant init` to make a project from a template, `chant approve` to approve a plan, and `chant emulator up` for a local database. Run it as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it.
+SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for two things only: `chant init` to make a project from a template, and `chant emulator up` for a local database. You approve a plan with `yodel approve`, which records chant's approval for you. Run it as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it.
 
 ## Getting started
 
@@ -20,7 +20,7 @@ export DEV_CLICKHOUSE_READER_USER=reader DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLI
 npx yodel new init && npx yodel lint
 git add -A && git commit -m "feat: the first migration"
 YODEL_CREDENTIALS=writer npx yodel apply dev   # stops at the approval
-npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
+npx yodel approve dev   # shows the plan; type dev to approve
 YODEL_CREDENTIALS=writer npx yodel apply dev
 ```
 
@@ -91,7 +91,7 @@ export const op = Op({
 });
 ```
 
-`yodel apply prod` stops at the gate and prints `chant approve migrate-prod approve-migrate-prod --plan <digest>`; approve (inside the project, `npx chant approve ...`), then run it again. `yodel apply prod --plan` prints the pending migrations and the digest without applying. Running `chant run migrate-prod` directly needs `yodel` on PATH.
+`yodel apply prod` stops at the gate; approve at a terminal with `npx yodel approve prod`, then run it again. A script, which has no terminal to ask, runs the `chant approve migrate-prod approve-migrate-prod --plan <digest>` command that `yodel apply` prints instead. `yodel apply prod --plan` prints the pending migrations and the digest without applying. Running `chant run migrate-prod` directly needs `yodel` on PATH.
 
 ## yodel lint
 
