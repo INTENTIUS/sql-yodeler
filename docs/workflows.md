@@ -143,6 +143,28 @@ export const gitlab = {
 
 By default every job runs in `node:22-bookworm` (GitHub's plan jobs on the runner, with `setup-node`) and installs the project's packages with `npm ci`. `ci.image` runs every job in the CI image instead, `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`, which a release publishes with Node, yodel, chant and the lexicons on it: no job runs `npm ci` or `setup-node`, and a checkout resolves chant and the lexicons from the image. It is taken only pinned by its digest, which the release's `image` job writes to its summary, so a job never runs a different image under the same tag. Use the version the project's `package.json` installs, so the image's yodel renders the same pipelines `yodel ci --check` compares; a project whose jobs need packages of their own leaves `image` unset.
 
+## ClickHouse objects
+
+A ClickHouse project declares these with the `sql` lexicon's tags, from `@intentius/chant-lexicon-sql/clickhouse`. Both paths plan and apply them, `yodel drift` watches them, and `yodel init --from` adopts them. The claims column names the scenario claims that run each against a server.
+
+| Object | Tag | Claims |
+| --- | --- | --- |
+| Database | `database` | declarative, new, adopt |
+| Table | `table` | declarative, new, adopt |
+| View and materialized view | `view` | adopt |
+| Dictionary | `dictionary` | declarative, adopt |
+| Function (a SQL lambda) | `func` | declarative, adopt |
+| User | `user` | declarative, adopt |
+| Role | `role` | declarative, adopt |
+| Row policy | `policy` | declarative, adopt |
+| Grant | `grant` | declarative, adopt |
+
+Dictionaries and functions:
+
+- A dictionary's changed comment is SQLCH203. Any other change (its source, layout, lifetime, attributes) is SQLCH245, applied as one `CREATE OR REPLACE DICTIONARY`.
+- A function belongs to no database. A changed lambda is SQLCH260, applied as `CREATE OR REPLACE FUNCTION`; the server prints `x * k` as `(x * k)`, and the plan asks the server's formatter before calling that a change. A function cannot carry chant's ownership marker, so it is never pruned and a function made by hand is never read. `yodel init --from` adopts every SQL function on the server, since none belongs to a database.
+- Users, roles, row policies and grants are planned only where the environment manages access ([Access control](access.md#clickhouse)).
+
 ## Postgres objects
 
 A Postgres project declares these with the `sql` lexicon's tags, and both paths plan, apply, watch for drift and adopt them. The claims column names the scenario claims that run each against a server.

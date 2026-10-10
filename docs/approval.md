@@ -151,7 +151,7 @@ waves: [
 | `gate` | The wave waits for an approval when |
 |---|---|
 | `always` (the default) | it has a migration to apply |
-| `on-destructive` | a pending step drops something, is a Postgres rewrite or lock-heavy statement (lint's `destructive`, `pg-rewrite`, `pg-lock`), a ClickHouse mutation or rebuild (`ch-mutation`, `ch-rebuild`), or is an Op or manual step |
+| `on-destructive` | a pending step drops something, is a Postgres rewrite or lock-heavy statement (lint's `destructive`, `pg-rewrite`, `pg-lock`), a ClickHouse mutation or rebuild (`ch-mutation`, `ch-rebuild`), takes access away (`pg-access`, `ch-access`), or is an Op or manual step |
 | `never` | never; review and branch protection are all that stand in front of it |
 
 `npm run ci` renders the waves as `yodel-waves.json`, a chant Op waves spec, and the `yodel-apply` pipeline from it on GitHub, GitLab and Forgejo: one job per wave, each needing the one before. Every job runs `chant run wave`, which:

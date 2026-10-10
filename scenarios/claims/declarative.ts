@@ -5,6 +5,7 @@ import { parse, Project } from "../lib/project.js";
 import { declareRoutines, insertedStatus, replaceFunctionByHand, routinesOnServer } from "../lib/routines.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 import { accessOnServer, declareAccess, manageAccess, reader } from "../lib/access.js";
+import { chAccessOnServer, chNames, declareChAccess, declareDictionary, declareFunction, dictionaryLifetime, replaceDictionaryByHand, scaled } from "../lib/clickhouse-objects.js";
 
 /** A declarative project (no migrations/) applied once behind its ApplyOp's gate. */
 export async function declared(ctx: Ctx): Promise<Project> {
@@ -130,6 +131,110 @@ async function access(ctx: Ctx, { p }: Declarative): Promise<void> {
   hold(clean.code === 0 && parse<AccessPlan>(clean).changes.length === 0, `yodel plan after the revoke is not empty: ${clean.out.slice(0, 600)}`);
 }
 
+/** What `yodel plan --json` lists: each change's object and rule. */
+const planned = (out: AccessPlan): string[] => out.changes.map((c) => `${c.object.split(" ")[0] ?? ""} ${c.rule}`);
+
+/**
+ * A ClickHouse dictionary (#46) over the fixture's daily table: created
+ * (SQLCH200) behind the gate, answering dictGet; a new lifetime then plans
+ * as SQLCH245 and applies as one CREATE OR REPLACE, and the plan is empty.
+ * BREAK: the dictionary is replaced by hand after the apply, so the server
+ * no longer holds what is declared and the plan is not empty.
+ */
+async function dictionaryPart(ctx: Ctx, { p }: Declarative): Promise<void> {
+  declareDictionary(p, 300);
+  const plan = await p.yodel(["plan", p.env, "--json"]);
+  hold(plan.code === 0 && planned(parse<AccessPlan>(plan)).includes("dailyN SQLCH200"), `yodel plan does not create the dictionary: ${plan.out.slice(0, 600)}`);
+  hold((await approvedApply(p)) === 0, "the approved dictionary did not apply");
+  await ctx.db.exec(`INSERT INTO ${ctx.db.name}.daily (day, n) VALUES ('2026-10-01', 7)`);
+  hold((await ctx.db.scalar(`SELECT dictGet('${ctx.db.name}.${chNames(ctx).dict}', 'n', tuple(toDate('2026-10-01')))`)) === "7", "dictGet does not read daily through the dictionary");
+
+  declareDictionary(p, 600);
+  const changed = await p.yodel(["plan", p.env, "--json"]);
+  const rules = planned(parse<AccessPlan>(changed));
+  hold(changed.code === 0 && rules.length === 1 && rules[0] === "dailyN SQLCH245", `yodel plan does not show the new lifetime as SQLCH245: ${rules.join(", ")}`);
+  hold((await approvedApply(p)) === 0, "the dictionary's new lifetime did not apply");
+  hold((await dictionaryLifetime(ctx)) === "600", `the dictionary's lifetime on the server is ${await dictionaryLifetime(ctx)}, not 600`);
+  if (ctx.broken) await replaceDictionaryByHand(ctx);
+  const after = await p.yodel(["plan", p.env, "--json"]);
+  const left = planned(parse<AccessPlan>(after));
+  hold(after.code === 0 && left.length === 0, `yodel plan after the dictionary applied is not empty: ${left.join(", ")}`);
+}
+
+/**
+ * A ClickHouse SQL function (#46): created (SQLCH200) behind the gate and
+ * callable; a new lambda then plans as SQLCH260 and applies as CREATE OR
+ * REPLACE FUNCTION, though the server prints it differently, and the plan is
+ * empty.
+ * BREAK: the function is replaced by hand after the apply, so the plan is
+ * not empty.
+ */
+async function functionPart(ctx: Ctx, { p }: Declarative): Promise<void> {
+  declareFunction(p, "x * k");
+  const plan = await p.yodel(["plan", p.env, "--json"]);
+  hold(plan.code === 0 && planned(parse<AccessPlan>(plan)).includes("scale SQLCH200"), `yodel plan does not create the function: ${plan.out.slice(0, 600)}`);
+  hold((await approvedApply(p)) === 0, "the approved function did not apply");
+  hold((await scaled(ctx)) === "6", `the function gives ${await scaled(ctx)} for (2, 3), not 6`);
+
+  declareFunction(p, "x * k + 1");
+  const changed = await p.yodel(["plan", p.env, "--json"]);
+  const rules = planned(parse<AccessPlan>(changed));
+  hold(changed.code === 0 && rules.length === 1 && rules[0] === "scale SQLCH260", `yodel plan does not show the new lambda as SQLCH260: ${rules.join(", ")}`);
+  hold((await approvedApply(p)) === 0, "the function's new lambda did not apply");
+  hold((await scaled(ctx)) === "7", `the function gives ${await scaled(ctx)} for (2, 3) after the change, not 7`);
+  if (ctx.broken) await ctx.db.exec(`CREATE OR REPLACE FUNCTION ${chNames(ctx).fn} AS (x, k) -> x - k`);
+  const after = await p.yodel(["plan", p.env, "--json"]);
+  const left = planned(parse<AccessPlan>(after));
+  hold(after.code === 0 && left.length === 0, `yodel plan after the function applied is not empty: ${left.join(", ")}`);
+}
+
+/**
+ * ClickHouse access control (#46), managed in the environment
+ * (yodel.config.ts's access: true): a role, a user it is granted to, a row
+ * policy on events and the role's SELECT are planned under the access
+ * section and applied behind the gate. A privilege then granted to the role
+ * by hand is drift: yodel drift reports it, yodel plan calls it out as
+ * revoked by the next apply, and the approved apply revokes it.
+ * BREAK: access is turned off for the environment before the grant is made
+ * by hand, so yodel refuses to plan the declared access and nothing calls
+ * the grant out.
+ */
+async function chAccess(ctx: Ctx, { p }: Declarative): Promise<void> {
+  const { reader: role } = chNames(ctx);
+  manageAccess(p);
+  declareChAccess(p);
+  await p.commit("access control");
+  const plan = await p.yodel(["plan", p.env, "--json"]);
+  const doc = parse<AccessPlan>(plan);
+  const shown = (doc.access?.changes ?? []).map((c) => `${c.object.split(" ")[0] ?? ""} ${c.rule}`);
+  hold(plan.code === 0 && doc.access?.managed === true, `yodel plan does not manage access in ${p.env}: ${JSON.stringify(doc.access)}`);
+  for (const want of ["reader SQLCH200", "svc SQLCH200", "clicksOnly SQLCH200", `grants SQLCH200`]) {
+    hold(shown.includes(want), `yodel plan's access section does not show ${want}: ${shown.join(", ")}`);
+  }
+  hold((await approvedApply(p)) === 0, "the approved access control did not apply");
+  const on = await chAccessOnServer(ctx);
+  hold(on.role && on.user && on.policy && on.select && on.granted && !on.insert, `on the server after the apply: ${JSON.stringify(on)}`);
+
+  if (ctx.broken) {
+    manageAccess(p, false);
+    await p.commit("access off");
+  }
+  await ctx.db.exec(`GRANT INSERT ON ${ctx.db.name}.events TO ${role}`);
+  const drift = await p.yodel(["drift", p.env, "--json"]);
+  hold(drift.code === 2 && drift.out.includes(`grants ${role}`), `yodel drift does not report the grant made by hand (exit ${String(drift.code)}): ${(drift.out || drift.err).slice(0, 600)}`);
+  const again = await p.yodel(["plan", p.env, "--json"]);
+  hold(again.code === 0, `yodel plan exited ${String(again.code)}: ${again.err.slice(-600)}`);
+  const byHand = (parse<AccessPlan>(again).access?.changes ?? []).filter((c) => c.byHand);
+  hold(byHand.length === 1 && byHand[0]?.rule === "SQLCH274", `yodel plan does not call out the grant made by hand as revoked: ${JSON.stringify(parse<AccessPlan>(again).access)}`);
+  const text = await p.yodel(["plan", p.env]);
+  hold(new RegExp(`Revoked by this apply, though no declaration revokes it[^\\n]*\\n\\s+INSERT ON \\S+events FROM ${role}\\n`).test(text.out), `yodel plan's text does not call out the revoke:\n${text.out.slice(-1200)}`);
+  hold((await approvedApply(p)) === 0, "the approved revoke did not apply");
+  const after = await chAccessOnServer(ctx);
+  hold(!after.insert && after.select, `the grant made by hand was not revoked, or the declared one went with it: ${JSON.stringify(after)}`);
+  const clean = await p.yodel(["plan", p.env, "--json"]);
+  hold(clean.code === 0 && parse<AccessPlan>(clean).changes.length === 0, `yodel plan after the revoke is not empty: ${clean.out.slice(0, 600)}`);
+}
+
 /** The ORM's DDL, scenarios/fixtures/<dialect>/orm/schema.sql: customers and invoices. */
 const ormDdl = (ctx: Ctx): string => readFileSync(fileURLToPath(new URL(`../fixtures/${ctx.dialect === "ch" ? "clickhouse" : "postgres"}/orm/schema.sql`, import.meta.url)), "utf8");
 
@@ -188,11 +293,19 @@ interface Declarative {
   p: Project;
 }
 
-/** The parts, in order: the src/ declarations, a column added and on Postgres the routines (#44) and access control (#45), on one project; then an ORM's DDL (#67) on a project of its own. */
+/**
+ * The parts, in order: the src/ declarations, a column added, on Postgres
+ * the routines (#44) and access control (#45), and on ClickHouse a
+ * dictionary, a function and access control (#46), on one project; then an
+ * ORM's DDL (#67) on a project of its own.
+ */
 const parts: ReadonlyArray<PartEntry<Declarative>> = [
   ["column", column],
   ["routines", routines, ["pg"]],
   ["access", access, ["pg"]],
+  ["dictionary", dictionaryPart, ["ch"]],
+  ["function", functionPart, ["ch"]],
+  ["ch-access", chAccess, ["ch"]],
   ["orm", orm],
 ];
 
@@ -202,7 +315,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const declarative: Claim = {
   name: "declarative",
-  says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
+  says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

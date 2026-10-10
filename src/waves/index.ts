@@ -67,13 +67,13 @@ export interface DestructiveStep {
   why: string;
 }
 
-const GATED_RULES = new Set(["destructive", "pg-rewrite", "pg-lock", "pg-access", "ch-mutation", "ch-rebuild"]);
+const GATED_RULES = new Set(["destructive", "pg-rewrite", "pg-lock", "pg-access", "ch-mutation", "ch-rebuild", "ch-access"]);
 
 /**
  * The steps of `pending` that `on-destructive` waits on: a destructive
  * statement or Op step, a Postgres rewrite or lock-heavy statement, one
  * that takes access away (a revoke, a policy dropped, row-level security
- * turned off), a
+ * turned off; on ClickHouse a revoke), a
  * ClickHouse mutation or rebuild (lint's statement rules, whatever their
  * level or silences), and any Op or manual step.
  */

@@ -8,7 +8,7 @@
  * | history database | `environments.<env>.history.database`  |                                   | `YODEL_HISTORY_DATABASE`| `yodeler`|
  * | lock TTL         | `environments.<env>.lockTtl` (seconds) |                                   | `YODEL_LOCK_TTL`        | 900      |
  * | lock wait        | `environments.<env>.lockWait` (seconds)|                                   | `YODEL_LOCK_WAIT`       | 0        |
- * | access (Postgres)| `environments.<env>.access`            | `sql.profiles.<env>.access`       |                         | off      |
+ * | access           | `environments.<env>.access`            | `sql.profiles.<env>.access`       |                         | off      |
  *
  * `yodel apply --lock-wait <duration>` sets the lock wait over all three.
  *

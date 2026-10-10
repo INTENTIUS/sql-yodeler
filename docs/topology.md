@@ -13,6 +13,8 @@ A ClickHouse environment runs on one of four topologies. One migrations director
 | `replicated`, `replicated:<cluster>` | `Replicated` databases, which replicate their own DDL | no `ON CLUSTER` inside the database; `ReplicatedMergeTree` with no arguments (the database supplies them); with a cluster named, `CREATE DATABASE` itself goes `ON CLUSTER` |
 | `cloud` | ClickHouse Cloud | no `ON CLUSTER`; plain `MergeTree`, which Cloud turns into `SharedMergeTree` |
 
+A dictionary is rendered like a table: `ON CLUSTER` on a cluster, none inside a `Replicated` database. A function, user, role, row policy or grant belongs to no database, so a `Replicated` database's log does not carry it: it goes `ON CLUSTER` on a cluster, and in `replicated:<cluster>` too (`CREATE FUNCTION f ON CLUSTER main`, `GRANT ON CLUSTER main SELECT ON ...`); in `replicated` with no cluster named it is sent to the node the apply runs on ([Access control](access.md#clickhouse)).
+
 The object form, `{ kind: "cluster", cluster: "main", replicaPath: "...", replicaName: "..." }`, sets the Keeper path and replica name of the tables the migrations create (the default path is `/clickhouse/tables/{uuid}/{shard}`, the replica `{replica}`).
 
 ## Setting it

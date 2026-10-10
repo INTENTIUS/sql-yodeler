@@ -40,6 +40,7 @@ Rules (yodel lint --rules lists them with their levels):
                      parent's
   ch-mutation        ClickHouse: a mutation rewriting parts, no rollback
   ch-rebuild         ClickHouse: a rebuild (ClickHouseRebuildOp)
+  ch-access          ClickHouse: a privilege or role revoked
   refused-step       a step yodel apply refuses (a manual step, an Op it
                      does not run)
   pg-routine-in-use  Postgres: a function dropped while a declared trigger
@@ -56,8 +57,8 @@ Rules (yodel lint --rules lists them with their levels):
 Silencing: a line above a statement in its migration.sql,
   -- yodel:allow <rule> <reason>
 silences that statement rule (destructive, pg-rewrite, pg-lock,
-pg-signature, data-dependent, naming, ch-mutation, ch-rebuild, or a schema
-check's id) for that one statement. The reason is required,
+pg-signature, pg-access, data-dependent, naming, ch-mutation, ch-rebuild,
+ch-access, or a schema check's id) for that one statement. The reason is required,
 and yodel apply records the rule, the statement and the reason in every
 history row the migration writes (the silences column). Adding the line
 changes the migration's checksum: for a migration not yet applied anywhere,

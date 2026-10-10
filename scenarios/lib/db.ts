@@ -107,6 +107,13 @@ export function dbFor(dialect: Dialect, claim: string): Db {
       columnExists: async (table, column) =>
         Number(await scalar(`SELECT count() FROM system.columns WHERE database = '${name}' AND table = '${table}' AND name = '${column}'`)) === 1,
       reset: async () => {
+        // A claim's row policies, users, roles and functions (#46) belong to no database: the policies on its tables, and the rest named <name>__<thing>, go with it here.
+        const like = `'${name.replace(/_/g, "\\\\_")}\\\\_\\\\_%'`;
+        const rows = async (sql: string) => (await q(sql)).split("\n").filter(Boolean);
+        for (const p of await rows(`SELECT concat(short_name, ' ON ', database, '.', table) FROM system.row_policies WHERE database = '${name}'`)) await q(`DROP ROW POLICY IF EXISTS ${p}`);
+        for (const u of await rows(`SELECT name FROM system.users WHERE name LIKE ${like}`)) await q(`DROP USER IF EXISTS ${u}`);
+        for (const r of await rows(`SELECT name FROM system.roles WHERE name LIKE ${like}`)) await q(`DROP ROLE IF EXISTS ${r}`);
+        for (const f of await rows(`SELECT name FROM system.functions WHERE origin = 'SQLUserDefined' AND name LIKE ${like}`)) await q(`DROP FUNCTION IF EXISTS ${f}`);
         await q(`DROP DATABASE IF EXISTS ${name} SYNC`);
         await q(`DROP DATABASE IF EXISTS ${history} SYNC`);
       },

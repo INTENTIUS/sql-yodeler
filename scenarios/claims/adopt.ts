@@ -1,6 +1,8 @@
+import { existsSync } from "node:fs";
 import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../lib/access.js";
+import { chAccessOnServer, chNames } from "../lib/clickhouse-objects.js";
 
 /** The database a team already has, made by hand: no ownership markers, and data. */
 async function handMade(ctx: Ctx): Promise<void> {
@@ -11,6 +13,16 @@ async function handMade(ctx: Ctx): Promise<void> {
     await ctx.db.exec(`CREATE TABLE ${n}.daily (day Date, kind String, n UInt64) ENGINE = SummingMergeTree ORDER BY (day, kind)`);
     await ctx.db.exec(`CREATE VIEW ${n}.recent AS SELECT * FROM ${n}.events WHERE ts > now() - INTERVAL 1 DAY`);
     await ctx.db.exec(`INSERT INTO ${n}.events (id, ts, kind) VALUES (1, now(), 'click'), (2, now(), 'view')`);
+    // A dictionary and a function (#46), and access control: a role, a user with a password (the environment's), a row policy and grants.
+    const { reader: role, svc, fn } = chNames(ctx);
+    await ctx.db.exec(`CREATE DICTIONARY ${n}.daily_n (day Date, n UInt64 DEFAULT 0) PRIMARY KEY day SOURCE(CLICKHOUSE(TABLE 'daily' DB '${n}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(300)`);
+    await ctx.db.exec(`CREATE FUNCTION ${fn} AS (x, k) -> x * k`);
+    await ctx.db.exec(`CREATE ROLE ${role} SETTINGS max_threads = 4`);
+    await ctx.db.exec(`CREATE USER ${svc} IDENTIFIED BY 'yodel-claims-only'`);
+    await ctx.db.exec(`GRANT SELECT ON ${n}.events TO ${role}`);
+    await ctx.db.exec(`GRANT ${role} TO ${svc}`);
+    await ctx.db.exec(`ALTER USER ${svc} DEFAULT ROLE ${role}`);
+    await ctx.db.exec(`CREATE ROW POLICY clicks ON ${n}.events FOR SELECT USING kind = 'click' TO ${role}`);
   } else {
     await ctx.db.exec(`
       CREATE SCHEMA ${n};
@@ -92,8 +104,36 @@ async function accessPart(ctx: Ctx, s: Adoption): Promise<void> {
 }
 
 /**
+ * ClickHouse access control (#46) is adopted with the tables: a role with a
+ * setting, a user with a password that is granted the role (its default
+ * role), a row policy on events for the role, and the role's SELECT, made
+ * by hand, with access managed in the environment (yodel.config.ts). init
+ * --from declares the role, the user without its password (the
+ * environment's), the policy and every grant of each grantee, records them
+ * in the baseline, and leaves the server's access as it was.
+ * BREAK: access is off in yodel.config.ts, so init adopts the tables alone.
+ */
+async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
+  const { reader: role, svc } = chNames(ctx);
+  s.access = !ctx.broken;
+  const { p, doc } = await adopted(ctx, s);
+  const src = existsSync(p.path("src/access.ts")) ? p.read("src/access.ts") : "";
+  for (const want of ["= role`", "= user`", "= policy`", "= grant`", `CREATE ROLE ${role}`, `CREATE USER ${svc}`, "DEFAULT ROLE ${", "ON ${events}"]) {
+    hold(src.includes(want), `yodel init --from did not declare ${want} in src/access.ts:\n${src}`);
+  }
+  hold(!/IDENTIFIED/i.test(src), "yodel init --from declared the user's authentication, which is the environment's");
+  const baseline = doc.migration ? p.migration(doc.migration.id).steps : [];
+  const rules = baseline.map((st) => st.rule ?? "");
+  hold(rules.includes("SQLCH273"), `the baseline does not record the grants (SQLCH273): ${[...new Set(rules)].join(", ")}`);
+  const on = await chAccessOnServer(ctx);
+  hold(on.role && on.user && on.policy && on.select && on.granted && !on.insert, `the server's access changed during the adoption: ${JSON.stringify(on)}`);
+  hold((await ctx.db.scalar(`SELECT auth_type[1] FROM system.users WHERE name = '${svc}'`)) === "sha256_password", "the user's password changed during the adoption");
+}
+
+/**
  * `yodel init --from <env>` adopts a database made by hand (on Postgres,
- * with a trigger function and a trigger): it writes the declarations and a
+ * with a trigger function and a trigger; on ClickHouse, with a dictionary
+ * and a function): it writes the declarations and a
  * baseline migration, records the baseline applied without running it (the objects keep their data and stay as they were),
  * and then yodel plan shows no change and yodel apply has nothing to do.
  * BREAK: one adopted declaration is edited after init (a column's type),
@@ -106,6 +146,10 @@ async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
     // Functions and triggers are adopted with the tables (#44), so the declared schema holds what the server does.
     const src = p.read("src/schema.ts");
     hold(/= func`/.test(src) && /= trigger`/.test(src) && src.includes("orders_lower_status"), "yodel init --from did not declare the function and the trigger it found");
+  } else {
+    // Dictionaries and functions are adopted with the tables (#46).
+    const src = p.read("src/schema.ts");
+    hold(/= dictionary`/.test(src) && /= func`/.test(src) && src.includes(chNames(ctx).fn), "yodel init --from did not declare the dictionary and the function it found");
   }
 
   if (ctx.broken) {
@@ -136,11 +180,12 @@ async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
 }
 
 /**
- * On Postgres, the access part first (it decides whether init manages
- * access), then the adoption's own checks; ClickHouse has the latter alone.
+ * The access part first (it decides whether init manages access): Postgres
+ * and ClickHouse each have their own. Then the adoption's own checks.
  */
 const parts: ReadonlyArray<PartEntry<Adoption>> = [
   ["access", accessPart, ["pg"]],
+  ["ch-access", chAccessPart, ["ch"]],
   ["init", initPart],
 ];
 
@@ -150,7 +195,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const adopt: Claim = {
   name: "adopt",
-  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too",
+  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

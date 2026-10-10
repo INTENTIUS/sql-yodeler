@@ -76,16 +76,19 @@ export interface EnvironmentConfig {
    */
   steps?: ApplySteps;
   /**
-   * Postgres: whether yodel plans, applies and compares access control in
-   * this environment: row-level security, policies, the roles the schema
-   * declares, grants and default privileges (chant's
-   * `sql.profiles.<env>.access`). Off, the access declarations are left out
-   * of the plan and the server's access is not read. On, the declared
-   * privileges are the whole of them: one granted by hand is revoked.
-   * Passwords and role memberships are the environment's and are never
-   * declared. Default: `sql.profiles.<env>.access` in chant.config.ts, then
-   * off. The declarative apply and drift run chant, which reads
-   * chant.config.ts, so there the two must agree.
+   * Whether yodel plans, applies and compares access control in this
+   * environment (chant's `sql.profiles.<env>.access`). On Postgres:
+   * row-level security, policies, the roles the schema declares, grants and
+   * default privileges. Off, the access declarations are left out of the
+   * plan and the server's access is not read. On, the declared privileges
+   * are the whole of them: one granted by hand is revoked. Passwords and
+   * role memberships are the environment's and are never declared. The
+   * declarative apply and drift run chant, which reads chant.config.ts, so
+   * there the two must agree. On ClickHouse (#46): users, roles, row
+   * policies and grants; chant's apply has no switch, so off, the
+   * declarative path is refused when `src/` declares any, and on, `yodel
+   * init --from` adopts them. Default: `sql.profiles.<env>.access` in
+   * chant.config.ts, then off.
    */
   access?: boolean;
   /**

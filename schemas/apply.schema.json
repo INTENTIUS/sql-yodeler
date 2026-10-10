@@ -419,7 +419,7 @@
           "type": "string"
         },
         "why": {
-          "description": "The lint rules that class it (destructive, pg-rewrite, pg-lock, ch-mutation, ch-rebuild), or op-step, manual-step.",
+          "description": "The lint rules that class it (destructive, pg-rewrite, pg-lock, pg-access, ch-mutation, ch-rebuild, ch-access), or op-step, manual-step.",
           "type": "string"
         }
       }

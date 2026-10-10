@@ -1,10 +1,10 @@
 import { parseArgs } from "node:util";
-import { accessReview, renderAccessReview } from "../chant/access.js";
+import { accessReview, clickhouseAccessRefusal, renderAccessReview } from "../chant/access.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { buildSchema } from "../chant/build.js";
-import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
+import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, unreadableOf, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
 import { runnable } from "../chant/runnable.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
@@ -719,16 +719,19 @@ async function declarativeRun(
 
   const build = await buildSchema(project);
   try {
+    const chRefusal = project.dialect === "clickhouse" ? clickhouseAccessRefusal(project, env.name, build.output) : undefined;
+    if (chRefusal) throw chRefusal;
     const before = await planEnvironment(project, env, build);
     const server = await probeServer(project, env);
     setServer(server);
     if (!json) {
       io.out(`${await renderPlan(before, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name})`)}\n`);
-      const review = project.dialect === "postgres" ? renderAccessReview(await accessReview(project, env.name, before.diff.changes, build.output), env.name) : [];
+      const review = renderAccessReview(await accessReview(project, env.name, before.diff.changes, build.output), env.name);
       if (review.length > 0) io.out(`\n${review.join("\n")}\n`);
     }
     if (planExitCode(before) === PLAN_NEEDS_OP) {
-      if (!json) io.err(`yodel apply: refused: ${String(before.refused.length)} change(s) need their own Op; nothing was applied\n`);
+      const unreadable = unreadableOf(before);
+      if (!json) io.err(`yodel apply: refused: ${unreadable.length > 0 ? `${unreadable.map((u) => u.object).join(", ")} could not be read` : `${String(before.refused.length)} change(s) need their own Op`}; nothing was applied\n`);
       return report({ status: "refused", plan: planJson(before) }, PLAN_NEEDS_OP);
     }
     if (declaredChanges(before, build).length === 0) {

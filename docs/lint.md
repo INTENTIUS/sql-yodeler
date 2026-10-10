@@ -46,6 +46,8 @@ ch-mutation        error, silenceable, clickhouse
                    ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback
 ch-rebuild         error, silenceable, clickhouse
                    ClickHouse: a rebuild, every row copied into a new table and swapped in (ClickHouseRebuildOp)
+ch-access          error, silenceable, clickhouse
+                   ClickHouse: takes access away: a privilege or role revoked from a user or role (SQLCH274)
 refused-step       error
                    a step yodel apply refuses to run: a manual step, or an Op step it does not run
 migration-sql      error
@@ -99,6 +101,8 @@ SQLCH120           the check's level, silenceable, clickhouse
 `fork`, `directory`, `checksum`, `unreadable-object` and `checkpoint` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
 
 Two Postgres rules are about access control ([Access control](access.md)). `pg-access` flags a statement that takes access away: a privilege revoked (SQLPG297), a policy dropped (SQLPG292), row-level security turned off or no longer forced (SQLPG293). A revoke on an object the same migration creates is left out, since nobody held the privilege. A wave with gate `on-destructive` waits on it. `pg-rls-not-forced`, a warning, flags a migration that enables a table's row-level security while its recorded schema does not force it, so the table's owner is not held to its policies.
+
+On ClickHouse, `ch-access` flags a privilege or role revoked from a user or role (SQLCH274). ClickHouse takes no `REVOKE` declaration: the grant declarations naming a grantee are everything it holds, so a revoke always takes away something no declaration grants any more. A wave with gate `on-destructive` waits on it too.
 
 Two Postgres rules read a step with the rest of its migration (#44). `pg-signature` flags a function or procedure dropped and created with another signature: SQLPG281 (the result type, an output parameter, an input parameter's name or a removed default, which `CREATE OR REPLACE` refuses, or other parameter types between two builds), or a routine dropped and one of the same name with other parameter types created in the same migration. A caller written for the old signature fails once it runs; it can be silenced for the statement. `pg-routine-in-use` flags a function dropped while a trigger in the migration's recorded schema still executes it, which happens when the trigger names the function in its text rather than through its declaration. The `DROP` would fail on the server, so it cannot be silenced: declare the function again, or drop the trigger in the same migration.
 
