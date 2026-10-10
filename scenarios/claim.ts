@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claims } from "./claims/index.js";
-import { NotCaught, Pending, Violation, type Ctx, type Dialect } from "./lib/claim.js";
+import { dialectName, NotCaught, partRunsOn, Pending, Violation, type Ctx, type Dialect } from "./lib/claim.js";
 import { dbFor } from "./lib/db.js";
 
 const [name, dialectArg] = process.argv.slice(2);
@@ -37,6 +37,10 @@ const broken = breakVar !== "" && breakVar !== "0";
 const breaking = broken && breakVar !== "1" ? breakVar : undefined;
 if (breaking !== undefined && !claim.parts?.includes(breaking)) {
   process.stderr.write(`BREAK=${breaking}: ${claim.parts ? `${claim.name}'s parts are ${claim.parts.join(", ")}` : `${claim.name} has no parts; BREAK=1 breaks it`}\n`);
+  process.exit(2);
+}
+if (breaking !== undefined && !partRunsOn(claim, breaking, dialect)) {
+  process.stderr.write(`BREAK=${breaking}: ${claim.name}'s part ${breaking} runs on ${(claim.partDialects?.[breaking] ?? []).map((d) => dialectName[d]).join(", ")} only, not ${dialectName[dialect]}\n`);
   process.exit(2);
 }
 const mode = broken ? "break" : "plain";

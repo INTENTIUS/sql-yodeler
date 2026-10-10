@@ -1,4 +1,4 @@
-import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, partNames, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 import { declared } from "./declarative.js";
@@ -33,6 +33,7 @@ const changedProperty = (ctx: Ctx): [string, RegExp] => (ctx.dialect === "ch" ? 
  * BREAK: the server is not changed, so there is no drift to report.
  */
 async function declarativePart(ctx: Ctx): Promise<void> {
+  await ctx.db.reset();
   const p = await declared(ctx);
   const clean = await p.yodel(["drift", p.env, "--json"]);
   hold(clean.code === 0, `yodel drift exited ${String(clean.code)} with nothing changed`);
@@ -59,6 +60,7 @@ async function declarativePart(ctx: Ctx): Promise<void> {
  * reads as drift.
  */
 async function historyPart(ctx: Ctx): Promise<void> {
+  await ctx.db.reset();
   const p = await Project.create(ctx, { name: "versioned" });
   const created = await p.newMigration("create");
   if (created === undefined) throw new Error("yodel new wrote no first migration");
@@ -82,32 +84,19 @@ async function historyPart(ctx: Ctx): Promise<void> {
   hold(/^sha256:[0-9a-f]{64}$/.test(after.fingerprint ?? ""), `yodel drift --json gave no fingerprint: ${String(after.fingerprint)}`);
 }
 
-/**
- * Each part on its own database (emptied between them). Under BREAK each
- * breaks its own property, and the run is caught only when both catch it.
- */
+/** The parts, in order, each on its own database (emptied first): the versioned path, then the declarative one. */
+const parts = [
+  ["history", historyPart],
+  ["declarative", declarativePart],
+] as const;
+
 async function body(ctx: Ctx): Promise<void> {
-  const caught: string[] = [];
-  const parts: Array<[string, () => Promise<void>]> = [
-    ["history", () => historyPart(ctx)],
-    ["declarative", () => declarativePart(ctx)],
-  ];
-  for (const [name, part] of parts) {
-    await ctx.db.reset();
-    try {
-      await part();
-    } catch (e) {
-      if (!(ctx.broken && e instanceof Violation)) throw e;
-      ctx.log(`${name} caught: ${e.message}`);
-      caught.push(e.message);
-    }
-  }
-  if (ctx.broken && caught.length === parts.length) throw new Violation(caught.join("; "));
-  if (ctx.broken) ctx.log(`only ${String(caught.length)} of the ${String(parts.length)} parts caught their break`);
+  await runParts(ctx, undefined, parts);
 }
 
 export const drift: Claim = {
   name: "drift",
   says: "yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
   dialects: { ch: body, pg: body },
+  parts: partNames(parts),
 };
