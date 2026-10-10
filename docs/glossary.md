@@ -1,3 +1,7 @@
+---
+claims: []
+---
+
 # Glossary
 
 SQL Yodeler is built on chant. These are the chant terms the docs and yodel's output use, in yodel's terms. You need no other chant knowledge to use yodel.

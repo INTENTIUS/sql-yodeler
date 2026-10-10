@@ -1,3 +1,7 @@
+---
+claims: [topology]
+---
+
 # Installing and configuring
 
 ## Installing

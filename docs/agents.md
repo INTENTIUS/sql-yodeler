@@ -1,3 +1,7 @@
+---
+claims: []
+---
+
 # Set up with a coding agent
 
 Setup needs no agent: [Your first migration](getting-started.md) and [Starting a project](adoption.md) give every step by hand. This page is for a coding agent adding SQL Yodeler to a repository, and for the person handing it the task. Run the agent in the repository and give it this prompt:

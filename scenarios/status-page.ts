@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claims as allClaims } from "./claims/index.js";
 import type { Claim, Dialect } from "./lib/claim.js";
+import { docsPages, pagesByClaim } from "./docs-claims.js";
 import { readRecord, type ClaimsRecord, type Stamp } from "./record.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -46,10 +47,23 @@ function verdict(v: string | null, needs: string | null): string {
   return v;
 }
 
-/** The page for `record` (undefined: no record yet), one row per claim and dialect in `claims`. */
-export function renderPage(record: ClaimsRecord | undefined, claims: readonly Claim[] = allClaims): string {
+/** The docs pages that name each claim (their front matter), this page aside. */
+export function citedBy(): Map<string, string[]> {
+  return pagesByClaim(docsPages(join(root, "docs")).filter((p) => p.file !== "claims.md"));
+}
+
+/**
+ * The page for `record` (undefined: no record yet), one row per claim and
+ * dialect in `claims`, each with the docs pages that name the claim.
+ */
+export function renderPage(record: ClaimsRecord | undefined, claims: readonly Claim[] = allClaims, pages: Map<string, string[]> = citedBy()): string {
   const byKey = new Map((record?.rows ?? []).map((r) => [`${r.claim}:${r.dialect}`, r]));
+  const cited = (name: string) => (pages.get(name) ?? []).map((f) => `[${f.replace(/\.md$/, "")}](${f})`).join(", ");
   const out: string[] = [
+    "---",
+    "claims: []",
+    "---",
+    "",
     "# Claims status",
     "",
     "<!-- Written by `npm run claims:page` from scenarios/claims-record.json. Do not edit by hand. -->",
@@ -62,14 +76,16 @@ export function renderPage(record: ClaimsRecord | undefined, claims: readonly Cl
     "",
     "A row marked \"not recorded\" has not been run into the record. CI does not run the template claim, which needs a Forgejo with a runner.",
     "",
-    "| Claim | Dialect | What it says | Plain | Broken | Commit | Date |",
-    "|---|---|---|---|---|---|---|",
+    "Each docs page names the claims that prove it, and `npm run check` fails when a page that is not a draft names one that does not pass plain and get caught broken here. The last column lists those pages.",
+    "",
+    "| Claim | Dialect | What it says | Plain | Broken | Commit | Date | Pages |",
+    "|---|---|---|---|---|---|---|---|",
   ];
   for (const c of claims) {
     for (const d of Object.keys(c.dialects) as Dialect[]) {
       const r = byKey.get(`${c.name}:${d}`);
       const head = `| ${c.name} | ${dialectName[d]} | ${cell(r?.says ?? c.says)} |`;
-      out.push(r ? `${head} ${verdict(r.plain, r.needs)} | ${verdict(r.break, r.needs)} | ${commitOf(r)} | ${when(r.recorded)} |` : `${head} not recorded | not recorded | | |`);
+      out.push(r ? `${head} ${verdict(r.plain, r.needs)} | ${verdict(r.break, r.needs)} | ${commitOf(r)} | ${when(r.recorded)} | ${cited(c.name)} |` : `${head} not recorded | not recorded | | | ${cited(c.name)} |`);
     }
   }
   return `${out.join("\n")}\n`;

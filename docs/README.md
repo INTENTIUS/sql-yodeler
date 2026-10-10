@@ -1,3 +1,7 @@
+---
+claims: []
+---
+
 # SQL Yodeler
 
 SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declare the schema in TypeScript with chant's `sql` lexicon, and the `yodel` CLI either applies it directly (the declarative path) or writes versioned migrations from it and applies those (the versioned path). Both paths apply behind an approval bound to a digest of the plan. Data migrations (rebuilds, backfills, expand-and-contract column changes) are steps inside a migration, recorded in the same history as the DDL, and resume where they stopped.

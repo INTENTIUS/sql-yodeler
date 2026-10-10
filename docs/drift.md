@@ -1,3 +1,7 @@
+---
+claims: [drift]
+---
+
 # Drift
 
 Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the objects `src/` declares with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported.

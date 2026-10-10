@@ -1,3 +1,7 @@
+---
+claims: [lint-ci, replay]
+---
+
 # Lint
 
 `yodel lint` checks the migrations directory against every rule, offline: no server and no dev database. It runs in CI on every pull request; the starter templates' pull request job runs it. Every rule is free.
