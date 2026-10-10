@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "recorded": "2026-10-10T06:38:42.829Z",
-  "commit": "856a189",
+  "recorded": "2026-10-10T07:31:57.483Z",
+  "commit": "d69ee66",
   "dirty": false,
   "rows": [
     {
@@ -127,31 +127,31 @@
     {
       "claim": "approve-and-apply",
       "dialect": "ch",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 72,
-        "break": 54
+        "plain": 61,
+        "break": 111
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T07:31:57.483Z",
+      "commit": "d69ee66",
       "dirty": false
     },
     {
       "claim": "approve-and-apply",
       "dialect": "pg",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 74,
-        "break": 57
+        "plain": 61,
+        "break": 112
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T07:31:57.483Z",
+      "commit": "d69ee66",
       "dirty": false
     },
     {
