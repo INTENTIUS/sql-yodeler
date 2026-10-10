@@ -143,7 +143,8 @@ export function driftFromLifecycle(environment: string, doc: unknown): Drift {
 
 /** Runs `chant lifecycle diff <env> --live --json` in the project and reads the drift from it. */
 export async function readDrift(project: Project, env: Environment, options: { env?: NodeJS.ProcessEnv; src?: string } = {}): Promise<Drift> {
-  const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json", ...(options.src ? ["--src", options.src] : [])], {
+  // Always scoped to the declared schema: a build of the project root reads every .sql file in it, migrations and ORM DDL included.
+  const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json", "--src", options.src ?? project.sourceDir], {
     cwd: project.dir,
     ...(options.env ? { env: options.env } : {}),
   });
