@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
       - name: Read access to sql-yodeler (SQL_YODELER_TOKEN)
         run: if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
         env:
@@ -47,7 +47,8 @@ jobs:
   apply-prod:
     runs-on: docker
     container: node:22-bookworm
-    needs: apply-dev
+    needs:
+      - apply-dev
     concurrency:
       group: yodel-apply-prod
       cancel-in-progress: false
@@ -59,7 +60,7 @@ jobs:
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: '0'
       - name: Read access to sql-yodeler (SQL_YODELER_TOKEN)
         run: if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
         env:

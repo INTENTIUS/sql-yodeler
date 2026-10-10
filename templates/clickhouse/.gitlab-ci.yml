@@ -41,7 +41,8 @@ variables:
   GIT_DEPTH: '0'
 
 .yodel:
-  image: node:22-bookworm
+  image:
+    name: node:22-bookworm
   before_script:
     - if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
     - npm ci
@@ -101,7 +102,7 @@ apply-prod:
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
   needs:
-    - apply-dev
+    - job: apply-dev
   environment:
     name: prod
   resource_group: yodel-apply-prod

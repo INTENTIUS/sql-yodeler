@@ -8,7 +8,10 @@
  * but `replay`, which is the lint job's throwaway server.
  * Each one needs ops/migrate-<env>.op.ts and ops/watch-<env>.op.ts.
  *
- * Three pipelines per forge:
+ * Three pipelines per forge, each declared with chant: yodel-pr and
+ * yodel-apply with the github lexicon's Workflow, Job and Step (Forgejo
+ * renders the same declaration through the forgejo lexicon's dialect) and
+ * the gitlab lexicon's Workflow and Job; the watch with generateOpsPipeline.
  *
  * - yodel-pr: on a pull (merge) request, `npm run ci:check` (these files are
  *   what this script renders), `yodel lint`, and the replay check into a
@@ -42,7 +45,30 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { Declarable } from "@intentius/chant/declarable";
+import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry } from "@intentius/chant/yaml";
+import {
+  Concurrency,
+  Job as ActionsJob,
+  Permissions,
+  Service as ActionsService,
+  Step,
+  Workflow as ActionsWorkflow,
+} from "@intentius/chant-lexicon-github";
+import { githubSerializer } from "@intentius/chant-lexicon-github/serializer";
+import { forgejoSerializer } from "@intentius/chant-lexicon-forgejo/serializer";
+import {
+  Environment as GitLabEnvironment,
+  Image,
+  Job as GitLabJob,
+  Need,
+  Rule,
+  Service as GitLabService,
+  Workflow as GitLabWorkflow,
+  WorkflowRule,
+} from "@intentius/chant-lexicon-gitlab";
+import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
 
 export type Forge = "github" | "gitlab" | "forgejo";
 export const FORGES: readonly Forge[] = ["github", "gitlab", "forgejo"];
@@ -57,7 +83,8 @@ export interface RenderedFile {
 export const IMAGE = "node:22-bookworm";
 export const MAIN = "main";
 
-const CHECKOUT = { github: "actions/checkout@v7", forgejo: "https://code.forgejo.org/actions/checkout@v7" } as const;
+/** The forgejo lexicon rewrites it to https://code.forgejo.org/actions/checkout@v7 on Forgejo. */
+const CHECKOUT = "actions/checkout@v7";
 const SETUP_NODE = "actions/setup-node@v7";
 
 /** DEV for dev: the prefix of an environment's variables. */
@@ -117,11 +144,12 @@ export const GIT_ACCESS = [
 ].join(" ");
 
 /** The step that runs GIT_ACCESS on GitHub and Forgejo, with the secret in its own env only. */
-const gitAccessStep = (): Record<string, unknown> => ({
-  name: "Read access to sql-yodeler (SQL_YODELER_TOKEN)",
-  run: GIT_ACCESS,
-  env: { [YODELER_TOKEN]: secret(YODELER_TOKEN) },
-});
+const gitAccessStep = (): AStep =>
+  new Step({
+    name: "Read access to sql-yodeler (SQL_YODELER_TOKEN)",
+    run: GIT_ACCESS,
+    env: { [YODELER_TOKEN]: secret(YODELER_TOKEN) },
+  });
 
 /** The watch reads; it never pushes. See the comment at the top. */
 export const NO_PUSH = "git remote set-url --push origin no-push://the-drift-watch-only-reads";
@@ -188,81 +216,119 @@ export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 /** Fails a pull request whose pipelines differ from what this script renders. */
 export const CI_CHECK = "npm run ci:check";
 
+/**
+ * The comment at the top of every file. Added here, not by chant: neither the
+ * github nor the gitlab lexicon's serializer writes YAML comments
+ * (INTENTIUS/chant#3667, INTENTIUS/chant#3669).
+ */
 const HEADER = [
   "# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.",
   "# Edit those and render again; npm run ci:check says when this file is stale.",
 ];
 
-function emitDocument(header: readonly string[], doc: Record<string, unknown>): string {
-  const body = Object.entries(doc)
-    .filter(([, v]) => v !== undefined)
-    .map(([k, v]) => emitYAMLEntry(k, v))
-    .join("\n\n");
-  return `${[...header, ""].join("\n")}${body}\n`;
+const withHeader = (header: readonly string[], yaml: string): string => `${[...header, ""].join("\n")}${yaml}`;
+
+/** A serializer's output for one file: its YAML, refusing anything else (a second file, a warning). */
+function oneFile(forge: Forge, out: string | SerializerResult): string {
+  if (typeof out === "string") return out;
+  const extra = [...Object.keys(out.files ?? {}), ...(out.warnings ?? [])];
+  if (extra.length > 0) throw new Error(`${forge}: expected one file and no warnings, got ${extra.join("; ")}`);
+  return out.primary;
 }
 
 // ── GitHub Actions and Forgejo Actions ──────────────────────────────────────
+//
+// One declaration, rendered by the github lexicon for GitHub and by the
+// forgejo lexicon for Forgejo. The forgejo dialect maps runs-on ubuntu-latest
+// to the runner label docker, resolves actions/checkout on code.forgejo.org
+// and drops the permissions block, which Forgejo does not read.
 
 type Actions = "github" | "forgejo";
+type AStep = InstanceType<typeof Step>;
+type AJob = InstanceType<typeof ActionsJob>;
+type AWorkflow = InstanceType<typeof ActionsWorkflow>;
 
-function setupSteps(forge: Actions, fetchDepth: number): Array<Record<string, unknown>> {
-  const steps: Array<Record<string, unknown>> = [{ uses: CHECKOUT[forge], with: { "fetch-depth": fetchDepth } }];
-  if (forge === "github") steps.push({ uses: SETUP_NODE, with: { "node-version": 22, cache: "npm" } });
+function renderActions(forge: Actions, workflow: AWorkflow): string {
+  const serializer = forge === "github" ? githubSerializer : forgejoSerializer;
+  return oneFile(forge, serializer.serialize(new Map([["workflow", workflow]])));
+}
+
+function setupSteps(forge: Actions): AStep[] {
+  // Step inputs are strings in the lexicon's schema (INTENTIUS/chant#3670); the actions read them as strings either way.
+  const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": "0" } })];
+  if (forge === "github") steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": "22", cache: "npm" } }));
   steps.push(
     gitAccessStep(),
-    { run: "npm ci" },
-    { run: 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"' },
-    { name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS },
+    new Step({ run: "npm ci" }),
+    new Step({ run: 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"' }),
+    new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }),
   );
   return steps;
 }
 
-function runner(forge: Actions): Record<string, unknown> {
-  return forge === "github" ? { "runs-on": "ubuntu-latest" } : { "runs-on": "docker", container: IMAGE };
-}
+/** Forgejo runs the job in IMAGE; GitHub on the runner's VM. */
+const runner = (forge: Actions) => ({ "runs-on": "ubuntu-latest", ...(forge === "forgejo" ? { container: IMAGE } : {}) });
 
 /** The token `yodel plan --comment` posts with: the job's own. */
 function commentToken(forge: Actions): Record<string, string> {
   return forge === "github" ? { GITHUB_TOKEN: "${{ github.token }}" } : { FORGEJO_TOKEN: "${{ github.token }}" };
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean): Record<string, unknown> {
-  const steps: Array<Record<string, unknown>> = [
-    ...setupSteps(forge, 0),
-    { name: "The pipelines are up to date", run: CI_CHECK },
-    { name: "yodel lint", run: LINT },
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean): AJob {
+  const steps = [
+    ...setupSteps(forge),
+    new Step({ name: "The pipelines are up to date", run: CI_CHECK }),
+    new Step({ name: "yodel lint", run: LINT }),
   ];
-  if (!replay) return { ...runner(forge), steps };
+  if (!replay) return new ActionsJob({ ...runner(forge), steps });
   const svc = REPLAY_SERVICE[dialect];
   // GitHub runs this job on the VM, where a service is on localhost; Forgejo
   // runs it in a container, where a service is on its name.
   const host = forge === "github" ? "localhost" : svc.name;
-  const health = `--health-cmd "${svc.health}" --health-interval 2s --health-timeout 5s --health-retries 45`;
-  return {
+  const port = String(svc.port);
+  return new ActionsJob({
     ...runner(forge),
     services: {
-      [svc.name]: { image: svc.image, env: svc.env, ...(forge === "github" ? { ports: [`${String(svc.port)}:${String(svc.port)}`] } : {}), options: health },
+      [svc.name]: new ActionsService({
+        image: svc.image,
+        env: svc.env,
+        // Exception (INTENTIUS/chant#3670): the lexicon's schema says ports
+        // are numbers, but a bare 8123 publishes the port on a random host
+        // port; the job reaches the service on localhost:8123, so it needs
+        // the host:container form GitHub also accepts.
+        ...(forge === "github" ? { ports: [`${port}:${port}`] } : {}),
+        options: `--health-cmd "${svc.health}" --health-interval 2s --health-timeout 5s --health-retries 45`,
+      }),
     },
     env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(host), ...svc.jobEnv },
-    steps: [...steps, { name: `Wait for the replay server (${svc.name})`, run: waitFor(host, svc.port) }, { name: "yodel lint --replay", run: REPLAY }],
-  };
+    steps: [
+      ...steps,
+      new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(host, svc.port) }),
+      new Step({ name: "yodel lint --replay", run: REPLAY }),
+    ],
+  });
 }
 
 export function actionsReview(forge: Actions, { dialect, names: envs, replay }: Environments): RenderedFile {
-  const jobs: Record<string, unknown> = {
-    lint: lintJob(forge, dialect, replay),
-  };
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay) };
   for (const env of envs) {
-    jobs[`plan-${env}`] = {
+    jobs[`plan-${env}`] = new ActionsJob({
       ...runner(forge),
       env: secrets(readerVariables(env, dialect)),
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
-        ...setupSteps(forge, 0),
-        { name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) },
+        ...setupSteps(forge),
+        new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
       ],
-    };
+    });
   }
+  const workflow = new ActionsWorkflow({
+    name: "yodel-pr",
+    on: { pull_request: { branches: [MAIN] } },
+    permissions: new Permissions({ contents: "read", "pull-requests": "write" }),
+    concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
+    jobs,
+  });
   const header = [
     ...HEADER,
     "#",
@@ -275,33 +341,32 @@ export function actionsReview(forge: Actions, { dialect, names: envs, replay }: 
   ];
   return {
     path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-pr.yml`,
-    content: emitDocument(header, {
-      name: "yodel-pr",
-      on: { pull_request: { branches: [MAIN] } },
-      // Forgejo reads no permissions block; its token is the runner's.
-      permissions: forge === "github" ? { contents: "read", "pull-requests": "write" } : undefined,
-      concurrency: { group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true },
-      jobs,
-    }),
+    content: withHeader(header, renderActions(forge, workflow)),
   };
 }
 
 export function actionsApply(forge: Actions, { dialect, names: envs }: Environments): RenderedFile {
-  const jobs: Record<string, unknown> = {};
+  const jobs: Record<string, AJob> = {};
   let previous: string | undefined;
   for (const env of envs) {
     const job = `apply-${env}`;
-    jobs[job] = {
+    jobs[job] = new ActionsJob({
       ...runner(forge),
-      ...(previous ? { needs: previous } : {}),
+      ...(previous ? { needs: [previous] } : {}),
       // A GitHub environment holds the writer's secrets, restricted to main.
       ...(forge === "github" ? { environment: env } : {}),
-      concurrency: { group: `yodel-apply-${env}`, "cancel-in-progress": false },
+      concurrency: new Concurrency({ group: `yodel-apply-${env}`, "cancel-in-progress": false }),
       env: { YODEL_CREDENTIALS: "writer", ...secrets(writerVariables(env, dialect)) },
-      steps: [...setupSteps(forge, 0), { name: `yodel apply ${env}`, run: `yodel apply ${env}` }],
-    };
+      steps: [...setupSteps(forge), new Step({ name: `yodel apply ${env}`, run: `yodel apply ${env}` })],
+    });
     previous = job;
   }
+  const workflow = new ActionsWorkflow({
+    name: "yodel-apply",
+    on: { push: { branches: [MAIN] }, workflow_dispatch: {} },
+    permissions: new Permissions({ contents: "read" }),
+    jobs,
+  });
   const header = [
     ...HEADER,
     "#",
@@ -317,12 +382,7 @@ export function actionsApply(forge: Actions, { dialect, names: envs }: Environme
   ];
   return {
     path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-apply.yml`,
-    content: emitDocument(header, {
-      name: "yodel-apply",
-      on: { push: { branches: [MAIN] }, workflow_dispatch: {} },
-      permissions: forge === "github" ? { contents: "read" } : undefined,
-      jobs,
-    }),
+    content: withHeader(header, renderActions(forge, workflow)),
   };
 }
 
@@ -330,53 +390,81 @@ export function actionsApply(forge: Actions, { dialect, names: envs }: Environme
 
 export const GITLAB_WATCH_FILE = ".gitlab/yodel-watch.gitlab-ci.yml";
 
+/** The stages the watch file's jobs use, after the ones this file's jobs use. */
+const GITLAB_STAGES = ["review", "apply", "ops"];
+
 export function gitlabPipeline({ dialect, names: envs, replay }: Environments): RenderedFile {
-  const mr = [{ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' }];
-  const doc: Record<string, unknown> = {
-    workflow: {
-      rules: [
-        { if: '$CI_PIPELINE_SOURCE == "merge_request_event"' },
-        { if: "$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS", when: "never" },
-        { if: "$CI_COMMIT_BRANCH" },
-      ],
-    },
-    include: [{ local: GITLAB_WATCH_FILE }],
-    stages: ["review", "apply", "ops"],
-    variables: { GIT_DEPTH: "0" },
-    ".yodel": {
-      image: IMAGE,
+  const mr = () => [new Rule({ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' })];
+  const workflow = new GitLabWorkflow({
+    rules: [
+      new WorkflowRule({ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' }),
+      new WorkflowRule({ if: "$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS", when: "never" }),
+      new WorkflowRule({ if: "$CI_COMMIT_BRANCH" }),
+    ],
+  });
+  const jobs = new Map<string, Declarable>();
+  jobs.set(
+    ".yodel",
+    new GitLabJob({
+      image: new Image({ name: IMAGE }),
       before_script: [GIT_ACCESS, "npm ci", 'export PATH="$PWD/node_modules/.bin:$PATH"', FETCH_APPROVALS],
-    },
-    lint: { extends: ".yodel", stage: "review", rules: mr, script: [CI_CHECK, LINT] },
-  };
-  if (replay) {
-    const svc = REPLAY_SERVICE[dialect];
-    doc.lint = {
-      ...(doc.lint as Record<string, unknown>),
-      services: [{ name: svc.image, alias: svc.name, variables: svc.env }],
-      variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
-      script: [CI_CHECK, LINT, waitFor(svc.name, svc.port), REPLAY],
-    };
-  }
+    }),
+  );
+  const svc = REPLAY_SERVICE[dialect];
+  jobs.set(
+    "lint",
+    new GitLabJob({
+      extends: ".yodel",
+      stage: "review",
+      rules: mr(),
+      ...(replay
+        ? {
+            script: [CI_CHECK, LINT, waitFor(svc.name, svc.port), REPLAY],
+            services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
+            variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+          }
+        : { script: [CI_CHECK, LINT] }),
+    }),
+  );
   for (const env of envs) {
-    doc[`plan-${env}`] = { extends: ".yodel", stage: "review", rules: mr, script: [`yodel plan ${env} --comment`] };
+    jobs.set(`plan-${env}`, new GitLabJob({ extends: ".yodel", stage: "review", rules: mr(), script: [`yodel plan ${env} --comment`] }));
   }
   let previous: string | undefined;
   for (const env of envs) {
     const job = `apply-${env}`;
-    doc[job] = {
-      extends: ".yodel",
-      stage: "apply",
-      rules: [{ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")' }],
-      ...(previous ? { needs: [previous] } : {}),
-      // The writer's variables are scoped to this environment, so no other job gets them.
-      environment: { name: env },
-      resource_group: `yodel-apply-${env}`,
-      variables: { YODEL_CREDENTIALS: "writer" },
-      script: [`yodel apply ${env}`],
-    };
+    jobs.set(
+      job,
+      new GitLabJob({
+        extends: ".yodel",
+        stage: "apply",
+        rules: [new Rule({ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")' })],
+        ...(previous ? { needs: [new Need({ job: previous })] } : {}),
+        // The writer's variables are scoped to this environment, so no other job gets them.
+        environment: new GitLabEnvironment({ name: env }),
+        resource_group: `yodel-apply-${env}`,
+        variables: { YODEL_CREDENTIALS: "writer" },
+        script: [`yodel apply ${env}`],
+      }),
+    );
     previous = job;
   }
+
+  const serialize = (entities: Map<string, Declarable>): string => oneFile("gitlab", gitlabSerializer.serialize(entities));
+  // Exception (INTENTIUS/chant#3669): the gitlab serializer writes no
+  // top-level include or variables, and its stages are only the ones the
+  // declared jobs name, so not the watch file's ops. It writes those stages
+  // first; they are replaced by GITLAB_STAGES, and include and variables are
+  // written beside them.
+  const derived = `${emitYAMLEntry("stages", GITLAB_STAGES.slice(0, 2))}\n\n`;
+  const jobsYaml = serialize(jobs);
+  if (!jobsYaml.startsWith(derived)) throw new Error(`gitlab: expected the jobs' YAML to start with\n${derived}`);
+  const topLevel = [
+    emitYAMLEntry("include", [{ local: GITLAB_WATCH_FILE }]),
+    emitYAMLEntry("stages", GITLAB_STAGES),
+    emitYAMLEntry("variables", { GIT_DEPTH: "0" }),
+  ];
+  const yaml = `${serialize(new Map([["workflow", workflow]]))}\n${topLevel.join("\n\n")}\n\n${jobsYaml.slice(derived.length)}`;
+
   const variables = envs.flatMap((env) => [
     `#   ${readerVariables(env, dialect).join(", ")}: not protected (merge request`,
     "#     pipelines run on unprotected branches), masked; no environment scope.",
@@ -401,7 +489,7 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     "# The jobs that hold no writer read with the reader: chant.config.ts picks",
     "# the writer only under YODEL_CREDENTIALS=writer, which only the apply jobs set.",
   ];
-  return { path: ".gitlab-ci.yml", content: emitDocument(header, doc) };
+  return { path: ".gitlab-ci.yml", content: withHeader(header, yaml) };
 }
 
 // ── The drift watch, through chant's generateOpsPipeline ────────────────────
