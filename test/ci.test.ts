@@ -83,8 +83,32 @@ describe("yodel ci", () => {
     expect(() => checkYodelConfig({ ci: { forges: ["github", "bitbucket"] } }, "yodel.config.ts")).toThrow(/ci\.forges: a list of github, gitlab, forgejo/);
     expect(() => checkYodelConfig({ ci: { forges: [] } }, "yodel.config.ts")).toThrow(/ci\.forges/);
     expect(() => checkYodelConfig({ ci: { jobs: 3 } }, "yodel.config.ts")).toThrow(/ci\.jobs/);
-    expect(() => checkYodelConfig({ ci: { image: "x" } }, "yodel.config.ts")).toThrow(/ci\.image: unknown setting/);
+    expect(() => checkYodelConfig({ ci: { image: "ghcr.io/intentius/sql-yodeler:0.3.0" } }, "yodel.config.ts")).toThrow(/ci\.image: the CI image pinned by its digest/);
+    expect(() => checkYodelConfig({ ci: { color: "x" } }, "yodel.config.ts")).toThrow(/ci\.color: unknown setting/);
     expect(checkYodelConfig({ ci: { forges: ["gitlab"], jobs: "ci/jobs.ts" } }, "yodel.config.ts").ci).toEqual({ forges: ["gitlab"], jobs: "ci/jobs.ts" });
+  });
+
+  it("with ci.image, runs every job in the yodel image by its digest, and installs nothing (#66)", async () => {
+    const image = `ghcr.io/intentius/sql-yodeler:0.3.0@sha256:${"a".repeat(64)}`;
+    const dir = project(`{ image: "${image}" }`);
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    const rendered = wrote.out.trim().split("\n").map((l) => l.replace(/^wrote /, ""));
+    expect(rendered).toHaveLength(11);
+    for (const f of rendered) {
+      const text = readFileSync(join(dir, f), "utf8");
+      expect(text, f).not.toContain("npm ci");
+      expect(text, f).not.toContain("node_modules/.bin");
+      expect(text, f).not.toContain("setup-node");
+      expect(text, f).not.toContain("node:22-bookworm");
+      expect(text, f).toContain(image);
+    }
+    // Every Actions job in the container, the plan jobs on GitHub's VM too, and the report from the image's yodel.
+    for (const f of [".github/workflows/yodel-pr.yml", ".github/workflows/yodel-apply.yml", ".github/workflows/watch-dev.yml"]) {
+      const doc = parseYAMLDocument(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { container?: unknown; steps: Array<{ run?: string }> }> };
+      for (const [name, job] of Object.entries(doc.jobs)) expect(job.container, `${f} ${name}`).toBe(image);
+    }
+    expect(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")).toContain("; yodel report dev --json");
   });
 
   it("takes --check or --replay, not both, and options after -- only with --replay", async () => {

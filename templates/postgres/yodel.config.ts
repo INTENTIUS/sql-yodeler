@@ -29,6 +29,10 @@ export default {
   // and, when the project has jobs of its own, the module that declares them
   // with chant's lexicons (jobs: "ci/jobs.ts", exporting `actions` for GitHub
   // and Forgejo and `gitlab`). yodel ci adds them to the pull request pipeline
-  // after its own, so they survive every render.
+  // after its own, so they survive every render. To run every job in the CI
+  // image (node, yodel, chant and the lexicons, no npm ci in any job), add
+  // image: "ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>", pinned by
+  // the digest the release's image job prints, with <version> the yodel this
+  // project installs.
   ci: { forges: ["github", "gitlab", "forgejo"] },
 } satisfies YodelConfig;

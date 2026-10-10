@@ -126,9 +126,15 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
   });
 }
 
+/** An image reference pinned by digest. */
+const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
+
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs? }`);
-  for (const k of Object.keys(value)) if (k !== "forges" && k !== "jobs") throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image)`);
+  if (value.image !== undefined && (typeof value.image !== "string" || !CI_IMAGE.test(value.image))) {
+    throw new YodelError(`${where}.image: the CI image pinned by its digest, ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest> (the release's image job writes the digest to its summary)`);
+  }
   const forges = value.forges;
   if (forges !== undefined && !(Array.isArray(forges) && forges.length > 0 && forges.every((f) => (CI_FORGES as readonly unknown[]).includes(f)))) {
     throw new YodelError(`${where}.forges: a list of ${CI_FORGES.join(", ")}`);

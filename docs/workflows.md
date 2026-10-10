@@ -141,6 +141,8 @@ export const gitlab = {
 
 `yodel ci` adds `actions` to `yodel-pr` on GitHub and Forgejo and `gitlab` to `.gitlab-ci.yml`, after its own jobs, with a GitLab job's stage after `review`, so they are there after every render. A job with the name of one of yodel's (`lint`, `plan-<env>`, `.yodel`) is refused.
 
+By default every job runs in `node:22-bookworm` (GitHub's plan jobs on the runner, with `setup-node`) and installs the project's packages with `npm ci`. `ci.image` runs every job in the CI image instead, `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`, which a release publishes with Node, yodel, chant and the lexicons on it: no job runs `npm ci` or `setup-node`, and a checkout resolves chant and the lexicons from the image. It is taken only pinned by its digest, which the release's `image` job writes to its summary, so a job never runs a different image under the same tag. Use the version the project's `package.json` installs, so the image's yodel renders the same pipelines `yodel ci --check` compares; a project whose jobs need packages of their own leaves `image` unset.
+
 ## Postgres objects
 
 A Postgres project declares these with the `sql` lexicon's tags, and both paths plan, apply, watch for drift and adopt them. The claims column names the scenario claims that run each against a server.
