@@ -1,13 +1,15 @@
 import type { ChantConfig } from "@intentius/chant/config";
 import "@intentius/chant-lexicon-sql";
+import { credentials } from "@intentius/sql-yodeler";
 
 /**
- * Two sets of credentials per environment, chosen by YODEL_CREDENTIALS:
+ * Two sets of credentials per environment, from credentials(), chosen by
+ * YODEL_CREDENTIALS:
  *
  * - reader (the default): a user that can only read (ClickHouse
  *   `readonly = 1`, SELECT and SHOW on the schema's database and the history
- *   database). Pull request jobs, the drift watch and anyone on their laptop
- *   use it.
+ *   database).
+ *   Pull request jobs, the drift watch and anyone on their laptop use it.
  * - writer: YODEL_CREDENTIALS=writer:<env> for that environment alone (or
  *   =writer for every one). Only an environment's wave job after a merge
  *   sets it, and only that job holds that environment's writer secrets; it
@@ -16,16 +18,20 @@ import "@intentius/chant-lexicon-sql";
  * Credentials are named by environment variable, never written here:
  * <ENV>_CLICKHOUSE_URL, <ENV>_CLICKHOUSE_READER_USER,
  * <ENV>_CLICKHOUSE_READER_PASSWORD, <ENV>_CLICKHOUSE_WRITER_USER and
- * <ENV>_CLICKHOUSE_WRITER_PASSWORD.
+ * <ENV>_CLICKHOUSE_WRITER_PASSWORD. yodel refuses an environment whose
+ * reader and writer are the same user, and every pull request job tries a
+ * write first and fails if the server lets it through.
+ *
+ * A password can be a short-lived token in place of a variable, minted when
+ * a connection needs it:
+ * credentials("prod", "clickhouse", { writer: { password: { token: "command", command: ["./scripts/mint-token.sh"] } } }).
+ * `npm run ci` then renders the jobs' cloud identity; see Configuration in
+ * the SQL Yodeler docs.
  */
-const role = (env: string) => (process.env.YODEL_CREDENTIALS === "writer" || process.env.YODEL_CREDENTIALS === `writer:${env}` ? "WRITER" : "READER");
-
 function clickhouse(env: string, url: string) {
-  const prefix = env.toUpperCase();
   return {
-    url: process.env[`${prefix}_CLICKHOUSE_URL`] ?? url,
-    user: { env: `${prefix}_CLICKHOUSE_${role(env)}_USER` },
-    password: { env: `${prefix}_CLICKHOUSE_${role(env)}_PASSWORD` },
+    url: process.env[`${env.toUpperCase()}_CLICKHOUSE_URL`] ?? url,
+    ...credentials(env, "clickhouse"),
     databases: ["{{chant:database}}"],
   };
 }

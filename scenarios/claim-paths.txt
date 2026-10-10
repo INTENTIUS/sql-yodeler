@@ -28,6 +28,7 @@ LICENSE                                -
 .gitignore                             -
 .nvmrc                                 -
 eslint.config.js                       -
+tsconfig.templates.json                -
 vitest.config.ts                       -
 scenarios/claim-paths.txt              -
 scenarios/affected.ts                  -
@@ -158,6 +159,11 @@ src/steps/                             ALL
 # claim's project declares one, so only it reads DDL.
 src/sources/ddl.ts                     declarative
 src/sources/                           ALL
+
+# Credentials (#50): yodel config check and its write probe, which the
+# approval claim runs and every template pull request job runs first.
+src/commands/config.ts                 approval template template-github template-gitlab
+src/probe.ts                           approval template template-github template-gitlab
 
 # The core every claim runs: yodel new, apply and status, the migrations
 # directory, the history, the versioned engine and its gate, the topology

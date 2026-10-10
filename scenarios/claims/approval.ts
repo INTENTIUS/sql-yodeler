@@ -331,12 +331,101 @@ export async function digestMovedPart(ctx: Ctx, p: Project): Promise<void> {
   hold((await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}'`)) === 0, `the history records ${id}`);
 }
 
+/** The claim's reader and writer on the emulator, made for the reader-writer part: a user each, the reader only able to read. */
+async function readerAndWriter(ctx: Ctx): Promise<{ reader: string; writer: string; password: string }> {
+  const { name, history } = ctx.db;
+  const reader = `${name}__ro`;
+  const writer = `${name}__rw`;
+  const password = "yodel-claim-50";
+  if (ctx.dialect === "ch") {
+    for (const sql of [
+      `CREATE USER IF NOT EXISTS ${reader} IDENTIFIED WITH plaintext_password BY '${password}' SETTINGS readonly = 1`,
+      `GRANT SELECT, SHOW ON ${name}.* TO ${reader}`,
+      `GRANT SELECT, SHOW ON ${history}.* TO ${reader}`,
+      `CREATE USER IF NOT EXISTS ${writer} IDENTIFIED WITH plaintext_password BY '${password}'`,
+      `GRANT ALL ON ${name}.* TO ${writer}`,
+      `GRANT ALL ON ${history}.* TO ${writer}`,
+    ]) {
+      await ctx.db.exec(sql);
+    }
+  } else {
+    await ctx.db.exec(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${reader}') THEN CREATE ROLE ${reader} LOGIN PASSWORD '${password}'; END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${writer}') THEN CREATE ROLE ${writer} LOGIN PASSWORD '${password}'; END IF;
+    END $$`);
+    await ctx.db.exec(`GRANT USAGE ON SCHEMA ${name}, ${history} TO ${reader}; GRANT SELECT ON ALL TABLES IN SCHEMA ${name}, ${history} TO ${reader}`);
+    await ctx.db.exec(`GRANT ALL ON SCHEMA ${name}, ${history} TO ${writer}`);
+  }
+  return { reader, writer, password };
+}
+
+/** Under BREAK, yodel with the refusal of a shared reader and writer taken out: the project's yodel copied, its loadProject made to check nothing. */
+function withoutSharedRefusal(ctx: Ctx, p: Project): string[] {
+  const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
+  const root = join(ctx.work, "yodel-without-shared-refusal");
+  mkdirSync(root, { recursive: true });
+  cpSync(join(pkg, "dist"), join(root, "dist"), { recursive: true });
+  copyFileSync(join(pkg, "package.json"), join(root, "package.json"));
+  symlinkSync(p.path("node_modules"), join(root, "node_modules"));
+  const file = join(root, "dist", "project.js");
+  const text = readFileSync(file, "utf8");
+  const patched = text.replace(/const shared = sharedCredentialsIn\([^;]*\);/, "const shared = undefined;");
+  if (patched === text) throw new Error(`the refusal of a shared reader and writer is not in ${file}; the broken build cannot take it out`);
+  writeFileSync(file, patched);
+  ctx.log("BREAK: yodel built without the refusal of a shared reader and writer");
+  return ["node", join(root, "dist", "bin.js")];
+}
+
+/**
+ * Credentials (#50): the environment's profile made with credentials(), a
+ * reader and a writer, the reader's password minted by a command token
+ * source (the test double for a cloud's). With the reader, yodel config
+ * check --write-probe connects (the token minted) and the server refuses
+ * the write; with the writer (YODEL_CREDENTIALS=writer:<env>) the probe's
+ * write goes through and it exits 4. With the writer's user variable
+ * holding the reader's user, yodel refuses the project, exit 4 naming both
+ * variables and the user, and nothing runs. The profile is put back after.
+ * BREAK: yodel is built without that refusal, so the shared config runs.
+ */
+export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
+  const { reader, writer, password } = await readerAndWriter(ctx);
+  const config = p.read("chant.config.ts");
+  const dialect = ctx.dialect === "ch" ? "clickhouse" : "postgres";
+  const roles = `{ reader: { user: { env: "CLAIM_READER_USER" }, password: { token: "command", command: ["node", "-e", "process.stdout.write(process.env.CLAIM_READER_SECRET ?? '')"] } }, writer: { user: { env: "CLAIM_WRITER_USER" }, password: { env: "CLAIM_WRITER_PASSWORD" } } }`;
+  const spread = `...credentials(${JSON.stringify(p.env)}, "${dialect}", ${roles}),`;
+  const withRoles =
+    ctx.dialect === "ch"
+      ? config.replace(/(url: process\.env\.YODEL_CLAIMS_CLICKHOUSE_URL \?\? "[^"]*",)/, `$1 ${spread}`)
+      : config.replace(/user: \{ env: "YODEL_CLAIMS_POSTGRES_USER" \},\s*password: \{ env: "YODEL_CLAIMS_POSTGRES_PASSWORD" \},/, spread);
+  if (withRoles === config) throw new Error("could not make the profile with credentials()");
+  p.write("chant.config.ts", withRoles.replace(/^(import "@intentius\/chant-lexicon-sql";)$/m, '$1\nimport { credentials } from "@intentius/sql-yodeler";'));
+  const apart = { CLAIM_READER_USER: reader, CLAIM_READER_SECRET: password, CLAIM_WRITER_USER: writer, CLAIM_WRITER_PASSWORD: password };
+  const bin = ctx.broken ? { bin: withoutSharedRefusal(ctx, p) } : {};
+  try {
+    // Not the property under BREAK: the probe, which the broken build keeps.
+    const must: (cond: boolean, what: string) => asserts cond = ctx.broken ? (cond, what) => { if (!cond) throw new Error(what); } : hold;
+    const read = await p.yodel(["config", "check", p.env, "--write-probe"], { env: apart, ...bin });
+    must(read.code === 0 && read.out.includes("write probe   cannot write") && read.out.includes("password a command token (node)"), `yodel config check --write-probe with the reader exited ${String(read.code)}: ${read.out}${read.err}`);
+    const wrote = await p.yodel(["config", "check", p.env, "--write-probe"], { env: { ...apart, YODEL_CREDENTIALS: `writer:${p.env}` }, ...bin });
+    must(wrote.code === 4 && wrote.err.includes("the credentials this process holds can write"), `yodel config check --write-probe with the writer exited ${String(wrote.code)}, not 4: ${wrote.out}${wrote.err}`);
+
+    const shared = await p.yodel(["status", p.env], { env: { ...apart, CLAIM_WRITER_USER: reader }, ...bin });
+    hold(
+      shared.code === 4 && shared.err.includes(`the reader (CLAIM_READER_USER) and the writer (CLAIM_WRITER_USER) are the same user, ${reader}`),
+      `yodel status with the reader's user as the writer's exited ${String(shared.code)}, not 4 naming both: ${shared.err.slice(-400)}`,
+    );
+  } finally {
+    p.write("chant.config.ts", config);
+  }
+}
+
 /** The parts, in order, on one project. */
 const parts = [
   ["approval", approvalPart],
   ["pre-check", preCheckPart],
   ["policy", policyPart],
   ["audit", auditPart],
+  ["reader-writer", readerWriterPart],
   ["digest-moved", digestMovedPart],
 ] as const;
 
@@ -346,7 +435,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const approval: Claim = {
   name: "approval",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied",
   dialects: { ch: body, pg: body },
   parts: parts.map(([name]) => name),
 };

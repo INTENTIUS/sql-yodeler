@@ -17,6 +17,11 @@ export default tseslint.config(
     },
   },
   {
+    // The templates' chant.config.ts imports @intentius/sql-yodeler, which is this repository: tsconfig.templates.json maps it to ./src.
+    files: ["templates/*/chant.config.ts"],
+    languageOptions: { parserOptions: { projectService: false, project: "./tsconfig.templates.json", tsconfigRootDir: import.meta.dirname } },
+  },
+  {
     files: ["eslint.config.js"],
     ...tseslint.configs.disableTypeChecked,
   },

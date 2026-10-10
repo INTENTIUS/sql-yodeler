@@ -1,6 +1,7 @@
 import type { Command } from "../command.js";
 import { apply } from "./apply.js";
 import { ci } from "./ci.js";
+import { config } from "./config.js";
 import { approve } from "./approve.js";
 import { checkpoint } from "./checkpoint.js";
 import { cleanup } from "./cleanup.js";
@@ -35,6 +36,7 @@ export const commands: readonly Command[] = [
   drift,
   docs,
   ci,
+  config,
   rebase,
   repair,
   revert,

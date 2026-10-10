@@ -104,7 +104,17 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("has a migrate Op yodel apply runs and a WatchOp on a schedule for each environment, in each forge's pipelines", async () => {
     const envs = await environments(dir);
-    expect(envs).toEqual({ dialect, names: ["dev", "prod"], replay: true, waves: [{ env: "dev", gate: "always" }, { env: "prod", gate: "always", requires: "dev" }], forges: ["github", "gitlab", "forgejo"] });
+    const P = dialect.toUpperCase();
+    const roles = (env: string) => ({ reader: { variables: [`${env}_${P}_READER_USER`, `${env}_${P}_READER_PASSWORD`] }, writer: { variables: [`${env}_${P}_WRITER_USER`, `${env}_${P}_WRITER_PASSWORD`] } });
+    expect(envs).toEqual({
+      dialect,
+      names: ["dev", "prod"],
+      replay: true,
+      waves: [{ env: "dev", gate: "always" }, { env: "prod", gate: "always", requires: "dev" }],
+      forges: ["github", "gitlab", "forgejo"],
+      // The profiles are made with credentials(): a reader and a writer each, by the default variables.
+      credentials: { dev: roles("DEV"), prod: roles("PROD") },
+    });
     for (const env of envs.names) {
       const migrate = (await import(pathToFileURL(join(dir, "ops", `migrate-${env}.op.ts`)).href)) as { op: { props: OpConfig } };
       expect(migrateOpParts(migrate.op.props, env)).toEqual({ gate: `approve-migrate-${env}`, quorum: false });
@@ -168,6 +178,20 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       }
     }
     expect(applyJobs).toBe(6); // a wave each for dev and prod on each of three forges
+  });
+
+  it("tries a write in each plan job before the plan, with every reader the job holds (#50)", () => {
+    const probe = { dev: "yodel config check dev --write-probe", prod: "yodel config check prod dev --write-probe" };
+    for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml"]) {
+      const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
+      for (const env of ["dev", "prod"] as const) {
+        const runs = (doc.jobs[`plan-${env}`]?.steps ?? []).map((s) => s.run);
+        expect(runs.indexOf(probe[env]), `${f} plan-${env}`).toBeGreaterThan(-1);
+        expect(runs.indexOf(probe[env]), `${f} plan-${env}`).toBeLessThan(runs.indexOf(`yodel plan ${env} --comment`));
+      }
+    }
+    const gitlab = load(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as Record<string, { script?: string[] }>;
+    for (const env of ["dev", "prod"] as const) expect(gitlab[`plan-${env}`]?.script).toEqual([probe[env], `yodel plan ${env} --comment`]);
   });
 
   it("never points the replay profile at another profile's server, and gives it the history's database", async () => {

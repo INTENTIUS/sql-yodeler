@@ -1,0 +1,7 @@
+{
+  // Lints the starter templates' chant.config.ts with this repository's
+  // paths: it imports credentials() from @intentius/sql-yodeler, which a
+  // project made from a template installs, and which here is ./src.
+  "extends": "./tsconfig.json",
+  "include": ["templates/*/chant.config.ts"]
+}
