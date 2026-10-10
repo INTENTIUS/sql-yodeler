@@ -307,31 +307,31 @@
     {
       "claim": "drift",
       "dialect": "ch",
-      "says": "yodel drift reports a declared object changed out of band, naming the property, and one dropped",
+      "says": "yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 85,
-        "break": 89
+        "plain": 50,
+        "break": 59
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T06:32:12.280Z",
+      "commit": "a231637",
       "dirty": false
     },
     {
       "claim": "drift",
       "dialect": "pg",
-      "says": "yodel drift reports a declared object changed out of band, naming the property, and one dropped",
+      "says": "yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 92,
-        "break": 93
+        "plain": 51,
+        "break": 59
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T06:32:12.280Z",
+      "commit": "a231637",
       "dirty": false
     },
     {
