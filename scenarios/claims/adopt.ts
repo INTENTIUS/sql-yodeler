@@ -3,9 +3,11 @@ import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type Par
 import { parse, Project } from "../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../lib/access.js";
 import { chAccessOnServer, chNames } from "../lib/clickhouse-objects.js";
+import { secondServer, type SecondServer } from "../lib/second-server.js";
 
-/** The database a team already has, made by hand: no ownership markers, and data. */
-async function handMade(ctx: Ctx): Promise<void> {
+/** The database a team already has, made by hand: no ownership markers, and data. `exec` runs SQL on the server it is made on (default the claim's). */
+async function handMade(claim: Ctx, exec?: (sql: string) => Promise<void>): Promise<void> {
+  const ctx: Ctx = exec ? { ...claim, db: { ...claim.db, exec } } : claim;
   const n = ctx.db.name;
   if (ctx.dialect === "ch") {
     await ctx.db.exec(`CREATE DATABASE ${n}`);
@@ -179,6 +181,67 @@ async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
   }
 }
 
+/** The second environment's profile in chant.config.ts, with the access the first one has. */
+function secondProfile(ctx: Ctx, server: SecondServer, access: boolean): string {
+  if (ctx.dialect === "ch") return `{ url: "${server.url}", databases: ["${ctx.db.name}"] }`;
+  return `{ url: "${server.url}", user: { env: "YODEL_CLAIMS_POSTGRES_USER" }, password: { env: "YODEL_CLAIMS_POSTGRES_PASSWORD" }, schemas: ["${ctx.db.name}"], lockTimeoutMs: 500${access ? ", access: true" : ""} }`;
+}
+
+/**
+ * `yodel init --baseline <env>` (#115): a second environment that already
+ * holds the schema (made by hand the same way, with its data, on a server
+ * of its own) takes the project's baseline as applied, through its
+ * migrations Op and behind its gate: the run stops at the gate, and once
+ * approved records the baseline without running a statement. Then its
+ * history holds the one baseline row, yodel status lists the baseline
+ * applied, yodel plan shows only the migrations after it pending, and the
+ * objects keep their data.
+ * BREAK: the second environment differs from the baseline (a column the
+ * baseline does not have), and it is refused, naming the difference, with
+ * nothing recorded.
+ */
+async function secondEnvPart(ctx: Ctx, s: Adoption): Promise<void> {
+  const { p, doc } = await adopted(ctx, s);
+  const baseline = doc.migration?.id ?? "";
+  const env = `${ctx.env}-second`;
+  const server = await secondServer(ctx, "second");
+  try {
+    await handMade(ctx, (sql) => server.exec(sql));
+    const table = ctx.dialect === "ch" ? "events" : "customers";
+    if (ctx.broken) await server.exec(`ALTER TABLE ${ctx.db.name}.${table} ADD COLUMN extra ${ctx.dialect === "ch" ? "String DEFAULT ''" : "text"}`);
+    const rowsBefore = await server.scalar(`SELECT count(*) FROM ${ctx.db.name}.${table}`);
+    p.edit("chant.config.ts", /profiles: \{\n/, `profiles: {\n      "${env}": ${secondProfile(ctx, server, s.access === true)},\n`);
+    p.write("yodel.config.ts", `import { defineConfig } from "@intentius/sql-yodeler";\n\nexport default defineConfig({\n  environments: { ${JSON.stringify(p.env)}: { access: ${String(s.access === true)} }, ${JSON.stringify(env)}: { access: ${String(s.access === true)} } },\n});\n`);
+    p.write(`ops/migrate-${env}.op.ts`, p.read(`ops/migrate-${p.env}.op.ts`).replaceAll(p.env, env));
+    await p.commit("a second environment");
+
+    const first = await p.yodel(["init", "--baseline", env, "--json"], { timeoutMs: 600_000 });
+    hold(first.code === 3, `yodel init --baseline ${env} exited ${String(first.code)}, not 3 at the gate: ${first.err.trim().split("\n").slice(-6).join("\n")}`);
+    const gated = parse<{ status: string; approve?: string; planDigest: string }>(first);
+    hold(gated.status === "gated" && gated.approve !== undefined, `yodel init --baseline ${env} did not stop at the gate (${gated.status})`);
+    const unrecorded = await server.scalar(`SELECT count(*) FROM ${ctx.db.history}.history`).catch(() => "0");
+    hold(unrecorded === "0" || unrecorded === "", `the history recorded ${unrecorded} rows before the approval`);
+    await p.approve(gated.approve);
+    const second = await p.yodel(["init", "--baseline", env, "--json"], { timeoutMs: 600_000 });
+    hold(second.code === 0 && parse<{ status: string }>(second).status === "recorded", `yodel init --baseline ${env} after the approval exited ${String(second.code)}`);
+
+    const baselineRows = await server.scalar(
+      `SELECT count(*) FROM ${ctx.db.history}.history WHERE kind = 'migration' AND status = 'succeeded' AND migration_id = '${baseline}' AND note LIKE 'baseline:%' AND plan_digest = '${gated.planDigest}'`,
+    );
+    const statements = await server.scalar(`SELECT count(*) FROM ${ctx.db.history}.history WHERE kind = 'statement'`);
+    hold(baselineRows === "1" && statements === "0", `${env}'s history holds ${baselineRows} baseline rows under the approved digest and ${statements} statement rows, not one and none`);
+    hold((await server.scalar(`SELECT count(*) FROM ${ctx.db.name}.${table}`)) === rowsBefore, `${env}'s ${table} lost rows`);
+    const status = await p.yodel(["status", env, "--json"]);
+    const st = parse<{ applied?: Array<{ id: string }>; pending?: Array<{ id: string }> }>(status);
+    hold(st.applied?.map((a) => a.id).join() === baseline, `yodel status ${env} lists ${JSON.stringify(st.applied?.map((a) => a.id))} applied, not the baseline alone`);
+    // A part before may have left a migration after the baseline (init's break writes one): it is pending here as anywhere.
+    const after = p.migrationIds().filter((id) => id !== baseline);
+    hold((st.pending ?? []).map((m) => m.id).join() === after.join(), `yodel status ${env} lists ${JSON.stringify(st.pending?.map((m) => m.id))} pending, not ${JSON.stringify(after)}`);
+  } finally {
+    await server.close();
+  }
+}
+
 /**
  * The access part first (it decides whether init manages access): Postgres
  * and ClickHouse each have their own. Then the adoption's own checks.
@@ -187,6 +250,7 @@ const parts: ReadonlyArray<PartEntry<Adoption>> = [
   ["access", accessPart, ["pg"]],
   ["ch-access", chAccessPart, ["ch"]],
   ["init", initPart],
+  ["second-env", secondEnvPart],
 ];
 
 async function body(ctx: Ctx): Promise<void> {
@@ -195,7 +259,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const adopt: Claim = {
   name: "adopt",
-  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants",
+  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

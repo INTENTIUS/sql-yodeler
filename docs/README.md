@@ -10,7 +10,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 |---|---|
 | [Your first migration](getting-started.md) | from an empty directory to applied migrations on a local database: the template, the emulator, the variables, plan, approve and apply |
 | [Installing and configuring](configuration.md) | installing `yodel`, the project layout, `chant.config.ts` profiles, `yodel.config.ts`, the environment variables |
-| [Starting a project](adoption.md) | a new project from a starter template, and `yodel init --from` to adopt a database that already exists |
+| [Starting a project](adoption.md) | a new project from a starter template, `yodel init --from` to adopt a database that already exists, and `yodel init --baseline` for another environment that holds the same schema |
 | [Coming from another migration tool](from-other-tools.md) | for a database golang-migrate, goose, Flyway or dbmate manages: the concepts mapped, adopting it with `yodel init --from`, the old tool's files and table, and rollback with `yodel revert` |
 | [The two workflows](workflows.md) | the declarative path (`yodel plan`, `yodel apply` against the declared schema) and the versioned path (`yodel new`, then `yodel apply`) |
 | [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair`, `yodel checkpoint`, and rollback with `yodel revert` |
@@ -43,7 +43,7 @@ Usage: yodel <command> [options]
 Schema management and migrations for ClickHouse and Postgres.
 
 Commands:
-  init        adopt a live database: declarations and an applied baseline
+  init        adopt a live database, or record its baseline in another env
   plan        show what apply would change in an environment
   apply       bring an environment to its declared schema or pending migrations
   approve     approve the plan yodel apply would run (a person at a terminal)
@@ -94,7 +94,7 @@ With `--json`, a command prints one JSON document on stdout. Each document has a
 
 | Command | Schema |
 |---|---|
-| `yodel init --from <env> --json` | [`init`](https://intentius.io/sql-yodeler/schemas/v1/init.schema.json) |
+| `yodel init --from <env> --json`, `yodel init --baseline <env> --json` | [`init`](https://intentius.io/sql-yodeler/schemas/v1/init.schema.json) |
 | `yodel plan <env> --json` | [`plan`](https://intentius.io/sql-yodeler/schemas/v1/plan.schema.json): the versioned plan (`"mode": "versioned"`) or the declarative one |
 | `yodel apply <env> --json` | [`apply`](https://intentius.io/sql-yodeler/schemas/v1/apply.schema.json) |
 | `yodel new <name> --json` | [`new`](https://intentius.io/sql-yodeler/schemas/v1/new.schema.json) |

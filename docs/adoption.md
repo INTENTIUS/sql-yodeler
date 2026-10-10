@@ -157,3 +157,24 @@ Objects made by hand carry no chant ownership marker in their comments, and `ini
 After `init`, `yodel apply <env>` needs a migrations Op for the environment (an Op with a Plan step running `yodel apply <env> --digest`, a gate bound to its output, and an Apply step running `yodel apply <env> --execute`); `yodel apply` prints the declaration to add when there is none. See [Approval](approval.md).
 
 The [Postgres example](../examples/postgres/README.md#2-adopting-the-schema-into-versioned-migrations) does the same on Postgres.
+
+## Another environment that already holds the schema: yodel init --baseline
+
+`init --from` adopts one environment. Another environment that holds the same schema with its data (staging, prod) cannot run the baseline, whose first `CREATE` would fail there. `yodel init --baseline <env>` records the baseline applied in it instead, without running it:
+
+```sh
+YODEL_CREDENTIALS=writer npx yodel init --baseline prod
+```
+
+1. It plans the schema the baseline (the project's first migration) records against `<env>`'s live database, from `migration.json` alone. The plan must be empty: every object the baseline declares is there as it declares it, and the profile's databases or schemas hold nothing else. Each difference is named, with what the environment has and what the baseline declares, and the command refuses (exit 4), recording nothing:
+
+   ```text
+   yodel init: refused: prod's live schema is not the schema 20261010T1745-baseline records, so the baseline cannot be recorded applied there. 1 difference:
+     customers (app.customers) columns.extra: extra text in the environment, (none) in the baseline (SQLPG204)
+   Make prod hold the baseline's schema (or empty it, and let yodel apply run the baseline), then run yodel init --baseline prod again. Nothing was recorded.
+   ```
+
+2. When they match, it runs `<env>`'s migrations Op, as `yodel apply` does. The Plan step compares again and prints the record's digest (the baseline, the empty history and the live schema), the gate binds the approval to that digest, and the run stops there (exit 3) with the `chant approve` command to run. Approve, and run `yodel init --baseline <env>` again.
+3. The Apply step takes the lock, checks that the history still records nothing, compares again, refuses if the digest moved since the approval, and appends the baseline's history row: a succeeded migration row whose `note` starts `baseline:`, with the approved digest. None of the baseline's statements is sent.
+
+From there `yodel status <env>` lists the baseline applied, and `yodel plan <env>` and `yodel apply <env>` take the migrations after it, as in every other environment. It refuses (exit 4) a project with no migrations and an environment whose history records anything.

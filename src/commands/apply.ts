@@ -57,6 +57,8 @@ import {
 import type { ExecuteOptions, ExecuteResult } from "../versioned/engine.js";
 import type { StatusReport } from "../versioned/report.js";
 import type { RuleResult } from "../versioned/policy.js";
+import { BASELINE_ENV } from "../versioned/op.js";
+import { baselineFromEnv, executeBaseline, planBaseline, projectBaseline } from "../init/second.js";
 
 /** When the gate's newest approval does not hold: what moved since (or that approval was asked for again), in one line. */
 async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered: readonly Migration[], op: MigrateOpRef, digest: string | undefined) {
@@ -378,6 +380,31 @@ interface Outcome {
 }
 
 async function versionedApplyWith(project: Project, env: Environment, a: ApplyArgs, io: Io, ordered: readonly Migration[], venv: VersionedEnv, outcome: Outcome = {}): Promise<number> {
+
+  // yodel init --baseline (#115) runs this Op with the baseline to record in the environment: its Plan step compares and prints the record's digest, its Apply step records it.
+  const baselineId = a.digest || a.execute ? baselineFromEnv(process.env) : undefined;
+  if (baselineId) {
+    const baseline = projectBaseline(ordered);
+    if (baseline.id !== baselineId) throw new YodelError(`${BASELINE_ENV} names ${baselineId}, and the project's baseline (its first migration) is ${baseline.id}; run yodel init --baseline ${env.name}`);
+    if (a.digest) {
+      io.out(`${await planBaseline(project, env, venv, baseline)}\n`);
+      return 0;
+    }
+    const approved = process.env[APPROVED_PLAN_ENV];
+    if (!approved) throw new YodelError(`--execute records a baseline only under the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel init --baseline ${env.name}`);
+    const op = await findMigrateOp(project, env, a.op);
+    const ledger = await migrationsLedger(project, env.name, io);
+    await executeBaseline(project, env, venv, baseline, {
+      approvedDigest: approved,
+      approve: async (digest) => {
+        const by = await verifyApproval(ledger, op, digest);
+        io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
+      },
+      log: (l) => { io.err(`${l}\n`); },
+    });
+    io.out(`Recorded: ${baseline.id}, as ${env.name}'s baseline\n`);
+    return 0;
+  }
 
   // yodel revert (#55) runs this Op with the migration to revert in the environment: its Plan and Apply steps plan and run that instead.
   const revert = a.digest || a.execute ? revertFromEnv(process.env, project.dir) : undefined;

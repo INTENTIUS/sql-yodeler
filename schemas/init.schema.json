@@ -1,31 +1,60 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://intentius.io/sql-yodeler/schemas/v1/init.schema.json",
-  "title": "yodel init --from <env> --json",
-  "description": "Version 1. What adopting a live database wrote: the declarations, the baseline migration, and the history row that records it applied. Within a version, fields are only added; a reader ignores fields it does not know.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["environment", "dialect", "status", "objects", "schemaFiles", "migration", "recorded", "warnings"],
-  "properties": {
-    "environment": { "type": "string" },
-    "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
-    "status": { "const": "adopted" },
-    "objects": { "description": "The objects read, as <kind> <name>.", "$ref": "common.schema.json#/$defs/stringList" },
-    "schemaFiles": { "description": "The declaration files written, relative to the project.", "$ref": "common.schema.json#/$defs/stringList" },
-    "migration": {
-      "description": "The baseline migration.",
+  "title": "yodel init --from <env> --json, yodel init --baseline <env> --json",
+  "description": "Version 1. With --from, what adopting a live database wrote: the declarations, the baseline migration, and the history row that records it applied. With --baseline, the record of the project's baseline in another environment: gated, recorded or failed. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "oneOf": [
+    {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "id", "checksum", "statements"],
-      "properties": { "path": { "type": "string" }, "id": { "type": "string" }, "checksum": { "type": "string" }, "statements": { "type": "integer" } }
+      "required": ["environment", "dialect", "status", "objects", "schemaFiles", "migration", "recorded", "warnings"],
+      "properties": {
+        "environment": { "type": "string" },
+        "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+        "status": { "const": "adopted" },
+        "objects": { "description": "The objects read, as <kind> <name>.", "$ref": "common.schema.json#/$defs/stringList" },
+        "schemaFiles": { "description": "The declaration files written, relative to the project.", "$ref": "common.schema.json#/$defs/stringList" },
+        "migration": {
+          "description": "The baseline migration.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "id", "checksum", "statements"],
+          "properties": { "path": { "type": "string" }, "id": { "type": "string" }, "checksum": { "type": "string" }, "statements": { "type": "integer" } }
+        },
+        "recorded": {
+          "description": "The baseline's history row.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["history", "seq", "note", "appliedBy"],
+          "properties": { "history": { "type": "string" }, "seq": { "type": "integer" }, "note": { "type": "string" }, "appliedBy": { "type": "string" } }
+        },
+        "warnings": { "$ref": "common.schema.json#/$defs/stringList" }
+      }
     },
-    "recorded": {
-      "description": "The baseline's history row.",
+    {
+      "description": "yodel init --baseline <env>.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["history", "seq", "note", "appliedBy"],
-      "properties": { "history": { "type": "string" }, "seq": { "type": "integer" }, "note": { "type": "string" }, "appliedBy": { "type": "string" } }
-    },
-    "warnings": { "$ref": "common.schema.json#/$defs/stringList" }
-  }
+      "required": ["environment", "dialect", "status", "migration", "planDigest", "op"],
+      "properties": {
+        "environment": { "type": "string" },
+        "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+        "status": { "enum": ["gated", "recorded", "failed"] },
+        "migration": {
+          "description": "The baseline: the project's first migration.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "checksum"],
+          "properties": { "id": { "type": "string" }, "checksum": { "type": "string" } }
+        },
+        "planDigest": { "description": "The record's digest: the baseline, the empty history and the live schema.", "type": "string" },
+        "op": { "type": "string" },
+        "gate": { "type": "string" },
+        "approve": { "type": "string" },
+        "gatePlanDigest": { "type": "string" },
+        "history": { "description": "Where the baseline's row was recorded (status recorded).", "type": "string" },
+        "exitCode": { "type": "integer" }
+      }
+    }
+  ]
 }

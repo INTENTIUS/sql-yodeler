@@ -47,7 +47,7 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 `yodel report` exits 4 and lists each gap:
 
 - A history row missing. Each environment's history numbers its rows from 1 with no hole, because every run appends at the highest `seq` plus one, under the lock. A hole is a row someone deleted.
-- An applied migration whose plan digest has no approval of the environment's gate on the ledger: the approval was removed, or the migration was applied without one. A baseline recorded by `yodel init --from` has no digest and needs no approval.
+- An applied migration whose plan digest has no approval of the environment's gate on the ledger: the approval was removed, or the migration was applied without one. A baseline recorded by `yodel init --from` has no digest and needs no approval; one recorded by `yodel init --baseline` carries the digest its gate approved.
 
   A migration a wave of the apply pipeline applied ([waves](workflows.md)) was let through on the wave's gate, `yodel-apply-wave-<k>` on the `yodel-apply` ledger, for the wave's set digest, not on the migrations Op's gate. The wave's apply records that gate and digest in the migration's `started` history row (`note.wave`), and the report looks for the approval there. A wave whose gate policy at the base commit needed no approval (`never`, or `on-destructive` with nothing destructive) records that instead, checked under the lock when it applied, and is not a gap.
 - With `--audit --check`, an entry of the file the sources no longer give.
