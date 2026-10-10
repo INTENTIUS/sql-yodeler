@@ -1,19 +1,18 @@
 # Rendered from .github/src/claims-weekly.ts by `npm run workflows`. Edit that file, not this one.
 #
-# Every claim, weekly, against @intentius/sql-yodeler as npm serves it
+# Every claim, run by hand, against @intentius/sql-yodeler as npm serves it
 # (`npm i @intentius/sql-yodeler@latest`), not against this checkout: the
 # claims link that install's node_modules (YODEL_CLAIMS_NODE_MODULES,
 # scenarios/lib/project.ts). The run rewrites the committed record,
 # scenarios/claims-record.json, and the status page made from it (npm run
 # claims:page, docs/claims.md), and when either changed, opens a pull
 # request from branch claims-weekly, or updates the one already open.
-# The template claims are skipped here, as in claims.yml.
+# The template claims are skipped here, as in claims.yml. It runs only when
+# a person starts it (between development cycles), never on a schedule.
 
 name: claims-weekly
 
 on:
-  schedule:
-    - cron: '0 6 * * 1'
   workflow_dispatch: null
 
 permissions:
@@ -103,7 +102,7 @@ jobs:
           git commit -q -m "$title"
           git push -f origin claims-weekly
           if [ -z "$(gh pr list --head claims-weekly --state open --json number --jq '.[].number')" ]; then
-            gh pr create --head claims-weekly --title "$title" --body "Every claim but the template claims, run weekly by claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            gh pr create --head claims-weekly --title "$title" --body "Every claim but the template claims, run by hand with claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
       - if: always()
         uses: actions/upload-artifact@v4
