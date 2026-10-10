@@ -14,16 +14,15 @@ Rules for anyone, person or agent, who changes this repo. Building from a clone,
 
 ## Checks
 
-A pull request merges on its local gates:
+A pull request merges on its local gate: `npm ci && npm run build && npm run check`, which runs `typecheck`, `lint` and `test`. A template or release pull request also runs `npm run templates:check`.
 
-- `npm ci && npm run build && npm run check`, which runs `typecheck`, `lint` and `test`;
-- the claims the change touches, run once locally against the emulator: plain, `BREAK=1`, and `BREAK=<part>` for each part it adds or changes (`npm run claims -- --affected --list` names them).
-
-CI (`.github/workflows/ci.yml` and `claims.yml`) runs the same on every pull request and on `main`, but nobody waits for it before merging. Watch `main` anyway: when its `check` or `claims` goes red, fix it forward at once.
+CI (`.github/workflows/ci.yml`) runs the same on every pull request and on `main`, but nobody waits for it before merging. Watch `main` anyway: when its `check` goes red, fix it forward at once.
 
 The workflows in `.github/workflows/` are rendered, not written by hand: each is declared in TypeScript in `.github/src/<name>.ts` with `@intentius/chant-lexicon-github`. Edit the declaration, run `npm run workflows`, and commit both; `npm run check` fails when a rendered file differs from its declaration (`test/workflows.test.ts`).
 
-The scenario claims (`npm run claims`, `scenarios/`) run on every pull request in `.github/workflows/claims.yml`, in about 35 minutes. Their result is a signal for `main`, not a merge gate.
+## Claims and the bench are not part of development
+
+The scenario claims (`npm run claims`, `scenarios/`) and the bench (`npm run bench`) run between development cycles, when a person starts them. Nothing merges or releases on them, and nobody waits on them. A coding agent never runs them: both refuse to start without a real terminal, and ask a person to type `run`. `.github/workflows/claims.yml` runs only when started by hand, and `claims-weekly.yml` on its schedule. A change that needs a new claim part writes it; a person runs it with the next cycle's claims.
 
 ## chant
 
@@ -49,7 +48,7 @@ The image job then builds the CI image (`.github/image/Dockerfile`, declared in 
 A release takes two runs of `npm run release` (`scripts/release.sh`, which needs `gh` signed in):
 
 1. `npm run release -- 0.1.1` while main's `package.json` is at an older version: it makes branch `release-0.1.1` from `origin/main` with the version bumped in `package.json` and `package-lock.json`, pushes it and opens a pull request, `chore: release 0.1.1`. That pull request follows the rules above: merged on its local gates. Move the templates' range in the same pull request when the release needs it (below).
-2. Once main is at that version and the release commit's local gates pass (`npm ci && npm run build && npm run check` and `npm run claims` in a fresh worktree of that commit), `npm run release -- 0.1.1 --skip-ci --commit <sha>` tags `v0.1.1` on it and pushes the tag. `--skip-ci` (or `YODEL_RELEASE_SKIP_CI=1`) is how releases are made: it does not look at CI, and still refuses a commit that is not on main or not at 0.1.1. Without `--commit` it tags `origin/main`. Without `--skip-ci` the script tags only a commit whose `ci` and `claims` push runs both concluded success (the newest such commit at 0.1.1, or the one `--commit` names), and says why when none does.
+2. Once main is at that version and the release commit's local gate passes (`npm ci && npm run build && npm run check` in a fresh worktree of that commit), `npm run release -- 0.1.1 --skip-ci --commit <sha>` tags `v0.1.1` on it and pushes the tag. `--skip-ci` (or `YODEL_RELEASE_SKIP_CI=1`) is how releases are made: it does not look at CI, and still refuses a commit that is not on main or not at 0.1.1. Without `--commit` it tags `origin/main`. Without `--skip-ci` the script tags only a commit whose `ci` push run concluded success (the newest such commit at 0.1.1, or the one `--commit` names), and says why when none does.
 
 Run step 2 with `--dry-run` first. `--dry-run` (`-n`) runs every check and says what it would do, without making a branch, pull request or tag. The script refuses a version that is not `X.Y.Z`, a tag that already exists, a version already on npm and a version below main's.
 

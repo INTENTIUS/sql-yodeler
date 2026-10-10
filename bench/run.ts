@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { arch, cpus, platform, release, tmpdir, totalmem } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { humanGate } from "../scenarios/lib/human-gate.js";
 import {
   clickhouse,
   dialectName,
@@ -571,6 +572,7 @@ const pkgVersion = (path: string): string => (JSON.parse(readFileSync(join(repoR
 
 async function main(): Promise<void> {
   const o = options(process.argv.slice(2));
+  await humanGate("bench");
   const versions = await serverVersions();
   const psql = await psqlVersion();
   const commit = git("rev-parse", "--short", "HEAD");

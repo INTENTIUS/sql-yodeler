@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
  * scripts/release.sh's tag step against a scratch origin, with `gh` and
- * `npm` stubbed on PATH: every ci and claims run on main concluded failure,
+ * `npm` stubbed on PATH: every ci run on main concluded failure,
  * and nothing is on npm yet.
  */
 const script = resolve(__dirname, "../scripts/release.sh");
@@ -72,12 +72,12 @@ afterEach(() => {
 });
 
 describe("scripts/release.sh, the tag step", () => {
-  it("refuses a commit whose ci and claims runs are not green", () => {
+  it("refuses a commit whose ci run is not green", () => {
     const r = release(["9.9.9"]);
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/concluded failure/);
     expect(r.out).toMatch(
-      /no commit on main at 9\.9\.9 has both ci and claims green/,
+      /no commit on main at 9\.9\.9 has ci green/,
     );
     expect(tags()).toBe("");
   });

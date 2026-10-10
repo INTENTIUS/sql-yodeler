@@ -98,6 +98,7 @@ import { claims } from "./claims/index.js";
 import { partRunsOn, type Dialect } from "./lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "./lib/db.js";
 import { killGroup } from "./lib/exec.js";
+import { humanGate } from "./lib/human-gate.js";
 import { mergeRecord, readRecord, type ClaimsRecord, type RecordRow } from "./record.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -385,6 +386,7 @@ process.on("SIGTERM", () => {
   process.exit(143);
 });
 
+await humanGate("claims");
 await reachable();
 process.stderr.write(`[claims] ${String(queue.length)} runs, ${String(jobs)} at a time; logs in ${relative(process.cwd(), logDir) || logDir}\n`);
 const began = Date.now();
