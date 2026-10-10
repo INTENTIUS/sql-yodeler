@@ -199,7 +199,7 @@ export const gitlab = {
     // BREAK: the installed yodel built to drop the project's jobs.
     const render = join(dir, "node_modules", "@intentius", "sql-yodeler", "dist", "ci", "render.js");
     const text = readFileSync(render, "utf8");
-    const broken = text.replace(/Object\.assign\(jobs, ownJobs\(/, "(() => {})(").replace(/for \(const \[name, job\] of Object\.entries\(ownJobs\(/, "for (const [name, job] of Object.entries(((..._a) => ({}))(");
+    const broken = text.replace(/Object\.assign\(jobs, ownJobs\(/, "Object.assign(jobs, ((..._a) => ({}))(").replace(/for \(const \[name, job\] of Object\.entries\(ownJobs\(/, "for (const [name, job] of Object.entries(((..._a) => ({}))(");
     if (broken === text) throw new Error(`the project's jobs are not merged in ${render}; the broken build cannot drop them`);
     // BREAK (#129): and renders the lint job's plain `yodel lint`, with no annotations.
     const plain = broken.replace(/export const lintCommand = \(forge\) => /, "export const lintCommand = (_forge) => LINT;\nconst annotatedLint = (forge) => ");
