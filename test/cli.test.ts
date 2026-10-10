@@ -22,9 +22,9 @@ async function run(argv: string[], list?: readonly Command[]) {
   return { code, out, err };
 }
 
-const verbs = ["init", "plan", "apply", "approve", "new", "lint", "status", "drift", "rebase", "repair"];
+const verbs = ["init", "plan", "apply", "approve", "override", "new", "lint", "status", "drift", "rebase", "repair"];
 const envVerbs = ["plan", "apply", "status", "drift"];
-const built = [...envVerbs, "approve", "new", "init", "lint", "rebase", "repair"];
+const built = [...envVerbs, "approve", "override", "new", "init", "lint", "rebase", "repair"];
 const notBuilt = verbs.filter((v) => !built.includes(v));
 
 describe("yodel", () => {

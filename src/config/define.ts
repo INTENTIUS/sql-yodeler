@@ -52,6 +52,86 @@ export interface YodelConfig {
   environments?: Record<string, EnvironmentConfig>;
   /** `yodel lint`'s rule levels: `{ rules: { destructive: "warning" } }`. A misspelled rule name is a type error. */
   lint?: LintConfig;
+  /** Rules over the plan (#53) that `yodel plan` reports and `yodel apply` enforces; see {@link PolicyConfig}. */
+  policy?: PolicyConfig;
+}
+
+/**
+ * Rules over the versioned plan (#53). `yodel plan` shows each rule's
+ * outcome, and `yodel apply` refuses (exit 4) a plan a rule denies, unless
+ * someone {@link PolicyConfig.overriders} lists recorded an override of that
+ * rule for exactly that plan digest (`yodel override <env> --rule <id>
+ * --reason <text>`).
+ *
+ * ```ts
+ * policy: {
+ *   overriders: ["alice", "bob"],
+ *   rules: [
+ *     { id: "no-drops-in-prod", environments: ["prod"], refuse: { classes: ["drop"], destructive: true } },
+ *     { id: "silences-cite-a-ticket", silences: { reason: /\b[A-Z]+-\d+\b/ } },
+ *     { id: "no-rebuilds-in-hours", environments: ["prod"], check: (plan) => {
+ *         const hour = new Date(plan.now).getUTCHours();
+ *         const rebuilds = plan.pending.flatMap((m) => m.steps.filter((s) => s.classes.includes("rebuild")));
+ *         return hour >= 8 && hour < 18 && rebuilds.length > 0 ? "a rebuild between 08:00 and 18:00 UTC" : undefined;
+ *       } },
+ *   ],
+ * }
+ * ```
+ */
+export interface PolicyConfig {
+  rules: PolicyRule[];
+  /** Who may override a rule: an override recorded by anyone else does not count. None listed, no override counts. */
+  overriders?: string[];
+}
+
+/** One rule. It denies the plan when any of `refuse`, `silences` or `check` does. */
+export interface PolicyRule {
+  /** Names it in output, in the refusal and in `yodel override --rule`: lowercase letters, digits, `-` and `_`. */
+  id: string;
+  description?: string;
+  /** The environments it applies to. Default: every one. */
+  environments?: string[];
+  /** Denies a pending step of one of these classes (`drop`, `rebuild`, `rewrite`, ...), or a destructive one when `destructive` is true. */
+  refuse?: { classes?: string[]; destructive?: boolean };
+  /** Denies a `-- yodel:allow` silence (of one of `rules`, default any) whose reason does not match `reason`. */
+  silences?: { rules?: string[]; reason: RegExp };
+  /** A predicate over the plan: a message (or several) or `false` denies it; `undefined`, `true` or `[]` allows it. */
+  check?: (plan: PolicyPlan) => string | string[] | boolean | undefined;
+}
+
+/** What a policy rule sees: the plan `yodel apply` would run. Plain JSON. */
+export interface PolicyPlan {
+  environment: string;
+  dialect: "clickhouse" | "postgres";
+  /** When the plan is evaluated, ISO 8601 in UTC. */
+  now: string;
+  /** The migrations the run would apply, in order. */
+  pending: PolicyMigration[];
+}
+
+export interface PolicyMigration {
+  id: string;
+  checksum: string;
+  outOfOrder: boolean;
+  steps: PolicyStep[];
+  /** Its `-- yodel:allow` silences. */
+  silences: Array<{ step: number; rule: string; reason: string }>;
+}
+
+export interface PolicyStep {
+  index: number;
+  kind: "statement" | "op" | "manual";
+  object: string;
+  name: string;
+  /** A statement's class, or every class an Op or manual step's changes have. */
+  classes: string[];
+  destructive: boolean;
+  /** The rules that classified it. */
+  rules: string[];
+  /** A statement's SQL. */
+  sql?: string;
+  /** An Op step's Op. */
+  op?: string;
 }
 
 /** The rules `lint.rules` can set: every lint rule, and the replay check's. */

@@ -5,6 +5,7 @@ import { drift } from "./drift.js";
 import { init } from "./init.js";
 import { lint } from "./lint.js";
 import { newCommand } from "./new.js";
+import { override } from "./override.js";
 import { plan } from "./plan.js";
 import { rebase } from "./rebase.js";
 import { repair } from "./repair.js";
@@ -16,6 +17,7 @@ export const commands: readonly Command[] = [
   plan,
   apply,
   approve,
+  override,
   newCommand,
   lint,
   status,

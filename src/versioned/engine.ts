@@ -73,6 +73,7 @@ import { openPostgres, type PgConnect } from "./postgres/driver.js";
 import { compareHistory, outOfOrder, type PendingMigration, type VersionedStatus } from "./state.js";
 import { digestSubject, planDigest, sameDigest, type LiveScope } from "./digest.js";
 import { checksDue, checksRefusal, failedChecks, runChecks } from "./checks.js";
+import type { PolicyOverride } from "./policy.js";
 
 /** Exit code: a checksum mismatch, an applied migration gone from the directory, or an out-of-order migration without `--allow-out-of-order`. */
 export const REFUSED = 4;
@@ -250,6 +251,12 @@ export interface ExecuteOptions {
   /** The silences in force for a migration, as JSON text for the history's `silences` field. Default `"[]"`. */
   silences?: (m: Migration) => string;
   processEnv?: NodeJS.ProcessEnv;
+  /**
+   * Judges the policy (#53) for the digest computed under the lock; throws to
+   * refuse. Returns the overrides the run relies on, which each migration's
+   * `started` row records. Absent: no policy.
+   */
+  policy?: (digest: string, toApply: readonly PendingMigration[]) => Promise<PolicyOverride[]>;
   /** Runs an Op step. Default: chant's local executor (`../steps/`). */
   runStep?: StepRunner;
   /** The receipt store a backfill step uses. Default: chant's, on the server. */
@@ -288,10 +295,12 @@ export async function executeApply(venv: VersionedEnv, ordered: readonly Migrati
       );
     }
     await options.approve(digest);
+    // The policy (#53), judged again under the lock for the digest computed here: a denial with no override for it refuses.
+    const overrides = options.policy ? await options.policy(digest, toApply) : [];
     const recorder = new HistoryRecorder(venv.store, newRunContext(options.approvedDigest, options.processEnv), state.maxSeq);
     const result: ExecuteResult = { applied: [], skipped: [], lock: { kind: lock.kind, where: lock.where, ...(lock.notice ? { notice: lock.notice } : {}) } };
     for (const p of toApply) {
-      await applyMigration(venv, p, state.byId.get(p.id), recorder, beat, options, result);
+      await applyMigration(venv, p, state.byId.get(p.id), recorder, beat, options, result, overrides);
       result.applied.push(p.id);
     }
     return result;
@@ -306,14 +315,17 @@ async function applyMigration(
   beat: () => Promise<void>,
   options: ExecuteOptions,
   result: ExecuteResult,
+  overrides: readonly PolicyOverride[] = [],
 ): Promise<void> {
   const m = p.migration;
   const silences = options.silences?.(m) ?? "[]";
   const base = { migration_id: m.id, parent: m.parent ?? "", checksum: p.checksum, silences };
-  let checksNote = "";
+  // The started row's note: the policy overrides the run relied on (#53), and the checks' outcomes (#52).
+  const noted: Record<string, unknown> = overrides.length > 0 ? { policy: { overrides } } : {};
+  let checksNote = Object.keys(noted).length > 0 ? JSON.stringify(noted) : "";
   if (checksDue(p)) {
     const outcomes = await runChecks(venv.driver, m);
-    checksNote = JSON.stringify({ checks: outcomes });
+    checksNote = JSON.stringify({ ...noted, checks: outcomes });
     const refusal = checksRefusal(m, outcomes, "under the lock, before its first statement");
     if (refusal) {
       const failed = failedChecks(m, outcomes);

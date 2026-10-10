@@ -55,6 +55,46 @@ function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
   return value;
 }
 
+const RULE_ID = /^[a-z0-9][a-z0-9_-]*$/;
+
+function checkPolicy(value: unknown, where: string, profiles?: readonly string[]): void {
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { rules: [...], overriders?: [...] }`);
+  for (const k of Object.keys(value)) if (k !== "rules" && k !== "overriders") throw new YodelError(`${where}.${k}: unknown setting (expected rules, overriders)`);
+  if (value.overriders !== undefined && !(Array.isArray(value.overriders) && value.overriders.every((o) => typeof o === "string" && o !== ""))) {
+    throw new YodelError(`${where}.overriders: expected a list of names`);
+  }
+  if (!Array.isArray(value.rules)) throw new YodelError(`${where}.rules: expected a list of rules`);
+  const seen = new Set<string>();
+  for (const [i, rule] of value.rules.entries()) {
+    const at = `${where}.rules[${String(i)}]`;
+    if (!isRecord(rule)) throw new YodelError(`${at}: expected an object`);
+    for (const k of Object.keys(rule)) {
+      if (!["id", "description", "environments", "refuse", "silences", "check"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected id, description, environments, refuse, silences, check)`);
+    }
+    if (typeof rule.id !== "string" || !RULE_ID.test(rule.id)) throw new YodelError(`${at}.id: lowercase letters, digits, - and _, got ${JSON.stringify(rule.id)}`);
+    if (seen.has(rule.id)) throw new YodelError(`${at}.id: two rules are named ${rule.id}`);
+    seen.add(rule.id);
+    if (rule.environments !== undefined) {
+      if (!Array.isArray(rule.environments) || !rule.environments.every((e) => typeof e === "string")) throw new YodelError(`${at}.environments: expected a list of environment names`);
+      const unknown = profiles ? rule.environments.filter((e) => !profiles.includes(e)) : [];
+      if (unknown.length > 0) throw new YodelError(`${at}.environments: ${unknown.join(", ")} ${unknown.length === 1 ? "is not an environment" : "are not environments"} chant.config.ts declares`);
+    }
+    if (rule.refuse === undefined && rule.silences === undefined && rule.check === undefined) throw new YodelError(`${at}: a rule needs refuse, silences or check`);
+    if (rule.refuse !== undefined) {
+      const r = rule.refuse;
+      if (!isRecord(r) || Object.keys(r).some((k) => k !== "classes" && k !== "destructive")) throw new YodelError(`${at}.refuse: expected { classes?: [...], destructive?: true }`);
+      if (r.classes !== undefined && !(Array.isArray(r.classes) && r.classes.every((c) => typeof c === "string"))) throw new YodelError(`${at}.refuse.classes: expected a list of classes`);
+      if (r.destructive !== undefined && typeof r.destructive !== "boolean") throw new YodelError(`${at}.refuse.destructive: expected true or false`);
+    }
+    if (rule.silences !== undefined) {
+      const s = rule.silences;
+      if (!isRecord(s) || !(s.reason instanceof RegExp) || Object.keys(s).some((k) => k !== "rules" && k !== "reason")) throw new YodelError(`${at}.silences: expected { reason: /pattern/, rules?: [...] }`);
+      if (s.rules !== undefined && !(Array.isArray(s.rules) && s.rules.every((x) => typeof x === "string"))) throw new YodelError(`${at}.silences.rules: expected a list of lint rules`);
+    }
+    if (rule.check !== undefined && typeof rule.check !== "function") throw new YodelError(`${at}.check: expected a function of the plan`);
+  }
+}
+
 /**
  * Checks a loaded config's shape. `environments` names each environment by
  * its `sql.profiles` name; one that chant.config.ts does not declare is an
@@ -63,8 +103,9 @@ function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
-    if (k !== "environments" && k !== "lint") throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint)`);
+    if (k !== "environments" && k !== "lint" && k !== "policy") throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy)`);
   }
+  if (value.policy !== undefined) checkPolicy(value.policy, `${path}: policy`, profiles);
   if (value.lint !== undefined && !isRecord(value.lint)) throw new YodelError(`${path}: lint: expected an object`);
   if (value.environments !== undefined) {
     if (!isRecord(value.environments)) throw new YodelError(`${path}: environments: expected an object keyed by environment`);
