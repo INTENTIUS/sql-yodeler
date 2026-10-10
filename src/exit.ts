@@ -22,7 +22,7 @@ export const EXIT_CODES: ReadonlyArray<readonly [number, string]> = [
   [EXIT_ERROR, "an error"],
   [EXIT_NEEDS_OP, "something yodel will not do itself (a change that needs an Op it does not run, a manual step); for yodel drift, drift found"],
   [EXIT_OUTSTANDING, "something outstanding: apply stopped at its approval gate, status found pending migrations, lint found errors"],
-  [EXIT_REFUSED, "refused, nothing done: a checksum mismatch, an applied migration gone from the directory, an out-of-order migration, a fork or another problem in the migrations directory, a migration the environment it must run on first has not applied, an environment whose reader and writer are one identity"],
+  [EXIT_REFUSED, "refused, nothing done: a checksum mismatch, an applied migration gone from the directory, an out-of-order migration, a fork or another problem in the migrations directory, a migration the environment it must run on first has not applied, an environment whose reader and writer are one identity, a command that writes run with an environment's reader"],
   [EXIT_LOCKED, "another apply holds the lock"],
 ];
 

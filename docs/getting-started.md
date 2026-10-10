@@ -73,7 +73,7 @@ export DEV_CLICKHOUSE_READER_USER=reader DEV_CLICKHOUSE_READER_PASSWORD=
 export DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
 ```
 
-Without them, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set`. The reader cannot write, so `yodel apply` runs with `YODEL_CREDENTIALS=writer`, as `just apply` does. The variables for every environment:
+Without them, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set`. The reader cannot write, so `yodel apply` runs with `YODEL_CREDENTIALS=writer`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 4) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_CREDENTIALS=writer:dev npx yodel apply dev`). The variables for every environment:
 
 | Variable | Meaning |
 |---|---|
@@ -170,7 +170,7 @@ migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (
 Approve it with:
   chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:96585362be63615a9c5a29c059b2e211f409bcb3e3d5a20a1b226773dfea9aa3
 or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first;
-then run npx yodel apply dev again.
+then run YODEL_CREDENTIALS=writer:dev npx yodel apply dev again.
 [exit 3]
 ```
 

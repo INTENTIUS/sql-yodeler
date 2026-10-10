@@ -168,3 +168,76 @@ export function sharedCredentialsIn(profiles: Record<string, unknown>, processEn
   }
   return undefined;
 }
+
+/**
+ * What a printed command that writes starts with for `profile` (#159):
+ * `YODEL_CREDENTIALS=writer:<env> ` when the profile has a reader and a
+ * writer of its own, so the command a hint prints runs as the writer
+ * whatever the shell it is pasted into holds; nothing for any other profile.
+ */
+export function writerPrefix(profile: unknown): string {
+  const c = credentialsOf(profile);
+  return c ? `YODEL_CREDENTIALS=writer:${c.env} ` : "";
+}
+
+/** The user a profile's chosen role connects as, for a message: `DEV_CLICKHOUSE_READER_USER (reader)`, or the variable alone when it is not set here. */
+function connectsAs(user: unknown, processEnv: NodeJS.ProcessEnv): string | undefined {
+  if (!isEnvRef(user)) return typeof user === "string" && user !== "" ? user : undefined;
+  const value = processEnv[user.env];
+  return value !== undefined && value !== "" ? `${user.env} (${value})` : user.env;
+}
+
+/**
+ * The refusal (#159) of `command`, which writes, when this process holds
+ * `profile`'s reader: one line naming the reader's user and the variable
+ * that picks the writer. Undefined when the profile has no separate reader
+ * and writer, or this process holds the writer.
+ */
+export function readerRefusal(profile: unknown, command: string, processEnv: NodeJS.ProcessEnv = process.env): string | undefined {
+  const c = credentialsOf(profile);
+  if (!c || c.role !== "reader") return undefined;
+  const ys = processEnv.YODEL_CREDENTIALS;
+  return (
+    `refused: ${command} writes, and this process holds ${c.env}'s reader, ${connectsAs(c.reader.user, processEnv) ?? c.reader.user.env}, ` +
+    `because YODEL_CREDENTIALS is ${ys ? `${ys}, not writer or writer:${c.env}` : "not set"}. ` +
+    `Run it as the writer: YODEL_CREDENTIALS=writer:${c.env} ${command}. Nothing was done.`
+  );
+}
+
+/** Postgres SQLSTATEs and ClickHouse error codes that mean the user lacks a privilege: insufficient_privilege, read_only_sql_transaction; READONLY, ACCESS_DENIED. */
+const PG_DENIED = new Set(["42501", "25006"]);
+const CH_DENIED = /\bCode: (164|497)\b|\b(ACCESS_DENIED|READONLY)\b|Not enough privileges/;
+
+/** The server's own message of an error, its first line, without ClickHouse's trailing version. */
+function serverLine(e: unknown): string {
+  const text = (e as { serverMessage?: unknown } | null)?.serverMessage;
+  const message = typeof text === "string" ? text : e instanceof Error ? e.message : String(e);
+  return (message.trim().split("\n")[0] ?? "").replace(/ \(version .*\)\.?$/, "");
+}
+
+/** Whether `e` is the server refusing a statement for want of a privilege. */
+export function isPermissionDenied(e: unknown): boolean {
+  if (typeof e !== "object" || e === null) return false;
+  const code = (e as { code?: unknown }).code;
+  if (typeof code === "string" && PG_DENIED.has(code)) return true;
+  const text = (e as { serverMessage?: unknown }).serverMessage;
+  const message = typeof text === "string" ? text : e instanceof Error ? e.message : "";
+  return CH_DENIED.test(message) || /^permission denied\b/i.test(message);
+}
+
+/**
+ * One line (#159) for the server refusing `command` a privilege, in place
+ * of the error and its stack: the user it connected as, the server's
+ * message (which names the grant), and, when `profile` connected as its
+ * reader, the variable that picks the writer. Undefined for any other error.
+ */
+export function permissionRefusal(e: unknown, profile: unknown, command: string, processEnv: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (!isPermissionDenied(e)) return undefined;
+  const c = credentialsOf(profile);
+  const role = c ? `${c.env}'s ${c.role}, ` : "";
+  const user = connectsAs((profile as { user?: unknown } | null)?.user, processEnv);
+  const fix = c?.role === "reader"
+    ? `Run it as the writer: YODEL_CREDENTIALS=writer:${c.env} ${command}.`
+    : `Grant that user what the server names, or connect as a user that has it.`;
+  return `refused: the server refused ${command}, which connected as ${role}${user ?? "the profile's user"}: ${serverLine(e)}. ${fix}`;
+}

@@ -4,7 +4,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { readMigrations } from "../migrations/index.js";
 import { runChant } from "../chant/process.js";
-import { runnable } from "../chant/runnable.js";
+import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
 import { EXIT_OUTSTANDING } from "../exit.js";
 import { gitLedger } from "../versioned/approval.js";
@@ -296,7 +296,7 @@ export const approve: Command = {
         }
         const mode = await migrationsApprovalAtBase(project, env.name);
         if (mode.note) io.err(`${mode.note}\n`);
-        return await record(io, project.dir, op.name, op.gate, report.digest, await resuming(project.dir), `Apply it with:\n  ${runnable(`yodel apply ${env.name}`, project.dir)}`, ` Where none waits, apply it with:\n  ${runnable(`yodel apply ${env.name}`, project.dir)}`, signing(mode.mode));
+        return await record(io, project.dir, op.name, op.gate, report.digest, await resuming(project.dir), `Apply it with:\n  ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)}`, ` Where none waits, apply it with:\n  ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)}`, signing(mode.mode));
       } finally {
         await closeVersioned(venv);
       }

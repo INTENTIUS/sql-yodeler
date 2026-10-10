@@ -5,7 +5,7 @@ import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { EXIT_REFUSED } from "../exit.js";
 import { policyAtBase } from "../config/base.js";
 import { runChant } from "../chant/process.js";
-import { runnable } from "../chant/runnable.js";
+import { runnableAsWriter } from "../chant/runnable.js";
 import {
   closeVersioned,
   currentRevert,
@@ -149,7 +149,7 @@ export const override: Command = {
           if (ran.code !== 0) throw new YodelError(`chant approve ${op.name} ${overrideGate(rule)} failed (exit ${String(ran.code)}); the override of ${rule} was not recorded`);
           io.out(`Recorded an override of ${rule} for ${digest}${by ? ` by ${by}` : ""}: ${reason}\n`);
         }
-        io.out(`It counts for this plan only. ${revertId !== undefined ? "Revert" : "Apply"} with:\n  ${runnable(next, project.dir)}\n`);
+        io.out(`It counts for this plan only. ${revertId !== undefined ? "Revert" : "Apply"} with:\n  ${runnableAsWriter(next, project.dir, env.profile)}\n`);
         return 0;
       } finally {
         await closeVersioned(venv);

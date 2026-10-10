@@ -359,7 +359,7 @@ async function readerAndWriter(ctx: Ctx): Promise<{ reader: string; writer: stri
   return { reader, writer, password };
 }
 
-/** Under BREAK, yodel with the refusal of a shared reader and writer taken out: the project's yodel copied, its loadProject made to check nothing. */
+/** Under BREAK, yodel with the refusal of a shared reader and writer taken out, and apply's refusal of the reader (#159): the project's yodel copied, its loadProject made to check nothing and its apply to refuse nothing for the credentials. */
 function withoutSharedRefusal(ctx: Ctx, p: Project): string[] {
   const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
   const root = join(ctx.work, "yodel-without-shared-refusal");
@@ -372,7 +372,12 @@ function withoutSharedRefusal(ctx: Ctx, p: Project): string[] {
   const patched = text.replace(/const shared = sharedCredentialsIn\([^;]*\);/, "const shared = undefined;");
   if (patched === text) throw new Error(`the refusal of a shared reader and writer is not in ${file}; the broken build cannot take it out`);
   writeFileSync(file, patched);
-  ctx.log("BREAK: yodel built without the refusal of a shared reader and writer");
+  const applyFile = join(root, "dist", "commands", "apply.js");
+  const applyText = readFileSync(applyFile, "utf8");
+  const applyPatched = applyText.replace(/const asReader = writes \? readerRefusal\([^;]*;/, "const asReader = undefined;");
+  if (applyPatched === applyText) throw new Error(`apply's refusal of the reader is not in ${applyFile}; the broken build cannot take it out`);
+  writeFileSync(applyFile, applyPatched);
+  ctx.log("BREAK: yodel built without the refusal of a shared reader and writer, and without apply's refusal of the reader");
   return ["node", join(root, "dist", "bin.js")];
 }
 
@@ -384,8 +389,11 @@ function withoutSharedRefusal(ctx: Ctx, p: Project): string[] {
  * the write; with the writer (YODEL_CREDENTIALS=writer:<env>) the probe's
  * write goes through and it exits 4. With the writer's user variable
  * holding the reader's user, yodel refuses the project, exit 4 naming both
- * variables and the user, and nothing runs. The profile is put back after.
- * BREAK: yodel is built without that refusal, so the shared config runs.
+ * variables and the user, and nothing runs. yodel apply with the reader
+ * (#159) refuses before the gate, exit 4 naming YODEL_CREDENTIALS=writer:<env>,
+ * and the history is as it was. The profile is put back after.
+ * BREAK: yodel is built without those refusals, so the shared config runs
+ * and the apply as the reader goes on to the gate or the server's refusal.
  */
 export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
   const { reader, writer, password } = await readerAndWriter(ctx);
@@ -413,6 +421,16 @@ export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
     hold(
       shared.code === 4 && shared.err.includes(`the reader (CLAIM_READER_USER) and the writer (CLAIM_WRITER_USER) are the same user, ${reader}`),
       `yodel status with the reader's user as the writer's exited ${String(shared.code)}, not 4 naming both: ${shared.err.slice(-400)}`,
+    );
+
+    // An apply as the reader (#159) refuses before the gate and writes nothing to the history.
+    const history = async () => (await p.yodel(["status", p.env, "--json"], { env: apart, ...bin })).out;
+    const before = await history();
+    const asReader = await p.yodel(["apply", p.env], { env: apart, ...bin });
+    const after = await history();
+    hold(
+      asReader.code === 4 && asReader.err.includes(`YODEL_CREDENTIALS=writer:${p.env}`) && !asReader.err.includes("\n    at ") && after === before,
+      `yodel apply as the reader exited ${String(asReader.code)}, not 4 naming YODEL_CREDENTIALS=writer:${p.env}${after === before ? "" : ", and the history moved"}: ${asReader.err.slice(-400)}`,
     );
   } finally {
     p.write("chant.config.ts", config);
