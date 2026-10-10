@@ -294,6 +294,13 @@ export interface ExecuteOptions {
    * through (`wave`, ../waves/index.ts).
    */
   runNote?: () => Record<string, unknown> | undefined;
+  /**
+   * The `after` steps (#64): run under the lock once the last migration's
+   * statements succeeded, before its `succeeded` row, whose note records
+   * what they return. An error they return is thrown once that row is
+   * written: the migrations stay applied.
+   */
+  after?: () => Promise<{ note: Record<string, unknown>; error?: Error }>;
 }
 
 /** How long a run waited for the lock, and who held it. */
@@ -403,9 +410,10 @@ export async function executeApply(venv: VersionedEnv, ordered: readonly Migrati
     const overrides = options.policy ? await options.policy(digest, toApply) : [];
     const recorder = new HistoryRecorder(venv.store, newRunContext(options.approvedDigest, options.processEnv), state.maxSeq);
     const result: ExecuteResult = { applied: [], skipped: [], lock: lockDoc };
-    for (const p of toApply) {
-      await applyMigration(venv, p, state.byId.get(p.id), recorder, beat, options, result, overrides);
+    for (const [i, p] of toApply.entries()) {
+      const after = await applyMigration(venv, p, state.byId.get(p.id), recorder, beat, options, result, overrides, i === toApply.length - 1);
       result.applied.push(p.id);
+      if (after) throw after;
     }
     return result;
   });
@@ -420,7 +428,8 @@ async function applyMigration(
   options: ExecuteOptions,
   result: ExecuteResult,
   overrides: readonly PolicyOverride[] = [],
-): Promise<void> {
+  last = false,
+): Promise<Error | undefined> {
   const m = p.migration;
   const silences = options.silences?.(m) ?? "[]";
   const base = { migration_id: m.id, parent: m.parent ?? "", checksum: p.checksum, silences };
@@ -474,8 +483,10 @@ async function applyMigration(
     }
     options.log(`  statement ${String(i)}: ok (${step.rule} ${step.class}, ${step.name})`);
   }
-  await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "succeeded" });
+  const after = last && options.after ? await options.after() : undefined;
+  await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "succeeded", ...(after ? { note: JSON.stringify(after.note) } : {}) });
   options.log(`${m.id}: applied`);
+  return after?.error;
 }
 
 type RowBase = { migration_id: string; parent: string; checksum: string; silences: string };

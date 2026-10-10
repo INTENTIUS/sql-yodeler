@@ -12,6 +12,7 @@ import { CI_FORGES, WAVE_GATES, type EnvironmentConfig, type YodelConfig } from 
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
+import { checksProblem } from "../migrations/checks.js";
 
 export const CONFIG_FILE = "yodel.config.ts";
 
@@ -43,9 +44,10 @@ function checkTopology(value: unknown, where: string): void {
 function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
   if (!isRecord(value)) throw new YodelError(`${where}: expected an object`);
   for (const k of Object.keys(value)) {
-    if (!["topology", "history", "lockTtl", "lockWait", "tenants"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait, tenants)`);
+    if (!["topology", "history", "lockTtl", "lockWait", "tenants", "steps"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait, tenants, steps)`);
   }
   if (value.tenants !== undefined) checkTenants(value.tenants, `${where}.tenants`);
+  if (value.steps !== undefined) checkApplySteps(value.steps, `${where}.steps`);
   if (value.topology !== undefined) checkTopology(value.topology, `${where}.topology`);
   if (value.history !== undefined) {
     if (!isRecord(value.history)) throw new YodelError(`${where}.history: expected an object`);
@@ -73,6 +75,37 @@ function checkTenants(value: unknown, where: string): void {
   const keys = isRecord(value) ? Object.keys(value) : [];
   if (!isRecord(value) || keys.length !== 1 || !["file", "query"].includes(keys[0] ?? "") || typeof value[keys[0] ?? ""] !== "string" || value[keys[0] ?? ""] === "") {
     throw new YodelError(`${where}: expected a list of tenant names, { file: "<path>" } or { query: "<SQL>" }`);
+  }
+}
+
+const STEP_NAME = /^[a-z0-9][a-z0-9_-]*$/;
+
+function checkApplySteps(value: unknown, where: string): void {
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { before?: [...], after?: [...] }`);
+  for (const k of Object.keys(value)) if (k !== "before" && k !== "after") throw new YodelError(`${where}.${k}: unknown setting (expected before, after)`);
+  const seen = new Set<string>();
+  for (const when of ["before", "after"] as const) {
+    const list = value[when];
+    if (list === undefined) continue;
+    if (!Array.isArray(list)) throw new YodelError(`${where}.${when}: expected a list of steps`);
+    list.forEach((step: unknown, i) => {
+      const at = `${where}.${when}[${String(i)}]`;
+      if (!isRecord(step)) throw new YodelError(`${at}: expected { name, sql } or { name, command }`);
+      for (const k of Object.keys(step)) if (!["name", "sql", "expect", "command", "onFailure"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected name, sql, expect, command, onFailure)`);
+      if (typeof step.name !== "string" || !STEP_NAME.test(step.name)) throw new YodelError(`${at}.name: lowercase letters, digits, - and _, got ${JSON.stringify(step.name)}`);
+      if (seen.has(step.name)) throw new YodelError(`${at}.name: two steps are named ${step.name}`);
+      seen.add(step.name);
+      const sql = typeof step.sql === "string" && step.sql.trim() !== "";
+      const command = typeof step.command === "string" && step.command.trim() !== "";
+      if (sql === command) throw new YodelError(`${at} (${step.name}): give sql or command, one of them`);
+      if (step.expect !== undefined) {
+        if (!sql) throw new YodelError(`${at}.expect: only a sql step has an expect`);
+        const problem = checksProblem([{ name: step.name, sql: step.sql, expect: step.expect }]);
+        if (problem) throw new YodelError(`${at}.expect: ${problem.replace(/^checks\[0\] \([^)]*\): /, "")}`);
+      }
+      if (step.onFailure !== undefined && step.onFailure !== "fail" && step.onFailure !== "approve") throw new YodelError(`${at}.onFailure: "fail" or "approve", got ${JSON.stringify(step.onFailure)}`);
+      if (step.onFailure === "approve" && when === "after") throw new YodelError(`${at}.onFailure: an after step runs once the migrations are applied, so there is nothing left to hold for approval; use "fail"`);
+    });
   }
 }
 

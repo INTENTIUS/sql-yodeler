@@ -39,8 +39,9 @@
 import { createHash } from "node:crypto";
 import type { HistoryRow } from "../history/index.js";
 import { waveRecordOf } from "../waves/record.js";
+import { describeStep, stepsOfNote } from "../apply-steps/index.js";
 
-export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted"] as const;
+export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted", "step"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
 export type AuditSource = { ledger: string; op: string; gate: string } | { history: string; seq: number; run: string };
@@ -138,11 +139,23 @@ function fromHistory(input: AuditInput): AuditEntry[] {
   const silenced = new Set<string>();
   /** Each migration's wave, from its latest started row. */
   const waveOf = new Map<string, AuditEntry["wave"]>();
+  /** The steps around apply (#64) a run recorded: the before steps are on every migration's started row of the run, listed once. */
+  const stepsSeen = new Set<string>();
+  const steps = (r: HistoryRow, at: Omit<AuditEntry, "id" | "kind">) => {
+    for (const o of stepsOfNote(r.note)) {
+      const key = `${r.run_id}\u0000${o.when}\u0000${o.name}`;
+      if (stepsSeen.has(key)) continue;
+      stepsSeen.add(key);
+      // A before step is the run's, not one migration's; an after step ran after the last.
+      out.push(entry({ at: at.at, environment: at.environment, ...(at.by ? { by: at.by } : {}), ...(o.when === "after" ? { migration: r.migration_id } : {}), source: at.source, kind: "step", detail: describeStep(o) }));
+    }
+  };
   for (const r of [...input.rows].sort((a, b) => a.seq - b.seq)) {
     if (r.kind !== "migration") continue;
     const source: AuditSource = { history, seq: r.seq, run: r.run_id };
     const base = { at: isoTime(r.recorded_at ?? ""), environment, by: r.applied_by, migration: r.migration_id, ...(r.plan_digest ? { digest: r.plan_digest } : {}), source };
     if (r.status === "started") {
+      steps(r, base);
       const w = waveRecordOf(r.note);
       if (w) waveOf.set(r.migration_id, { gate: w.gate, digest: w.digest, status: w.status });
       else waveOf.delete(r.migration_id);
@@ -163,12 +176,15 @@ function fromHistory(input: AuditInput): AuditEntry[] {
       applied.delete(r.migration_id);
       out.push(entry({ ...base, kind: "reverted", ...(r.note ? { detail: r.note } : {}) }));
     } else if (r.status === "succeeded") {
-      if (applied.has(r.migration_id)) out.push(entry({ ...base, kind: "repaired", detail: r.note || `checksum ${r.checksum}` }));
+      // The after steps' outcomes are entries of their own, not the applied entry's detail.
+      const note = stepsOfNote(r.note).length > 0 ? "" : r.note;
+      if (applied.has(r.migration_id)) out.push(entry({ ...base, kind: "repaired", detail: note || `checksum ${r.checksum}` }));
       else {
         applied.add(r.migration_id);
         const wave = waveOf.get(r.migration_id);
-        out.push(entry({ ...base, kind: "applied", ...(r.note ? { detail: r.note } : {}), ...(wave ? { wave } : {}) }));
+        out.push(entry({ ...base, kind: "applied", ...(note ? { detail: note } : {}), ...(wave ? { wave } : {}) }));
       }
+      steps(r, base);
     } else {
       out.push(entry({ ...base, kind: CHECK_FAILED.test(r.error) ? "refused" : "failed", detail: r.error }));
     }

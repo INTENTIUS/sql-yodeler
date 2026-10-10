@@ -70,7 +70,7 @@
         "id": { "type": "string", "description": "A hash of the entry and its source: the same sources give the same id." },
         "at": { "type": "string" },
         "environment": { "type": "string" },
-        "kind": { "enum": ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted"] },
+        "kind": { "enum": ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted", "step"] },
         "by": { "type": "string" },
         "migration": { "type": "string" },
         "digest": { "type": "string" },

@@ -15,6 +15,8 @@ import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "..
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
+import { describeStep, heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
+import type { ApplyStep } from "../config/define.js";
 import { enforcePromotion, forecastWave, planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
@@ -48,7 +50,7 @@ import {
   type MigrateOpRef,
   type VersionedEnv,
 } from "../versioned/index.js";
-import type { ExecuteResult } from "../versioned/engine.js";
+import type { ExecuteOptions, ExecuteResult } from "../versioned/engine.js";
 import type { StatusReport } from "../versioned/report.js";
 import type { RuleResult } from "../versioned/policy.js";
 
@@ -414,8 +416,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (planned.environment !== env.name) throw new YodelError(`refused: ${a.waveApply} is ${planned.environment}'s plan, not ${env.name}'s; nothing was applied`, EXIT_REFUSED);
     const cwd = process.cwd();
     let wave: WaveRecord | undefined;
+    let before: StepOutcome[] = [];
+    const steps = await stepsAtBase(project, env.name);
+    if (steps.note) io.err(`${steps.note}\n`);
     const result = await executeApply(venv, ordered, {
-      runNote: () => (wave ? { wave } : undefined),
+      runNote: () => (wave || before.length > 0 ? { ...(wave ? { wave } : {}), ...(before.length > 0 ? { steps: before } : {}) } : undefined),
+      ...afterSteps(project, venv, env, steps.steps?.after, io),
       approvedDigest: planned.migrations,
       allowOutOfOrder: a.allowOutOfOrder,
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
@@ -444,7 +450,10 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         if (now.planDigest !== planned.planDigest) {
           throw new YodelError(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`, 1);
         }
-        const verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest);
+        // The before steps (#64) ran again in that plan, under the lock; a held one needs a person's approval whatever the gate.
+        before = now.steps ?? [];
+        for (const o of before) io.err(`${describeStep(o)}\n`);
+        const verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest, now.held ?? []);
         wave = verified.wave;
         io.err(`${verified.line}\n`);
       },
@@ -464,7 +473,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     // The env var is only the Op's hand-off; the approval itself is checked in chant's gate ledger, under the lock.
     const op = await findMigrateOp(project, env, a.op);
     const ledger = await gitLedger(project.dir);
+    const steps = await stepsAtBase(project, env.name);
+    if (steps.note) io.err(`${steps.note}\n`);
+    let before: StepOutcome[] = [];
     const result = await executeApply(venv, ordered, {
+      runNote: () => (before.length > 0 ? { steps: before } : undefined),
+      ...afterSteps(project, venv, env, steps.steps?.after, io),
       approvedDigest: approved,
       allowOutOfOrder: a.allowOutOfOrder,
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
@@ -474,6 +488,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         await enforcePromotion(project, env.name, ordered, (await inspect(venv, ordered)).status.pending);
         const by = await verifyApproval(ledger, op, digest);
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
+        // The before steps (#64), under the lock: one that fails refuses; a held one is let through by the Op's approval, which every run of it asks for.
+        before = await runBeforeSteps(project, venv, env, steps.steps?.before, "under the lock", io);
       },
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
@@ -540,6 +556,18 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       if (!a.json) io.err(`yodel apply: ${refusal.message}\n`);
       return emit({ status: "refused", preChecks: checked }, refusal.exitCode);
     }
+  }
+
+  // The before steps (#64), as the base commit has them: one that fails refuses before anyone is asked; the Apply step runs them again under the lock.
+  const steps = await stepsAtBase(project, env.name);
+  if (steps.note && !a.json) io.err(`${steps.note}\n`);
+  try {
+    const outcomes = await runBeforeSteps(project, venv, env, steps.steps?.before, "before the gate", a.json ? undefined : io);
+    if (!a.json && heldSteps(outcomes).length > 0) io.out(`before step ${heldSteps(outcomes).join(", ")} failed with onFailure approve: approving this plan lets it through\n`);
+  } catch (e) {
+    if (!(e instanceof YodelError) || e.exitCode !== EXIT_REFUSED) throw e;
+    if (!a.json) io.err(`yodel apply: ${e.message}\n`);
+    return emit({ status: "refused", refusal: { exitCode: EXIT_REFUSED, message: e.message } }, EXIT_REFUSED);
   }
 
   const op = await findMigrateOp(project, env, a.op);
@@ -686,5 +714,28 @@ function standingDown(project: Project, env: Environment): () => Promise<string 
   return async () => {
     const n = await newerCommit(project.dir);
     return n ? standDownLine(env.name, n) : undefined;
+  };
+}
+
+/** Runs `env`'s before steps (#64); throws the refusal for one that fails with onFailure fail. */
+async function runBeforeSteps(project: Project, venv: VersionedEnv, env: Environment, list: readonly ApplyStep[] | undefined, when: string, io: Io | undefined): Promise<StepOutcome[]> {
+  if (!list || list.length === 0) return [];
+  const outcomes = await runApplySteps(venv.driver, list, "before", { dir: project.dir, env: env.name });
+  for (const o of outcomes) io?.err(`${describeStep(o)}\n`);
+  const refusal = stepsRefusal(env.name, outcomes, when);
+  if (refusal) throw refusal;
+  return outcomes;
+}
+
+/** executeApply's `after` (#64), when `env` has after steps. */
+function afterSteps(project: Project, venv: VersionedEnv, env: Environment, list: readonly ApplyStep[] | undefined, io: Io): Pick<ExecuteOptions, "after"> {
+  if (!list || list.length === 0) return {};
+  return {
+    after: async () => {
+      const outcomes = await runApplySteps(venv.driver, list, "after", { dir: project.dir, env: env.name });
+      for (const o of outcomes) io.err(`${describeStep(o)}\n`);
+      const error = stepsRefusal(env.name, outcomes, "under the lock");
+      return { note: { steps: outcomes }, ...(error ? { error } : {}) };
+    },
   };
 }
