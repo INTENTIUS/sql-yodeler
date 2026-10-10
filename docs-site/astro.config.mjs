@@ -22,6 +22,15 @@ export default defineConfig({
 			// The title gets a "Copy page as Markdown" button, an llms.txt pointer
 			// and, on a task page, its prompt for a coding agent.
 			components: { PageTitle: './src/components/PageTitle.astro' },
+			// docs/schema-docs.md shows the examples' ERDs as <pre class="mermaid">;
+			// Mermaid, pinned, draws them in the browser.
+			head: [
+				{
+					tag: 'script',
+					attrs: { type: 'module' },
+					content: "if (document.querySelector('pre.mermaid')) { const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs'); mermaid.initialize({ startOnLoad: false, theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default' }); await mermaid.run({ querySelector: 'pre.mermaid' }); }",
+				},
+			],
 		}),
 	],
 });

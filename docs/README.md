@@ -19,6 +19,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Reports and the audit log](audit.md) | `yodel report`: every environment's migrations side by side, the audit log derived from the history and the gate ledger, its gaps, `audit.jsonl` and the HTML run view |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Webhook events](notify.md) | `notify` in `yodel.config.ts`: signed events for an apply waiting for approval, a refusal, a failure and drift, and checking them in a receiver |
+| [Schema docs](schema-docs.md) | `yodel docs`: an HTML reference and a Mermaid ERD of the schema, from the build |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
 | [Set up with a coding agent](agents.md) | the prompt to hand a coding agent, the steps it follows to add SQL Yodeler to a repository, and what it leaves to people |
 | [Glossary](glossary.md) | the chant terms yodel's commands and output use, in yodel's terms |
@@ -49,6 +50,7 @@ Commands:
   status    list applied, pending and out-of-order migrations
   report    each environment's migrations side by side, and the audit log
   drift     report declared objects changed out of band or gone
+  docs      write an HTML reference and a Mermaid ERD of the schema
   rebase    move a migration onto a new parent and recompute its schema
   repair    record a new checksum for an applied migration, with a reason
   mcp       serve read-only tools to a coding agent (MCP, stdio)

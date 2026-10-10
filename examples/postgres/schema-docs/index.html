@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sql-yodeler-example-postgres: schema</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1f23;--muted:#5d6470;--bg:#fff;--line:#d8dce3;--code:#f3f5f8;--link:#1f5fbf}
+@media (prefers-color-scheme:dark){:root{--fg:#e6e8eb;--muted:#a3a9b3;--bg:#16181c;--line:#353a42;--code:#22262c;--link:#7fb0ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6rem;margin:0 0 4px}h2{margin-top:2.2rem;border-bottom:1px solid var(--line);padding-bottom:4px}
+h3{margin:2rem 0 .3rem}h4{margin:1rem 0 .3rem;font-size:.95rem}
+.muted,.kind{color:var(--muted)}.kind{font-weight:400;font-size:.85rem;margin-left:.5rem}
+a{color:var(--link)}code,pre{font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:1px 4px}pre{padding:8px 10px;overflow-x:auto;white-space:pre}
+table{border-collapse:collapse;width:100%;margin:.4rem 0;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}th{font-weight:600}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:.5rem 0}dt{color:var(--muted)}dd{margin:0}dd pre{margin:0}
+ul.toc{columns:2 260px;padding-left:1.2rem}details{margin:.5rem 0}summary{cursor:pointer;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>sql-yodeler-example-postgres</h1>
+<p class="muted">Postgres, 4 objects, from chant build of the declared schema. Written by <code>yodel docs</code>.</p>
+<h2>Objects</h2>
+<ul class="toc">
+<li><a href="#o-shopSchema">shop</a> <span class="muted">Schema</span></li>
+<li><a href="#o-orders">shop.orders</a> <span class="muted">Table</span></li>
+<li><a href="#o-ordersPlacedAt">shop.orders_placed_at_idx</a> <span class="muted">Index</span></li>
+<li><a href="#o-ordersStatusIdx">shop.orders_status_idx</a> <span class="muted">Index</span></li>
+</ul>
+<h2>Entity relationships</h2>
+<p class="muted">Mermaid source; erd.md next to this file renders it on GitHub, GitLab and Forgejo.</p>
+<pre>erDiagram
+  shop_orders[&quot;shop.orders&quot;] {
+    bigint id PK
+    text email
+    text status
+    numeric(12_2) amount
+    timestamp_with_time_zone placed_at
+    timestamp_with_time_zone refunded_at
+    boolean gift
+  }
+</pre>
+<h2>Reference</h2>
+<section id="o-shopSchema">
+<h3>shop<span class="kind">Postgres::Schema, export shopSchema</span></h3>
+<p>The SQL Yodeler Postgres example</p>
+<h4>History</h4>
+<table><thead><tr><th>Migration</th><th>Step</th></tr></thead><tbody>
+<tr><td><code>20261010T0531-baseline</code></td><td><code>SQLPG200 create: CREATE SCHEMA shop</code></td></tr>
+<tr><td><code>20261010T0531-baseline</code></td><td><code>SQLPG200 create: COMMENT ON SCHEMA shop IS 'The SQL Yodeler Postgres example [chant managed-by=chant]'</code></td></tr>
+</tbody></table>
+<details><summary>DDL</summary><pre>CREATE SCHEMA shop;
+  COMMENT ON SCHEMA shop IS 'The SQL Yodeler Postgres example'</pre></details>
+</section>
+<section id="o-orders">
+<h3>shop.orders<span class="kind">Postgres::Table, export orders</span></h3>
+<dl>
+<dt>Primary key</dt><dd><code>(id)</code> orders_pkey</dd>
+<dt>Check</dt><dd><code>amount &gt; 0</code> orders_amount_positive</dd>
+</dl>
+<table><thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Key</th><th>Default</th><th>Comment</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td><code>bigint</code></td><td>yes</td><td>PK</td><td>GENERATED ALWAYS AS IDENTITY</td><td></td></tr>
+<tr><td><code>email</code></td><td><code>text</code></td><td>no</td><td></td><td></td><td></td></tr>
+<tr><td><code>status</code></td><td><code>text</code></td><td>no</td><td></td><td>DEFAULT 'placed'::text</td><td></td></tr>
+<tr><td><code>amount</code></td><td><code>numeric(12,2)</code></td><td>no</td><td></td><td></td><td></td></tr>
+<tr><td><code>placed_at</code></td><td><code>timestamp with time zone</code></td><td>no</td><td></td><td>DEFAULT now()</td><td></td></tr>
+<tr><td><code>refunded_at</code></td><td><code>timestamp with time zone</code></td><td>yes</td><td></td><td></td><td></td></tr>
+<tr><td><code>gift</code></td><td><code>boolean</code></td><td>no</td><td></td><td>DEFAULT false</td><td></td></tr>
+</tbody></table>
+<h4>History</h4>
+<table><thead><tr><th>Migration</th><th>Step</th></tr></thead><tbody>
+<tr><td><code>20261010T0531-baseline</code></td><td><code>SQLPG200 create: CREATE TABLE shop.orders (
+      id bigint GENERATED ALWAYS AS IDENTITY,
+      customer_email text NOT NULL,
+      status text DEFAULT 'placed'::text NOT NULL,
+      amount numeric(12,2) NOT NULL,
+      placed_at timestamp with time zone DEFAULT now() NOT NULL,
+      CONSTRAINT orders_pkey PRIMARY KEY (id)
+  )</code></td></tr>
+<tr><td><code>20261010T0531-baseline</code></td><td><code>SQLPG200 create: COMMENT ON TABLE shop.orders IS '[chant managed-by=chant]'</code></td></tr>
+<tr><td><code>20261010T0532-coupons</code></td><td><code>SQLPG201 metadata: ALTER TABLE shop.orders ADD COLUMN coupon text</code></td></tr>
+<tr><td><code>20261010T0532-coupons</code></td><td><code>SQLPG217 metadata: ALTER TABLE shop.orders ADD CONSTRAINT orders_amount_positive CHECK (amount &gt; 0) NOT VALID</code></td></tr>
+<tr><td><code>20261010T0532-validate-amount</code></td><td><code>SQLPG201 metadata: ALTER TABLE shop.orders ADD COLUMN refunded_at timestamp with time zone</code></td></tr>
+<tr><td><code>20261010T0532-validate-amount</code></td><td><code>SQLPG220 validate: ALTER TABLE shop.orders VALIDATE CONSTRAINT orders_amount_positive</code></td></tr>
+<tr><td><code>20261010T0532-rename-email</code></td><td><code>PostgresMigrationOp step (SQLPG205 columns.email)</code></td></tr>
+<tr><td><code>20261010T0533-drop-coupon</code></td><td><code>SQLPG204 metadata: ALTER TABLE shop.orders DROP COLUMN coupon</code></td></tr>
+<tr><td><code>20261010T0533-add-gift</code></td><td><code>SQLPG201 metadata: ALTER TABLE shop.orders ADD COLUMN gift boolean DEFAULT false NOT NULL</code></td></tr>
+</tbody></table>
+<details><summary>DDL</summary><pre>CREATE TABLE shop.orders (
+      id bigint GENERATED ALWAYS AS IDENTITY,
+      email text NOT NULL, -- previously: customer_email
+      status text DEFAULT 'placed'::text NOT NULL,
+      amount numeric(12,2) NOT NULL,
+      placed_at timestamp with time zone DEFAULT now() NOT NULL,
+      refunded_at timestamp with time zone,
+      gift boolean DEFAULT false NOT NULL,
+      CONSTRAINT orders_pkey PRIMARY KEY (id),
+      CONSTRAINT orders_amount_positive CHECK (amount &gt; 0)
+  )</pre></details>
+</section>
+<section id="o-ordersPlacedAt">
+<h3>shop.orders_placed_at_idx<span class="kind">Postgres::Index, export ordersPlacedAt</span></h3>
+<dl>
+<dt>On</dt><dd><a href="#o-orders">shop.orders</a> <code>(placed_at)</code></dd>
+</dl>
+<h4>History</h4>
+<table><thead><tr><th>Migration</th><th>Step</th></tr></thead><tbody>
+<tr><td><code>20261010T0533-index-placed-at</code></td><td><code>SQLPG240 concurrently: CREATE INDEX CONCURRENTLY orders_placed_at_idx ON shop.orders (placed_at)</code></td></tr>
+<tr><td><code>20261010T0533-index-placed-at</code></td><td><code>SQLPG240 concurrently: COMMENT ON INDEX shop.orders_placed_at_idx IS '[chant managed-by=chant]'</code></td></tr>
+</tbody></table>
+<details><summary>DDL</summary><pre>CREATE INDEX CONCURRENTLY orders_placed_at_idx ON shop.orders (placed_at)</pre></details>
+</section>
+<section id="o-ordersStatusIdx">
+<h3>shop.orders_status_idx<span class="kind">Postgres::Index, export ordersStatusIdx</span></h3>
+<dl>
+<dt>On</dt><dd><a href="#o-orders">shop.orders</a> <code>(status)</code> using btree</dd>
+</dl>
+<h4>History</h4>
+<table><thead><tr><th>Migration</th><th>Step</th></tr></thead><tbody>
+<tr><td><code>20261010T0531-baseline</code></td><td><code>SQLPG200 create: CREATE INDEX orders_status_idx ON shop.orders USING btree (status)</code></td></tr>
+<tr><td><code>20261010T0531-baseline</code></td><td><code>SQLPG200 create: COMMENT ON INDEX shop.orders_status_idx IS '[chant managed-by=chant]'</code></td></tr>
+</tbody></table>
+<details><summary>DDL</summary><pre>CREATE INDEX orders_status_idx ON shop.orders USING btree (status)</pre></details>
+</section>
+</main>
+</body>
+</html>

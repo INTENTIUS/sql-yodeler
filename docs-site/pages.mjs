@@ -8,7 +8,7 @@
 // README's intro over docs/README.md, and the sidebar follows the order of
 // docs/README.md's table, then any page the table does not list.
 
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { pagePrompts } from './prompts.mjs';
 
@@ -50,6 +50,9 @@ function rewriteLinks(md, slugs) {
 			if (fence) return line;
 			return line.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (all, text, target) => {
 				if (/^(https?:|mailto:|#)/.test(target)) return all;
+				// An example's schema reference (yodel docs) is published next to the pages.
+				const schema = /^\.\.\/examples\/([\w-]+)\/schema-docs\/index\.html$/.exec(target);
+				if (schema) return `[${text}](${base}/examples/${schema[1]}/schema/)`;
 				const m = /^(?:\.\/)?([\w-]+)\.md(#.*)?$/.exec(target);
 				if (m) {
 					const slug = m[1].toLowerCase();
@@ -187,4 +190,21 @@ hero:
 
 `;
 	writeFileSync(`${outDir}index.md`, head + rewriteLinks(index.body, slugs));
+	writeSchemaReferences();
+}
+
+/**
+ * Each example's schema reference, examples/<name>/schema-docs/index.html
+ * (written by yodel docs and committed), copied into public/ so the site
+ * serves it at examples/<name>/schema/. public/examples/ is gitignored.
+ */
+function writeSchemaReferences() {
+	const dir = fileURLToPath(new URL('public/examples/', import.meta.url));
+	rmSync(dir, { recursive: true, force: true });
+	for (const name of readdirSync(new URL('examples/', repo))) {
+		const source = new URL(`examples/${name}/schema-docs/index.html`, repo);
+		if (!existsSync(source)) continue;
+		mkdirSync(`${dir}${name}/schema`, { recursive: true });
+		copyFileSync(source, `${dir}${name}/schema/index.html`);
+	}
 }

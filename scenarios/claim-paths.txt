@@ -106,6 +106,10 @@ src/chant/drift.ts                     drift template template-github template-g
 # Webhook events (#61): sent by apply, plan and drift only when yodel.config.ts
 # names a webhook, which only the template claims' projects do.
 src/notify/                            template template-github template-gitlab
+# yodel docs (#62): offline, and no claim runs it; test/schema-docs.test.ts
+# and the docs-site build prove it.
+src/commands/docs.ts                   -
+src/schema-docs/                       -
 
 # yodel rebase and yodel repair.
 src/commands/rebase.ts                 out-of-order
