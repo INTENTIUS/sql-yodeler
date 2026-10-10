@@ -771,6 +771,8 @@ Wrote migrations/20261010T0532-rename-email/ (0 statements; follows 20261010T053
   This migration contains an Op step: PostgresMigrationOp for orders (shop.orders), SQLPG205.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = PostgresMigrationOp({ name: "migrate-shop-orders-email", env: "<env>", table: "shop.orders", column: "email" });
+    No retain: the old column is dropped in the same yodel apply, right after the switch, so anything still reading it breaks then.
+    To keep it while readers move over: yodel new rename-email --replace --retain 7d
 ```
 
 `migrations/20261010T0532-rename-email/migration.sql`:

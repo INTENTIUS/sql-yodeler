@@ -24,7 +24,13 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["op", "object", "name", "rules"],
-            "properties": { "op": { "type": "string" }, "object": { "type": "string" }, "name": { "type": "string" }, "rules": { "$ref": "common.schema.json#/$defs/stringList" } }
+            "properties": {
+              "op": { "type": "string" },
+              "object": { "type": "string" },
+              "name": { "type": "string" },
+              "rules": { "$ref": "common.schema.json#/$defs/stringList" },
+              "retain": { "description": "A column rename or type change, or a rebuild: how long it keeps the old column or table after the switch (--retain).", "type": "string" }
+            }
           }
         },
         "manual": {
@@ -59,7 +65,7 @@
       }
     },
     "template": {
-      "description": "--backfill named a file that is not there: the template was written to it, and no migration.",
+      "description": "--backfill's form (backfills/<name>.json, or the file it names) is not there: the template was written to it, and no migration.",
       "type": "object",
       "additionalProperties": false,
       "required": ["written", "template"],

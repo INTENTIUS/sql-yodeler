@@ -2,7 +2,16 @@
  * A backfill step: a data migration the author writes, run inside the
  * migration between the statements around it, resumable from receipts.
  *
- * The step names a module in the migration's directory (`backfill.ts` by
+ * The common case is a form, the step's options in `migration.json`
+ * ({@link BackfillForm}): a table, an integer key and a batch size (or a
+ * list of batches), and the SQL of one batch with `{from}` and `{to}` (or
+ * `{batch}`) in it. `yodel new <name> --backfill` writes it from
+ * `backfills/<name>.json`. When the step runs, yodel builds the Op below
+ * from it ({@link formOp}): one `effect()` per batch, the batches read from
+ * the table's smallest and largest key at that moment, aligned to the
+ * batch size so a rerun sees the same ranges.
+ *
+ * The advanced case: the step names a module in the migration's directory (`backfill.ts` by
  * default) that exports a chant Op as `op` (or as its default export). Each
  * step of its phases is an `effect()` step: one batch of the backfill, with
  * its own receipt. The nested steps run SQL on the environment's server with
@@ -69,7 +78,7 @@ import type { ClickHousePort } from "../history/index.js";
 import type { PgClient } from "../history/postgres/index.js";
 import type { PgTimeouts } from "../versioned/postgres/executor.js";
 import { gatesOf, runOp, StepOpFailed, type RunOpOptions } from "./run.js";
-import { BACKFILL_FILE, BACKFILL_OP, type BackfillStep } from "./kinds.js";
+import { BACKFILL_FILE, BACKFILL_OP, describeForm, formPlaceholders, type BackfillForm, type BackfillStep } from "./kinds.js";
 
 /** The activity a backfill's steps run SQL with: `activity("yodelSql", { sql, settings? })`. */
 export const SQL_ACTIVITY = "yodelSql";
@@ -87,6 +96,37 @@ export function backfillStep(migrationName: string, file = BACKFILL_FILE): Backf
     declaration: `the Op exported by ${file} in this migration's directory`,
     changes: [],
     detail: `a data backfill: the effect() steps of the Op in ${file}, each a batch with its own receipt; yodel apply runs it after the statements before it and resumes it from its receipts`,
+  };
+}
+
+/** The default place `yodel new <name> --backfill` reads a form from (and writes its template at), in the project directory. */
+export const formPath = (name: string): string => `backfills/${name}.json`;
+
+/** What one batch of a form runs, as the plan shows it. */
+export function describeFormSql(form: BackfillForm): string {
+  return (typeof form.sql === "string" ? [form.sql] : form.sql).map((s) => `${s.trim().replace(/;\s*$/, "")};`).join("\n");
+}
+
+/** The step `yodel new --backfill` adds for a form: the form is the step's options, so it is in the checksum and the plan shows it. */
+export function backfillFormStep(migrationName: string, form: BackfillForm): BackfillStep {
+  const batches =
+    form.key !== undefined
+      ? `each range of ${form.key} ${String(form.batchSize)} wide, {from} inclusive to {to} exclusive, from the table's smallest key to its largest when the step runs, is one batch`
+      : `each of the ${String(form.batches?.length ?? 0)} batches listed, {batch} in the SQL, is one batch`;
+  return {
+    kind: "op",
+    object: "backfill",
+    type: "Yodel::Backfill",
+    name: migrationName,
+    op: BACKFILL_OP,
+    importPath: "@intentius/sql-yodeler",
+    options: form,
+    declaration: JSON.stringify(form, null, 2),
+    changes: [],
+    detail:
+      `a data backfill of ${describeForm(form)}: ${batches}, with its own receipt. ` +
+      `yodel apply runs the batches in order after the statements before this step, and a rerun after a failure resumes at the first batch without a receipt. Each batch runs:\n` +
+      describeFormSql(form),
   };
 }
 
@@ -136,6 +176,26 @@ export const op = Op({
 `;
 }
 
+/** What `yodel new <name> --backfill` writes at `backfills/<name>.json` when there is none yet: a form to fill in. */
+export function formTemplate(name: string, dialect: SqlDialect = "clickhouse"): string {
+  const form =
+    dialect === "postgres"
+      ? {
+          table: "<schema>.<table>",
+          key: "id",
+          batchSize: 10000,
+          sql: `${TEMPLATE_MARK} ${name}: UPDATE <schema>.<table> SET <column> = <expression> WHERE id >= {from} AND id < {to}`,
+        }
+      : {
+          table: "<database>.<table>",
+          key: "id",
+          batchSize: 100000,
+          settings: { mutations_sync: "2" },
+          sql: `${TEMPLATE_MARK} ${name}: ALTER TABLE <database>.<table> UPDATE <column> = <expression> WHERE id >= {from} AND id < {to}`,
+        };
+  return `${JSON.stringify(form, null, 2)}\n`;
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
 /** The Op config a module exports as `op` or as its default export. */
@@ -180,7 +240,10 @@ export async function loadBackfill(path: string, text?: string): Promise<OpConfi
 
 export interface BackfillSummary {
   op: "backfill";
-  file: string;
+  /** The module, for a backfill written as an Op. */
+  file?: string;
+  /** The table, for a backfill written as a form. */
+  table?: string;
   /** The Op's name. */
   name: string;
   /** Batches (effect steps) the Op has. */
@@ -228,6 +291,8 @@ export interface PgBackfillServer {
 
 /** How a backfill's batches meet the server: `next` starts a batch, `sql` runs one of its statements, `done` follows its receipt's write, `abandon` its failure. */
 interface BatchSession {
+  /** A read outside any batch: the form's key bounds. */
+  read(sql: string): Promise<Array<Record<string, unknown>>>;
   next(): Promise<void>;
   sql(sql: string, settings: Record<string, string> | undefined): Promise<number>;
   done(): Promise<void>;
@@ -236,6 +301,7 @@ interface BatchSession {
 
 function clickhouseBatches(port: ClickHousePort): BatchSession {
   return {
+    read: (sql) => port.query(sql),
     next: () => Promise.resolve(),
     sql: async (sql, settings) => (await port.query(sql, settings ? { settings } : {})).length,
     done: () => Promise.resolve(),
@@ -255,6 +321,10 @@ function postgresBatches(server: PgBackfillServer): BatchSession {
     await client.query("ROLLBACK").catch(() => undefined);
   };
   return {
+    async read(sql) {
+      await rollback();
+      return client.query(sql);
+    },
     async next() {
       await rollback();
       lost = undefined;
@@ -300,12 +370,86 @@ export interface RunBackfillOptions extends Omit<RunOpOptions, "activities" | "c
   log?: (line: string) => void;
 }
 
-/** Runs a backfill step to the end, counting batches as they skip or finish. */
-export async function runBackfill(file: string, run: RunBackfillOptions): Promise<{ summary: BackfillSummary; records: StepRecord[] }> {
-  const config = await loadBackfill(join(run.dir, file), run.text);
-  const summary: BackfillSummary = { op: "backfill", file, name: config.name, effects: config.phases.reduce((n, p) => n + p.steps.length, 0), skipped: 0, ran: 0 };
+/** One batch of a form: the receipt's name and the values its placeholders take. */
+export interface FormBatch {
+  id: string;
+  values: Record<string, string>;
+}
+
+/** Floor division of bigints. */
+const floorDiv = (a: bigint, b: bigint): bigint => (a % b === 0n || a >= 0n ? a / b : a / b - 1n);
+
+/** The ranges `[from, to)` of width `size`, aligned to multiples of it, that cover `lo` to `hi`. */
+export function keyRanges(lo: bigint, hi: bigint, size: number): FormBatch[] {
+  const width = BigInt(size);
+  const out: FormBatch[] = [];
+  for (let from = floorDiv(lo, width) * width; from <= hi; from += width) {
+    const to = from + width;
+    out.push({ id: `${String(from)}-${String(to)}`, values: { "{from}": String(from), "{to}": String(to) } });
+  }
+  return out;
+}
+
+/** A form's batches: its list, or the ranges of its key over the table's rows now (none when the table is empty). */
+export async function formBatches(form: BackfillForm, read: (sql: string) => Promise<Array<Record<string, unknown>>>, dialect: "clickhouse" | "postgres"): Promise<FormBatch[]> {
+  if (form.key === undefined) return (form.batches ?? []).map((b) => ({ id: String(b), values: { "{batch}": String(b) } }));
+  const sql =
+    dialect === "clickhouse"
+      ? `SELECT count() AS n, toString(min(${form.key})) AS lo, toString(max(${form.key})) AS hi FROM ${form.table}`
+      : `SELECT count(*)::text AS n, min(${form.key})::text AS lo, max(${form.key})::text AS hi FROM ${form.table}`;
+  const [row] = await read(sql);
+  if (!row || Number(row.n) === 0) return [];
+  let lo: bigint, hi: bigint;
+  try {
+    lo = BigInt(String(row.lo));
+    hi = BigInt(String(row.hi));
+  } catch {
+    throw new YodelError(`the backfill's key ${form.key} of ${form.table} is not an integer (its values run from ${String(row.lo)} to ${String(row.hi)}); list the batches with "batches" instead`);
+  }
+  return keyRanges(lo, hi, form.batchSize ?? 1);
+}
+
+/** The SQL of one batch: each placeholder replaced by its value. */
+export function batchSql(form: BackfillForm, batch: FormBatch): string[] {
+  const statements = typeof form.sql === "string" ? [form.sql] : form.sql;
+  return statements.map((s) => formPlaceholders(form).reduce((out, p) => out.split(p).join(batch.values[p] ?? p), s));
+}
+
+/** The Op a form runs: one effect() per batch, each running its statements with `yodelSql` and writing its receipt last. */
+export async function formOp(name: string, form: BackfillForm, batches: readonly FormBatch[]): Promise<OpConfig> {
+  const { EffectReceipt } = await import("@intentius/chant");
+  const { Op, activity, effect, phase } = await import("@intentius/chant/op");
+  const kind = form.key !== undefined ? "range" : "batch";
+  const steps = batches.map((b) =>
+    effect(
+      EffectReceipt(`${name}-${b.id}`, { effect: `${kind}/${b.id}`, flavor: "existence" }),
+      batchSql(form, b).map((sql) => activity(SQL_ACTIVITY, { sql, ...(form.settings ? { settings: form.settings } : {}) }, "atMostOnce")),
+    ),
+  );
+  const op = Op({ name: `backfill-${name}`, overview: `Backfill of ${describeForm(form)}`, phases: [phase("Backfill", steps)] });
+  return (op as unknown as { props: OpConfig }).props;
+}
+
+/** Runs a backfill step to the end, counting batches as they skip or finish. `source` is the module's file, or the step's form. */
+export async function runBackfill(source: string | BackfillForm, run: RunBackfillOptions): Promise<{ summary: BackfillSummary; records: StepRecord[] }> {
   const session = run.postgres ? postgresBatches(run.postgres) : run.port ? clickhouseBatches(run.port) : undefined;
   if (!session) throw new YodelError("a backfill step needs the environment's server to run its SQL on, and has none");
+  let config: OpConfig;
+  let summary: BackfillSummary;
+  if (typeof source === "string") {
+    config = await loadBackfill(join(run.dir, source), run.text);
+    summary = { op: "backfill", file: source, name: config.name, effects: config.phases.reduce((n, p) => n + p.steps.length, 0), skipped: 0, ran: 0 };
+  } else {
+    const name = run.migrationId.slice(run.migrationId.indexOf("-") + 1);
+    const batches = await formBatches(source, (sql) => session.read(sql), run.postgres ? "postgres" : "clickhouse");
+    config = await formOp(name, source, batches);
+    summary = { op: "backfill", table: source.table, name: config.name, effects: batches.length, skipped: 0, ran: 0 };
+    if (batches.length === 0) {
+      run.log?.(`    ${source.table} has no rows: no batch to run`);
+      await session.abandon();
+      return { summary, records: [] };
+    }
+  }
   const { receiptActivities } = await import("@intentius/chant/op/receipt-store");
   const store = receiptActivities(prefixedStore(run.receipts, `${run.migrationId}/`));
   const activities: Record<string, ActivityFn> = {

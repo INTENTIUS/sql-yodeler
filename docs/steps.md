@@ -9,7 +9,7 @@ Most of a migration is statements. A change that is not one statement is a step 
 | Step | Dialect | Written by `yodel new` for |
 |---|---|---|
 | `ClickHouseRebuildOp` | ClickHouse | a change `ALTER` cannot make: the sort key, the engine, a key column's type or name |
-| backfill | ClickHouse, Postgres | `yodel new <name> --backfill <file>`: a data migration you write |
+| backfill | ClickHouse, Postgres | `yodel new <name> --backfill`: a data migration you write, as a table, a key, a batch size and the SQL of one batch |
 | `PostgresMigrationOp` | Postgres | a column rename (SQLPG205) or a type change across kinds (SQLPG208) |
 
 A step and any file it runs are in the migration's checksum, so in the plan digest the approval binds. Its history rows have `kind = 'step'`, and the `succeeded` (or `failed`) row's `note` is the step's summary as JSON. A step that failed or was stopped runs again on the next `yodel apply` and resumes from its receipts, skipping the partitions or batches that finished. `yodel lint --replay` runs rebuild and `PostgresMigrationOp` steps in the replayed database and skips backfills, which move data the replayed database does not have.
@@ -113,7 +113,114 @@ The topology the rebuild renders for is the environment's, the same as the state
 
 ## Backfills
 
-A backfill is a data migration in the same history as the DDL: a module exporting a chant Op whose every step is an `effect()` batch with its own receipt. `yodel new <name> --backfill <file>` writes a template at `<file>` when it does not exist, and no migration:
+A backfill is a data migration in the same history as the DDL: "fill this column, a range of ids at a time". You write it as a form of a few fields, and yodel runs it as batches, each with its own receipt, so an apply that stops part way resumes at the first batch that has none.
+
+### Writing one
+
+`yodel new <name> --backfill` writes a template at `backfills/<name>.json` when there is none, and no migration:
+
+```json
+{
+  "table": "<database>.<table>",
+  "key": "id",
+  "batchSize": 100000,
+  "settings": {
+    "mutations_sync": "2"
+  },
+  "sql": "write the backfill of fill-country: ALTER TABLE <database>.<table> UPDATE <column> = <expression> WHERE id >= {from} AND id < {to}"
+}
+```
+
+Fill it in. Filling `events.country` in the ClickHouse example's schema, 100,000 ids a batch:
+
+```json
+{
+  "table": "shop.events",
+  "key": "id",
+  "batchSize": 100000,
+  "settings": { "mutations_sync": "2" },
+  "sql": "ALTER TABLE shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE id >= {from} AND id < {to} AND country = ''"
+}
+```
+
+Run the same command again. `yodel new` checks the form, writes it into the migration's step in `migration.json` (so it counts in the checksum and the plan digest), and ends the migration with the step. With `--backfill`, a migration is written even when the declared schema has not changed. It prints:
+
+```text
+Wrote migrations/20261010T1212-fill-country/ (0 statements; follows 20261010T1212-baseline)
+  This migration ends with a backfill of shop.events by id, 100000 a batch. Each batch runs:
+    ALTER TABLE shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE id >= {from} AND id < {to} AND country = '';
+    yodel apply runs the batches after the statements before it, each with its own receipt, and resumes from them after a failure.
+```
+
+and `migration.sql` shows the step as comments:
+
+```sql
+-- yodel migration 20261010T1212-fill-country
+-- parent: 20261010T1212-baseline
+-- This migration contains an Op step, not only SQL:
+--   a backfill of shop.events by id, 100000 a batch, its batches resumable from their receipts
+
+-- backfill (fill-country): a backfill of shop.events by id, 100000 a batch, not a statement; each batch runs:
+--   ALTER TABLE shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE id >= {from} AND id < {to} AND country = '';
+```
+
+`yodel plan` lists the step with the table, the batches and the SQL of one batch, and the pull request comment shows the same under "Op steps", with the form as written. `--backfill <file>` reads the form from another `.json` file in the project.
+
+### The form
+
+| Field | |
+|---|---|
+| `table` | the table the backfill fills, qualified as in your SQL |
+| `key`, `batchSize` | batches by ranges of an integer column: each range is `batchSize` wide, `{from}` inclusive to `{to}` exclusive |
+| `batches` | instead of `key` and `batchSize`: the batches as a list, strings or numbers, each one `{batch}` in the SQL |
+| `sql` | the SQL of one batch, an `UPDATE` or an `INSERT ... SELECT`: one statement, or a list run in order |
+| `settings` | optional: ClickHouse query settings for each statement (`mutations_sync: "2"` makes an `ALTER TABLE ... UPDATE` finish before the batch's receipt is written); on Postgres, settings for the batch's transaction (`work_mem`) |
+
+With `key`, the ranges come from the table's smallest and largest key when the step runs, aligned to multiples of `batchSize`, so a rerun sees the same ranges and skips the ones with a receipt. Rows added since the first run that fall in a range already done are not filled again; filter on the value still being empty (as `country = ''` does) and run the backfill as a new migration if that matters. A key that is not an integer (a date, a string) is refused when the step runs; list the batches with `batches` instead, for example one per month:
+
+```json
+{
+  "table": "shop.events",
+  "batches": ["202606", "202607", "202608"],
+  "settings": { "mutations_sync": "2" },
+  "sql": "ALTER TABLE shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = {batch} AND country = ''"
+}
+```
+
+`{batch}` is replaced as written, so quote it in the SQL when it is a string (`'{batch}'`).
+
+### How it runs
+
+`yodel apply` runs the step after the statements before it, under the migration's lock and approval. For each batch it reads the batch's receipt, skips the batch when the receipt is there, and otherwise runs the batch's statements and writes the receipt last, only when they all succeeded. A run that fails or is stopped leaves the finished batches' receipts, and the next `yodel apply` resumes at the first batch without one. The step's history note counts the batches: `{"op":"backfill","table":"shop.events","name":"backfill-fill-country","effects":3,"skipped":2,"ran":1}` is a rerun that found two batches done and ran the third.
+
+On ClickHouse, make each batch safe to run twice: the batch that was running when a run stopped runs again on the next one. The example's `UPDATE` touches only rows still empty. On Postgres each batch is one transaction with its receipt, so a batch is never half done ([Backfills on Postgres](#backfills-on-postgres)).
+
+The receipts are rows on the environment's server, addressed `yodel/<env>/<migration id>/<batch>`, so the same batch in two migrations is two receipts. They are kept by the sql lexicon's receipt store (`sqlReceiptStore` from `@intentius/chant-lexicon-sql/receipts`). On ClickHouse they are in `chant_receipts.receipts`, the table the rebuild keeps its partition receipts in.
+
+### Backfills on Postgres
+
+On Postgres the batches' SQL runs on the apply's own connection to the environment's server, and the receipts are rows in `<history schema>.__chant_receipts` (chant's Postgres receipts table, the one `PostgresMigrationOp` keeps in the migrated table's schema), in the schema yodel's history is in: `yodeler.__chant_receipts` by default.
+
+Each batch runs in one transaction: `BEGIN` at its first statement, then its statements, then its receipt, then `COMMIT`. A batch whose statement fails is rolled back whole and leaves no receipt, and a run killed in the middle of a batch leaves neither its changes nor its receipt, so the next `yodel apply` runs that batch again from its first statement and skips every batch that committed. A Postgres batch therefore does not need to be safe to run twice, but its statements must be ones Postgres runs in a transaction block: no `CREATE INDEX CONCURRENTLY`, no `VACUUM`. Keep batches small enough that holding their row locks until the batch commits is acceptable.
+
+The batch's transaction has `lock_timeout` and `statement_timeout` set from the environment's profile (`lockTimeoutMs`, default 5 s, and `scanTimeoutMs`, default none). A batch blocked behind another session's lock fails when the lock timeout passes; the next `yodel apply` resumes at it. The form's `settings` are set for the batch's transaction only (`set_config(name, value, true)`), for example `{ "work_mem": "256MB" }`.
+
+A Postgres backfill filling a new column, 10,000 ids a batch:
+
+```json
+{
+  "table": "shop.orders",
+  "key": "id",
+  "batchSize": 10000,
+  "sql": "UPDATE shop.orders SET region = lower(country) WHERE id >= {from} AND id < {to}"
+}
+```
+
+An `INSERT ... SELECT` works the same way, for example copying rows into a new table a range at a time: `INSERT INTO shop.orders_archive SELECT * FROM shop.orders WHERE id >= {from} AND id < {to} AND placed_at < '2025-01-01'`.
+
+### A backfill as a chant Op
+
+For a backfill the form cannot say (batches that are not a list or ranges of one key, a step that calls another activity, a check between batches), write the Op yourself. `yodel new <name> --backfill <file>` with a `<file>` that is not `.json` takes a module exporting a chant Op whose every step is an `effect()` batch with its own receipt, and writes a template at `<file>` when it does not exist, and no migration:
 
 <!-- quote: clickhouse#backfill-template -->
 ```console
@@ -211,35 +318,7 @@ The rules for a backfill module:
 
 The receipts are rows on the environment's server, addressed `yodel/<env>/<migration id>/<effect>`, so the same effect name in two migrations is two receipts. They are kept by the sql lexicon's receipt store (`sqlReceiptStore` from `@intentius/chant-lexicon-sql/receipts`). On ClickHouse they are in `chant_receipts.receipts`, the table the rebuild keeps its partition receipts in.
 
-### Backfills on Postgres
-
-On Postgres the batches' SQL runs on the apply's own connection to the environment's server, and the receipts are rows in `<history schema>.__chant_receipts` (chant's Postgres receipts table, the one `PostgresMigrationOp` keeps in the migrated table's schema), in the schema yodel's history is in: `yodeler.__chant_receipts` by default.
-
-Each batch runs in one transaction: `BEGIN` at its first `yodelSql` statement, then its statements, then its receipt, then `COMMIT`. A batch whose statement fails is rolled back whole and leaves no receipt, and a run killed in the middle of a batch leaves neither its changes nor its receipt, so the next `yodel apply` runs that batch again from its first statement and skips every batch that committed. A Postgres batch whose steps are all `yodelSql` therefore does not need to be safe to run twice (another activity in a batch runs outside its transaction), but its statements must be ones Postgres runs in a transaction block: no `CREATE INDEX CONCURRENTLY`, no `VACUUM`. Keep batches small enough that holding their row locks until the batch commits is acceptable.
-
-The batch's transaction has `lock_timeout` and `statement_timeout` set from the environment's profile (`lockTimeoutMs`, default 5 s, and `scanTimeoutMs`, default none). A batch blocked behind another session's lock fails when the lock timeout passes; the next `yodel apply` resumes at it. `yodelSql`'s `settings` are set for the batch's transaction only (`set_config(name, value, true)`), for example `{ work_mem: "256MB" }`.
-
-A Postgres backfill filling a new column, one range of ids per batch:
-
-```ts
-import { EffectReceipt } from "@intentius/chant";
-import { Op, activity, effect, phase } from "@intentius/chant/op";
-
-const ranges = [[1, 100_000], [100_001, 200_000], [200_001, 300_000]];
-
-const batch = ([from, to]: number[]) =>
-  effect(EffectReceipt(`fill-region-${String(from)}`, { effect: `fill-region/${String(from)}`, flavor: "existence" }), [
-    activity("yodelSql", { sql: `UPDATE shop.orders SET region = lower(country) WHERE id BETWEEN ${String(from)} AND ${String(to)}` }, "atMostOnce"),
-  ]);
-
-export const op = Op({
-  name: "backfill-fill-region",
-  overview: "orders.region from the country, a range of ids at a time",
-  phases: [phase("Backfill", ranges.map(batch))],
-});
-```
-
-The template `yodel new --backfill` writes in a Postgres project raises an exception (`DO $$ BEGIN RAISE EXCEPTION ... END $$`) in place of the SQL until you write it.
+The template `yodel new --backfill <file>` writes in a Postgres project raises an exception (`DO $$ BEGIN RAISE EXCEPTION ... END $$`) in place of the SQL until you write it.
 
 ## Postgres: PostgresMigrationOp
 
@@ -263,6 +342,8 @@ Wrote migrations/20261010T0532-rename-email/ (0 statements; follows 20261010T053
   This migration contains an Op step: PostgresMigrationOp for orders (shop.orders), SQLPG205.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = PostgresMigrationOp({ name: "migrate-shop-orders-email", env: "<env>", table: "shop.orders", column: "email" });
+    No retain: the old column is dropped in the same yodel apply, right after the switch, so anything still reading it breaks then.
+    To keep it while readers move over: yodel new rename-email --replace --retain 7d
 ```
 
 <!-- quote: postgres#rename-sql -->
@@ -292,7 +373,22 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:935527e15a4311e97553
 ...
 ```
 
-`retainUntil` and `dropped` in the note: with no `retain` in the step's options the old column is kept for no time, and the contract drops it in the same run, as the recorded schema says it is gone. A step with `options.retain` set keeps the old column that long and succeeds with it kept; dropping it after that date is `chant run` of the Op's declaration in `migration.json`.
+`retainUntil` and `dropped` in the note: by default the step keeps the old column for no time, and the contract drops it in the same apply, right after the switch, as the recorded schema says it is gone. Anything still reading `customer_email` breaks at that moment, which is what `yodel new` warns about.
+
+To keep the old column while readers move over, give the step a retention with `--retain`, when you write the migration or by writing it again before it is applied:
+
+```sh
+npx yodel new rename-email --retain 7d             # when writing it
+npx yodel new rename-email --replace --retain 7d   # a migration written without it, not applied yet
+```
+
+`--retain` writes `"retain": "7d"` into the step's options in `migration.json` (and into its declaration), so it is in the checksum and the plan digest; never edit `migration.json` by hand to add it. Durations are whole numbers of `ms`, `s`, `m`, `h` or `d`. The lifecycle is then:
+
+1. The apply expands, dual-writes, backfills, verifies and switches. Readers of `email` see the new column; the old column is still there under its old name, kept written by the dual-write trigger for a rename, and its comment says until when (`retain-until`). The step succeeds with `"dropped":false` and `retainUntil` in its note.
+2. During those seven days, move the remaining readers and writers of `customer_email` over.
+3. After the date, the Op's contract drops the old column, and for a rename its trigger and function: `chant run` of the declaration in `migration.json`, whose contract drops it only once the date has passed.
+
+`--retain` sets the retention of a ClickHouse rebuild too: how long `<table>__chant_old` is kept after the swap, 7 days when the step sets none.
 
 A `PostgresMigrationOp` step that failed or was stopped keeps the new column, its trigger and the receipts of the batches it filled, and resumes on the next apply: each phase reads the server again and does what is left, and the backfill skips every batch with a receipt (the note's `skipped`). To start over instead, drop the new column, its trigger and function (named in their comments).
 
@@ -301,3 +397,7 @@ The expand adds the new column at the end of the table, and no `ALTER` moves it,
 ## Manual steps
 
 A change neither a statement nor an Op makes is a manual step: `yodel new` writes it and says what it needs, and `yodel apply` refuses the migration with exit 2 until it is gone. Make the change another way (for example, split it into changes yodel can make, as `-- previously:` does for a rename), delete the migration, and write it again.
+
+## The ownership marker
+
+Objects yodel creates carry `[chant managed-by=chant]` at the end of their comment, on Postgres even a table that has no comment of its own (`COMMENT ON TABLE ... IS '[chant managed-by=chant]'`). chant, the library yodel declares and diffs schemas with, reads the marker to tell the objects it manages from ones it does not, and takes it off again before it compares or prints a comment, so your declared comment is what `yodel drift` and `yodel plan` compare. The working objects of a step carry more pairs in the same trailer: `<table>__chant_old` after a rebuild carries `role=old` and `retain-until=<date>`, and so does the old column after a Postgres rename. Leave the marker in place: an object whose marker was removed by hand reads as one yodel did not create, until the next apply of its declaration stamps it again.
