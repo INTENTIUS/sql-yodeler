@@ -112,15 +112,15 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   return `${lines.join("\n")}\n`;
 }
 
-const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
-const fence = (text: string, lang: string) => {
+export const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
+export const fence = (text: string, lang: string) => {
   const ticks = "`".repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
   return `${ticks}${lang}\n${text}\n${ticks}`;
 };
 
-function pendingMarkdown(p: PendingView, withSql: boolean): string[] {
+export function pendingMarkdown(p: PendingView, withSql: boolean, level = 4): string[] {
   const marks = pendingMarks(p);
-  const out = [`#### \`${p.id}\`${marks.length > 0 ? ` (${marks.join("; ")})` : ""}`, "", "| # | Step | Rule | Class | Object |", "|---|---|---|---|---|"];
+  const out = [`${"#".repeat(level)} \`${p.id}\`${marks.length > 0 ? ` (${marks.join("; ")})` : ""}`, "", "| # | Step | Rule | Class | Object |", "|---|---|---|---|---|"];
   for (const { index, step, done } of p.steps) {
     const { rule, cls } = stepRule(step);
     out.push(`| ${String(index)} | ${step.kind === "statement" ? "statement" : `**${cell(stepKind(step))}**`}${done ? " (done)" : ""} | ${cell(rule)} | ${cell(cls)} | \`${cell(step.name)}\` |`);

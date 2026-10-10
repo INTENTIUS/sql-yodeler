@@ -18,7 +18,8 @@ import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
 import { describeStep, heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
 import type { ApplyStep } from "../config/define.js";
-import { enforcePromotion, forecastWave, planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
+import { enforcePromotion, forecastWave, planWave, readWavePlan, verifyWaveDecision, WavePlanMoved, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
+import { applySlot, splitSlot, writeSlotPlan } from "../tenants/wave.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -158,7 +159,9 @@ Two paths, chosen by the project:
   environments.<env>.tenants): the environment's profile on the tenant's
   database or schema, each statement with the template's name replaced by
   the tenant's, and a history of its own. A tenant set is applied tenant by
-  tenant, or by its wave, which gates once for every tenant.
+  tenant, or by its wave, which gates once for every tenant. The wave of a
+  set given by a query runs slots, <env>/@<i>of<n>, each every tenant the
+  query lists when it runs whose name hashes to it.
 
 - Declarative: no migrations. Plans the declared schema against the live
   database, then runs the project's ApplyOp for the environment behind its
@@ -234,6 +237,8 @@ interface ApplyArgs {
   wavePlan: string | undefined;
   waveApply: string | undefined;
   spec: string;
+  /** A tenant of a slot (#56): chant decided the slot, so the decision is checked for it. */
+  decidedAs?: { target: string; planDigest: string } | undefined;
 }
 
 function parseApplyArgs(args: string[]): ApplyArgs {
@@ -294,6 +299,7 @@ export const apply: Command = {
     const code = await guarded("apply", io, args, help, async () => {
       const a = parseApplyArgs(args);
       const project = await loadProject(a.dir);
+      if (splitSlot(a.env)) return slotWave(project, a, io);
       const env = resolveEnvironment(project, a.env);
       if (!env.tenant && project.yodel?.config.environments?.[env.name]?.tenants) {
         throw new YodelError(`${env.name} is a tenant set (yodel.config.ts environments.${env.name}.tenants): apply a tenant, yodel apply ${env.name}/<tenant>, or every tenant through ${env.name}'s wave in the apply pipeline`);
@@ -310,6 +316,31 @@ export const apply: Command = {
     return code;
   },
 };
+
+/**
+ * A slot of a tenant set's wave read at run time (#56), `<env>/@<i>of<n>`:
+ * every tenant the set's query lists now that hashes to the slot, planned
+ * or applied each against its own history and lock.
+ */
+async function slotWave(project: Project, a: ApplyArgs, io: Io): Promise<number> {
+  if (!hasMigrations(project)) throw new YodelError(`${a.env} is a slot of a tenant set's wave, for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+  const ordered = readChain(project);
+  const log = (l: string) => { io.err(`${l}\n`); };
+  if (a.wavePlan !== undefined) {
+    const plan = await writeSlotPlan(project, a.env, ordered, a.wavePlan, { allowOutOfOrder: a.allowOutOfOrder }, log);
+    const forecast = await forecastWave(process.cwd(), a.spec, plan);
+    if (forecast?.waits) {
+      const set = splitSlot(a.env)?.env ?? a.env;
+      log(`${set}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}) for every tenant. Approve it with yodel approve ${set}, or: ${forecast.approve}`);
+    }
+    if (a.json) io.out(`${JSON.stringify(plan, null, 2)}\n`);
+    return 0;
+  }
+  if (a.waveApply !== undefined) {
+    return applySlot(a.env, a.waveApply, (tenant, file, decidedAs) => versionedApply(project, resolveEnvironment(project, tenant), { ...a, env: tenant, waveApply: file, decidedAs }, io), log);
+  }
+  throw new YodelError(`${a.env} is a slot of ${splitSlot(a.env)?.env ?? ""}'s wave, which chant run wave plans and applies with --wave-plan and --wave-apply; apply a tenant with yodel apply <env>/<tenant>`);
+}
 
 async function versionedApply(project: Project, env: Environment, a: ApplyArgs, io: Io): Promise<number> {
   const ordered = readChain(project);
@@ -403,8 +434,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
     const forecast = await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
-      // A tenant set's wave (#56) is approved once for every tenant, with chant approve.
-      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with: ` : `. Approve it with yodel approve ${env.name}, or: `;
+      // A tenant set's wave (#56) is approved once for every tenant.
+      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with yodel approve ${env.tenant.env}, or: ` : `. Approve it with yodel approve ${env.name}, or: `;
       io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)})${how}${forecast.approve}\n`);
       outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve: forecast.approve };
     }
@@ -451,16 +482,16 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         // Under the lock: the wave plan now, and chant's decision for it.
         const now = await planWave(project, venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
         if (now.planDigest !== planned.planDigest) {
-          throw new YodelError(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`, 1);
+          throw new WavePlanMoved(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`);
         }
         // The before steps' SQL checks (#64) ran again in that plan, under the lock; a held one needs a person's approval whatever the gate.
         const checked = (now.steps ?? []).filter((o) => !o.deferred);
         for (const o of checked) io.err(`${describeStep(o)}\n`);
-        let verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest, now.held ?? []);
+        let verified = await verifyWaveDecision(cwd, a.spec, a.decidedAs?.target ?? env.name, a.decidedAs?.planDigest ?? planned.planDigest, now.held ?? []);
         // The commands (#107) run once, here, once the wave may apply: one that fails refuses; a held one needs the approval too.
         const commands = await runBeforeSteps(project, venv, env, steps.steps?.before?.filter((s) => s.sql === undefined), "under the lock", io);
         before = [...checked, ...commands];
-        if (heldSteps(commands).length > 0 && verified.wave.status !== "approved") verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest, [...(now.held ?? []), ...heldSteps(commands)]);
+        if (heldSteps(commands).length > 0 && verified.wave.status !== "approved") verified = await verifyWaveDecision(cwd, a.spec, a.decidedAs?.target ?? env.name, a.decidedAs?.planDigest ?? planned.planDigest, [...(now.held ?? []), ...heldSteps(commands)]);
         wave = verified.wave;
         io.err(`${verified.line}\n`);
       },

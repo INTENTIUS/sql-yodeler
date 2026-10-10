@@ -94,7 +94,8 @@ src/lint/                              lint template template-github template-gi
 src/replay/                            lint template template-github template-gitlab
 
 # yodel plan and the pull request comment it posts.
-src/commands/plan.ts                   adopt declarative pr-comment template template-github template-gitlab
+src/commands/plan.ts                   adopt declarative pr-comment template template-github template-gitlab waves
+src/pr/tenants.ts                      waves
 src/pr/                                pr-comment drift template template-github template-gitlab
 
 # yodel report and the audit log (#57).

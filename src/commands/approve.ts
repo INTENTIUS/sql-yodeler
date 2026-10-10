@@ -9,6 +9,10 @@ import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
 import { EXIT_OUTSTANDING } from "../exit.js";
 import { gitLedger } from "../versioned/approval.js";
 import { closeVersioned, findMigrateOp, hasMigrations, migrationsDir, openVersioned, renderStatus, statusReport, ALLOW_OUT_OF_ORDER_ENV } from "../versioned/index.js";
+import { tenantSetOf } from "../tenants/index.js";
+import { describeTenantSetWave, groupTenants, someNames, viewTenantSetWave, viewTenants } from "../tenants/wave.js";
+import type { Migration } from "../migrations/index.js";
+import type { Project } from "../project.js";
 
 /** Exit code: nothing was approved (no one to ask, a wrong answer, a plan apply would refuse, a plan that moved). */
 export const NOT_APPROVED = 4;
@@ -46,6 +50,12 @@ ${WAVES_PIPELINE}-wave-<k> --plan <digest>, bound to the wave's set digest
 (the plan, the gate policy at the base commit, and what the environments
 before it applied), and the wave's job is the one resumed. A wave whose
 policy needs no approval for this plan has nothing to approve.
+
+An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
+is approved once for every tenant: yodel approve <env> plans each tenant as
+the wave's deciding job does, shows what is pending on each, and approves
+the wave's set digest over all of them. <env>/<tenant> approves one tenant
+for yodel apply <env>/<tenant>, outside the pipeline.
 
 Options:
   --plan <digest>       the digest you mean to approve (from the pull request
@@ -167,10 +177,8 @@ export const approve: Command = {
       };
       const project = await loadProject(typeof values.dir === "string" ? values.dir : process.cwd());
       const env = resolveEnvironment(project, name);
-      const set = env.tenant?.env ?? (project.yodel?.config.environments?.[env.name]?.tenants ? env.name : undefined);
-      if (set !== undefined) {
-        throw new YodelError(`${set} is a tenant set: its wave is approved once for every tenant, with the chant approve command its deciding job printed (yodel apply <tenant> --wave-plan prints it too); nothing was approved`);
-      }
+      // A tenant set (#56): its wave, once for every tenant. One tenant is approved as an environment of its own.
+      const set = !env.tenant && tenantSetOf(project, env.name) ? env.name : undefined;
       // Asked before anything is read: no terminal is no one to ask, whatever the plan.
       const ask = io.ask;
       if (!ask) {
@@ -184,6 +192,7 @@ export const approve: Command = {
         throw new YodelError(`${project.dir} has no migrations/ directory with a migration; yodel approve is for versioned migrations. For a declarative project, run yodel apply ${env.name}: it prints the chant approve command`);
       }
       const ordered = readMigrations(migrationsDir(project));
+      if (set !== undefined) return await approveTenantSet(project, set, ordered, { allowOutOfOrder, expected, ask, io, resuming });
       const venv = await openVersioned(project, env);
       try {
         const report = await statusReport(venv, ordered, { allowOutOfOrder });
@@ -250,3 +259,61 @@ export const approve: Command = {
       }
     }),
 };
+
+/** `yodel approve <set>` (#56): the tenant set's wave, one approval of its set digest over every tenant's plan. */
+async function approveTenantSet(
+  project: Project,
+  set: string,
+  ordered: readonly Migration[],
+  o: { allowOutOfOrder: boolean; expected: string | undefined; ask: (q: string) => Promise<string>; io: Parameters<Command["run"]>[1]; resuming: (dir: string) => Promise<boolean> },
+): Promise<number> {
+  const { io } = o;
+  const read = async () => {
+    const tenants = await viewTenants(project, set, ordered, { allowOutOfOrder: o.allowOutOfOrder });
+    return { tenants, view: await viewTenantSetWave(project, set, tenants) };
+  };
+  const { tenants, view } = await read();
+  if (!view) {
+    throw new YodelError(`${set} is a tenant set, and yodel.config.ts waves does not name it, so no wave applies it: approve a tenant with yodel approve ${set}/<tenant>, for yodel apply ${set}/<tenant>; nothing was approved`);
+  }
+  for (const t of tenants.filter((x) => x.report.refusal)) io.err(`yodel approve: ${t.target}: ${t.report.refusal?.message ?? ""}\n`);
+  if (view.refused.length > 0) {
+    io.err(`${describeTenantSetWave(view, tenants.length)}\nNothing was approved.\n`);
+    return NOT_APPROVED;
+  }
+  if (tenants.every((t) => t.plan?.empty)) {
+    io.out(`Every tenant of ${set} (${String(tenants.length)}) is up to date: there is nothing to approve.\n`);
+    return 0;
+  }
+  io.out(`Tenant set ${set}, ${String(tenants.length)} tenant${tenants.length === 1 ? "" : "s"}:\n`);
+  for (const g of groupTenants(tenants, (t) => (t.plan?.pending ?? []).join(" "))) {
+    const pending = g.members[0]?.plan?.pending ?? [];
+    io.out(`  ${pending.length === 0 ? "up to date" : `${String(pending.length)} pending (${pending.join(", ")})`}: ${someNames(g.members.map((m) => m.target))}\n`);
+    const destructive = g.members[0]?.plan?.destructiveSteps ?? [];
+    if (destructive.length > 0) io.out(`    destructive: ${destructive.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}\n`);
+  }
+  io.out(`${describeTenantSetWave(view, tenants.length)}\n`);
+  if (view.blocked.length > 0) {
+    io.err("Nothing was approved.\n");
+    return NOT_APPROVED;
+  }
+  if (!view.waits || !view.digest) return 0;
+  if (o.expected !== undefined && o.expected !== view.digest) {
+    io.err(`yodel approve: --plan ${o.expected} is not the plan waiting for ${set}, which is ${view.digest}. Nothing was approved.\n`);
+    return NOT_APPROVED;
+  }
+  const answer = (await o.ask(`\nApprove wave ${String(view.wave)} for every tenant of ${set}, ${view.digest}? Type ${set} to approve: `)).trim();
+  if (answer !== set) {
+    io.err(`Not approved: the answer was not ${set}.\n`);
+    return NOT_APPROVED;
+  }
+  // Every tenant is read again: what is approved is what the person saw.
+  const again = await read();
+  if (again.view?.digest !== view.digest) {
+    io.err(`Not approved: the plan moved while you were asked (now ${again.view?.digest ?? "nothing to approve"}); run yodel approve ${set} again.\n`);
+    return NOT_APPROVED;
+  }
+  const { waveGateName } = await import("@intentius/chant/gated-waves");
+  const gate = waveGateName(WAVES_PIPELINE, view.wave);
+  return record(io, project.dir, WAVES_PIPELINE, gate, view.digest, await o.resuming(project.dir), `Run wave ${String(view.wave)}'s deciding job again (push chant/lifecycle first if chant did not).`);
+}

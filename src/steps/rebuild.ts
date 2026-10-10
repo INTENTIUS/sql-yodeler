@@ -63,16 +63,17 @@ export function withProfileTopology(config: ProjectConfig, environment: string, 
 }
 
 /**
- * The chant config a rebuild step's activities bind with: the project's,
- * with the environment's resolved topology on its profile when chant would
- * not find it there itself. `undefined` when chant's own resolution already
- * gives the same topology (set in the profile, or no topology anywhere).
+ * The chant config a rebuild step's activities bind with: the project's
+ * (or `base`, a tenant's, #56), with the environment's resolved topology on
+ * its profile when chant would not find it there itself. `base` (or
+ * `undefined`, chant.config.ts) when chant's own resolution already gives
+ * the same topology (set in the profile, or no topology anywhere).
  */
-export async function rebuildChantConfig(projectDir: string, environment: string, env: NodeJS.ProcessEnv = process.env): Promise<ProjectConfig | undefined> {
+export async function rebuildChantConfig(projectDir: string, environment: string, env: NodeJS.ProcessEnv = process.env, base?: ProjectConfig): Promise<ProjectConfig | undefined> {
   const project = await loadProject(projectDir);
   const settings = environmentSettings(project, environment, env);
-  if (settings.topologySource === "default" || settings.topologySource === `sql.profiles.${environment}.topology`) return undefined;
-  return withProfileTopology(project.config, environment, settings.topology);
+  if (settings.topologySource === "default" || settings.topologySource === `sql.profiles.${environment}.topology`) return base;
+  return withProfileTopology(base ?? project.config, environment, settings.topology);
 }
 
 /** The Op a rebuild step runs. `buildPath` is the recorded schema's file; `projectDir` holds chant.config.ts. */

@@ -9,7 +9,7 @@ import { hold, runParts, Violation, type Claim, type Ctx, type Part as RunPart }
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { parse, Project } from "../lib/project.js";
-import { addColumn, mainTable } from "../lib/schema.js";
+import { addColumn, addTable, mainTable } from "../lib/schema.js";
 
 /**
  * The apply pipeline as waves (#42): two environments, staging then prod,
@@ -58,8 +58,15 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   status` counts them up to date. A tenant whose plan moved after the
  *   decision (a table made by hand) is refused by its share job, named,
  *   exit 4, while the others in the share apply; `yodel status` and `yodel
- *   report` show it behind. BREAK: the wave is rendered with the first
- *   tenant alone, so the others never get the migrations.
+ *   report` show it behind. Then the set is read by a query (a registry
+ *   table): the pipeline is rendered once, and a tenant added to the
+ *   registry afterwards renders the same files. A migration with a backfill
+ *   step: `yodel plan <set> --format markdown` is one comment for every
+ *   tenant, naming the digest the deciding job then waits on; `yodel
+ *   approve <set>` approves it; the wave applies to all four tenants, the
+ *   new one from its first migration, and the backfill runs on each
+ *   tenant's own table. BREAK: the wave is rendered with the first tenant
+ *   alone, so the others never get the migrations.
  * - pre-check (#64): staging has steps around apply, read at the base
  *   commit: a before step that fails with `onFailure: "approve"`, a before
  *   command that appends a line to a file, and an after step. Under gate
@@ -94,9 +101,9 @@ const ENV_KEYS = ["staging", "prod"] as const;
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string } = {}): Promise<void> {
   const { p } = st;
-  p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps));
+  p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps, options.tenantQuery));
   // A tenant set's wave has a run per tenant, as yodel ci renders it.
   let ws: readonly Wave[] = await withTenants(p.dir, options.allNever ? waves.map((w): Wave => ({ ...w, gate: "never" })) : waves);
   if (options.firstTenantOnly) ws = ws.map((w) => (w.targets ? { ...w, targets: w.targets.slice(0, 1), shares: 1 } : w));
@@ -163,14 +170,14 @@ async function runJob(st: State, name: string): Promise<JobResult> {
 // ── The project ──────────────────────────────────────────────────────────────
 
 /** yodel.config.ts with these waves; `stagingSteps` is staging's `steps`, as TypeScript. */
-function yodelConfig(st: State, waves: readonly Wave[], noRequires = false, stagingSteps?: string): string {
+function yodelConfig(st: State, waves: readonly Wave[], noRequires = false, stagingSteps?: string, tenantQuery?: string): string {
   const history = st.p.ctx.db.history;
   return `import type { YodelConfig } from "@intentius/sql-yodeler";
 
 export default {
   environments: {
 ${ENV_KEYS.map((k) => `    "${st.envs[k]}": { history: { database: "${history}" }${k === "staging" && stagingSteps ? `, steps: ${stagingSteps}` : ""} },`).join("\n")}
-    "${st.envs.tenants}": { history: { database: "${history}" }, tenants: ${JSON.stringify(tenantNames(st.p.ctx))} },
+    "${st.envs.tenants}": { history: { database: "${history}" }, tenants: ${tenantQuery ? `{ query: ${JSON.stringify(tenantQuery)} }` : JSON.stringify(tenantNames(st.p.ctx))} },
   },
   waves: [
 ${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i > 0 ? ", requires: false" : ""}${w.shares ? `, shares: ${String(w.shares)}` : ""} },`).join("\n")}
@@ -238,9 +245,17 @@ async function prodServer(ctx: Ctx): Promise<{ url: string; close: () => Promise
 /** The tenant set's tenants: three schemas or databases beside the claim's own on the staging server. */
 const tenantNames = (ctx: Ctx): string[] => ["t1", "t2", "t3"].map((t) => `${ctx.db.name}_${t}`);
 
-/** Drops the tenants and their histories. */
+/** The tenant added to the registry once the set is read by a query. */
+const lateTenant = (ctx: Ctx): string => `${ctx.db.name}_t4`;
+
+/** The registry a tenant set read by a query lists its tenants from: a table of names in a database (schema) of its own. */
+const registry = (ctx: Ctx): string => `${ctx.db.name}_registry`;
+
+/** Drops the tenants, their histories and the registry. */
 async function dropTenants(ctx: Ctx): Promise<void> {
-  for (const t of tenantNames(ctx)) {
+  if (ctx.dialect === "ch") await clickhouseAt(endpoints.clickhouse, `DROP DATABASE IF EXISTS ${registry(ctx)} SYNC`);
+  else await postgresQuery(`DROP SCHEMA IF EXISTS ${registry(ctx)} CASCADE`);
+  for (const t of [...tenantNames(ctx), lateTenant(ctx)]) {
     for (const name of [t, `${ctx.db.history}_${t}`]) {
       if (ctx.dialect === "ch") await clickhouseAt(endpoints.clickhouse, `DROP DATABASE IF EXISTS ${name} SYNC`);
       else await postgresQuery(`DROP SCHEMA IF EXISTS ${name} CASCADE`);
@@ -547,6 +562,75 @@ async function tenants(ctx: Ctx, st: State, broken: boolean): Promise<void> {
       report.environments.find((e) => e.name === `${set}/${t2}`)?.migrations.some((m) => m.state === "pending") === true,
     `yodel report ${set} does not show a column per tenant with ${t2} behind`,
   );
+
+  await tenantsByQuery(ctx, st, names);
+}
+
+/** Sends SQL to the staging server, where the tenants are. */
+const onStaging = (ctx: Ctx, sql: string) => (ctx.dialect === "ch" ? clickhouseAt(endpoints.clickhouse, sql) : postgresQuery(sql));
+
+/**
+ * The tenant set read by a query (#56): rendered once, read again when the
+ * wave runs; one plan comment and one yodel approve for the set; an Op step
+ * (a backfill) on each tenant.
+ */
+async function tenantsByQuery(ctx: Ctx, st: State, names: readonly string[]): Promise<void> {
+  const set = st.envs.tenants;
+  const reg = registry(ctx);
+  const t4 = lateTenant(ctx);
+  await onStaging(ctx, ctx.dialect === "ch" ? `CREATE DATABASE ${reg}` : `CREATE SCHEMA ${reg}`);
+  await onStaging(ctx, ctx.dialect === "ch" ? `CREATE TABLE ${reg}.tenants (name String) ENGINE = MergeTree ORDER BY name` : `CREATE TABLE ${reg}.tenants (name text PRIMARY KEY)`);
+  await onStaging(ctx, `INSERT INTO ${reg}.tenants (name) VALUES ${names.map((n) => `('${n}')`).join(", ")}`);
+  const tenantQuery = `SELECT name FROM ${reg}.tenants ORDER BY name`;
+  const tenantWaves: Wave[] = [{ env: st.envs.staging, gate: "never" }, { env: set, gate: "always", shares: 2 }];
+  await render(st, tenantWaves, { tenantQuery });
+  await st.p.commit("the tenant set, read by a query");
+
+  // A tenant comes; the pipeline rendered again is the same.
+  await onStaging(ctx, `INSERT INTO ${reg}.tenants (name) VALUES ('${t4}')`);
+  await render(st, tenantWaves, { tenantQuery });
+  const changed = (await st.p.git("status", "--porcelain")).out.trim();
+  hold(changed === "", `rendering the pipeline again after a tenant was added changed it: ${changed}`);
+
+  // A migration with an Op step: a backfill writing one row to a new table.
+  addTable(st.p, "filled");
+  st.p.write(
+    "backfills/fill.ts",
+    `import { EffectReceipt } from "@intentius/chant";
+import { Op, activity, effect, phase } from "@intentius/chant/op";
+
+export const op = Op({
+  name: "backfill-fill",
+  overview: "one row in filled",
+  phases: [phase("Backfill", [effect(EffectReceipt("fill-all", { effect: "fill/all", flavor: "existence" }), [activity("yodelSql", { sql: "INSERT INTO ${ctx.db.name}.filled (id) VALUES (1)" }, "atMostOnce")])])],
+});
+`,
+  );
+  const id = await st.p.newMigration("fill", ["--backfill", "backfills/fill.ts"]);
+  if (!id) throw new Error("yodel new fill wrote no migration");
+  await st.p.commit("feat: a table filled by a backfill");
+
+  // Staging applies, and the deciding job waits; one plan comment for the set names the digest it waits on.
+  const first = await pipeline(st);
+  const waiting = first.get(`wave-2-${set}-decide`);
+  hold(waiting?.code === 3, `the tenant set read by a query did not wait for an approval (exit ${String(waiting?.code)})`);
+  const digest = / --plan (\S+)/.exec(approveCommand(waiting))?.[1];
+  const comment = await st.p.yodel(["plan", set, "--format", "markdown"]);
+  const commented = /one approval of `(jcs1-[^`]+)`/.exec(comment.out)?.[1];
+  hold(comment.code === 0 && [...names, t4].every((t) => comment.out.includes(`\`${t}\``)), `yodel plan ${set} --format markdown is not one comment naming every tenant (exit ${String(comment.code)})`);
+  hold(commented !== undefined && commented === digest, `the plan comment's digest (${String(commented)}) is not the one the deciding job waits on (${String(digest)})`);
+
+  const approved = await yodelBuild(ctx, st.p, "yodel").ask(set, ["approve", set]);
+  hold(approved.code === 0, `yodel approve ${set} exited ${String(approved.code)}: ${approved.err.split("\n").slice(-3).join(" ")}`);
+  const applied = await pipeline(st, first);
+  hold([...applied.values()].every((r) => r.ok), `a job of the tenant set's wave failed after yodel approve: ${[...applied].filter(([, r]) => !r.ok).map(([n, r]) => `${n} exit ${String(r.code)}`).join(", ")}`);
+  for (const t of [...names, t4]) {
+    const rows = ctx.dialect === "ch" ? Number((await clickhouseAt(endpoints.clickhouse, `SELECT count() FROM ${t}.filled`)).trim()) : Number(Object.values((await postgresQuery(`SELECT count(*) FROM ${t}.filled`))[0] ?? {})[0] ?? 0);
+    hold(rows === 1, `the backfill wrote ${String(rows)} rows to ${t}.filled, not 1`);
+  }
+  hold(await onTenant(ctx, t4, "tenanted"), `${t4}, added after the pipeline was rendered, did not get every migration`);
+  const status = parse<{ upToDate: number; total: number }>(await st.p.yodel(["status", set, "--json"]));
+  hold(status.upToDate === 4 && status.total === 4, `yodel status ${set} does not count 4 of 4 tenants up to date (${String(status.upToDate)} of ${String(status.total)})`);
 }
 
 async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {

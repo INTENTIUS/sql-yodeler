@@ -560,8 +560,9 @@ export interface Wave {
    */
   requires?: string;
   /**
-   * A tenant set's wave (#56): a run per tenant, `<env>/<tenant>`, in place
-   * of the environment's one, all behind the wave's one gate.
+   * A tenant set's wave (#56): a run per tenant, `<env>/<tenant>`, or per
+   * slot of a set read at run time, `<env>/@<i>of<n>`, in place of the
+   * environment's one, all behind the wave's one gate.
    */
   targets?: readonly string[];
   /** Split the wave into a deciding job and this many share jobs (yodel.config.ts `waves[].shares`). */
@@ -751,23 +752,21 @@ export async function readWaves(dir: string, envs: readonly string[]): Promise<W
 }
 
 /**
- * Each wave of an environment with a tenant set (#56), with a run per
- * tenant. A set given by a query is read from the server now, with the
- * environment's profile: run yodel ci again when the tenants change.
+ * Each wave of an environment with a tenant set (#56), with its runs: a
+ * run per tenant of a list or a file, or for a set given by a query,
+ * `shares` slots (one without) that read the tenants when the wave runs.
+ * The query is not run here, so the pipeline stays the same as tenants come
+ * and go; a list or a file is in the repository, and changing it is
+ * rendering again.
  */
 export async function withTenants(dir: string, waves: readonly Wave[]): Promise<Wave[]> {
   const { loadProject } = await import("../project.js");
-  const { listTenants, tenantTarget } = await import("../tenants/index.js");
+  const { waveTargets } = await import("../tenants/wave.js");
   const project = await loadProject(dir);
   const out: Wave[] = [];
   for (const w of waves) {
-    const tenants = await listTenants(project, w.env);
-    if (tenants === undefined) {
-      out.push(w);
-      continue;
-    }
-    if (tenants.length === 0) throw new Error(`${w.env}'s tenant set lists no tenant, so its wave would apply nothing`);
-    out.push({ ...w, targets: tenants.map((t) => tenantTarget(w.env, t)) });
+    const targets = await waveTargets(project, w.env, w.shares);
+    out.push(targets === undefined ? w : { ...w, targets });
   }
   return out;
 }
