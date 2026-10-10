@@ -71,7 +71,7 @@ async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered:
 /** What a versioned run did, beyond the status it reports. */
 export type VersionedOutcome =
   | { status: "planned" | "unchanged" }
-  | { status: "refused"; preChecks?: { migration: string; checks: CheckOutcome[] } }
+  | { status: "refused"; preChecks?: { migration: string; checks: CheckOutcome[] }; refusal?: { exitCode: number; message: string } }
   | { status: "denied"; policy: RuleResult[] }
   | { status: "stood-down"; stoodDown: string; op?: string }
   | { status: "gated"; op: string; gate: string; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; gatePlanDigest?: string }

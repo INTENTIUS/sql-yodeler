@@ -214,6 +214,7 @@ describe("each command's --json output validates against its schema", () => {
       { status: "unchanged" },
       { status: "refused" },
       { status: "refused", preChecks: { migration: "20261010T0910-rebuild", checks: [{ name: "no-nulls", passed: false, detail: "3 rows" }] } },
+      { status: "refused", refusal: { exitCode: 4, message: "refused: prod applies only migrations staging applied first" } },
       { status: "denied", policy: [{ id: "online-only", outcome: "denied", reasons: ["a rebuild is not online"] }] },
       { status: "stood-down", stoodDown: "standing down: main on origin is at b, newer than this run's a" },
       { status: "stood-down", stoodDown: "standing down", op: "migrate-dev" },
