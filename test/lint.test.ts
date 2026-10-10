@@ -202,23 +202,23 @@ describe("yodel lint: what the lexicon cannot read", () => {
       ["create", ch(chEvents("id UInt64"))],
       ["add-kind", ch(chEvents("id UInt64, kind String DEFAULT ''"))],
     ]);
-    const dictionary: BuiltObject = {
+    const collection: BuiltObject = {
       export: "lookup",
-      type: "ClickHouse::Dictionary",
-      ddl: "CREATE DICTIONARY yodel_14.lookup (id UInt64, v String) PRIMARY KEY id SOURCE(NULL()) LAYOUT(FLAT()) LIFETIME(0)",
-      dependsOn: ["db"],
+      type: "ClickHouse::NamedCollection",
+      ddl: "CREATE NAMED COLLECTION lookup AS url = 'http://example.invalid'",
+      dependsOn: [],
     };
     // Schemas recorded with an object the lexicon has no parser for (hand-written, or by a newer chant).
     // Both migrations record it; it is reported once, where it first appears.
     for (const id of [m?.id ?? "", next?.id ?? ""]) {
-      editDocument(dir, id, (doc) => ({ ...doc, schema: { ...doc.schema, objects: [...doc.schema.objects, dictionary] } }));
+      editDocument(dir, id, (doc) => ({ ...doc, schema: { ...doc.schema, objects: [...doc.schema.objects, collection] } }));
     }
 
     const report = await lint(dir);
     const unreadable = report.findings.filter((f) => f.rule === "unreadable-object");
     expect(unreadable).toHaveLength(1);
     expect(unreadable[0]).toMatchObject({ level: "error", migration: m?.id, object: "lookup" });
-    expect(unreadable[0]?.message).toContain("lookup (ClickHouse::Dictionary)");
+    expect(unreadable[0]?.message).toContain("lookup (ClickHouse::NamedCollection)");
     expect(unreadable[0]?.message).toContain("cannot read it");
     expect(report.errors).toBe(1);
   });
@@ -291,7 +291,7 @@ describe("yodel lint: ClickHouse statement rules", () => {
 });
 
 describe("yodel lint: Postgres statement rules (from the classifier's classes)", () => {
-  it("flags a rewrite, a volatile default, a CHECK added in place and a drop", async () => {
+  it("flags a rewrite, a volatile default and a drop; a CHECK is planned NOT VALID, then VALIDATE", async () => {
     const dir = tempDir();
     chain(dir, [
       ["create", pg(pgOrders("n integer, gone text"))],
@@ -303,15 +303,16 @@ describe("yodel lint: Postgres statement rules (from the classifier's classes)",
       expect.arrayContaining([
         ["pg-rewrite", "SQLPG207"],
         ["pg-rewrite", "SQLPG202"],
-        ["pg-rewrite", "SQLPG218"],
         ["destructive", "SQLPG204"],
       ]),
     );
+    // chant plans the CHECK as ADD CONSTRAINT ... NOT VALID (SQLPG217), then VALIDATE (SQLPG220): neither blocks writes.
+    expect(got.map(([, code]) => code)).not.toContain("SQLPG218");
     expect(report.findings.find((f) => f.message.includes("SQLPG207"))?.message).toContain("blocks reads and writes");
     expect(report.errors).toBe(report.findings.length);
   });
 
-  it("flags locks: an index without CONCURRENTLY on an existing table, a foreign key validated in place", async () => {
+  it("flags an index without CONCURRENTLY on an existing table; a foreign key is planned NOT VALID, then VALIDATE", async () => {
     const dir = tempDir();
     chain(dir, [
       ["create", pg(pgOrders("cid bigint"))],
@@ -321,10 +322,8 @@ describe("yodel lint: Postgres statement rules (from the classifier's classes)",
     const report = await lint(dir);
     expect(report.findings.map((f) => [f.rule, f.message.match(/SQLPG\d+/)?.[0]])).toEqual([
       ["pg-lock", "SQLPG241"],
-      ["pg-lock", "SQLPG219"],
     ]);
     expect(report.findings[0]?.message).toContain("without CONCURRENTLY");
-    expect(report.findings[1]?.message).toContain("NOT VALID");
   });
 
   it("passes the safe forms: CONCURRENTLY, NOT VALID, USING INDEX, and an index on a table created with it", async () => {

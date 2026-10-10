@@ -13,8 +13,8 @@
     "replay": "yodel ci --replay"
   },
   "dependencies": {
-    "@intentius/chant": "0.117.0",
-    "@intentius/chant-lexicon-sql": "0.117.0",
+    "@intentius/chant": "0.118.0",
+    "@intentius/chant-lexicon-sql": "0.118.0",
     "@intentius/sql-yodeler": "^0.3.0"
   },
   "devDependencies": {
