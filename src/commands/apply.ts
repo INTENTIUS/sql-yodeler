@@ -23,6 +23,7 @@ import {
   checksRefusal,
   describeResults,
   judgePlan,
+  judgeRevert,
   policyRefusal,
   runChecks,
   currentDigest,
@@ -343,6 +344,9 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (!approved) throw new YodelError(`--execute reverts only the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel revert ${env.name} ${revert.id}`);
     const op = await findMigrateOp(project, env, a.op);
     const ledger = await gitLedger(project.dir);
+    // The policy over the revert (#97), as the base commit has it (#73), as yodel revert judged it before the gate.
+    const { policy: basePolicy, note: policyNote } = await policyAtBase(project);
+    if (policyNote) io.err(`${policyNote}\n`);
     const plan = await executeRevert(venv, ordered, {
       id: revert.id,
       step: revert.step,
@@ -352,6 +356,17 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         const by = await verifyApproval(ledger, op, digest);
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
       },
+      ...(basePolicy
+        ? {
+            policy: async (digest, planned) => {
+              const results = await judgeRevert({ policy: basePolicy, environment: env.name, dialect: project.dialect, plan: planned, digest, ledger: () => Promise.resolve({ port: ledger, op }) });
+              const refusal = policyRefusal(results, env.name, digest, "under the lock", { id: revert.id, step: revert.step?.file });
+              if (refusal) throw refusal;
+              for (const line of describeResults(results)) io.err(`${line}\n`);
+              return results.flatMap((r) => (r.override ? [r.override] : []));
+            },
+          }
+        : {}),
       log: (l) => { io.err(`${l}\n`); },
     });
     io.out(`Reverted: ${plan.migration.id}, back to ${plan.to ?? "an empty schema"}\n`);

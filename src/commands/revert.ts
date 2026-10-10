@@ -8,17 +8,26 @@ import { runnable } from "../chant/runnable.js";
 import { LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
 import { MIGRATION_ID } from "../migrations/index.js";
 import { describeServer } from "../server.js";
+import { policyAtBase } from "../config/base.js";
+import { EXIT_REFUSED } from "../exit.js";
+import type { WaveGate } from "../config/define.js";
+import { destructiveSteps, gateAtBase, type DestructiveStep } from "../waves/index.js";
 import {
   closeVersioned,
   currentRevert,
+  describeResults,
   findMigrateOp,
+  gitLedger,
+  judgeRevert,
   openVersioned,
+  policyRefusal,
   readChain,
   readRevertStep,
   renderStatus,
   runMigrateOp,
   statusReport,
   type RevertPlan,
+  type RuleResult,
 } from "../versioned/index.js";
 
 const usage = "usage: yodel revert <env> <id> [--step <file>] [--dry-run] [--json] [--op <name>] [--lock-wait <duration>] [--dir <project>]";
@@ -42,6 +51,15 @@ again, and yodel status shows it reverted. Delete it, or rewrite it with
 yodel new --replace, before the next yodel apply, which would apply it
 again.
 
+The policy in yodel.config.ts (policy.rules), as the base commit has it, is
+judged over the revert's statements before the gate, and again under the
+lock: a rule that refuses drops refuses a revert that drops what the
+migration added (exit 4), unless an override is recorded for the revert's
+digest (yodel override <env> --revert <id> --rule <rule> --reason <why>).
+In an environment yodel.config.ts waves names, the revert waits at the
+migrations Op's gate whatever the wave's gate policy: under on-destructive,
+a destructive revert waits for an approval, and so does any other.
+
 Statements carry the schema back, never data. A migration with a data step
 (a backfill) is refused unless --step names a file of statements that undo
 it, each ending with ; at the end of a line; they run before the reverse
@@ -63,7 +81,9 @@ Exit codes:
      or the reverse needs an Op or a manual step
   3  stopped at the gate, waiting for approval of this revert
   4  refused, nothing reverted: <id> is not applied in <env>, a migration
-     after it is, or the history does not match the migrations directory
+     after it is, the history does not match the migrations directory, or
+     a policy rule denies the revert and no override is recorded for its
+     digest
   5  another apply holds the lock
   1  anything else failed: a statement (the history records where; rerun to
      resume), a revert whose plan moved since approval, a bad config
@@ -117,6 +137,35 @@ function parseRevertArgs(args: string[]): RevertArgs {
   };
 }
 
+/** The wave of the environment a revert runs in (#97), when yodel.config.ts waves names it. */
+export interface RevertWave {
+  /** The wave's gate policy, as the base commit has it. */
+  gate: WaveGate;
+  base: string;
+  /** The revert's statements the wave's gate counts as destructive (what on-destructive waits on). */
+  destructiveSteps: DestructiveStep[];
+  /** Whether the wave's gate policy asks for an approval of this revert. The revert waits at the migrations Op's gate either way. */
+  policyWaits: boolean;
+}
+
+/** What the wave gate `gate` makes of the revert `plan`: the statements it counts as destructive, the way a wave plan counts a migration's steps, and whether it asks for an approval. */
+export function revertWaveOf(gate: WaveGate, base: string, dialect: "clickhouse" | "postgres", plan: RevertPlan): RevertWave {
+  const steps = destructiveSteps(dialect, [{ id: plan.migration.id, migration: { document: { ...plan.migration.document, steps: plan.statements.map((s) => s.step) } } }]);
+  return { gate, base, destructiveSteps: steps, policyWaits: plan.statements.length > 0 && (gate === "always" || (gate === "on-destructive" && steps.length > 0)) };
+}
+
+/** `env`'s wave gate at the base commit for the revert `plan`, or undefined when no wave names `env`. */
+async function revertWave(project: Parameters<typeof gateAtBase>[0], env: string, plan: RevertPlan): Promise<RevertWave | undefined> {
+  if (!(project.yodel?.config.waves ?? []).some((w) => w.env === env)) return undefined;
+  const { gate, at } = await gateAtBase(project, env);
+  return revertWaveOf(gate, at.sha, project.dialect === "postgres" ? "postgres" : "clickhouse", plan);
+}
+
+function describeWave(env: string, wave: RevertWave): string {
+  const destructive = wave.destructiveSteps.length > 0 ? `destructive (${wave.destructiveSteps.map((d) => `statement ${String(d.step)}: ${d.why}`).join(", ")})` : "not destructive";
+  return `wave gate ${wave.gate} for ${env} at ${wave.base.slice(0, 12)}: the revert is ${destructive}; ${wave.policyWaits ? "it waits for an approval" : "the gate policy alone would let it through, and it waits at the migrations Op's gate all the same"}`;
+}
+
 /** The revert as JSON (schemas/revert.schema.json), with what happened. */
 export function revertJson(plan: RevertPlan, digest: string, outcome: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -159,14 +208,42 @@ async function run(a: RevertArgs, io: Io): Promise<number> {
   const venv = await openVersioned(project, env);
   try {
     const { plan, digest } = await currentRevert(venv, ordered, a.id, step);
+    // The policy (#53) over the revert (#97), as the base commit has it (#73), with the overrides recorded for this revert's digest.
+    const basePolicy = await policyAtBase(project);
+    if (basePolicy.note && !a.json) io.err(`${basePolicy.note}\n`);
+    const op = a.dryRun ? undefined : await findMigrateOp(project, env, a.op);
+    const policy: RuleResult[] = await judgeRevert({
+      policy: basePolicy.policy,
+      environment: env.name,
+      dialect: project.dialect,
+      plan,
+      digest,
+      ledger: async () => {
+        try {
+          return { port: await gitLedger(project.dir), op: op ?? (await findMigrateOp(project, env, a.op)) };
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    const wave = await revertWave(project, env.name, plan);
+    const extra = { ...(policy.length > 0 ? { policy } : {}), ...(wave ? { wave } : {}) };
     const emit = (outcome: Record<string, unknown>, code: number) => {
-      if (a.json) io.out(`${JSON.stringify(revertJson(plan, digest, outcome), null, 2)}\n`);
+      if (a.json) io.out(`${JSON.stringify(revertJson(plan, digest, { ...outcome, ...extra }), null, 2)}\n`);
       return code;
     };
-    if (!a.json) io.out(renderPlan(plan, digest));
-    if (a.dryRun) return emit({ status: "planned" }, 0);
+    if (!a.json) {
+      io.out(renderPlan(plan, digest));
+      for (const line of describeResults(policy)) io.out(`${line}\n`);
+      if (wave) io.out(`${describeWave(env.name, wave)}\n`);
+    }
+    if (a.dryRun || !op) return emit({ status: "planned" }, 0);
+    const denied = policyRefusal(policy, env.name, digest, "before the gate", { id: plan.migration.id, step: a.step });
+    if (denied) {
+      if (!a.json) io.err(`yodel revert: ${denied.message}\n`);
+      return emit({ status: "denied" }, EXIT_REFUSED);
+    }
 
-    const op = await findMigrateOp(project, env, a.op);
     if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath}) to revert ${plan.migration.id}\n`);
     const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(a.lockWaitMs !== undefined ? { [LOCK_WAIT_ENV]: `${String(a.lockWaitMs)}ms` } : {}) };
     const ran = await runMigrateOp(project, op, {

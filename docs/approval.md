@@ -361,3 +361,15 @@ npx yodel override prod --rule no-drops-in-prod --reason "the table has been emp
 It is recorded on chant's gate ledger (the `chant/lifecycle` branch) as an approval of the gate `override-<rule>` of the environment's migrations Op, for exactly the current plan digest, with the reason as its note (`chant approve <op> override-<rule> --plan <digest> --note <reason>`). It counts only for that digest: if the plan moves (a migration added or edited, the live schema changed), the rule denies again and needs a new override. It counts only when `policy.overriders` lists who recorded it (`--by`, else chant's actor: the CI user or your login). `yodel override` refuses a rule that does not deny the current plan, so an override always answers one denial. An override does not approve the plan: the migrations Op's gate still asks for approval as before.
 
 The Apply step writes the overrides it relied on into the history, in the `note` of each migration's `started` row, as `{"policy":{"overrides":[{"rule":...,"by":...,"at":...,"reason":...,"digest":...}]}}`.
+
+### Reverts
+
+`yodel revert` ([Reverting](migrations.md#reverting-yodel-revert)) is judged by the same policy, read at the base commit, before the gate and again under the lock. The rules see the revert as a plan with one entry in `pending`, the migration reverted, whose steps are the revert's statements in the order they run (a hand-written revert step's first), and `plan.revert` names the migration and the one it goes back to. A revert usually drops what the migration added, so a rule that refuses drops (or `refuse.destructive`) in prod refuses the revert too: exit 4, nothing reverted. To revert anyway, override for the revert's own digest:
+
+```sh
+npx yodel override prod --revert 20261010T0900-add-coupons --rule no-drops-in-prod --reason "added by mistake, OPS-415" --by alice
+```
+
+With `--step <file>` as well when the revert has a hand-written step. An override of the apply's plan never counts for a revert, nor the other way round. The revert's Apply step writes the overrides it relied on into the note of the migration's `reverted` row.
+
+A revert always stops at the migrations Op's gate, whatever the wave's gate policy in an environment `waves` names: under `on-destructive`, a destructive revert waits for an approval, and so does any other revert. `yodel revert --json` says what the wave's gate, at the base commit, makes of the revert (`wave`: its destructive statements, counted as a wave plan counts them, and whether the policy asks for an approval).

@@ -256,7 +256,7 @@ export function parse<T>(ran: Ran): T {
   return JSON.parse(ran.out.slice(at)) as T;
 }
 
-function parseOr<T>(ran: Ran, fallback: T): T {
+export function parseOr<T>(ran: Ran, fallback: T): T {
   try {
     return parse<T>(ran);
   } catch {

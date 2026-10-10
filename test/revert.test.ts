@@ -18,6 +18,9 @@ import {
   executeApply,
   executeRevert,
   inspect,
+  judgeRevert,
+  overrideGate,
+  policyRefusal,
   openVersioned,
   planRevert,
   selectToApply,
@@ -29,6 +32,8 @@ import {
   type VersionedEnv,
 } from "../src/versioned/index.js";
 import { FakeClickHouse } from "./helpers/fake-clickhouse.js";
+import type { PolicyConfig } from "../src/config/define.js";
+import { revertWaveOf } from "../src/commands/revert.js";
 
 const build = (columns: string): BuildOutput => ({
   dialect: "clickhouse",
@@ -178,6 +183,64 @@ describe("executeRevert", () => {
     await executeApply(venv, ordered, { approvedDigest: again, allowOutOfOrder: false, approve: (d) => verifyApproval(ledgerFor(again), OP, d), log: quiet, processEnv: { USER: "tester" } });
     expect(ch.sent.slice(sentRevert)).toEqual([expect.stringMatching(/ADD COLUMN.*note/)]);
     expect((await inspect(venv, ordered)).status.applied.map((a) => a.id)).toEqual([m0.id, m1.id]);
+  });
+});
+
+describe("the policy over a revert (#97)", () => {
+  const policy: PolicyConfig = { overriders: ["alice"], rules: [{ id: "no-drops", environments: ["e2e"], refuse: { classes: ["drop"], destructive: true } }] };
+
+  it("denies a revert that drops what the migration added, unless an override is recorded for the revert's digest", async () => {
+    const p = plan([row(1, m0), row(2, m1)], m1.id);
+    const none = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:aa", ledger: () => Promise.resolve(undefined) });
+    expect(none).toMatchObject([{ id: "no-drops", outcome: "denied", reasons: [expect.stringMatching(/step 0 .* is destructive/) as unknown] }]);
+    const refused = policyRefusal(none, "e2e", "jcs1-sha256:aa", "before the gate", { id: m1.id });
+    expect(refused?.exitCode).toBe(4);
+    expect(refused?.message).toContain(`denies the revert of ${m1.id}`);
+    expect(refused?.message).toContain(`yodel override e2e --revert ${m1.id} --rule no-drops`);
+
+    const port = memoryGateLedgerPort({
+      resolutions: [{ version: 1, op: OP.name, gate: overrideGate("no-drops"), resolvedBy: "alice", timestamp: "2026-10-10T12:00:00.000Z", planDigest: "jcs1-sha256:aa", note: "nothing reads it" }],
+    });
+    const over = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:aa", ledger: () => Promise.resolve({ port, op: OP }) });
+    expect(over).toMatchObject([{ id: "no-drops", outcome: "overridden", override: { by: "alice", reason: "nothing reads it" } }]);
+    // An override of another digest (the apply's, or the revert before it moved) does not count.
+    const other = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:bb", ledger: () => Promise.resolve({ port, op: OP }) });
+    expect(other[0]?.outcome).toBe("denied");
+    // A rule's check sees that the plan is a revert.
+    const seen = await judgeRevert({ policy: { rules: [{ id: "no-reverts", check: (pl) => (pl.revert ? `reverts ${pl.revert.id} to ${String(pl.revert.to)}` : undefined) }] }, environment: "e2e", dialect: "clickhouse", plan: p, digest: undefined, ledger: () => Promise.resolve(undefined) });
+    expect(seen[0]?.reasons).toEqual([`reverts ${m1.id} to ${m0.id}`]);
+  });
+
+  it("refuses under the lock when a rule denies with no override, and records the override it relied on in the reverted row", async () => {
+    const { ch, venv } = await setup();
+    const ordered = [m0, m1];
+    const { status } = await inspect(venv, ordered);
+    const applyDigest = await currentDigest(venv, status, selectToApply(status, false));
+    await executeApply(venv, ordered, { approvedDigest: applyDigest, allowOutOfOrder: false, approve: (d) => verifyApproval(ledgerFor(applyDigest), OP, d), log: quiet, processEnv: { USER: "tester" } });
+    const { digest } = await currentRevert(venv, ordered, m1.id);
+    const judge = (port?: ReturnType<typeof memoryGateLedgerPort>) => async (d: string, planned: Parameters<typeof judgeRevert>[0]["plan"]) => {
+      const results = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: planned, digest: d, ledger: () => Promise.resolve(port ? { port, op: OP } : undefined) });
+      const refusal = policyRefusal(results, "e2e", d, "under the lock", { id: m1.id });
+      if (refusal) throw refusal;
+      return results.flatMap((r) => (r.override ? [r.override] : []));
+    };
+    const sent = ch.sent.length;
+    await expect(executeRevert(venv, ordered, { id: m1.id, approvedDigest: digest, approve: (d) => verifyApproval(ledgerFor(digest), OP, d), policy: judge(), log: quiet })).rejects.toThrow(/refused by policy under the lock/);
+    expect(ch.sent.length).toBe(sent);
+    const port = memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: overrideGate("no-drops"), resolvedBy: "alice", timestamp: "2026-10-10T12:00:00.000Z", planDigest: digest, note: "TICKET-9" }] });
+    await executeRevert(venv, ordered, { id: m1.id, approvedDigest: digest, approve: (d) => verifyApproval(ledgerFor(digest), OP, d), policy: judge(port), log: quiet, processEnv: { USER: "tester" } });
+    const reverted = ch.rows.at(-1);
+    expect(reverted?.status).toBe("reverted");
+    expect(JSON.parse(reverted?.note as string) as unknown).toMatchObject({ policy: { overrides: [{ rule: "no-drops", by: "alice", reason: "TICKET-9", digest }] } });
+  });
+
+  it("says what a wave's gate policy makes of the revert: under on-destructive, a destructive revert waits", () => {
+    const dropping = plan([row(1, m0), row(2, m1)], m1.id);
+    const wave = revertWaveOf("on-destructive", "abc", "clickhouse", dropping);
+    expect(wave.destructiveSteps).toEqual([expect.objectContaining({ migration: m1.id, step: 0, why: expect.stringMatching(/destructive/) as unknown })]);
+    expect(wave.policyWaits).toBe(true);
+    expect(revertWaveOf("never", "abc", "clickhouse", dropping).policyWaits).toBe(false);
+    expect(revertWaveOf("always", "abc", "clickhouse", dropping).policyWaits).toBe(true);
   });
 });
 

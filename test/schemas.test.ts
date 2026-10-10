@@ -392,7 +392,7 @@ describe("each command's --json output validates against its schema", () => {
     }
   }, 60_000);
 
-  it("revert: planned, gated, reverted", () => {
+  it("revert: planned, denied, gated, reverted", () => {
     const db: BuiltObject = { export: "db", type: "ClickHouse::Database", ddl: "CREATE DATABASE yodel_55 ENGINE = Atomic", dependsOn: [] };
     const made = createMigration({ name: "one", build: { dialect: "clickhouse", objects: [db] }, now: new Date(Date.UTC(2026, 9, 10, 10, 0)) });
     if (made.id === undefined) throw new Error("no change");
@@ -402,6 +402,9 @@ describe("each command's --json output validates against its schema", () => {
     expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "gated", op: "migrate-dev", gate: "approve-migrate-dev", approve: "chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:d", gatePlanDigest: "jcs1-sha256:d" }));
     expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "reverted", op: "migrate-dev" }));
     expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "failed", op: "migrate-dev", exitCode: 5 }));
+    const denied = [{ id: "no-drops", outcome: "denied" as const, reasons: ["20261010T1000-one step 0 (yodel_55.t) is drop"] }];
+    const wave = { gate: "on-destructive" as const, base: "a".repeat(40), destructiveSteps: [{ migration: m.id, step: 0, what: "DROP TABLE", why: "destructive" }], policyWaits: true };
+    expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "denied", policy: denied, wave }));
   });
 
   it("repair", () => {
