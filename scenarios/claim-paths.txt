@@ -31,6 +31,8 @@ scenarios/claim-paths.txt              -
 scenarios/affected.ts                  -
 scenarios/record.ts                    -
 scenarios/images.ts                    -
+scenarios/claims-record.json           -
+scenarios/status-page.ts               -
 
 # What every claim stands on: the build, the runner and its fixtures.
 package.json                           ALL

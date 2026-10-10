@@ -5,12 +5,12 @@ export const comment = `Every claim, weekly, against @intentius/sql-yodeler as n
 (\`npm i @intentius/sql-yodeler@latest\`), not against this checkout: the
 claims link that install's node_modules (YODEL_CLAIMS_NODE_MODULES,
 scenarios/lib/project.ts). The run rewrites the committed record,
-scenarios/record.json, and the status page made from it (npm run
+scenarios/claims-record.json, and the status page made from it (npm run
 claims:page, docs/claims.md), and when either changed, opens a pull
 request from branch claims-weekly, or updates the one already open.
 The template claim is skipped here, as in claims.yml.`;
 
-const record = "scenarios/record.json";
+const record = "scenarios/claims-record.json";
 const page = "docs/claims.md";
 const branch = "claims-weekly";
 
@@ -54,7 +54,7 @@ echo "YODEL_CLAIMS_NODE_MODULES=$dir/node_modules" >> "$GITHUB_ENV"
           "continue-on-error": true,
           run: `timeout 3000 npm run claims -- --record ${record} --skip template`,
         }),
-        new Step({ name: "The status page", run: "npm run claims:page --if-present" }),
+        new Step({ name: "The status page", run: "npm run claims:page" }),
         new Step({
           name: "A pull request when the record changed",
           env: { GH_TOKEN: "${{ github.token }}", VERSION: "${{ steps.published.outputs.version }}" },

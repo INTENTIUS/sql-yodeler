@@ -35,7 +35,8 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "claims": "npm run build && tsx scenarios/run.ts",
     "release": "bash scripts/release.sh",
-    "workflows": "tsx .github/src/render.ts"
+    "workflows": "tsx .github/src/render.ts",
+    "claims:page": "tsx scenarios/status-page.ts"
   },
   "dependencies": {
     "@intentius/chant": "^0.114.1",

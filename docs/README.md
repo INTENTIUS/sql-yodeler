@@ -13,6 +13,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
+| [Claims status](claims.md) | the scenario claims and their last recorded verdicts, plain and broken |
 
 Two example projects, one per dialect, show each of these on a real server. Their READMEs are transcripts of runs against chant's emulator, with the output each command printed:
 

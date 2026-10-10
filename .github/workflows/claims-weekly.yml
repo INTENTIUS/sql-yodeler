@@ -4,7 +4,7 @@
 # (`npm i @intentius/sql-yodeler@latest`), not against this checkout: the
 # claims link that install's node_modules (YODEL_CLAIMS_NODE_MODULES,
 # scenarios/lib/project.ts). The run rewrites the committed record,
-# scenarios/record.json, and the status page made from it (npm run
+# scenarios/claims-record.json, and the status page made from it (npm run
 # claims:page, docs/claims.md), and when either changed, opens a pull
 # request from branch claims-weekly, or updates the one already open.
 # The template claim is skipped here, as in claims.yml.
@@ -83,22 +83,22 @@ jobs:
       - name: Claims
         id: claims
         continue-on-error: true
-        run: timeout 3000 npm run claims -- --record scenarios/record.json --skip template
+        run: timeout 3000 npm run claims -- --record scenarios/claims-record.json --skip template
       - name: The status page
-        run: npm run claims:page --if-present
+        run: npm run claims:page
       - name: A pull request when the record changed
         env:
           GH_TOKEN: '${{ github.token }}'
           VERSION: '${{ steps.published.outputs.version }}'
         run: |
-          if [ -z "$(git status --porcelain -- scenarios/record.json docs/claims.md)" ]; then
+          if [ -z "$(git status --porcelain -- scenarios/claims-record.json docs/claims.md)" ]; then
             echo "the record and the page are unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C claims-weekly
-          git add -- scenarios/record.json docs/claims.md
+          git add -- scenarios/claims-record.json docs/claims.md
           title="chore: weekly claims record for @intentius/sql-yodeler@$VERSION"
           git commit -q -m "$title"
           git push -f origin claims-weekly
@@ -110,7 +110,7 @@ jobs:
         with:
           name: claims-weekly
           path: |
-            scenarios/record.json
+            scenarios/claims-record.json
             claims-logs/
       - name: Fail when a claim failed
         if: steps.claims.outcome == 'failure'
