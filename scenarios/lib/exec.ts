@@ -21,6 +21,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Echo stdout to the log (default true). */
   echo?: boolean;
+  /** Called with each chunk of stdout and stderr as it arrives, for a claim that acts on what a command says while it runs. */
+  onOutput?: (chunk: string) => void;
 }
 
 const indent = (text: string) =>
@@ -44,10 +46,12 @@ export function run(cmd: string, args: readonly string[], options: RunOptions): 
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (c: string) => {
       out += c;
+      options.onOutput?.(c);
       if (options.echo !== false) process.stdout.write(indent(c) + "\n");
     });
     child.stderr.on("data", (c: string) => {
       err += c;
+      options.onOutput?.(c);
       process.stdout.write(indent(c) + "\n");
     });
     const timer = setTimeout(() => {

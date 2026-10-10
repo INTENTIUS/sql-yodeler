@@ -10,7 +10,7 @@
  * export default defineConfig({
  *   environments: {
  *     dev: { topology: "single" },
- *     prod: { topology: "cluster:main", history: { database: "yodeler" }, lockTtl: 1800 },
+ *     prod: { topology: "cluster:main", history: { database: "yodeler" }, lockTtl: 1800, lockWait: 600 },
  *   },
  * });
  * ```
@@ -45,6 +45,12 @@ export interface EnvironmentConfig {
   };
   /** The apply lock's TTL, in seconds. Default: `YODEL_LOCK_TTL`, then 900. */
   lockTtl?: number;
+  /**
+   * How long, in seconds, an apply waits for the lock another apply holds
+   * before it gives up (exit 5). `yodel apply --lock-wait` overrides it.
+   * Default: `YODEL_LOCK_WAIT`, then 0 (give up at once).
+   */
+  lockWait?: number;
 }
 
 export interface YodelConfig {

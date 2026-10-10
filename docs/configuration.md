@@ -78,7 +78,7 @@ import { defineConfig } from "@intentius/sql-yodeler";
 export default defineConfig({
   environments: {
     dev: { topology: "single", history: { database: "yodeler" } },
-    prod: { topology: "cluster:main", history: { database: "yodeler" }, lockTtl: 1800 },
+    prod: { topology: "cluster:main", history: { database: "yodeler" }, lockTtl: 1800, lockWait: 600 },
   },
   lint: { rules: { "ch-mutation": "warning" } },
 });
@@ -91,6 +91,7 @@ export default defineConfig({
 | topology (ClickHouse) | `environments.<env>.topology` | `sql.profiles.<env>.topology` | `YODEL_TOPOLOGY` | `single` |
 | the history's database (ClickHouse) or schema (Postgres) | `environments.<env>.history.database` | | `YODEL_HISTORY_DATABASE` | `yodeler` |
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
+| how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
 | lint rule levels | `lint.rules` | | | each rule's own |
 
 The first one set wins. On ClickHouse, `yodel status <env>` and `yodel plan <env>` print the topology and where it came from (`topology single (default)`); Postgres has no topology, and they print none.
@@ -109,6 +110,8 @@ yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but 
 | `YODEL_TOPOLOGY` | the versioned commands on ClickHouse (`apply`, `plan`, `status`, `init`, `repair`, `lint --replay`) | the topology, when neither config sets one; the declarative path does not read it |
 | `YODEL_HISTORY_DATABASE` | the versioned commands | the history's database or schema, when `yodel.config.ts` sets none |
 | `YODEL_LOCK_TTL` | `yodel apply`, `yodel init`, `yodel repair` on ClickHouse | the lock's TTL in seconds |
+| `YODEL_LOCK_WAIT` | `yodel apply` | how long to wait for a lock another apply holds, as `--lock-wait` (`10m`); `yodel apply` hands its `--lock-wait` to the Op's Apply step this way |
+| `YODEL_STAND_DOWN` | `yodel apply` | `1`: as `--stand-down`, apply nothing and exit 0 when the run's branch has a newer commit on `origin` |
 | `YODEL_LOCK_RETRIES` | `yodel apply` on Postgres | how many more times a statement that hit `lock_timeout` is tried (default 5, the pause doubling from 250 ms) |
 | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN` | `yodel plan --comment` | the forge token; see [Approval](approval.md) |
 

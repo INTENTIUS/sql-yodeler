@@ -22,7 +22,11 @@
  *   that environment's reader credentials and nothing else.
  * - yodel-apply: on a push to main, `yodel apply <env>` for each environment
  *   in order. The only jobs that hold a writer's credentials, one
- *   environment's each, with YODEL_CREDENTIALS=writer.
+ *   environment's each, with YODEL_CREDENTIALS=writer. Two merges in quick
+ *   succession do not fail the second apply: it waits for the first's lock
+ *   (YODEL_LOCK_WAIT), and an apply whose commit is no longer main's tip
+ *   stands down (YODEL_STAND_DOWN), since the newer commit's apply applies
+ *   the same environment.
  * - watch-<env>: the environment's WatchOp on its own schedule, rendered by
  *   chant's generateOpsPipeline, with the reader's credentials. The job fails
  *   when the run found drift (scripts/watch-outcome.ts).
@@ -125,6 +129,9 @@ const secrets = (names: readonly string[]) => Object.fromEntries(names.map((n) =
  */
 export const FETCH_APPROVALS =
   "git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'";
+
+/** The apply jobs' lock settings: wait for another apply's lock, and stand down for a newer commit on main. */
+export const APPLY_LOCK: Record<string, string> = { YODEL_LOCK_WAIT: "10m", YODEL_STAND_DOWN: "1" };
 
 /** The watch reads; it never pushes. See the comment at the top. */
 export const NO_PUSH = "git remote set-url --push origin no-push://the-drift-watch-only-reads";
@@ -332,7 +339,7 @@ export function actionsApply(forge: Actions, { dialect, names: envs }: Environme
       // A GitHub environment holds the writer's secrets, restricted to main.
       ...(forge === "github" ? { environment: env } : {}),
       concurrency: new Concurrency({ group: `yodel-apply-${env}`, "cancel-in-progress": false }),
-      env: { YODEL_CREDENTIALS: "writer", ...secrets(writerVariables(env, dialect)) },
+      env: { YODEL_CREDENTIALS: "writer", ...APPLY_LOCK, ...secrets(writerVariables(env, dialect)) },
       steps: [...setupSteps(inContainer(forge)), new Step({ name: `yodel apply ${env}`, run: `yodel apply ${env}` })],
     });
     previous = job;
@@ -418,7 +425,7 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
         // The writer's variables are scoped to this environment, so no other job gets them.
         environment: new GitLabEnvironment({ name: env }),
         resource_group: `yodel-apply-${env}`,
-        variables: { YODEL_CREDENTIALS: "writer" },
+        variables: { YODEL_CREDENTIALS: "writer", ...APPLY_LOCK },
         script: [`yodel apply ${env}`],
       }),
     );

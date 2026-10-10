@@ -27,6 +27,8 @@ jobs:
       cancel-in-progress: false
     env:
       YODEL_CREDENTIALS: writer
+      YODEL_LOCK_WAIT: '10m'
+      YODEL_STAND_DOWN: '1'
       DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
       DEV_CLICKHOUSE_WRITER_USER: '${{ secrets.DEV_CLICKHOUSE_WRITER_USER }}'
       DEV_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.DEV_CLICKHOUSE_WRITER_PASSWORD }}'
@@ -54,6 +56,8 @@ jobs:
       cancel-in-progress: false
     env:
       YODEL_CREDENTIALS: writer
+      YODEL_LOCK_WAIT: '10m'
+      YODEL_STAND_DOWN: '1'
       PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
       PROD_CLICKHOUSE_WRITER_USER: '${{ secrets.PROD_CLICKHOUSE_WRITER_USER }}'
       PROD_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_WRITER_PASSWORD }}'

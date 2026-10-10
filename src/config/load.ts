@@ -40,7 +40,7 @@ function checkTopology(value: unknown, where: string): void {
 function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
   if (!isRecord(value)) throw new YodelError(`${where}: expected an object`);
   for (const k of Object.keys(value)) {
-    if (!["topology", "history", "lockTtl"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl)`);
+    if (!["topology", "history", "lockTtl", "lockWait"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait)`);
   }
   if (value.topology !== undefined) checkTopology(value.topology, `${where}.topology`);
   if (value.history !== undefined) {
@@ -51,6 +51,9 @@ function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
   }
   if (value.lockTtl !== undefined && !(typeof value.lockTtl === "number" && Number.isFinite(value.lockTtl) && value.lockTtl > 0)) {
     throw new YodelError(`${where}.lockTtl: expected a number of seconds greater than 0`);
+  }
+  if (value.lockWait !== undefined && !(typeof value.lockWait === "number" && Number.isFinite(value.lockWait) && value.lockWait >= 0)) {
+    throw new YodelError(`${where}.lockWait: expected a number of seconds, 0 or more`);
   }
   return value;
 }

@@ -90,6 +90,8 @@ apply-dev:
   resource_group: yodel-apply-dev
   variables:
     YODEL_CREDENTIALS: writer
+    YODEL_LOCK_WAIT: '10m'
+    YODEL_STAND_DOWN: '1'
   script:
     - yodel apply dev
 
@@ -105,5 +107,7 @@ apply-prod:
   resource_group: yodel-apply-prod
   variables:
     YODEL_CREDENTIALS: writer
+    YODEL_LOCK_WAIT: '10m'
+    YODEL_STAND_DOWN: '1'
   script:
     - yodel apply prod
