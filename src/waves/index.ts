@@ -1,0 +1,276 @@
+/**
+ * Environment waves (#42): the apply pipeline as chant's Op waves, one wave
+ * per environment, each behind a gate policy of its own.
+ *
+ * The project's CI script renders `yodel.config.ts` `waves` as a chant Op
+ * waves spec, {@link WAVES_SPEC_FILE}, and the pipeline from it (`chant run
+ * --generate <forge> --spec`, or `generateOpWavesPipeline`). Every wave's
+ * job runs `chant run wave`, which calls back into yodel twice per
+ * environment:
+ *
+ * - `yodel apply <env> --wave-plan <file>` ({@link writeWavePlan}): the
+ *   plan file chant binds the wave's gate to. Its `planDigest` covers the
+ *   migrations' plan digest (what `--digest` prints), the environment's gate
+ *   policy as the base commit's `yodel.config.ts` has it, and whether a
+ *   pending step is destructive, which is what `on-destructive` waits on.
+ * - `yodel apply <env> --wave-apply <file>` ({@link applyWave}): applies
+ *   that plan, under the lock, only when chant's decision for the wave lets
+ *   it through: an approval of the wave's set digest in the gate ledger, or
+ *   a policy at the base commit that needs none. The plan is computed again
+ *   under the lock and must be the one the decision was made on.
+ *
+ * chant reads the policy from the spec file at the first parent, so a pull
+ * request that loosens its own environment's gate merges under the old one.
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
+import { baseRef, loadYodelConfigAtBase, type ConfigAtBase } from "../config/base.js";
+import type { WaveGate, YodelConfig } from "../config/define.js";
+import { stepFindings } from "../lint/statements.js";
+import type { Migration } from "../migrations/index.js";
+import { YodelError, type Project } from "../project.js";
+import { describeStep } from "../steps/kinds.js";
+import { EXIT_REFUSED } from "../exit.js";
+import { currentDigest, inspect, selectToApply, type VersionedEnv } from "../versioned/engine.js";
+import { gitLedger, NOT_APPROVED, verifyApproval } from "../versioned/approval.js";
+import type { PendingMigration } from "../versioned/state.js";
+
+/** The waves spec the CI script writes and every wave job reads. */
+export const WAVES_SPEC_FILE = "yodel-waves.json";
+/** The pipeline's name, and the op chant records the wave gates under. */
+export const WAVES_PIPELINE = "yodel-apply";
+export const WAVE_PLAN_KIND = "yodel-wave";
+
+/** The gate policy an environment no wave names gets. */
+export const DEFAULT_WAVE_GATE: WaveGate = "always";
+
+/** `env`'s wave gate in `config`. */
+export function waveGate(config: YodelConfig | undefined, env: string): { gate: WaveGate; declared: boolean } {
+  const wave = config?.waves?.find((w) => w.env === env);
+  return wave ? { gate: wave.gate ?? DEFAULT_WAVE_GATE, declared: true } : { gate: DEFAULT_WAVE_GATE, declared: false };
+}
+
+/** A pending step `on-destructive` waits on, and why. */
+export interface DestructiveStep {
+  migration: string;
+  step: number;
+  what: string;
+  /** The lint rule that classes it, or `op-step` / `manual-step`. */
+  why: string;
+}
+
+const GATED_RULES = new Set(["destructive", "pg-rewrite", "pg-lock", "ch-mutation", "ch-rebuild"]);
+
+/**
+ * The steps of `pending` that `on-destructive` waits on: a destructive
+ * statement or Op step, a Postgres rewrite or lock-heavy statement, a
+ * ClickHouse mutation or rebuild (lint's statement rules, whatever their
+ * level or silences), and any Op or manual step.
+ */
+export function destructiveSteps(dialect: "clickhouse" | "postgres", pending: ReadonlyArray<Pick<PendingMigration, "id"> & { migration: Pick<Migration, "document"> }>): DestructiveStep[] {
+  const out: DestructiveStep[] = [];
+  for (const p of pending) {
+    p.migration.document.steps.forEach((step: MigrationStep, i: number) => {
+      const rules = stepFindings(dialect, step).map((f) => f.rule).filter((r) => GATED_RULES.has(r));
+      const why = rules[0] ?? (step.kind === "op" ? "op-step" : step.kind === "manual" ? "manual-step" : undefined);
+      if (why) out.push({ migration: p.id, step: i, what: describeStep(step), why: [...new Set([why, ...rules])].join(", ") });
+    });
+  }
+  return out;
+}
+
+/** What `--wave-plan` writes: chant's plan file, and what yodel needs to apply exactly it. */
+export interface WavePlanFile {
+  /** chant's: what the wave's set digest is taken over. */
+  planDigest: string;
+  destructive: boolean;
+  empty: boolean;
+  environment: string;
+  /** The migrations' plan digest, as `yodel apply --digest` prints it; the history records it. */
+  migrations: string;
+  /** The gate policy at the base commit, and that commit. */
+  gate: WaveGate;
+  base: string;
+  pending: string[];
+  destructiveSteps: DestructiveStep[];
+}
+
+/** The wave plan's digest: over what the run would do and the policy it is gated under. */
+export async function wavePlanDigest(subject: { environment: string; migrations: string; gate: WaveGate; destructive: boolean }): Promise<string> {
+  const { computePlanDigest } = await import("@intentius/chant/lifecycle/plan-digest");
+  return computePlanDigest(WAVE_PLAN_KIND, subject);
+}
+
+/** The gate policy for `env` at the base commit. */
+export async function gateAtBase(project: Project, env: string): Promise<{ gate: WaveGate; at: ConfigAtBase; declared: boolean }> {
+  const at = await loadYodelConfigAtBase(project.dir);
+  return { ...waveGate(at.config, env), at };
+}
+
+/** The wave plan for one environment, now. A refusal (out of order, a checksum) throws, as `--digest` does. */
+export async function planWave(project: Project, venv: VersionedEnv, ordered: readonly Migration[], options: { allowOutOfOrder: boolean }): Promise<WavePlanFile> {
+  const { status } = await inspect(venv, ordered);
+  const toApply = selectToApply(status, options.allowOutOfOrder);
+  const migrations = await currentDigest(venv, status, toApply);
+  const { gate, at } = await gateAtBase(project, venv.environment);
+  const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", toApply);
+  const destructive = steps.length > 0;
+  return {
+    planDigest: await wavePlanDigest({ environment: venv.environment, migrations, gate, destructive }),
+    destructive,
+    empty: toApply.length === 0,
+    environment: venv.environment,
+    migrations,
+    gate,
+    base: at.sha,
+    pending: toApply.map((p) => p.id),
+    destructiveSteps: steps,
+  };
+}
+
+/** `--wave-plan <file>`: writes the plan file. */
+export async function writeWavePlan(project: Project, venv: VersionedEnv, ordered: readonly Migration[], file: string, options: { allowOutOfOrder: boolean }): Promise<WavePlanFile> {
+  const plan = await planWave(project, venv, ordered, options);
+  const path = resolve(file);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(plan, null, 2)}\n`);
+  return plan;
+}
+
+/** chant's spec, the parts read here. */
+interface WavesSpec {
+  name: string;
+  waves: Array<{ name: string; runs: Array<{ target: string }> }>;
+}
+
+/** chant's decision record for a wave, the parts read here. */
+interface WaveDecision {
+  wave: number;
+  op: string;
+  gate: string;
+  digest: string;
+  status: "approved" | "not-required" | "waiting";
+  members: Array<{ member: string; planDigest: string; destructive?: boolean; empty?: boolean }>;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the document's shape
+function readJson<T>(path: string, what: string): T {
+  if (!existsSync(path)) throw new YodelError(`refused: ${what} is not at ${path}. --wave-apply runs inside chant run wave, after it decided the wave; nothing was applied`, NOT_APPROVED);
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as T;
+  } catch (e) {
+    throw new YodelError(`${path}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** The wave `env` is in, by the spec. */
+function waveOf(spec: WavesSpec, env: string, specFile: string): { k: number; name: string } {
+  const i = spec.waves.findIndex((w) => w.runs.some((r) => r.target === env));
+  const wave = spec.waves[i];
+  if (!wave) throw new YodelError(`refused: ${specFile} has no wave for ${env}; nothing was applied`, EXIT_REFUSED);
+  return { k: i + 1, name: wave.name };
+}
+
+/**
+ * Throws unless chant's decision for `env`'s wave lets `planDigest` apply:
+ * the decision names this plan for `env`, and either the gate ledger holds
+ * an approval of the wave's set digest, or the wave's policy at the base
+ * commit needs no approval for these plans.
+ */
+export async function verifyWaveDecision(cwd: string, specFile: string, env: string, planDigest: string): Promise<string> {
+  const specPath = resolve(cwd, specFile);
+  const spec = readJson<WavesSpec>(specPath, "the waves spec");
+  const { k, name } = waveOf(spec, env, specFile);
+  const decision = readJson<WaveDecision>(join(cwd, ".chant", "op-waves", spec.name, `wave-${String(k)}.json`), `chant's decision for wave ${String(k)} (${name})`);
+  const member = decision.members.find((m) => m.member === env);
+  if (decision.wave !== k || !member || member.planDigest !== planDigest) {
+    throw new YodelError(
+      `refused: chant decided wave ${String(k)} (${name}) on ${member ? `plan ${member.planDigest}` : `no plan for ${env}`}, and ${env}'s plan is now ${planDigest}. Nothing was applied; run the wave again.`,
+      NOT_APPROVED,
+    );
+  }
+  const { waveSetDigest } = await import("@intentius/chant/gated-waves");
+  if (waveSetDigest(decision.members) !== decision.digest) throw new YodelError(`refused: chant's decision for wave ${String(k)} does not hold the digest of its own members; nothing was applied`, NOT_APPROVED);
+  if (decision.status === "approved") {
+    const by = await verifyApproval(await gitLedger(cwd), { name: spec.name, filePath: specFile, gate: decision.gate, quorum: false }, decision.digest);
+    return `wave ${String(k)} (${name}): approved by ${by.resolvedBy} at ${by.timestamp}`;
+  }
+  // Not required: ask chant's rule again rather than trust the record, at yodel's base
+  // (../config/base.ts), never at a base the spec in the change names.
+  const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
+  const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
+  if (decision.status !== "not-required" || opWaveNeedsApproval(policy.policy, decision.members as never)) {
+    throw new YodelError(
+      `refused: wave ${String(k)} (${name}) needs an approval of ${decision.digest} under gate ${policy.policy} (read at ${policy.base.slice(0, 12)}), and chant's gate ledger has none. Nothing was applied.`,
+      NOT_APPROVED,
+    );
+  }
+  return `wave ${String(k)} (${name}): gate ${policy.policy} at ${policy.base.slice(0, 12)} needs no approval for this plan`;
+}
+
+/** Reads a plan file `--wave-plan` wrote. */
+export function readWavePlan(file: string): WavePlanFile {
+  const plan = readJson<WavePlanFile>(resolve(file), "the wave's plan file");
+  if (typeof plan.planDigest !== "string" || typeof plan.migrations !== "string") throw new YodelError(`${file} is not a plan yodel apply --wave-plan wrote`);
+  return plan;
+}
+
+/** What `yodel plan` and the pull request comment show of an environment's wave. */
+export interface WaveView {
+  /** 1-based, in yodel.config.ts `waves`. */
+  wave: number;
+  gate: WaveGate;
+  /** The base commit the gate was read at, and how it was chosen. */
+  base: string;
+  baseSource: string;
+  destructiveSteps: DestructiveStep[];
+  /** Under the gate at the base, the wave waits for an approval of this plan. */
+  waits: boolean;
+  /** The wave plan digest and the set digest the wave's gate binds. */
+  planDigest: string;
+  digest: string;
+  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`. */
+  approve: string;
+}
+
+/**
+ * `env`'s wave, as the apply pipeline will plan it after the merge, when
+ * yodel.config.ts declares waves and names `env`; undefined otherwise. The
+ * gate is the base commit's: on a pull request, the merge base with the
+ * target branch.
+ */
+export async function waveView(project: Project, env: string, pending: readonly PendingMigration[], migrations: string): Promise<WaveView | undefined> {
+  const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === env) + 1;
+  if (k === 0) return undefined;
+  const { gate, at } = await gateAtBase(project, env);
+  const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", pending);
+  const destructive = steps.length > 0;
+  const planDigest = await wavePlanDigest({ environment: env, migrations, gate, destructive });
+  const { waveSetDigest, waveGateName } = await import("@intentius/chant/gated-waves");
+  const digest = waveSetDigest([{ member: env, planDigest }]);
+  const waits = pending.length > 0 && (gate === "always" || (gate === "on-destructive" && destructive));
+  return {
+    wave: k,
+    gate,
+    base: at.sha,
+    baseSource: at.base.source,
+    destructiveSteps: steps,
+    waits,
+    planDigest,
+    digest,
+    approve: `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${digest}`,
+  };
+}
+
+/** One line on the wave, for text and markdown. */
+export function describeWave(w: WaveView, code: (s: string) => string = (s) => s): string {
+  const at = `gate ${code(w.gate)} at ${code(w.base.slice(0, 12))}`;
+  if (!w.waits) {
+    const why = w.gate === "never" ? "" : `: nothing pending is destructive`;
+    return `The apply pipeline applies this in wave ${String(w.wave)} with no approval (${at}${why}).`;
+  }
+  const why = w.gate === "on-destructive" ? `: ${w.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : "";
+  return `The apply pipeline waits in wave ${String(w.wave)} for an approval of ${code(w.digest)} (${at}${why}).`;
+}

@@ -1,5 +1,5 @@
 ---
-claims: [approve-and-apply, digest-moved, pr-comment]
+claims: [approve-and-apply, digest-moved, pr-comment, waves]
 ---
 
 # Approval
@@ -109,6 +109,34 @@ npx yodel apply dev
 It never approves without a person at the terminal: with no terminal to ask (a script, CI, a coding agent) it approves nothing and exits 4. The printed `npx chant approve ...` command does the same in one line, and `"$(npx yodel apply dev --digest)"` can stand in for the digest.
 
 In a repository with no remote, chant warns that the approval (and the pending record `yodel apply` writes at the gate) was not pushed; on your own machine that is expected.
+
+## Waves: a gate per environment
+
+The starter templates' apply pipeline is a list of waves, one per environment, in the order `yodel.config.ts` gives them. Each wave has its own gate policy:
+
+```ts
+waves: [
+  { env: "dev", gate: "never" },
+  { env: "staging", gate: "on-destructive" },
+  { env: "prod", gate: "always" },
+],
+```
+
+| `gate` | The wave waits for an approval when |
+|---|---|
+| `always` (the default) | it has a migration to apply |
+| `on-destructive` | a pending step drops something, is a Postgres rewrite or lock-heavy statement (lint's `destructive`, `pg-rewrite`, `pg-lock`), a ClickHouse mutation or rebuild (`ch-mutation`, `ch-rebuild`), or is an Op or manual step |
+| `never` | never; review and branch protection are all that stand in front of it |
+
+`npm run ci` renders the waves as `yodel-waves.json`, a chant Op waves spec, and the `yodel-apply` pipeline from it on GitHub, GitLab and Forgejo: one job per wave, each needing the one before. Every job runs `chant run wave`, which:
+
+1. plans the environment with `yodel apply <env> --wave-plan <file>`: the migrations' plan digest, the gate policy, and whether a pending step is destructive, all in one digest;
+2. reads the wave's gate policy from `yodel-waves.json` as the commit before the push has it, and decides. A wave that needs an approval applies nothing, prints `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, and exits 3, so the waves after it do not run;
+3. applies with `yodel apply <env> --wave-apply <file>`, which takes the lock, plans again, and applies only when the plan is still the one the wave decided on and the decision holds: an approval of the wave's digest in the gate ledger, or a policy at the base commit that needs none.
+
+To let a waiting wave through, run the approve command it printed, push `chant/lifecycle`, and re-run the failed job (on GitLab, retry it).
+
+The policy comes from the base commit, the first parent of the commit being applied, never from the change. A pull request that sets prod's gate to `never` merges, and prod still waits under the gate main had. Only the gate is read there: the waves, their order and the migrations come from the commit being applied. yodel reads its own config at the base the same way: `YODEL_BASE` names another commit, and on a pull request it is the merge base with the target branch.
 
 ## The pull request comment
 

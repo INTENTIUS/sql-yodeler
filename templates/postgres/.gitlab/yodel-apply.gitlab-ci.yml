@@ -1,0 +1,57 @@
+# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
+# Edit those and render again; npm run ci:check says when this file is stale.
+#
+# A push to main: one job per wave, each needing the one before. Each runs
+# chant run wave: yodel apply <env> --wave-plan plans the environment, the
+# wave's gate policy is read from yodel-waves.json as the commit before the push
+# has it (yodel.config.ts waves, rendered), and a wave that needs an approval
+# exits 3 with the chant approve command, so the waves after it do not run.
+# Approve, push chant/lifecycle, and run the failed job again. These are the
+# only jobs that hold a writer's credentials, one environment's each.
+# chant Op waves "yodel-apply" (#3679): one stage per wave, each needing the one before.
+# A wave that waits at its gate exits 3 and stops the waves after it; approve the
+# digest it prints, then retry the job.
+
+stages:
+  - wave-1-dev
+  - wave-2-prod
+
+wave-1-dev:
+  stage: wave-1-dev
+  image: node:22-bookworm
+  resource_group: yodel-apply-dev
+  environment:
+    name: dev
+  variables:
+    GIT_DEPTH: '0'
+    YODEL_CREDENTIALS: writer
+    YODEL_LOCK_WAIT: '10m'
+    YODEL_STAND_DOWN: '1'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+  script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - chant run wave --spec yodel-waves.json --wave 1
+
+wave-2-prod:
+  stage: wave-2-prod
+  image: node:22-bookworm
+  resource_group: yodel-apply-prod
+  environment:
+    name: prod
+  variables:
+    GIT_DEPTH: '0'
+    YODEL_CREDENTIALS: writer
+    YODEL_LOCK_WAIT: '10m'
+    YODEL_STAND_DOWN: '1'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
+  needs:
+    - wave-1-dev
+  script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - chant run wave --spec yodel-waves.json --wave 2

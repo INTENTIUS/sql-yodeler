@@ -26,6 +26,7 @@ export type { NotifyConfig };
 
 export type { Topology };
 
+
 /**
  * A ClickHouse topology in its string form (`single`, `cluster:<name>`,
  * `replicated`, `replicated:<cluster>`, `cloud`) or chant's object form,
@@ -57,9 +58,43 @@ export interface EnvironmentConfig {
   lockWait?: number;
 }
 
+/** When an environment's wave waits for an approval (chant's wave gate policy). */
+export type WaveGate = "always" | "on-destructive" | "never";
+
+export const WAVE_GATES: readonly WaveGate[] = ["always", "on-destructive", "never"];
+
+/**
+ * One wave of the apply pipeline: an environment, applied after the waves
+ * before it, behind its own gate.
+ */
+export interface WaveConfig {
+  /** The environment, by its name in `sql.profiles`. */
+  env: string;
+  /**
+   * When the wave waits for an approval of its plan:
+   *
+   * - `always` (the default): whenever it has a migration to apply;
+   * - `on-destructive`: when a pending step is destructive, a Postgres
+   *   rewrite or lock-heavy statement, a ClickHouse mutation or rebuild, or
+   *   an Op or manual step;
+   * - `never`: never. Review and branch protection are all that stand in
+   *   front of it.
+   *
+   * The pipeline reads it from the commit a change merges onto, never from
+   * the change itself.
+   */
+  gate?: WaveGate;
+}
+
 export interface YodelConfig {
   /** Keyed by the environment's name in `sql.profiles`. */
   environments?: Record<string, EnvironmentConfig>;
+  /**
+   * The apply pipeline's waves, in order. An environment no wave names
+   * waits for an approval whenever it has a migration to apply, as under
+   * gate `always`.
+   */
+  waves?: WaveConfig[];
   /** `yodel lint`'s rule levels: `{ rules: { destructive: "warning" } }`. A misspelled rule name is a type error. */
   lint?: LintConfig;
   /** Rules over the plan (#53) that `yodel plan` reports and `yodel apply` enforces; see {@link PolicyConfig}. */

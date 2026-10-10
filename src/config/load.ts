@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import type { EnvironmentConfig, YodelConfig } from "./define.js";
+import { WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 
@@ -100,6 +100,26 @@ function checkPolicy(value: unknown, where: string, profiles?: readonly string[]
   }
 }
 
+const notDeclared = (profiles: readonly string[]) => (profiles.length > 0 ? ` (sql.profiles: ${profiles.join(", ")})` : " (it declares no sql.profiles)");
+
+function checkWaves(value: unknown, where: string, profiles?: readonly string[]): void {
+  if (!Array.isArray(value)) throw new YodelError(`${where}: expected a list of { env, gate }, in the order they apply`);
+  const seen = new Set<string>();
+  value.forEach((wave: unknown, i) => {
+    const at = `${where}[${String(i)}]`;
+    if (!isRecord(wave)) throw new YodelError(`${at}: expected { env, gate }`);
+    for (const k of Object.keys(wave)) if (!["env", "gate"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate)`);
+    const env = wave.env;
+    if (typeof env !== "string" || env === "") throw new YodelError(`${at}.env: expected an environment's name`);
+    if (profiles && !profiles.includes(env)) throw new YodelError(`${at}.env: ${env} is not an environment chant.config.ts declares${notDeclared(profiles)}`);
+    if (seen.has(env)) throw new YodelError(`${at}.env: ${env} has a wave already; an environment is one wave`);
+    seen.add(env);
+    if (wave.gate !== undefined && !WAVE_GATES.includes(wave.gate as never)) {
+      throw new YodelError(`${at}.gate: ${JSON.stringify(wave.gate)} is not a gate policy (expected ${WAVE_GATES.join(", ")})`);
+    }
+  });
+}
+
 /**
  * Checks a loaded config's shape. `environments` names each environment by
  * its `sql.profiles` name; one that chant.config.ts does not declare is an
@@ -108,7 +128,7 @@ function checkPolicy(value: unknown, where: string, profiles?: readonly string[]
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
-    if (!["environments", "lint", "policy", "notify", "sources"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources)`);
+    if (!["environments", "lint", "policy", "notify", "sources", "waves"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves)`);
   }
   if (value.sources !== undefined) checkSources(value.sources, `${path}: sources`);
   if (value.notify !== undefined) {
@@ -116,6 +136,7 @@ export function checkYodelConfig(value: unknown, path: string, profiles?: readon
     if (problem) throw new YodelError(`${path}: ${problem}`);
   }
   if (value.policy !== undefined) checkPolicy(value.policy, `${path}: policy`, profiles);
+  if (value.waves !== undefined) checkWaves(value.waves, `${path}: waves`, profiles);
   if (value.lint !== undefined && !isRecord(value.lint)) throw new YodelError(`${path}: lint: expected an object`);
   if (value.environments !== undefined) {
     if (!isRecord(value.environments)) throw new YodelError(`${path}: environments: expected an object keyed by environment`);
@@ -123,7 +144,7 @@ export function checkYodelConfig(value: unknown, path: string, profiles?: readon
       checkEnvironment(env, `${path}: environments.${name}`);
       if (profiles && !profiles.includes(name)) {
         throw new YodelError(
-          `${path}: environments.${name} is not an environment chant.config.ts declares` + (profiles.length > 0 ? ` (sql.profiles: ${profiles.join(", ")})` : " (it declares no sql.profiles)"),
+          `${path}: environments.${name} is not an environment chant.config.ts declares${notDeclared(profiles)}`,
         );
       }
     }

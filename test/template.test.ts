@@ -16,10 +16,14 @@ import type { OpConfig } from "@intentius/chant/op/types";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { migrateOpParts } from "../src/versioned/op.js";
 import {
+  applyPipelines,
   environments,
   readerVariables,
+  readWaves,
   REPLAY,
-  reviewAndApply,
+  review,
+  WAVES_SPEC,
+  wavesSpec,
   writerVariables,
   type Dialect,
 } from "../templates/clickhouse/scripts/ci.js";
@@ -96,7 +100,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("has a migrate Op yodel apply runs and a WatchOp on a schedule for each environment, in each forge's pipelines", async () => {
     const envs = await environments(dir);
-    expect(envs).toEqual({ dialect, names: ["dev", "prod"], replay: true });
+    expect(envs).toEqual({ dialect, names: ["dev", "prod"], replay: true, waves: [{ env: "dev", gate: "always" }, { env: "prod", gate: "always" }] });
     for (const env of envs.names) {
       const migrate = (await import(pathToFileURL(join(dir, "ops", `migrate-${env}.op.ts`)).href)) as { op: { props: OpConfig } };
       expect(migrateOpParts(migrate.op.props, env)).toEqual({ gate: `approve-migrate-${env}`, quorum: false });
@@ -113,9 +117,27 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
   });
 
   it("commits the pull request and apply pipelines its scripts/ci.ts renders", async () => {
-    for (const file of reviewAndApply(await environments(dir))) {
+    const envs = await environments(dir);
+    for (const file of [...review(envs), ...(await applyPipelines(dir, envs))]) {
       expect(readFileSync(join(dir, file.path), "utf8"), file.path).toBe(file.content);
     }
+  });
+
+  it("applies as chant waves, one per environment in order, each job needing the one before and running chant run wave", () => {
+    const spec = JSON.parse(readFileSync(join(dir, WAVES_SPEC), "utf8")) as ReturnType<typeof wavesSpec>;
+    expect(spec.waves.map((w) => [w.name, w.gate])).toEqual([["dev", "always"], ["prod", "always"]]);
+    expect(spec.plan).toContain("--wave-plan");
+    expect(spec.apply).toContain("--wave-apply");
+    for (const f of [".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
+      const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { needs?: string[]; steps: Array<{ run?: string }> }> };
+      expect(Object.keys(doc.jobs), f).toEqual(["wave-1-dev", "wave-2-prod"]);
+      expect(doc.jobs["wave-2-prod"]?.needs, f).toEqual(["wave-1-dev"]);
+      expect(doc.jobs["wave-2-prod"]?.steps.map((s) => s.run), f).toContain(`chant run wave --spec ${WAVES_SPEC} --wave 2`);
+    }
+    const gitlab = load(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { needs?: string[]; stage?: string }>;
+    expect(gitlab["wave-2-prod"]?.needs).toEqual(["wave-1-dev"]);
+    const main = load(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as { stages: string[] };
+    expect(main.stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "ops"]);
   });
 
   it("gives the writer's credentials to the apply jobs only, and the reader's to the rest", () => {
@@ -128,7 +150,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       for (const [name, job] of Object.entries(jobs)) {
         if (typeof job !== "object" || job === null || name === "stages" || name === "variables") continue;
         const text = JSON.stringify(job);
-        if (name.startsWith("apply-")) {
+        if (name.startsWith("wave-")) {
           applyJobs++;
           expect(text, `${f} ${name}`).toContain('"YODEL_CREDENTIALS":"writer"');
           for (const v of readers.filter((r) => !r.endsWith("_URL"))) expect(text, `${f} ${name}`).not.toContain(v);
@@ -138,7 +160,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
         }
       }
     }
-    expect(applyJobs).toBe(6); // dev and prod on each of three forges
+    expect(applyJobs).toBe(6); // a wave each for dev and prod on each of three forges
   });
 
   it("never points the replay profile at another profile's server, and gives it the history's database", async () => {
@@ -176,6 +198,23 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 });
 
 describe("the templates' scripts", () => {
+  it("read yodel.config.ts waves, refusing an environment that is not one and a gate that is not a policy", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const project = (waves: string | undefined) => {
+      const dir = mkdtempSync(join(tmpdir(), "yodel-waves-"));
+      temps.push(dir);
+      writeFileSync(join(dir, "yodel.config.ts"), waves === undefined ? "export default {};\n" : `export default { waves: ${waves} };\n`);
+      return dir;
+    };
+    expect(await readWaves(project(undefined), ["dev", "prod"])).toEqual([{ env: "dev", gate: "always" }, { env: "prod", gate: "always" }]);
+    expect(await readWaves(project('[{ env: "dev", gate: "never" }, { env: "prod", gate: "on-destructive" }]'), ["dev", "prod"])).toEqual([
+      { env: "dev", gate: "never" },
+      { env: "prod", gate: "on-destructive" },
+    ]);
+    await expect(readWaves(project('[{ env: "staging" }]'), ["dev", "prod"])).rejects.toThrow(/staging is not an environment/);
+    await expect(readWaves(project('[{ env: "dev", gate: "sometimes" }]'), ["dev", "prod"])).rejects.toThrow(/sometimes is not/);
+  });
+
   it("are the same in every template", () => {
     for (const f of ["justfile", "scripts/ci.ts", "scripts/local.ts", "ops/migrate-dev.op.ts", "ops/watch-dev.op.ts"]) {
       expect(readFileSync(join(templateDir("postgres"), f), "utf8"), f).toBe(readFileSync(join(templateDir("clickhouse"), f), "utf8"));

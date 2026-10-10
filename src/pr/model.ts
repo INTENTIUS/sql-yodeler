@@ -39,6 +39,7 @@ import {
 import { currentSubject, explainAgainst, explainMove, latestApproval, type LatestApproval, type MoveExplanation } from "../versioned/explain.js";
 import type { DigestSubject } from "../versioned/digest.js";
 import type { ServerInfo } from "../server.js";
+import { waveView, type WaveView } from "../waves/index.js";
 
 export interface StepView {
   index: number;
@@ -97,6 +98,8 @@ export interface VersionedPlan {
   policy?: RuleResult[] | undefined;
   /** The comment this one replaces showed another digest: what moved since. */
   sinceLast?: MoveExplanation | undefined;
+  /** The environment's wave in the apply pipeline, when yodel.config.ts declares waves. */
+  wave?: WaveView | undefined;
   notes: string[];
 }
 
@@ -202,6 +205,13 @@ async function collectWith(
         }
       },
     });
+  }
+  if (report.digest && !report.refusal) {
+    try {
+      plan.wave = await waveView(project, env.name, status.pending, report.digest);
+    } catch (e) {
+      plan.notes.push(`The wave's gate could not be read at the base commit: ${e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e)}`);
+    }
   }
   return plan;
 }

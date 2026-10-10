@@ -66,6 +66,7 @@ scenarios/claims/template-github.ts    template-github
 scenarios/claims/template-gitlab.ts    template-gitlab
 scenarios/claims/lock-retry.ts         lock-retry
 scenarios/claims/column-change.ts      column-change
+scenarios/claims/waves.ts              waves
 
 # The forges the template claims run on, and the body they share.
 scenarios/forges/forgejo.ts            template
@@ -76,7 +77,9 @@ scenarios/forges/gitlab.ts             template-gitlab
 scenarios/forges/gitlab.compose.ts     template-gitlab
 scenarios/forges/                      template template-github template-gitlab
 
-# The starter templates: only the template claims make a project from them.
+# The starter templates: only the template claims make a project from them,
+# and the waves claim renders its pipeline with their scripts/ci.ts.
+templates/postgres/scripts/ci.ts       waves template template-github template-gitlab
 templates/                             template template-github template-gitlab
 
 # yodel init, and what --from adopts with.
@@ -98,6 +101,9 @@ src/pr/                                pr-comment drift template template-github
 # yodel report and the audit log (#57).
 src/commands/report.ts                 approve-and-apply
 src/report/                            approve-and-apply
+
+# The apply pipeline's waves.
+src/waves/                             waves template template-github template-gitlab
 
 # yodel drift, which the templates' watch runs (--issue).
 src/commands/drift.ts                  drift template template-github template-gitlab

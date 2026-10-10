@@ -61,7 +61,7 @@ Each environment has two Postgres roles. `chant.config.ts` picks the reader unle
 |---|---|
 | `<ENV>_POSTGRES_URL` | every job for that environment, e.g. `postgres://db.example.com:5432/app` |
 | `<ENV>_POSTGRES_READER_USER`, `<ENV>_POSTGRES_READER_PASSWORD` | the plan comment and the drift watch |
-| `<ENV>_POSTGRES_WRITER_USER`, `<ENV>_POSTGRES_WRITER_PASSWORD` | `apply-<env>`, after a merge to main, and nothing else |
+| `<ENV>_POSTGRES_WRITER_USER`, `<ENV>_POSTGRES_WRITER_PASSWORD` | the environment's wave job, after a merge to main, and nothing else |
 
 `<ENV>` is `DEV` or `PROD`. The roles, for example, where the writer creates both schemas on the first apply:
 
@@ -84,19 +84,19 @@ On your machine, put an environment's variables in `.env` (or export them) to ru
 |---|---|---|---|
 | a pull request to main | `lint` | `npm run ci:check`, `yodel lint`, and `yodel lint --replay replay --reset`: every migration replayed into a throwaway server the job starts as a service (profile `replay`) and compared with the schema it recorded | none (the service's own) |
 | | `plan-<env>` | `yodel plan <env> --comment`: one comment per environment with the pending migrations and the plan digest | reader, and a forge token that can comment |
-| a push to main | `apply-<env>`, in order | `yodel apply <env>` | writer |
+| a push to main | `wave-<k>-<env>`, one per wave of `yodel.config.ts` `waves`, each needing the one before | `chant run wave`: `yodel apply <env> --wave-plan`, the wave's gate, `yodel apply <env> --wave-apply` | writer |
 | on each watch's schedule (and by hand) | `watch-<env>` | `chant run watch-<env>`, then `yodel drift <env> --issue`: drift against the newest applied migration, and the environment's tracking issue | reader |
 
 ### Approving
 
-`yodel apply <env>` applies only a plan someone approved. The pull request comment ends with the command:
+Each environment is a wave of the apply pipeline, with a gate policy in `yodel.config.ts`: `always` (the default) waits for an approval whenever there is a migration to apply, `on-destructive` only when a pending step drops something, rewrites or locks a table, rebuilds, or is an Op or manual step, and `never` never waits. The pipeline reads the gate from the commit before the push, so a pull request cannot loosen its own. When the wave will wait, the pull request comment ends with the command:
 
 ```sh
-chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:...
+chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:...
 git push origin chant/lifecycle
 ```
 
-The approval is a commit on the `chant/lifecycle` branch; every job fetches that branch. Approve before merging, and the apply after the merge goes through. A merge with nothing approved applies nothing and fails with the command to run; approve and push, then run the apply workflow again (GitHub and Forgejo: run `yodel-apply` by hand; GitLab: run a pipeline on main). If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
+The approval is a commit on the `chant/lifecycle` branch; every job fetches that branch. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; approve and push, then re-run the failed job (GitLab: retry it). If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
 
 ### Drift
 
@@ -118,7 +118,7 @@ Forgejo Actions:
 
 GitLab CI:
 
-- CI/CD variables: readers not protected (merge request pipelines run on unprotected branches); writers protected and scoped to environment `dev` or `prod`, which only `apply-<env>` declares.
+- CI/CD variables: readers not protected (merge request pipelines run on unprotected branches); writers protected and scoped to environment `dev` or `prod`, which only the wave job for that environment declares.
 - `GITLAB_TOKEN`: a project access token with the `api` scope, for the plan comment and the watch's tracking issue (`CI_JOB_TOKEN` cannot write merge request notes or issues).
 - GitLab has no cron in the file: create one pipeline schedule per watch (Settings > CI/CD > Schedules) with the cron and the `CHANT_SCHEDULED_OP` value noted at the top of `.gitlab/yodel-watch.gitlab-ci.yml`.
 
@@ -132,7 +132,7 @@ Delete the profile and `npm run ci` to stop running the check.
 
 ## Adding an environment
 
-Add its profile to `chant.config.ts` (in the order merges apply them) and its entry to `yodel.config.ts`, copy `ops/migrate-dev.op.ts` and `ops/watch-dev.op.ts` to the new name and change `dev` in them, then `just ci` (`npm run ci`). `just ci-check` (`npm run ci:check`) fails when the pipelines are stale.
+Add its profile to `chant.config.ts`, its entry to `yodel.config.ts` `environments` and its wave to `waves` (in the order merges apply them), copy `ops/migrate-dev.op.ts` and `ops/watch-dev.op.ts` to the new name and change `dev` in them, then `just ci` (`npm run ci`). `just ci-check` (`npm run ci:check`) fails when the pipelines are stale.
 
 ## The sql-yodeler dependency
 
