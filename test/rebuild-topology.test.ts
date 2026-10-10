@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildOutput } from "../src/chant/build.js";
@@ -24,17 +24,26 @@ afterEach(() => {
   for (const d of disposers.splice(0)) d();
 });
 
-/** Runs the step with chant's own rebuildRun in place of the Create activity, and returns the new table's DDL and topology it bound. */
+/**
+ * Runs the step with a Create activity that binds the server and reads the
+ * declaration as chant's rebuildRun does (without its query of the
+ * cluster's shards, which needs a server), and returns the new table's DDL
+ * and the topology it bound.
+ */
 async function rebuildAs(dir: string) {
-  const { rebuildRun } = await import("@intentius/chant-lexicon-sql/op/activities/clickhouse-rebuild");
+  const { bindClickHouse } = await import("@intentius/chant-lexicon-sql/clickhouse/live/bind");
+  const { declaredObjects } = await import("@intentius/chant-lexicon-sql/clickhouse/apply/apply");
+  const { declaredTable } = await import("@intentius/chant-lexicon-sql/clickhouse/rebuild/observe");
   const seen: { ddl?: string; topology?: unknown } = {};
   const ok = () => Promise.resolve({});
   const activities = {
     clickhouseRebuildPlan: () => Promise.resolve({ state: "rebuild" }),
-    clickhouseRebuildCreate: async (args: Record<string, unknown>, signal?: AbortSignal, deps?: unknown) => {
-      const run = await rebuildRun(args as never, signal, (deps ?? {}));
-      seen.ddl = run.declared.ddl;
-      seen.topology = run.target.topology;
+    clickhouseRebuildCreate: async (args: Record<string, unknown>, _signal?: AbortSignal, deps?: unknown) => {
+      const config = (deps as { config?: NonNullable<Parameters<typeof bindClickHouse>[0]>["config"] } | undefined)?.config;
+      const target = await bindClickHouse({ environment: String(args.environment), cwd: String(args.cwd), ...(config ? { config } : {}) });
+      const declared = declaredTable(declaredObjects(readFileSync(String(args.buildPath), "utf8"), target.defaultDatabase, target.topology), String(args.table));
+      seen.ddl = declared.ddl;
+      seen.topology = target.topology;
       return {};
     },
     clickhouseRebuildDualWrite: ok,

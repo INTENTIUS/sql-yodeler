@@ -138,7 +138,7 @@ describe("createMigration with a backfill", () => {
 });
 
 describe("the rebuild step's Op", () => {
-  it("is chant's ClickHouseRebuildOp without its gates, its Drop phase or its onFailure, built from the recorded schema", async () => {
+  it("is chant's ClickHouseRebuildOp with gates: \"outer\" and onFailure: \"keep\" (no gate, no Drop phase, no onFailure), built from the recorded schema", async () => {
     const config = await rebuildOpConfig(
       { name: "rebuild-yodel_12-events", table: `${DB}.events`, dualWrite: { mode: "materialized-view", cutoverColumn: "ts" } },
       { environment: "e2e", projectDir: "/p", buildPath: "/tmp/schema.json" },
@@ -151,6 +151,7 @@ describe("the rebuild step's Op", () => {
       "clickhouseRebuildPlan", "clickhouseRebuildCreate", "clickhouseRebuildDualWrite", "clickhouseRebuildBackfill", "clickhouseRebuildVerify", "clickhouseRebuildSwap", "clickhouseRebuildRetain",
     ]);
     expect(config.onFailure).toBeUndefined();
+    expect(steps.every((s) => s.kind === "activity" && s.args?.keepOnFailure === true)).toBe(true);
     expect(steps[0]?.kind === "activity" ? steps[0].args : {}).toMatchObject({ table: `${DB}.events`, buildPath: "/tmp/schema.json", environment: "e2e", cwd: "/p" });
   });
 

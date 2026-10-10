@@ -14,7 +14,7 @@ import type { ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse
 import type { ClickHousePort } from "../history/index.js";
 import type { Migration } from "../migrations/index.js";
 import { YodelError } from "../project.js";
-import { postgresServerReceipts, runBackfill, serverReceipts, type PgBackfillServer } from "./backfill.js";
+import { runBackfill, serverReceipts, type PgBackfillServer } from "./backfill.js";
 import type { StepPlan } from "./kinds.js";
 import { rebuildChantConfig, runRebuild } from "./rebuild.js";
 import { runPgMigration } from "./postgres-migration.js";
@@ -36,13 +36,13 @@ export interface StepContext {
   postgres?: (PgBackfillServer & { receiptsSchema: string }) | undefined;
   /** Postgres: the environment's lock timeout, for a PostgresMigrationOp step whose options set none. */
   lockTimeoutMs?: number | undefined;
-  /** The server, for chant's receipt store; the port is enough for everything else. */
+  /** The server, for the backfill's receipt store; the port is enough for everything else. */
   endpoint?: ClickHouseEndpoint | undefined;
   migration: Migration;
   index: number;
   plan: Exclude<StepPlan, { run: "statement" } | { run: "refused" }>;
   log: (line: string) => void;
-  /** A backfill's receipt store; default chant's on the server. */
+  /** A backfill's receipt store; default the sql lexicon's on the server. */
   receipts?: ReceiptStore | undefined;
 }
 
@@ -63,9 +63,9 @@ export const defaultStepRunner: StepRunner = async (ctx) => {
   const receipts =
     ctx.receipts ??
     (ctx.postgres
-      ? await postgresServerReceipts(ctx.postgres.client, ctx.postgres.receiptsSchema, ctx.environment)
+      ? await serverReceipts({ postgres: ctx.postgres.client, schema: ctx.postgres.receiptsSchema }, ctx.environment)
       : ctx.endpoint
-        ? await serverReceipts(ctx.endpoint, ctx.environment)
+        ? await serverReceipts({ clickhouse: ctx.endpoint }, ctx.environment)
         : undefined);
   if (!receipts) throw new YodelError("a backfill step needs a receipt store, and this environment has no server endpoint for one");
   const { summary } = await runBackfill(ctx.plan.file, {
