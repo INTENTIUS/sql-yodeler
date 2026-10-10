@@ -5,7 +5,7 @@ import type { Command } from "../command.js";
 import { eventFromDrift, sendEvent } from "../notify/index.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
-import { declarativeTopologyRefusal } from "../config/settings.js";
+import { declarativeAccessRefusal, declarativeTopologyRefusal } from "../config/settings.js";
 import {
   declaredColumns,
   driftExitCode,
@@ -231,7 +231,7 @@ export const drift: Command = {
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
       // chant renders the declaration for sql.profiles.<env>.topology alone; a different one in yodel.config.ts would show every replicated engine as drift.
-      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
+      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : declarativeAccessRefusal(project, env.name);
       if (refusal) throw refusal;
       const versioned = hasMigrations(project);
       const source = a.against ?? (versioned ? "history" : "src");

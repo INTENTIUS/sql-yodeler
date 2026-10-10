@@ -13,6 +13,7 @@ import { describeServer } from "../server.js";
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
 import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
 import { asBackfill } from "../steps/kinds.js";
+import { describeAccessSteps } from "../chant/access.js";
 import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
 import { describeResults, type RuleResult } from "../versioned/policy.js";
@@ -87,6 +88,7 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
       if (step.kind !== "statement") lines.push(`       ${why ? `yodel apply refuses it: ${why}` : "yodel apply runs it as this step"}`);
     }
     for (const c of p.checks ?? []) lines.push(`  check ${c.name} (${describeExpect(c)}, before the first statement):`, ...redact(c.sql).split("\n").map((l) => `       ${l}`));
+    for (const l of describeAccessSteps(p.steps.map((s) => s.step))) lines.push(`  ${l}`);
   }
   if (plan.pending.length === 0 && !plan.refusal) lines.push("", "Nothing pending: every migration is applied.");
   if (plan.problems.length > 0) lines.push("", `Integrity problems (${String(plan.problems.length)}):`, ...plan.problems.map((p) => `  ${p}`));
@@ -123,6 +125,8 @@ function pendingMarkdown(p: PendingView, withSql: boolean): string[] {
     const { rule, cls } = stepRule(step);
     out.push(`| ${String(index)} | ${step.kind === "statement" ? "statement" : `**${cell(stepKind(step))}**`}${done ? " (done)" : ""} | ${cell(rule)} | ${cell(cls)} | \`${cell(step.name)}\` |`);
   }
+  const access = describeAccessSteps(p.steps.map((s) => s.step), true);
+  if (access.length > 0) out.push("", ...access);
   const checks = p.checks ?? [];
   if (checks.length > 0) {
     out.push("", `Pre-migration checks (${String(checks.length)}), run before the first statement; one that fails refuses the apply:`, "", "| Check | Must | Query |", "|---|---|---|");

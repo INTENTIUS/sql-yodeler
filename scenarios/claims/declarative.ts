@@ -4,6 +4,7 @@ import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type Par
 import { parse, Project } from "../lib/project.js";
 import { declareRoutines, insertedStatus, replaceFunctionByHand, routinesOnServer } from "../lib/routines.js";
 import { addColumn, mainTable } from "../lib/schema.js";
+import { accessOnServer, declareAccess, manageAccess, reader } from "../lib/access.js";
 
 /** A declarative project (no migrations/) applied once behind its ApplyOp's gate. */
 export async function declared(ctx: Ctx): Promise<Project> {
@@ -70,6 +71,65 @@ async function routines(ctx: Ctx, { p }: Declarative): Promise<void> {
   hold(after.code === 0 && left.length === 0, `yodel plan after the routines applied is not empty: ${left.join(", ")}`);
 }
 
+/** A declarative plan's access section (#45), as `yodel plan --json` prints it. */
+interface AccessPlan {
+  changes: Array<{ object: string; rule: string; class: string }>;
+  access?: { managed: boolean; source: string; changes: Array<{ object: string; rule: string; class: string; field: string; byHand?: true }> };
+}
+
+/** yodel apply, approved at its gate, yodel apply again: the second apply's exit code. */
+async function approvedApply(p: Project): Promise<number> {
+  const gated = await p.apply();
+  if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)}): ${gated.ran.err.slice(-600)}`);
+  await p.approve(gated.doc.approve);
+  return (await p.apply()).ran.code;
+}
+
+/**
+ * Postgres access control (#45), managed in the environment
+ * (yodel.config.ts and the chant profile both say access: true): a role,
+ * row-level security forced on orders, a policy for the role and two grants
+ * are planned with their rules and classes, and applied behind the gate. A
+ * privilege then granted by hand on orders is drift: yodel plan calls it out
+ * as revoked by the next apply, and the approved apply revokes it.
+ * BREAK: access is turned off for the environment before the grant is made
+ * by hand, so the plan does not read the server's privileges and the role
+ * keeps it.
+ */
+async function access(ctx: Ctx, { p }: Declarative): Promise<void> {
+  manageAccess(p);
+  declareAccess(p);
+  await p.commit("access control");
+  const plan = await p.yodel(["plan", p.env, "--json"]);
+  const planned = parse<AccessPlan>(plan);
+  const shown = (planned.access?.changes ?? []).map((c) => `${c.rule} ${c.class} ${c.field}`);
+  hold(plan.code === 0 && planned.access?.managed === true, `yodel plan does not manage access in ${p.env}: ${JSON.stringify(planned.access)}`);
+  for (const want of ["SQLPG200 create role", "SQLPG290 metadata policy", "SQLPG296 metadata privileges"]) {
+    hold(shown.includes(want), `yodel plan's access section does not show ${want}: ${shown.join(", ")}`);
+  }
+  hold(planned.changes.some((c) => c.rule === "SQLPG293"), `yodel plan does not turn on orders' row-level security: ${planned.changes.map((c) => c.rule).join(", ")}`);
+  hold((await approvedApply(p)) === 0, "the approved access control did not apply");
+  const on = await accessOnServer(ctx);
+  hold(on.rls && on.forced && on.policy && on.usage && on.select && !on.insert, `on the server after the apply: ${JSON.stringify(on)}`);
+
+  if (ctx.broken) {
+    manageAccess(p, false);
+    p.edit("chant.config.ts", "\n        access: true,", "");
+    await p.commit("access off");
+  }
+  await ctx.db.exec(`GRANT INSERT ON ${ctx.db.name}.orders TO ${reader(ctx)}`);
+  const drift = await p.yodel(["plan", p.env, "--json"]);
+  const byHand = (parse<AccessPlan>(drift).access?.changes ?? []).filter((c) => c.byHand);
+  hold(byHand.length === 1 && byHand[0]?.rule === "SQLPG297" && byHand[0].object.includes("orders"), `yodel plan does not call out the grant made by hand as revoked: ${JSON.stringify(parse<AccessPlan>(drift).access)}`);
+  const text = await p.yodel(["plan", p.env]);
+  hold(/Revoked by this apply, though no declaration revokes it[^\n]*\n\s+relation \S+orders FROM \S+: insert\n/.test(text.out), `yodel plan's text does not call out the revoke:\n${text.out.slice(-1200)}`);
+  await approvedApply(p);
+  const after = await accessOnServer(ctx);
+  hold(!after.insert && after.select, `the grant made by hand was not revoked, or the declared one went with it: ${JSON.stringify(after)}`);
+  const clean = await p.yodel(["plan", p.env, "--json"]);
+  hold(clean.code === 0 && parse<AccessPlan>(clean).changes.length === 0, `yodel plan after the revoke is not empty: ${clean.out.slice(0, 600)}`);
+}
+
 /** The ORM's DDL, scenarios/fixtures/<dialect>/orm/schema.sql: customers and invoices. */
 const ormDdl = (ctx: Ctx): string => readFileSync(fileURLToPath(new URL(`../fixtures/${ctx.dialect === "ch" ? "clickhouse" : "postgres"}/orm/schema.sql`, import.meta.url)), "utf8");
 
@@ -127,10 +187,11 @@ interface Declarative {
   p: Project;
 }
 
-/** The parts, in order: the src/ declarations, a column added and on Postgres the routines (#44), on one project; then an ORM's DDL (#67) on a project of its own. */
+/** The parts, in order: the src/ declarations, a column added and on Postgres the routines (#44) and access control (#45), on one project; then an ORM's DDL (#67) on a project of its own. */
 const parts: ReadonlyArray<PartEntry<Declarative>> = [
   ["column", column],
   ["routines", routines, ["pg"]],
+  ["access", access, ["pg"]],
   ["orm", orm],
 ];
 
@@ -140,7 +201,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const declarative: Claim = {
   name: "declarative",
-  says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
+  says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

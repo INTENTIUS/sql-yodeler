@@ -134,6 +134,10 @@ export function dbFor(dialect: Dialect, claim: string): Db {
       Number(await scalar(`SELECT count(*) FROM information_schema.columns WHERE table_schema = '${name}' AND table_name = '${table}' AND column_name = '${column}'`)) === 1,
     reset: async () => {
       await postgresQuery(`DROP SCHEMA IF EXISTS ${name} CASCADE; DROP SCHEMA IF EXISTS ${history} CASCADE`);
+      // A claim's roles (#45) are named <name>__<role>; roles outlive the schema, so they go with it here.
+      await postgresQuery(
+        `DO $$ DECLARE r text; BEGIN FOR r IN SELECT rolname FROM pg_roles WHERE rolname LIKE '${name}\\_\\_%' LOOP EXECUTE format('DROP ROLE %I', r); END LOOP; END $$`,
+      );
     },
   };
 }

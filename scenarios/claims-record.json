@@ -7,7 +7,7 @@
     {
       "claim": "adopt",
       "dialect": "ch",
-      "says": "yodel init --from adopts a live database without touching it, and yodel plan then shows no change",
+      "says": "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too",
       "needs": null,
       "plain": "pass",
       "break": "caught",
@@ -22,7 +22,7 @@
     {
       "claim": "adopt",
       "dialect": "pg",
-      "says": "yodel init --from adopts a live database without touching it, and yodel plan then shows no change",
+      "says": "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too",
       "needs": null,
       "plain": "pass",
       "break": "caught",
@@ -262,7 +262,7 @@
     {
       "claim": "declarative",
       "dialect": "ch",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
       "needs": null,
       "plain": "pass",
       "break": "caught",
@@ -277,7 +277,7 @@
     {
       "claim": "declarative",
       "dialect": "pg",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
       "needs": null,
       "plain": "pass",
       "break": "caught",

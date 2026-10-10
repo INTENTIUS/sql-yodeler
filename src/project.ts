@@ -46,6 +46,12 @@ export interface Project {
   sourceDir: string;
   /** `yodel.config.ts`, checked, when the project has one (`./config/`). */
   yodel?: { path: string; config: YodelConfig } | undefined;
+  /**
+   * `sql.profiles.<env>.access` as chant.config.ts says it, before
+   * yodel.config.ts's `environments.<env>.access` is put in {@link config}'s
+   * profile. Only the environments whose profile sets it.
+   */
+  profileAccess?: Record<string, boolean>;
 }
 
 export interface Environment {
@@ -96,7 +102,28 @@ export function projectFromConfig(dir: string, configPath: string, config: Proje
     throw new YodelError(`${configPath}: lexicons does not include "sql"; add lexicons: ["sql"] and import "@intentius/chant-lexicon-sql"`);
   }
   const sourceDir = config.sourceDir ?? (existsSync(join(dir, "src")) ? "src" : ".");
-  return { dir, configPath, config, dialect: projectDialect(config, configPath), sourceDir, ...(yodel ? { yodel } : {}) };
+  const { config: withAccess, profileAccess } = accessInProfiles(config, yodel?.config);
+  return { dir, configPath, config: withAccess, dialect: projectDialect(config, configPath), sourceDir, ...(yodel ? { yodel } : {}), profileAccess };
+}
+
+/**
+ * `config` with each profile's `access` set to yodel.config.ts's
+ * `environments.<env>.access` where it sets one, so the chant functions yodel
+ * calls in process (the plan, the import, the server reads) manage access as
+ * yodel.config.ts says. Pure.
+ */
+export function accessInProfiles(config: ProjectConfig, yodel: YodelConfig | undefined): { config: ProjectConfig; profileAccess: Record<string, boolean> } {
+  const profiles = config.sql?.profiles ?? {};
+  const profileAccess: Record<string, boolean> = {};
+  for (const [name, profile] of Object.entries(profiles)) {
+    const access = (profile as { access?: unknown }).access;
+    if (typeof access === "boolean") profileAccess[name] = access;
+  }
+  const own = Object.entries(yodel?.environments ?? {}).filter(([name, e]) => e.access !== undefined && profiles[name] !== undefined);
+  if (own.length === 0) return { config, profileAccess };
+  const next = { ...profiles };
+  for (const [name, e] of own) next[name] = { ...profiles[name], access: e.access } as (typeof profiles)[string];
+  return { config: { ...config, sql: { ...config.sql, profiles: next } }, profileAccess };
 }
 
 /**

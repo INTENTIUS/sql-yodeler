@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { accessReview, renderAccessReview } from "../chant/access.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
@@ -9,7 +10,7 @@ import { runnable } from "../chant/runnable.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
-import { declarativeTopologyRefusal, LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
+import { declarativeAccessRefusal, declarativeTopologyRefusal, LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
 import { policyAtBase } from "../config/base.js";
 import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
@@ -301,7 +302,7 @@ export const apply: Command = {
       if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down") || a.wavePlan !== undefined || a.waveApply !== undefined) {
         throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
       }
-      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
+      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : declarativeAccessRefusal(project, env.name);
       if (refusal) throw refusal;
       return declarativeApply(project, env, a, io);
     });
@@ -671,7 +672,11 @@ async function declarativeRun(
     const before = await planEnvironment(project, env, build);
     const server = await probeServer(project, env);
     setServer(server);
-    if (!json) io.out(`${await renderPlan(before, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name})`)}\n`);
+    if (!json) {
+      io.out(`${await renderPlan(before, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name})`)}\n`);
+      const review = project.dialect === "postgres" ? renderAccessReview(await accessReview(project, env.name, before.diff.changes, build.output), env.name) : [];
+      if (review.length > 0) io.out(`\n${review.join("\n")}\n`);
+    }
     if (planExitCode(before) === PLAN_NEEDS_OP) {
       if (!json) io.err(`yodel apply: refused: ${String(before.refused.length)} change(s) need their own Op; nothing was applied\n`);
       return report({ status: "refused", plan: planJson(before) }, PLAN_NEEDS_OP);

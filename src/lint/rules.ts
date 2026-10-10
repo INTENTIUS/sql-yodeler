@@ -9,8 +9,8 @@
  *   config lowers them and nothing silences them, because a migration that
  *   breaks one cannot be applied safely or cannot be checked at all.
  * - Statement rules, from the classes chant's classifier gives each step:
- *   `destructive`, `pg-rewrite`, `pg-lock`, `pg-signature`, `ch-mutation`,
- *   `ch-rebuild`.
+ *   `destructive`, `pg-rewrite`, `pg-lock`, `pg-signature`, `pg-access`,
+ *   `pg-rls-not-forced` (a warning), `ch-mutation`, `ch-rebuild`.
  *   Errors by default; a line `-- yodel:allow <rule> <reason>` above the
  *   statement in `migration.sql` silences one for that statement, and the
  *   reason is recorded in the history when the migration applies.
@@ -52,6 +52,8 @@ export const LINT_RULES = {
   "pg-lock": statement("pg-lock", "Postgres: holds a lock that blocks writes for a whole scan or index build (an index without CONCURRENTLY, a constraint validated in place)", "postgres"),
   "pg-signature": statement("pg-signature", "Postgres: a function or procedure dropped and created with another signature or result; a caller written for the old one fails", "postgres"),
   "pg-routine-in-use": { id: "pg-routine-in-use", summary: "Postgres: a function dropped while a trigger the migration's schema declares still executes it; the DROP fails", level: "error", silenceable: false, configurable: true, dialect: "postgres" },
+  "pg-access": statement("pg-access", "Postgres: takes access away: a privilege revoked, a policy dropped, or row-level security turned off or no longer forced on the table's owner", "postgres"),
+  "pg-rls-not-forced": { id: "pg-rls-not-forced", summary: "Postgres: a table's row-level security is enabled but not forced, so the table's owner (often the role that applies) bypasses its policies", level: "warning", silenceable: true, configurable: true, dialect: "postgres" },
   "ch-mutation": statement("ch-mutation", "ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback", "clickhouse"),
   "ch-rebuild": statement("ch-rebuild", "ClickHouse: a rebuild, every row copied into a new table and swapped in (ClickHouseRebuildOp)", "clickhouse"),
   "refused-step": shape("refused-step", "a step yodel apply refuses to run: a manual step, or an Op step it does not run"),

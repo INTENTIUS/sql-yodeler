@@ -78,6 +78,8 @@ Make the directory a git repository and commit (`yodel apply` finds the migratio
 3. It writes the baseline migration, `migrations/<timestamp>-baseline/`: the first migration, whose statements create everything.
 4. It records the baseline applied in the environment's history, without running any of its statements.
 
+On Postgres, when the environment manages access (`environments.<env>.access` in `yodel.config.ts`, or `sql.profiles.<env>.access`), step 1 also reads each table's row-level security, the policies and the privileges, and declares them; roles stay the environment's and are named as text ([Access control](access.md#adopting-a-database)).
+
 The live database is only read. The one write is the history row (and the history's database or schema and table, when they are not there yet).
 
 What it needs first: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect` and `sql.profiles.<env>`, with the project's databases (ClickHouse, `databases`) or schemas (Postgres, `schemas`) listed and the history's database or schema not among them, and a `package.json` from which chant and the `sql` lexicon resolve. `init` does not write `chant.config.ts`. It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, or the environment holds nothing.

@@ -3,9 +3,10 @@ import { eventFromRun, sendEvent } from "../notify/index.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
-import { declarativeTopologyRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
+import { declarativeAccessRefusal, declarativeTopologyRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
+import { accessReview, renderAccessReview } from "../chant/access.js";
 import { hasMigrations } from "../versioned/index.js";
 import { describeServer, probeServer } from "../server.js";
 import { runnable } from "../chant/runnable.js";
@@ -153,15 +154,20 @@ export const plan: Command = {
 };
 
 async function declarativePlan(project: Project, env: Environment, json: boolean, io: Io): Promise<number> {
-  const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
+  const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : declarativeAccessRefusal(project, env.name);
   if (refusal) throw refusal;
   const topology = project.dialect === "clickhouse" ? `, topology ${describeSettingsTopology(environmentSettings(project, env.name))}` : "";
   const build = await buildSchema(project);
   try {
     const result = await planEnvironment(project, env, build);
     const server = await probeServer(project, env);
-    if (json) io.out(`${JSON.stringify({ ...planJson(result), ...(server ? { server } : {}) }, null, 2)}\n`);
-    else io.out(`${await renderPlan(result, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name}${topology})`)}\n`);
+    const access = project.dialect === "postgres" ? await accessReview(project, env.name, result.diff.changes, build.output) : undefined;
+    if (json) io.out(`${JSON.stringify({ ...planJson(result), ...(access ? { access } : {}), ...(server ? { server } : {}) }, null, 2)}\n`);
+    else {
+      const text = await renderPlan(result, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name}${topology})`);
+      const review = access ? renderAccessReview(access, env.name) : [];
+      io.out(`${text}\n${review.length > 0 ? `\n${review.join("\n")}\n` : ""}`);
+    }
     return planExitCode(result);
   } finally {
     build.dispose();

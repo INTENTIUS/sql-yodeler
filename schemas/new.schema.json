@@ -38,7 +38,24 @@
           }
         },
         "hints": { "$ref": "common.schema.json#/$defs/stringList" },
-        "checks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/check" } }
+        "checks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/check" } },
+        "access": {
+          "description": "Postgres: the steps about access control (policies, row-level security, roles, grants, revokes, default privileges), each with its rule and class; takesAway says why one takes access away.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step", "object", "name"],
+            "properties": {
+              "step": { "type": "integer", "minimum": 0 },
+              "object": { "type": "string" },
+              "name": { "type": "string" },
+              "rule": { "type": "string" },
+              "class": { "type": "string" },
+              "takesAway": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "template": {
