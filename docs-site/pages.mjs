@@ -75,7 +75,7 @@ function tagline() {
 		.replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
-/** The sidebar: docs/README.md's table order, then any page it does not list. */
+/** The sidebar: docs/README.md's table order, then the pages it does not list, under "For contributors". */
 export function sidebar() {
 	const files = docFiles();
 	const slugs = new Set(files.map((f) => f.slug));
@@ -84,10 +84,10 @@ export function sidebar() {
 		const slug = m[2].toLowerCase();
 		if (slugs.has(slug) && !items.some((i) => i.slug === slug)) items.push({ label: m[1], slug });
 	}
-	for (const { file, slug } of files) {
-		if (!items.some((i) => i.slug === slug)) items.push({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug });
-	}
-	return items;
+	const rest = files
+		.filter(({ slug }) => !items.some((i) => i.slug === slug))
+		.map(({ file, slug }) => ({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug }));
+	return rest.length ? [...items, { label: 'For contributors', items: rest }] : items;
 }
 
 export function writePages() {
@@ -103,6 +103,9 @@ export function writePages() {
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');
 	const head = `---
 title: ${JSON.stringify(index.title)}
+head:
+  - tag: title
+    content: ${JSON.stringify(`${index.title}: schema management and migrations for ClickHouse and Postgres`)}
 template: splash
 hero:
   tagline: ${JSON.stringify(tagline())}

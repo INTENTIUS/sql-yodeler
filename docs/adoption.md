@@ -4,16 +4,16 @@ There are two ways in: a new project from a starter template, whose first migrat
 
 ## A new project from a template
 
-`templates/clickhouse` and `templates/postgres` in this repository are starter projects for `chant init --from`. Each gives `chant.config.ts` with a `dev` and a `prod` profile, `yodel.config.ts`, a migrations Op and a drift watch per environment, and CI pipelines for GitHub Actions, GitLab CI and Forgejo Actions. The parameters are in each template's `chant.template.json`.
+`templates/clickhouse` and `templates/postgres` in this repository are starter projects for `chant init --from`. [Your first migration](getting-started.md) takes a project made this way to applied migrations on a local database, step by step. Each gives `chant.config.ts` with a `dev` and a `prod` profile, `yodel.config.ts`, a migrations Op and a drift watch per environment, and CI pipelines for GitHub Actions, GitLab CI and Forgejo Actions. The parameters are in each template's `chant.template.json`.
 
-From GitHub:
+From GitHub, with chant's CLI from npm (`@intentius/chant`; plain `npx chant` outside a project runs an unrelated package):
 
 ```sh
-chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
-chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
+npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
 ```
 
-or from a clone, by path. The run quoted here is `examples/walkthrough/template.ts` (`npx tsx examples/walkthrough/run.ts template --write` runs it again and rewrites these quotes), from a clone whose path is shown as `<clone>`:
+or from a clone, by path, shown here as `<clone>`. Inside the clone, `npx chant` is the clone's own chant:
 
 ```console
 $ npx chant init --from <clone>/templates/clickhouse --param name=events-schema --param database=yodel_18_tpl --param history_database=yodel_18_tpl_history my-schema
@@ -48,7 +48,7 @@ Lineage: dir:<clone>/templates/clickhouse (a directory, recorded by digest only)
 Parameters: database="yodel_18_tpl", history_database="yodel_18_tpl_history", name="events-schema"
 ```
 
-The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.1.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. The run skips `npm install` and links the clone's `node_modules` into `my-schema`, so it runs the yodel built in the clone.
+The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.1.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. The run quoted here linked the clone's `node_modules` into `my-schema` in place of `npm install`.
 
 The first migration creates what `src/schema.ts` declares. `yodel new` needs no server:
 

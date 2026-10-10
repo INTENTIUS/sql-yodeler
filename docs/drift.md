@@ -44,7 +44,7 @@ import { WatchOp } from "@intentius/chant/op";
 export const { op } = WatchOp({ name: "watch-dev", env: "dev", schedule: "17 * * * *" });
 ```
 
-`chant run watch-dev` runs it once. It takes a snapshot, diffs declared against live, and reports:
+`npx chant run watch-dev` runs it once. It takes a snapshot, diffs declared against live, and reports:
 
 ```console
 $ npx chant run watch-dev

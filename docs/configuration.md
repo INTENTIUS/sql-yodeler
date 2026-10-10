@@ -9,44 +9,9 @@ npm install @intentius/sql-yodeler @intentius/chant@0.114.1 @intentius/chant-lex
 npx yodel --version
 ```
 
-No token is needed, on your machine or in CI. The starter templates' `package.json` names `^0.1.0`. While the version is 0.x, a caret range stays within one minor version, so moving to the next minor release means changing the range (`npm install @intentius/sql-yodeler@0.2`).
+No token is needed, on your machine or in CI. A project made from a starter template has all three in its `package.json` already, so `npm install` there is enough; [Your first migration](getting-started.md) goes from there. The starter templates' `package.json` names `^0.1.0`. While the version is 0.x, a caret range stays within one minor version, so moving to the next minor release means changing the range (`npm install @intentius/sql-yodeler@0.2`).
 
-### From git
-
-A commit that is not released yet installs from git:
-
-```sh
-npm install github:INTENTIUS/sql-yodeler#main
-```
-
-npm clones the commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin; `package-lock.json` pins the commit. The repository is public, so this needs no token.
-
-### From a clone
-
-Clone and build it once:
-
-```sh
-git clone https://github.com/INTENTIUS/sql-yodeler.git
-cd sql-yodeler
-npm ci
-```
-
-`npm ci` builds `dist/` through the `prepare` script (`npm run build` does the same by hand). Then, in your project, either install the clone by path (npm links it, so a rebuild of the clone is picked up):
-
-```sh
-npm install ../sql-yodeler
-```
-
-or pack it and install the tarball, which you can commit so CI needs no access to this repository:
-
-```sh
-mkdir -p vendor
-(cd ../sql-yodeler && npm pack --pack-destination "$OLDPWD/vendor")
-npm install ./vendor/intentius-sql-yodeler-0.1.0.tgz
-npx yodel --version
-```
-
-Installing the tarball rewrites the dependency in `package.json` to `file:vendor/intentius-sql-yodeler-0.1.0.tgz`. The tarball is named for the version in the clone's `package.json`. The examples in `examples/` use `file:../..`, the clone they sit in.
+To try a commit that is not released yet, from git or from a clone, see [CONTRIBUTING.md](../CONTRIBUTING.md#running-an-unreleased-yodel-in-a-project).
 
 ## A project
 

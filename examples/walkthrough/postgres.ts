@@ -62,13 +62,13 @@ export const walkthrough: Walkthrough = {
 
 A Postgres schema taken from the declarative path to versioned migrations: adoption with \`yodel init --from\`, lint findings and a silence, a migration that fails part way and resumes, a column rename run as a \`PostgresMigrationOp\` step, two branches that fork the history (rebase, repair, out of order), drift, and the replay check. Every command below ran against the emulator (\`chant emulator up --lexicon sql\`), and the output under each is what it printed. \`examples/walkthrough/postgres.ts\` holds the steps; \`npx tsx examples/walkthrough/run.ts postgres --write\` runs them again and rewrites this file and the project files from the run.
 
-The project in this directory is what the walkthrough leaves: \`src/schema.ts\`, the migrations it wrote, and the two Ops.
+The project in this directory is what the walkthrough leaves: \`src/schema.ts\`, the migrations it wrote, and the two Ops. It is a finished run, with every migration already written, so running it again does not retrace the steps. To go step by step from an empty directory, start with [Your first migration](../../docs/getting-started.md).
 
 To run it yourself, from a clone of this repository:
 
 \`\`\`sh
 npm ci && npm run build          # in the repository root
-chant emulator up --lexicon sql  # or any Postgres you can drop schema yodel_18_shop on
+npx chant emulator up --lexicon sql  # or any Postgres you can drop schema yodel_18_shop on
 cd examples/postgres
 npm install                      # @intentius/sql-yodeler from file:../.., this clone
 export DEV_POSTGRES_URL=postgres://127.0.0.1:5432/postgres DEV_POSTGRES_USER=postgres DEV_POSTGRES_PASSWORD=...

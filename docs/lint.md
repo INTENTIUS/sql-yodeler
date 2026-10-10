@@ -170,7 +170,7 @@ A `yodel:allow` line that is malformed, names a rule that cannot be silenced, ha
 
 `yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server and compares the schema each one leaves with the schema it recorded. The first that differs fails the run (rule `replay`, exit 3) and is named. This is what keeps the recorded schemas, which `yodel new` diffs against, true to what the statements do.
 
-`<env>` should be a throwaway server: the emulator (`chant emulator up --lexicon sql`), or in CI a service container, as the starter templates' `replay` profile is. The databases or schemas the history names must not exist there yet; otherwise it runs nothing and exits 4:
+`<env>` should be a throwaway server: the emulator (`npx chant emulator up --lexicon sql`), or in CI a service container, as the starter templates' `replay` profile is. The databases or schemas the history names must not exist there yet; otherwise it runs nothing and exits 4:
 
 ```console
 $ npx yodel lint --replay replay

@@ -4,7 +4,8 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 
 | Page | What it covers |
 |---|---|
-| [Installing and configuring](configuration.md) | installing `yodel` today, the project layout, `chant.config.ts` profiles, `yodel.config.ts`, the environment variables |
+| [Your first migration](getting-started.md) | from an empty directory to applied migrations on a local database: the template, the emulator, the variables, plan, approve and apply |
+| [Installing and configuring](configuration.md) | installing `yodel`, the project layout, `chant.config.ts` profiles, `yodel.config.ts`, the environment variables |
 | [Starting a project](adoption.md) | a new project from a starter template, and `yodel init --from` to adopt a database that already exists |
 | [The two workflows](workflows.md) | the declarative path (`yodel plan`, `yodel apply` against the declared schema) and the versioned path (`yodel new`, then `yodel apply`) |
 | [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair` |
@@ -13,14 +14,13 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
-| [Claims status](claims.md) | the scenario claims and their last recorded verdicts, plain and broken |
 
-Two example projects, one per dialect, show each of these on a real server. Their READMEs are transcripts of runs against chant's emulator, with the output each command printed:
+Two example projects, one per dialect, show each of these on a real server. They are finished projects, and their READMEs are transcripts of the runs that made them, against chant's emulator, with the output each command printed. To follow along step by step, start with [Your first migration](getting-started.md):
 
 - [examples/clickhouse](../examples/clickhouse/README.md): adoption, a migration, a sort-key rebuild, a backfill, a lint silence, an approval that stops holding, drift, the replay check.
 - [examples/postgres](../examples/postgres/README.md): adoption, lint findings, a migration that fails part way and resumes, a column rename as an expand-and-contract step, a destructive change silenced, a fork resolved with `yodel rebase` and `yodel repair`, an out-of-order migration, drift, the replay check.
 
-The pages quote those runs. `test/e2e/examples.test.ts` runs both walkthroughs again when the emulator variables are set, so the commands and exit codes shown stay right.
+The pages quote those runs.
 
 ## The commands
 
