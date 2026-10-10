@@ -60,9 +60,16 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   exit 4, while the others in the share apply; `yodel status` and `yodel
  *   report` show it behind. BREAK: the wave is rendered with the first
  *   tenant alone, so the others never get the migrations.
+ * - pre-check (#64): staging has steps around apply, read at the base
+ *   commit: a before step that fails with `onFailure: "approve"`, and an
+ *   after step. Under gate `never`, the wave is held: nothing is applied
+ *   and the job prints the approval it needs. Approved, it applies, and the
+ *   history records both steps' outcomes, which `yodel report` lists.
+ *   BREAK: the steps removed from yodel.config.ts, so the wave applies
+ *   with no one asked.
  */
 
-const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants"] as const;
+const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants", "pre-check"] as const;
 type Part = (typeof PARTS)[number];
 
 interface Envs {
@@ -85,9 +92,9 @@ const ENV_KEYS = ["staging", "prod"] as const;
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string } = {}): Promise<void> {
   const { p } = st;
-  p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true));
+  p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps));
   // A tenant set's wave has a run per tenant, as yodel ci renders it.
   let ws: readonly Wave[] = await withTenants(p.dir, options.allNever ? waves.map((w): Wave => ({ ...w, gate: "never" })) : waves);
   if (options.firstTenantOnly) ws = ws.map((w) => (w.targets ? { ...w, targets: w.targets.slice(0, 1), shares: 1 } : w));
@@ -153,13 +160,14 @@ async function runJob(st: State, name: string): Promise<JobResult> {
 
 // ── The project ──────────────────────────────────────────────────────────────
 
-function yodelConfig(st: State, waves: readonly Wave[], noRequires = false): string {
+/** yodel.config.ts with these waves; `stagingSteps` is staging's `steps`, as TypeScript. */
+function yodelConfig(st: State, waves: readonly Wave[], noRequires = false, stagingSteps?: string): string {
   const history = st.p.ctx.db.history;
   return `import type { YodelConfig } from "@intentius/sql-yodeler";
 
 export default {
   environments: {
-${ENV_KEYS.map((k) => `    "${st.envs[k]}": { history: { database: "${history}" } },`).join("\n")}
+${ENV_KEYS.map((k) => `    "${st.envs[k]}": { history: { database: "${history}" }${k === "staging" && stagingSteps ? `, steps: ${stagingSteps}` : ""} },`).join("\n")}
     "${st.envs.tenants}": { history: { database: "${history}" }, tenants: ${JSON.stringify(tenantNames(st.p.ctx))} },
   },
   waves: [
@@ -535,6 +543,37 @@ async function tenants(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   );
 }
 
+async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+  const db = ctx.db.name;
+  const table = mainTable(ctx);
+  // "SELECT 1" returns a row, and a step expects none by default: the before step fails, every time.
+  const steps = `{ before: [{ name: "replication-lag", sql: "SELECT 1", onFailure: "approve" }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
+  if (broken) ctx.log("BREAK: the steps are removed from yodel.config.ts");
+  await render(st, waves(st, "never", "never"), broken ? {} : { steps });
+  await st.p.commit("the waves: both never, staging with steps around apply");
+  addColumn(st.p, "checked");
+  await migrate(st, "add-checked", "feat: a checked column");
+
+  // Held at staging under gate never: nothing applied, the approval it needs printed, prod not run.
+  const ran = await pipeline(st);
+  const staging = ran.get(job(st, 1, "staging"));
+  hold(staging?.ok === false, `staging's wave applied with its before step failing (exit ${String(staging?.code)})`);
+  hold(!(await st.columnOn("staging", "checked")), "staging applied the column with its before step failing and no approval");
+  hold(/replication-lag failed with onFailure approve/.test(staging.out), "staging's wave did not say which before step held it");
+  hold(!ran.has(job(st, 2, "prod")), "prod's wave ran while staging's was held");
+
+  await st.p.approve(approveCommand(staging));
+  const again = await pipeline(st, ran);
+  hold(again.get(job(st, 1, "staging"))?.ok === true && (await st.columnOn("staging", "checked")), "staging's wave did not apply once its held plan was approved");
+  hold(again.get(job(st, 2, "prod"))?.ok === true, "prod's wave did not apply after staging's");
+
+  // The history records both steps, and yodel report lists them.
+  const report = parse<{ audit: Array<{ kind: string; environment: string; detail?: string }> }>(await st.p.yodel(["report", st.envs.staging, "--json"]));
+  const recorded = report.audit.filter((e) => e.kind === "step").map((e) => e.detail ?? "");
+  hold(recorded.some((d) => d.startsWith("before step replication-lag failed, held for approval")), "the history does not record the held before step");
+  hold(recorded.some((d) => d.startsWith("after step smoke passed")), "the history does not record the after step");
+}
+
 const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {
   "gate-policy": gatePolicy,
   "wave-order": waveOrder,
@@ -543,6 +582,7 @@ const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>>
   "yodel-approve": yodelApprove,
   report,
   tenants,
+  "pre-check": preCheck,
 };
 
 /** The parts, run by runParts; a part that caught its break leaves the servers where its break took them, so they are levelled for the parts after. */

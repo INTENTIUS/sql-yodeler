@@ -175,6 +175,33 @@ The profile in `chant.config.ts` names one database (ClickHouse `databases`) or 
 A tenant requires what its environment requires: the same tenant when the environment before is a tenant set too, else that environment.
 
 `yodel status prod` lists every tenant against its own history, then how many are up to date (exit 3 while any is behind), and `yodel report prod` shows a column per tenant.
+### Steps around apply: checks before and after
+
+Checks a runbook asks for before a migration (replication lag, long transactions, disk headroom) and smoke queries after go in `environments.<env>.steps`:
+
+```ts
+environments: {
+  prod: {
+    steps: {
+      before: [
+        { name: "no-long-transactions", sql: "SELECT pid FROM pg_stat_activity WHERE xact_start < now() - interval '5 minutes'", onFailure: "approve" },
+        { name: "disk", command: "./scripts/disk-headroom.sh" },
+      ],
+      after: [{ name: "smoke", sql: "SELECT count(*) FROM app.orders", expect: { min: 1 } }],
+    },
+  },
+},
+```
+
+A `sql` step is a read-only query on the environment's server, judged like a migration's pre-migration check: `expect` is `empty` (the default, no rows), `true`, or `{ min, max }`. A `command` step runs with `sh -c` in the project directory, with `YODEL_ENV` and `YODEL_STEP` (`before` or `after`) set, and passes when it exits 0.
+
+The steps are read from `yodel.config.ts` at the base commit, like the policy, so a pull request cannot add a step that runs with the writer's credentials, or remove one that would hold it. They run only when something is pending:
+
+- `before` steps run when the wave is planned (`--wave-plan`), and again under the lock just before the first migration. In the migrations Op's path, `yodel apply <env>` runs them before the gate and its Apply step under the lock. A failing step refuses the run, exit 4, nothing applied.
+- With `onFailure: "approve"`, a failing `before` step holds the wave for a person instead, whatever its gate: the wave plan's digest names the held steps, `on-destructive` waits on it, and under `never` the wave job applies nothing and exits 3 with the `chant approve` command for the wave's digest. Once someone approves that plan, the job run again applies it. If the step passes by then, the plan has moved and the wave decides again.
+- `after` steps run under the lock once the last migration's statements succeeded. A failing one fails the run, exit 1; the migrations stay applied.
+
+Every outcome is in the history: the `before` steps on each migration's `started` row, the `after` steps on the last migration's `succeeded` row (`note.steps`). `yodel report` lists them as `step` entries in the audit log.
 
 ## The pull request comment
 

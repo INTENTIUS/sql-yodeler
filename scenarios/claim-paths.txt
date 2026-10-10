@@ -105,6 +105,8 @@ src/report/                            approval waves
 src/waves/                             waves template template-github template-gitlab
 # Tenant sets (#56): only a target named <env>/<tenant> runs them, and only the waves claim names one.
 src/tenants/                           waves
+# Steps around apply (#64): only a yodel.config.ts with steps runs them, and only the waves claim has one.
+src/apply-steps/                       waves
 
 # yodel drift, which the templates' watch runs (--issue).
 src/commands/drift.ts                  drift template template-github template-gitlab

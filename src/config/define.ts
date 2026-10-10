@@ -67,6 +67,50 @@ export interface EnvironmentConfig {
    * tenant behind one gate. See {@link TenantSet}.
    */
   tenants?: TenantSet;
+  /**
+   * Steps around apply (#64): checks run before the migrations are applied
+   * (replication lag, long transactions, disk headroom) and after (smoke
+   * queries). Read from yodel.config.ts at the base commit, never from the
+   * change, so a pull request cannot add a step that runs with the writer.
+   * Each outcome is recorded in the history. See {@link ApplySteps}.
+   */
+  steps?: ApplySteps;
+}
+
+/** `steps` of an environment: run in order, `before` under the lock before the first migration, `after` after the last. */
+export interface ApplySteps {
+  before?: ApplyStep[];
+  after?: ApplyStep[];
+}
+
+/**
+ * One step: a read-only SQL query on the environment's server, judged like a
+ * migration's pre-migration check (`expect`, default `empty`: no rows), or a
+ * shell command run in the project directory with `YODEL_ENV` and
+ * `YODEL_STEP` (`before` or `after`) set, which passes when it exits 0.
+ *
+ * ```ts
+ * steps: {
+ *   before: [{ name: "no-long-transactions", sql: "SELECT pid FROM pg_stat_activity WHERE xact_start < now() - interval '5 minutes'", onFailure: "approve" }],
+ *   after: [{ name: "smoke", command: "./scripts/smoke.sh" }],
+ * }
+ * ```
+ */
+export interface ApplyStep {
+  /** Names it in output and in the history: lowercase letters, digits, - and _. */
+  name: string;
+  sql?: string;
+  /** What `sql` must return: `empty` (the default), `true`, or a number in `{ min, max }`. */
+  expect?: "empty" | "true" | { min?: number; max?: number };
+  command?: string;
+  /**
+   * A failing `before` step: `fail` (the default) refuses the apply, exit 4;
+   * `approve` holds the environment's wave for a person instead, whatever
+   * its gate, until someone approves the plan with the step failing. An
+   * `after` step that fails fails the run (exit 1); the migrations stay
+   * applied.
+   */
+  onFailure?: "fail" | "approve";
 }
 
 /**

@@ -39,6 +39,7 @@ import type { PendingMigration } from "../versioned/state.js";
 import { WAVES_PIPELINE, type WaveRecord } from "./record.js";
 import { enforcePromotion, promotionEvidence, readPromotions, type Promotion } from "./promotion.js";
 import { baseEnvironment, splitTarget } from "../tenants/target.js";
+import { heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
 
 export * from "./promotion.js";
 export * from "./record.js";
@@ -101,6 +102,10 @@ export interface WavePlanFile {
   destructiveSteps: DestructiveStep[];
   /** Each environment this one requires, and the pending migrations its history records applied. */
   requires: Array<{ env: string; applied: Array<{ id: string; checksum: string }> }>;
+  /** The `before` steps' outcomes (#64), when the environment has steps and something is pending. */
+  steps?: StepOutcome[];
+  /** The `before` steps that failed with `onFailure: "approve"`: the wave waits for a person whatever its gate, and the digest covers them. */
+  held?: string[];
 }
 
 /** The wave plan's digest: over what the run would do and the policy it is gated under. */
@@ -110,6 +115,7 @@ export async function wavePlanDigest(subject: {
   gate: WaveGate;
   destructive: boolean;
   requires?: ReadonlyArray<{ env: string; applied: ReadonlyArray<{ id: string; checksum: string }> }>;
+  held?: readonly string[];
 }): Promise<string> {
   const { computePlanDigest } = await import("@intentius/chant/lifecycle/plan-digest");
   return computePlanDigest(WAVE_PLAN_KIND, subject);
@@ -130,9 +136,16 @@ export async function planWave(project: Project, venv: VersionedEnv, ordered: re
   const migrations = await currentDigest(venv, status, toApply);
   const { gate, at } = await gateAtBase(project, venv.environment);
   const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", toApply);
-  const destructive = steps.length > 0;
+  // The before steps (#64), as the base commit declares them: one that fails refuses; one that fails with onFailure approve holds the wave for a person.
+  const before = toApply.length > 0 ? ((await stepsAtBase(project, venv.environment)).steps?.before ?? []) : [];
+  const outcomes = before.length > 0 ? await runApplySteps(venv.driver, before, "before", { dir: project.dir, env: venv.environment }) : [];
+  const refusal = stepsRefusal(venv.environment, outcomes, "as the wave was planned");
+  if (refusal) throw refusal;
+  const held = heldSteps(outcomes);
+  // A held step is what on-destructive waits on too; the gate never is held by --wave-apply (verifyWaveDecision).
+  const destructive = steps.length > 0 || held.length > 0;
   return {
-    planDigest: await wavePlanDigest({ environment: venv.environment, migrations, gate, destructive, requires }),
+    planDigest: await wavePlanDigest({ environment: venv.environment, migrations, gate, destructive, requires, ...(held.length > 0 ? { held } : {}) }),
     destructive,
     empty: toApply.length === 0,
     environment: venv.environment,
@@ -142,6 +155,8 @@ export async function planWave(project: Project, venv: VersionedEnv, ordered: re
     pending: toApply.map((p) => p.id),
     destructiveSteps: steps,
     requires,
+    ...(outcomes.length > 0 ? { steps: outcomes } : {}),
+    ...(held.length > 0 ? { held } : {}),
   };
 }
 
@@ -192,9 +207,10 @@ function waveOf(spec: WavesSpec, env: string, specFile: string): { k: number; na
  * Throws unless chant's decision for `env`'s wave lets `planDigest` apply:
  * the decision names this plan for `env`, and either the gate ledger holds
  * an approval of the wave's set digest, or the wave's policy at the base
- * commit needs no approval for these plans.
+ * commit needs no approval for these plans. A plan with `held` steps (#64)
+ * needs that approval whatever the policy.
  */
-export async function verifyWaveDecision(cwd: string, specFile: string, env: string, planDigest: string): Promise<{ line: string; wave: WaveRecord }> {
+export async function verifyWaveDecision(cwd: string, specFile: string, env: string, planDigest: string, held: readonly string[] = []): Promise<{ line: string; wave: WaveRecord }> {
   const specPath = resolve(cwd, specFile);
   const spec = readJson<WavesSpec>(specPath, "the waves spec");
   const { k, name } = waveOf(spec, env, specFile);
@@ -219,6 +235,22 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
   // (../config/base.ts), never at a base the spec in the change names.
   const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
   const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
+  if (held.length > 0) {
+    // A before step failed with onFailure approve: a person approves this plan, whatever the gate.
+    try {
+      const by = await verifyApproval(await gitLedger(cwd), { name: spec.name, filePath: specFile, gate: decision.gate, quorum: false }, decision.digest);
+      return {
+        line: `wave ${String(k)} (${name}): held by ${held.join(", ")}, approved by ${by.resolvedBy} at ${by.timestamp}`,
+        wave: { wave: k, op: spec.name, gate: decision.gate, digest: decision.digest, status: "approved" },
+      };
+    } catch {
+      throw new YodelError(
+        `refused: ${env}'s before step${held.length === 1 ? "" : "s"} ${held.join(", ")} failed with onFailure approve, so wave ${String(k)} (${name}) waits for a person under any gate. Nothing was applied. ` +
+          `Approve it with: chant approve ${spec.name} ${decision.gate} --plan ${decision.digest}`,
+        NOT_APPROVED,
+      );
+    }
+  }
   if (decision.status !== "not-required" || opWaveNeedsApproval(policy.policy, decision.members as never)) {
     throw new YodelError(
       `refused: wave ${String(k)} (${name}) needs an approval of ${decision.digest} under gate ${policy.policy} (read at ${policy.base.slice(0, 12)}), and chant's gate ledger has none. Nothing was applied.`,
@@ -278,7 +310,7 @@ export async function forecastWave(cwd: string, specFile: string, plan: WavePlan
   const digest = waveSetDigest(members);
   const gate = waveGateName(spec.gate ?? spec.name, k);
   const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
-  let waits = opWaveNeedsApproval(policy.policy, members);
+  let waits = opWaveNeedsApproval(policy.policy, members) || (plan.held?.length ?? 0) > 0;
   if (waits) {
     try {
       await verifyApproval(await gitLedger(cwd), { name: spec.name, filePath: specFile, gate, quorum: false }, digest);
