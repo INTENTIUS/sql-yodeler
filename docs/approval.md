@@ -1,5 +1,5 @@
 ---
-claims: [approve-and-apply, digest-moved, pr-comment, waves]
+claims: [approval, pr-comment, waves]
 ---
 
 # Approval

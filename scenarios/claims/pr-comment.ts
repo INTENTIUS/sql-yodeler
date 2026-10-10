@@ -46,7 +46,7 @@ async function fakeGitHub(): Promise<{ api: string; comments: Array<{ id: number
 async function body(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx);
   await p.newMigration("create");
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
+  await p.setupApply();
   addColumn(p, "note");
   addTable(p, "audit");
   const id = await p.newMigration("note-and-audit");

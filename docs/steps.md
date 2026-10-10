@@ -1,5 +1,5 @@
 ---
-claims: [rebuild-refused, rebuild-as-step, backfill-resumed, column-change]
+claims: [rebuild, resume, column-change]
 ---
 
 # Steps

@@ -302,7 +302,7 @@ async function serialPart(ctx: Ctx, p: Project, s: Serial): Promise<void> {
 /** The fixture's project with its first migration applied: what both parts build on. */
 async function created(ctx: Ctx, p: Project): Promise<Project> {
   await p.newMigration("create");
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
+  await p.setupApply();
   return p;
 }
 

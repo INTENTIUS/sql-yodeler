@@ -3,7 +3,7 @@
  * matter naming the scenario claims that prove what it describes:
  *
  *   ---
- *   claims: [approve-and-apply, digest-moved]
+ *   claims: [approval, pr-comment]
  *   ---
  *
  * (an empty list is allowed, and says the page makes no claim a scenario

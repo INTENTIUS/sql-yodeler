@@ -1,17 +1,15 @@
 import type { Claim } from "../lib/claim.js";
 import { adopt } from "./adopt.js";
-import { approveAndApply } from "./approve-and-apply.js";
-import { backfillResumed } from "./backfill-resumed.js";
+import { approval } from "./approval.js";
 import { columnChange } from "./column-change.js";
 import { declarative } from "./declarative.js";
-import { digestMoved } from "./digest-moved.js";
 import { drift } from "./drift.js";
 import { lockRetry } from "./lock-retry.js";
 import { newClaim } from "./new.js";
 import { outOfOrder } from "./out-of-order.js";
-import { lintCiClaim, replayClaim } from "./lint.js";
+import { lintClaim } from "./lint.js";
 import { prComment } from "./pr-comment.js";
-import { rebuildAsStep, rebuildRefused } from "./rebuild.js";
+import { rebuild } from "./rebuild.js";
 import { resume } from "./resume.js";
 import { templateClaim } from "./template.js";
 import { templateGithub } from "./template-github.js";
@@ -23,18 +21,14 @@ import { wavesClaim } from "./waves.js";
 export const claims: readonly Claim[] = [
   adopt,
   newClaim,
-  lintCiClaim,
+  lintClaim,
   prComment,
-  approveAndApply,
-  digestMoved,
+  approval,
   resume,
   outOfOrder,
-  rebuildRefused,
-  rebuildAsStep,
-  backfillResumed,
+  rebuild,
   drift,
   declarative,
-  replayClaim,
   topology,
   templateClaim,
   templateGithub,

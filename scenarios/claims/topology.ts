@@ -1,6 +1,6 @@
 import { clickhouseQuery, type ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
 import { startKeeperCluster, CLUSTER, SHARDED_CLUSTER, type KeeperCluster } from "../../test/e2e/keeper-cluster.js";
-import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { endpoints } from "../lib/db.js";
 import { parse, Project } from "../lib/project.js";
 
@@ -20,13 +20,15 @@ export const op = Op({
 });
 `;
 
-/** `yodel apply <env>`, stopped at the gate, approved with the command it printed, and applied. */
+/**
+ * The pending migrations applied to `env` by the migrations Op's own steps:
+ * its Plan step's digest, chant approve of it, and its Apply step. The gate
+ * itself is the approval claim's; here what matters is how each statement
+ * is rendered for the topology.
+ */
 async function approvedApply(p: Project, env: string): Promise<void> {
-  const first = await p.yodel(["apply", env, "--json"], { timeoutMs: 600_000 });
-  if (first.code !== 3) throw new Error(`yodel apply ${env} did not stop at the gate (exit ${String(first.code)})`);
-  await p.approve((JSON.parse(first.out.slice(first.out.indexOf("{"))) as { approve?: string }).approve);
-  const ran = await p.yodel(["apply", env, "--json"], { timeoutMs: 600_000 });
-  hold(ran.code === 0, `yodel apply ${env} exited ${String(ran.code)}`);
+  const ran = await p.stepsApply({}, env);
+  hold(ran.code === 0, `yodel apply ${env} --execute exited ${String(ran.code)}`);
 }
 
 /** Each row of a query's answer, its columns joined by a space. */
@@ -43,7 +45,7 @@ const q = async (at: ClickHouseEndpoint, sql: string) => (await clickhouseQuery(
  * BREAK: yodel.config.ts gives the replicated environment the single-node
  * topology, so the cluster gets plain MergeTree tables on one replica.
  */
-async function replicatedPart(ctx: Ctx, cluster: KeeperCluster): Promise<void> {
+export async function replicatedPart(ctx: Ctx, cluster: KeeperCluster): Promise<void> {
   {
     const [r1, r2] = cluster.replicas;
     const single = `${ctx.env}-single`;
@@ -130,7 +132,7 @@ export default defineConfig({
  * BREAK: yodel.config.ts gives the environment the single-node topology,
  * so the tables are made on the first server only.
  */
-async function shardedPart(ctx: Ctx, cluster: KeeperCluster): Promise<void> {
+export async function shardedPart(ctx: Ctx, cluster: KeeperCluster): Promise<void> {
   const [r1, r2] = cluster.replicas;
   const r3 = cluster.shard2;
   if (!r3) throw new Error("the scratch cluster has no second shard");
@@ -255,6 +257,11 @@ export const eventsAll = table\`
   hold(doc.missing.includes("eventsAll"), `yodel drift does not report eventsAll gone: ${JSON.stringify(doc.missing)}`);
 }
 
+const parts = [
+  ["replicated", replicatedPart],
+  ["sharded", shardedPart],
+] as const;
+
 /**
  * Both parts on one scratch cluster of three servers. Under BREAK each part
  * breaks its own topology, and the run is caught only when both catch it.
@@ -262,18 +269,7 @@ export const eventsAll = table\`
 async function body(ctx: Ctx): Promise<void> {
   const cluster = await startKeeperCluster("yodel-topology", { shards: 2 });
   try {
-    const caught: string[] = [];
-    for (const part of [replicatedPart, shardedPart]) {
-      try {
-        await part(ctx, cluster);
-      } catch (e) {
-        if (!(ctx.broken && e instanceof Violation)) throw e;
-        ctx.log(`${part.name} caught: ${e.message}`);
-        caught.push(e.message);
-      }
-    }
-    if (ctx.broken && caught.length === 2) throw new Violation(caught.join("; "));
-    if (ctx.broken) ctx.log(`only ${String(caught.length)} of the two parts caught the broken topology`);
+    await runParts(ctx, cluster, parts);
   } finally {
     await cluster.stop();
   }
@@ -285,4 +281,5 @@ export const topology: Claim = {
   dialects: { ch: body },
   shares: ["docker-cluster"],
   stallMinutes: 10,
+  parts: parts.map(([name]) => name),
 };

@@ -1,6 +1,6 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
 import { addColumn, addTable, createTableByHand, mainTable, needsVersioned } from "../lib/schema.js";
 
@@ -11,7 +11,7 @@ import { addColumn, addTable, createTableByHand, mainTable, needsVersioned } fro
  * row carries the digest that was approved.
  * BREAK: the approval is skipped, so the second apply stops at the gate too.
  */
-async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
+export async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
   const id = await p.newMigration("create");
   hold(id !== undefined, "yodel new wrote no migration for the fixture's schema");
   await p.commit("the first migration");
@@ -42,7 +42,7 @@ async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
  * BREAK: the check is removed and the checksum updated, so the migration
  * runs on data it should have refused.
  */
-async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
+export async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
   // Under BREAK the approval part left the first migration pending.
   if ((await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
   const table = `${ctx.db.name}.${mainTable(ctx)}`;
@@ -74,7 +74,7 @@ async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
 
   // Leave the project with nothing pending for the next part: the table emptied, the migration applied.
   await ctx.db.exec(ctx.dialect === "ch" ? `TRUNCATE TABLE ${table}` : `DELETE FROM ${table}`);
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error(`${id} did not apply once ${table} was empty`);
+  await p.setupApply();
 }
 
 /**
@@ -89,12 +89,12 @@ async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
  * BREAK: the policy is read from the change itself (YODEL_BASE=HEAD), where
  * the rule is gone, so the drop is not refused.
  */
-async function policyPart(ctx: Ctx, p: Project): Promise<void> {
+export async function policyPart(ctx: Ctx, p: Project): Promise<void> {
   // A table to drop, applied first. Under BREAK an earlier part may have left migrations pending too.
   addTable(p, "scratch");
   if ((await p.newMigration("add-scratch")) === undefined) throw new Error("yodel new wrote no migration for the scratch table");
   await p.commit("a scratch table");
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+  await p.setupApply();
   // The branch's policy refuses drops here.
   p.write(
     "yodel.config.ts",
@@ -164,9 +164,10 @@ async function removeApprovals(ctx: Ctx, p: Project, file: string, gate: string,
  * ledger before --check, which then names the missing entry and the
  * migration applied with no approval.
  */
-async function auditPart(ctx: Ctx, p: Project): Promise<void> {
-  // Under BREAK the earlier parts may have left migrations pending: the policy part's drop, which the base's policy still denies.
-  if ((await p.approvedApply([], ctx.broken ? { YODEL_BASE: "HEAD" } : {})).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+export async function auditPart(ctx: Ctx, p: Project): Promise<void> {
+  // A broken earlier part may have left migrations pending: the policy part's drop, which the base's policy still denies,
+  // so the policy is read from the change (with nothing pending, as when every part held, this applies nothing).
+  if ((await p.approvedApply([], { YODEL_BASE: "HEAD" })).ran.code !== 0) throw new Error("the earlier migrations did not apply");
   // Before the break: a failure here is not the break being caught.
   const must: (cond: boolean, what: string) => asserts cond = ctx.broken ? (cond, what) => { if (!cond) throw new Error(what); } : hold;
   const file = join(ctx.work, "audit.jsonl");
@@ -199,28 +200,57 @@ async function auditPart(ctx: Ctx, p: Project): Promise<void> {
 }
 
 /**
- * Both parts on one project. Under BREAK each part breaks its own property,
- * and the run is caught only when every part catches it.
+ * An approval binds the plan it was given for. A migration is approved,
+ * then its migration.sql is edited by hand: yodel apply stops at the gate
+ * again, the Op's Apply step handed the old approval refuses, and nothing
+ * reaches the server or the history.
+ * BREAK: the migration is not edited after the approval, so it applies.
+ *
+ * It leaves its migration pending, refused: a part added to this claim
+ * goes before it.
  */
-async function body(ctx: Ctx): Promise<void> {
-  const p = await Project.create(ctx);
-  const parts = [approvalPart, preCheckPart, policyPart, auditPart];
-  const caught: string[] = [];
-  for (const part of parts) {
-    try {
-      await part(ctx, p);
-    } catch (e) {
-      if (!(ctx.broken && e instanceof Violation)) throw e;
-      ctx.log(`${part.name} caught: ${e.message}`);
-      caught.push(e.message);
-    }
+export async function digestMovedPart(ctx: Ctx, p: Project): Promise<void> {
+  // Whatever the parts before left pending (under BREAK, the first migration) is applied first.
+  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+  addColumn(p, "memo");
+  const id = await p.newMigration("add-memo");
+  if (id === undefined) throw new Error("yodel new wrote no migration");
+  await p.commit("add memo");
+
+  const gated = await p.apply();
+  if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
+  await p.approve(gated.doc.approve);
+  if (!ctx.broken) {
+    const sql = `migrations/${id}/migration.sql`;
+    if (ctx.dialect === "ch") p.edit(sql, "memo String DEFAULT ''", "memo String DEFAULT 'tampered'");
+    else p.edit(sql, "memo text", "memo varchar(8)");
+    await p.commit("an edit after the approval");
   }
-  if (ctx.broken && caught.length === parts.length) throw new Violation(caught.join("; "));
-  if (ctx.broken) ctx.log(`only ${String(caught.length)} of the ${String(parts.length)} parts caught the break`);
+
+  const again = await p.apply();
+  hold(again.ran.code !== 0, "yodel apply ran a migration edited after its approval");
+  const stale = await p.yodel(["apply", p.env, "--execute"], { env: { YODEL_APPROVED_PLAN: gated.doc.planDigest } });
+  hold(stale.code !== 0, "the Apply step ran with an approval given before the migration was edited");
+  hold(!(await ctx.db.columnExists(mainTable(ctx), "memo")), `${ctx.db.name}.${mainTable(ctx)}.memo is on the server: the moved plan was applied`);
+  hold((await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}'`)) === 0, `the history records ${id}`);
 }
 
-export const approveAndApply: Claim = {
-  name: "approve-and-apply",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
+/** The parts, in order, on one project. */
+const parts = [
+  ["approval", approvalPart],
+  ["pre-check", preCheckPart],
+  ["policy", policyPart],
+  ["audit", auditPart],
+  ["digest-moved", digestMovedPart],
+] as const;
+
+async function body(ctx: Ctx): Promise<void> {
+  await runParts(ctx, await Project.create(ctx), parts);
+}
+
+export const approval: Claim = {
+  name: "approval",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
   dialects: { ch: body, pg: body },
+  parts: parts.map(([name]) => name),
 };

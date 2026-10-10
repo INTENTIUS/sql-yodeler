@@ -37,6 +37,7 @@ export function run(cmd: string, args: readonly string[], options: RunOptions): 
   const timeoutMs = options.timeoutMs ?? 300_000;
   const shown = [cmd, ...args].map((a) => (/[\s"'$]/.test(a) ? JSON.stringify(a) : a)).join(" ");
   process.stdout.write(`  $ ${shown}\n`);
+  const began = Date.now();
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], detached: true });
     let out = "";
@@ -66,7 +67,7 @@ export function run(cmd: string, args: readonly string[], options: RunOptions): 
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       const exit = timedOut ? 124 : (code ?? (signal ? 128 : 1));
-      process.stdout.write(`  -> exit ${String(exit)}\n`);
+      process.stdout.write(`  -> exit ${String(exit)} (${((Date.now() - began) / 1000).toFixed(1)}s)\n`);
       resolve({ code: exit, out, err, timedOut });
     });
   });

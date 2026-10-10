@@ -7,8 +7,12 @@
  *   YODEL_CLAIMS_POSTGRES_USER        default postgres
  *   YODEL_CLAIMS_POSTGRES_PASSWORD    default chant (the emulator's)
  *
+ *   YODEL_CLAIMS_DB_PREFIX            default yodel_34
+ *
  * Each claim writes only to its own ClickHouse database or Postgres schema,
- * yodel_34_<claim>, and its history, yodel_34_<claim>_history.
+ * <prefix>_<claim>, and its history, <prefix>_<claim>_history. Two people
+ * running the same claim on one server at once give each run its own
+ * prefix (yodel_<issue>), so their databases do not collide.
  */
 
 import pg from "pg";
@@ -64,9 +68,9 @@ export async function postgresQuery<T = Record<string, unknown>>(sql: string): P
 /** A claim's database (ClickHouse) or schema (Postgres), and the questions claims ask of it. */
 export interface Db {
   dialect: Dialect;
-  /** yodel_34_<claim>. */
+  /** <prefix>_<claim>. */
   name: string;
-  /** yodel_34_<claim>_history: the history database or schema. */
+  /** <prefix>_<claim>_history: the history database or schema. */
   history: string;
   /** Runs SQL as the emulator's admin. */
   exec(sql: string): Promise<void>;
@@ -80,8 +84,12 @@ export interface Db {
   reset(): Promise<void>;
 }
 
+/** The start of every claim database's name: YODEL_CLAIMS_DB_PREFIX, default yodel_34. */
+export const dbPrefix = process.env.YODEL_CLAIMS_DB_PREFIX ?? "yodel_34";
+if (!/^[a-z][a-z0-9_]*$/.test(dbPrefix)) throw new Error(`YODEL_CLAIMS_DB_PREFIX=${dbPrefix} is not a lower-case identifier`);
+
 export function dbFor(dialect: Dialect, claim: string): Db {
-  const name = `yodel_34_${claim.replace(/-/g, "_")}`;
+  const name = `${dbPrefix}_${claim.replace(/-/g, "_")}`;
   const history = `${name}_history`;
   if (dialect === "ch") {
     const q = (sql: string) => clickhouseAt(endpoints.clickhouse, sql);

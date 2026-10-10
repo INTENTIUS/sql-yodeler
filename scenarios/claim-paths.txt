@@ -50,14 +50,12 @@ scenarios/claims/index.ts              ALL
 # Each claim's own file.
 scenarios/claims/adopt.ts              adopt
 scenarios/claims/new.ts                new
-scenarios/claims/lint.ts               lint-ci replay
+scenarios/claims/lint.ts               lint
 scenarios/claims/pr-comment.ts         pr-comment
-scenarios/claims/approve-and-apply.ts  approve-and-apply
-scenarios/claims/digest-moved.ts       digest-moved
+scenarios/claims/approval.ts           approval
 scenarios/claims/resume.ts             resume
 scenarios/claims/out-of-order.ts       out-of-order
-scenarios/claims/rebuild.ts            rebuild-refused rebuild-as-step
-scenarios/claims/backfill-resumed.ts   backfill-resumed
+scenarios/claims/rebuild.ts            rebuild
 scenarios/claims/drift.ts              drift
 scenarios/claims/declarative.ts        declarative
 scenarios/claims/topology.ts           topology
@@ -90,9 +88,9 @@ src/init/                              adopt template template-github template-g
 # lint/index.ts and lint/silences.ts, so those two reach every claim.
 src/lint/index.ts                      ALL
 src/lint/silences.ts                   ALL
-src/commands/lint.ts                   lint-ci replay template template-github template-gitlab
-src/lint/                              lint-ci replay template template-github template-gitlab
-src/replay/                            replay template template-github template-gitlab
+src/commands/lint.ts                   lint template template-github template-gitlab
+src/lint/                              lint template template-github template-gitlab
+src/replay/                            lint template template-github template-gitlab
 
 # yodel plan and the pull request comment it posts.
 src/commands/plan.ts                   adopt declarative pr-comment template template-github template-gitlab
@@ -130,10 +128,10 @@ src/schemas.ts                         -
 schemas/                               -
 
 # Step kinds. The step index and kinds are on every migration's path.
-src/steps/rebuild.ts                   rebuild-refused rebuild-as-step topology
-src/steps/backfill.ts                  backfill-resumed
+src/steps/rebuild.ts                   rebuild topology
+src/steps/backfill.ts                  resume
 src/steps/postgres-migration.ts        column-change
-src/steps/run.ts                       rebuild-refused rebuild-as-step backfill-resumed column-change topology
+src/steps/run.ts                       rebuild resume column-change topology
 src/steps/                             ALL
 
 # DDL sources (#67): every build syncs them, but only the declarative
