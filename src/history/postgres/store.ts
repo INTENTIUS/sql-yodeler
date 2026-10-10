@@ -11,7 +11,7 @@
 import { deriveState, type HistoryRow, type HistoryState } from "../rows.js";
 import { fromRaw, type HistoryStoreLike } from "../store.js";
 import { HISTORY_TABLE } from "../ddl.js";
-import { pgHistoryDdl, pgHistoryTable, PG_HISTORY_COLUMNS, PG_WRITTEN_COLUMNS } from "./ddl.js";
+import { pgHistoryDdl, pgHistoryTable, pgWidenChecks, PG_HISTORY_COLUMNS, PG_WRITTEN_COLUMNS } from "./ddl.js";
 
 /** What the history needs from a Postgres connection: chant's `PostgresClient`. */
 export interface PgClient {
@@ -51,6 +51,15 @@ export class PostgresHistoryStore implements HistoryStoreLike {
   async ensure(): Promise<void> {
     if (await this.exists()) return;
     for (const sql of pgHistoryDdl(this.location.schema)) await this.client.query(sql);
+  }
+
+  /** A table made before `yodel revert` (#55) takes its rows only once its CHECK constraints are widened; this widens them, once. */
+  async allowRevert(): Promise<void> {
+    const constraints = await this.client.query<{ name: string; def: string }>(
+      "SELECT c.conname AS name, pg_catalog.pg_get_constraintdef(c.oid) AS def FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class t ON t.oid = c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = $1 AND t.relname = $2 AND c.contype = 'c'",
+      [this.location.schema, HISTORY_TABLE],
+    );
+    for (const sql of pgWidenChecks(this.location.schema, constraints)) await this.client.query(sql);
   }
 
   /** Every row, in seq order. Postgres reads are consistent, so the `sync` option the ClickHouse store takes changes nothing here. */

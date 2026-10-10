@@ -7,13 +7,22 @@
  * `succeeded` is applied. One whose latest row is `failed` (a statement
  * failed) or `started` (the runner died) is part way: it resumes at the
  * first statement whose latest row is not `succeeded`.
+ *
+ * `yodel revert` (#55) writes `revert` rows, one per statement of the
+ * revert as it starts, succeeds or fails, then a migration row `reverted`.
+ * A migration whose latest migration row is `reverted` is not applied: it
+ * is pending again, its statements' rows no longer count, and applying it
+ * again runs every statement. Revert rows count only after the migration's
+ * latest migration row, so a revert that failed part way resumes at the
+ * revert statement that failed.
  */
 
 import { createHash } from "node:crypto";
 
-export type HistoryStatus = "started" | "succeeded" | "failed";
-/** `step`: an Op step (#12), recorded as a statement is, its `note` the step's summary (receipts skipped and run). */
-export type HistoryKind = "migration" | "statement" | "step";
+/** `reverted`: on a migration row only, written by `yodel revert` (#55). */
+export type HistoryStatus = "started" | "succeeded" | "failed" | "reverted";
+/** `step`: an Op step (#12), recorded as a statement is, its `note` the step's summary (receipts skipped and run). `revert`: a statement of `yodel revert` (#55). */
+export type HistoryKind = "migration" | "statement" | "step" | "revert";
 
 /** The statement index of a migration's own rows. */
 export const MIGRATION_ROW = -1;
@@ -80,6 +89,8 @@ export interface MigrationRecord {
   appliedSeq: number | undefined;
   /** Each statement's latest row, by index. */
   statements: Map<number, StatementRecord>;
+  /** Each revert statement's latest row since the latest migration row, by its index in the revert (#55). */
+  reverts: Map<number, StatementRecord>;
 }
 
 /** A `yodel repair` of an applied migration: the new checksum, who recorded it, when and why. */
@@ -122,11 +133,27 @@ export function deriveState(rows: readonly HistoryRow[]): HistoryState {
         appliedSeq: undefined,
         repairs: [],
         statements: new Map(),
+        reverts: new Map(),
       };
       byId.set(r.migration_id, m);
       order.push(m);
     }
-    if (r.kind === "migration" && r.status === "succeeded" && m.status === "succeeded" && m.appliedSeq !== undefined) {
+    if (r.kind === "migration") m.reverts = new Map();
+    if (r.kind === "migration" && r.status === "reverted") {
+      // Reverted: no longer applied. Applied again, every statement runs again.
+      m.parent = r.parent === "" ? null : r.parent;
+      m.checksum = r.checksum;
+      m.status = "reverted";
+      m.error = "";
+      m.appliedBy = r.applied_by;
+      m.planDigest = r.plan_digest;
+      m.recordedAt = r.recorded_at ?? "";
+      m.seq = r.seq;
+      m.appliedSeq = undefined;
+      m.statements = new Map();
+    } else if (r.kind === "revert") {
+      m.reverts.set(r.statement_index, { index: r.statement_index, status: r.status, sha: r.statement_sha, error: r.error, seq: r.seq });
+    } else if (r.kind === "migration" && r.status === "succeeded" && m.status === "succeeded" && m.appliedSeq !== undefined) {
       // Already applied: a repair. It records a new checksum; the migration was applied when and by whom it was.
       m.parent = r.parent === "" ? null : r.parent;
       m.checksum = r.checksum;
@@ -149,6 +176,9 @@ export function deriveState(rows: readonly HistoryRow[]): HistoryState {
   }
   return { migrations: order, byId, maxSeq };
 }
+
+/** Whether the history records the migration reverted (`yodel revert`, #55): its latest migration row is `reverted`. */
+export const isReverted = (m: MigrationRecord | undefined): boolean => m?.status === "reverted";
 
 /** Whether the history records the migration applied. */
 export const isApplied = (m: MigrationRecord | undefined): boolean => m?.status === "succeeded";

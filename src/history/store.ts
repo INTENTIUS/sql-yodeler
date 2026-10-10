@@ -44,13 +44,13 @@ export function fromRaw(r: RawRow): HistoryRow {
   return {
     seq: Number(r.seq),
     run_id: s("run_id"),
-    kind: s("kind") === "statement" || s("kind") === "step" ? (s("kind") as "statement" | "step") : "migration",
+    kind: s("kind") === "statement" || s("kind") === "step" || s("kind") === "revert" ? (s("kind") as "statement" | "step" | "revert") : "migration",
     migration_id: s("migration_id"),
     parent: s("parent"),
     checksum: s("checksum"),
     statement_index: Number(r.statement_index),
     statement_sha: s("statement_sha"),
-    status: (["started", "succeeded", "failed"].includes(s("status")) ? s("status") : "started") as HistoryRow["status"],
+    status: (["started", "succeeded", "failed", "reverted"].includes(s("status")) ? s("status") : "started") as HistoryRow["status"],
     error: s("error"),
     applied_by: s("applied_by"),
     plan_digest: s("plan_digest"),
@@ -67,6 +67,8 @@ export interface HistoryStoreLike {
   rows(options?: { sync?: boolean }): Promise<HistoryRow[]>;
   state(options?: { sync?: boolean }): Promise<HistoryState>;
   append(rows: readonly HistoryRow[]): Promise<void>;
+  /** Makes the history take `yodel revert`'s rows (#55): on Postgres, widens an older table's CHECK constraints. Absent where nothing is needed. */
+  allowRevert?(): Promise<void>;
 }
 
 export class HistoryStore implements HistoryStoreLike {

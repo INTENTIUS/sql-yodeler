@@ -15,7 +15,7 @@ import { approvalOf, byTime, deriveAudit, isoTime, type AuditEntry, type AuditGa
 
 export const REPORT_VERSION = 1;
 
-export type MigrationState = "applied" | "pending" | "failed" | "started";
+export type MigrationState = "applied" | "pending" | "failed" | "started" | "reverted";
 
 export interface EnvironmentMigration {
   id: string;

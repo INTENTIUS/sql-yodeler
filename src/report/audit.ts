@@ -40,7 +40,7 @@ import { createHash } from "node:crypto";
 import type { HistoryRow } from "../history/index.js";
 import { waveRecordOf } from "../waves/record.js";
 
-export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired"] as const;
+export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
 export type AuditSource = { ledger: string; op: string; gate: string } | { history: string; seq: number; run: string };
@@ -158,6 +158,10 @@ function fromHistory(input: AuditInput): AuditEntry[] {
         silenced.add(key);
         out.push(entry({ ...base, kind: "silenced", detail: `step ${String(s.step)}: ${s.rule ?? ""} ${s.reason ?? ""}`.trim() }));
       }
+    } else if (r.status === "reverted") {
+      // yodel revert (#55): applied again later, it is applied, not repaired.
+      applied.delete(r.migration_id);
+      out.push(entry({ ...base, kind: "reverted", ...(r.note ? { detail: r.note } : {}) }));
     } else if (r.status === "succeeded") {
       if (applied.has(r.migration_id)) out.push(entry({ ...base, kind: "repaired", detail: r.note || `checksum ${r.checksum}` }));
       else {
@@ -232,7 +236,7 @@ export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: A
     gaps.push({ environment: input.environment, kind: "history-row", detail: `${input.history} has no row with seq ${missing.join(", ")} of 1..${String(max)}: rows are only ever appended, so ${missing.length === 1 ? "that row was" : "those rows were"} deleted` });
   }
 
-  for (const a of entries.filter((e) => e.kind === "applied" && e.digest)) {
+  for (const a of entries.filter((e) => (e.kind === "applied" || e.kind === "reverted") && e.digest)) {
     const seq = "history" in a.source ? a.source.seq : 0;
     const wave = a.wave;
     if (wave) {
@@ -249,7 +253,7 @@ export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: A
     gaps.push({
       environment: input.environment,
       kind: "approval",
-      detail: `${String(a.migration)} was applied under ${String(a.digest)} (${input.history} seq ${String(seq)}), but ${input.ledger.path} holds no approval of ${input.ledger.op} / ${input.ledger.gate} for that digest`,
+      detail: `${String(a.migration)} was ${a.kind} under ${String(a.digest)} (${input.history} seq ${String(seq)}), but ${input.ledger.path} holds no approval of ${input.ledger.op} / ${input.ledger.gate} for that digest`,
     });
   }
   return { entries, gaps };

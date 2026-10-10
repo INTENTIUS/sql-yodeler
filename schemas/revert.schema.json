@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/revert.schema.json",
+  "title": "yodel revert <env> <id> --json",
+  "description": "Version 1. The revert of a migration: the statements that take the schema from its recorded schema back to its parent's (a hand-written revert step's first), the digest its gate binds, and what happened: planned (--dry-run), gated (waiting for approval), reverted, or failed. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["environment", "migration", "to", "planDigest", "statements", "dataSteps", "status"],
+  "properties": {
+    "environment": { "type": "string" },
+    "migration": { "type": "string" },
+    "to": { "description": "The migration it goes back to; null when the first migration is reverted.", "type": ["string", "null"] },
+    "planDigest": { "type": "string" },
+    "statements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "source", "sql", "rule", "class", "done"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "source": { "description": "step: the hand-written revert step; reverse: diffed from the recorded schemas.", "enum": ["step", "reverse"] },
+          "sql": { "type": "string" },
+          "rule": { "type": "string" },
+          "class": { "type": "string" },
+          "destructive": { "const": true },
+          "done": { "description": "It succeeded in an earlier run of this revert and is not sent again.", "type": "boolean" }
+        }
+      }
+    },
+    "dataSteps": { "description": "The migration's data steps, which the hand-written revert step undoes.", "$ref": "common.schema.json#/$defs/stringList" },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha", "statements"],
+      "properties": { "file": { "type": "string" }, "sha": { "type": "string" }, "statements": { "type": "integer", "minimum": 1 } }
+    },
+    "status": { "enum": ["planned", "gated", "reverted", "failed"] },
+    "op": { "type": "string" },
+    "gate": { "type": "string" },
+    "approve": { "description": "The chant approve command that approves this revert.", "type": "string" },
+    "gatePlanDigest": { "type": "string" },
+    "exitCode": { "type": "integer" }
+  }
+}

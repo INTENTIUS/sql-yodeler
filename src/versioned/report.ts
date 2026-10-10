@@ -44,6 +44,7 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
       checksum: p.checksum,
       outOfOrder: p.outOfOrder,
       partWay: p.partWay ?? null,
+      ...(p.reverted ? { reverted: p.reverted } : {}),
       opSteps: p.opSteps.map(({ index, step }) => ({ index, kind: step.kind, object: step.object, name: step.name, ...(step.kind === "op" ? { op: step.op } : {}) })),
       refusedSteps: p.refusedSteps.map(({ index, step, reason }) => ({ index, kind: step.kind, object: step.object, name: step.name, ...(step.kind === "op" ? { op: step.op } : {}), reason })),
     })),
@@ -70,6 +71,7 @@ export function renderStatus(r: StatusReport): string {
   for (const p of status.pending) {
     const marks: string[] = [];
     if (p.outOfOrder) marks.push("out of order");
+    if (p.reverted) marks.push(`reverted ${p.reverted.at} by ${p.reverted.by}`);
     if (p.partWay) {
       const pw = p.partWay;
       marks.push(

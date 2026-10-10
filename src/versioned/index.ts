@@ -31,6 +31,7 @@ export * from "./engine.js";
 export * from "./op.js";
 export * from "./policy.js";
 export * from "./report.js";
+export * from "./revert.js";
 export * from "./state.js";
 
 /** The project's migrations directory. */

@@ -52,7 +52,7 @@
       "required": ["id", "state", "inDirectory"],
       "properties": {
         "id": { "type": "string" },
-        "state": { "enum": ["applied", "pending", "failed", "started"] },
+        "state": { "enum": ["applied", "pending", "failed", "started", "reverted"] },
         "inDirectory": { "type": "boolean" },
         "at": { "type": "string" },
         "by": { "type": "string" },
@@ -70,7 +70,7 @@
         "id": { "type": "string", "description": "A hash of the entry and its source: the same sources give the same id." },
         "at": { "type": "string" },
         "environment": { "type": "string" },
-        "kind": { "enum": ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired"] },
+        "kind": { "enum": ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted"] },
         "by": { "type": "string" },
         "migration": { "type": "string" },
         "digest": { "type": "string" },
