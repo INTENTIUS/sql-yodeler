@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { projectFromConfig } from "../src/project.js";
-import { checksProblem, computeChecksum, judgeCheck, parseCheckArg, serializeDocument, verifyChecksum, type Migration, type MigrationCheck } from "../src/migrations/index.js";
+import { checksProblem, computeChecksum, judgeCheck, migrationChecks, parseCheckArg, serializeDocument, verifyChecksum, type Migration, type MigrationCheck } from "../src/migrations/index.js";
+import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { currentDigest, executeApply, inspect, openVersioned, REFUSED, selectToApply, type VersionedEnv } from "../src/versioned/index.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
 
@@ -100,5 +101,50 @@ describe("pre-migration checks (#52)", () => {
     ch.failWith = () => undefined;
     expect((await apply(venv, [m1, two])).applied).toEqual([two.id]);
     expect(asked).toHaveLength(1);
+  });
+});
+
+describe("statement pre-checks (#51)", () => {
+  /** A statement chant marks as able to fail on existing rows, with the count of them as its pre-check. */
+  const unique = (i: number, precheck = true): MigrationStep => ({
+    kind: "statement",
+    object: "ix",
+    type: "ClickHouse::Table",
+    name: "yodel_8.a",
+    sql: `ALTER TABLE yodel_8.a ADD COLUMN c${String(i)} UInt8`,
+    rule: "SQLCH200",
+    class: "metadata",
+    transactional: false,
+    ...(precheck ? { precheck: { sql: `SELECT count() AS n FROM yodel_8.a WHERE dup${String(i)}`, detail: "values of (x) held by more than one row, which a unique index fails on" } } : {}),
+  });
+
+  it("join the migration's checks, after its own, each expecting 0", () => {
+    const m = withChecks(migration("20261009T1100-two", m1.id, [unique(0, false), unique(1)]), [empty]);
+    expect(migrationChecks(m.document)).toEqual([
+      empty,
+      { name: "precheck-1", sql: "SELECT count() AS n FROM yodel_8.a WHERE dup1", expect: { max: 0 }, step: { index: 1, sql: "ALTER TABLE yodel_8.a ADD COLUMN c1 UInt8", detail: "values of (x) held by more than one row, which a unique index fails on" } },
+    ]);
+  });
+
+  it("refuse with exit 4 before the first statement when one counts rows, naming the statement and the count", async () => {
+    const { ch, venv, asked } = await setup((sql) => [{ n: sql.includes("dup1") ? "2" : "0" }]);
+    const two = migration("20261009T1100-two", m1.id, [unique(0), unique(1)]);
+    const refused = apply(venv, [m1, two]);
+    await expect(refused).rejects.toMatchObject({ exitCode: REFUSED });
+    const message = await refused.catch((e: unknown) => (e instanceof Error ? e.message : ""));
+    expect(message).toContain("step 1, ALTER TABLE yodel_8.a ADD COLUMN c1 UInt8, would fail: 2 values of (x) held by more than one row");
+    expect(message).not.toContain("step 0,");
+    expect(asked).toEqual(["SELECT count() AS n FROM yodel_8.a WHERE dup0", "SELECT count() AS n FROM yodel_8.a WHERE dup1"]);
+    // Nothing of the migration was sent.
+    expect(ch.sent).toEqual([m1.document.steps[0]?.kind === "statement" ? m1.document.steps[0].sql : ""]);
+  });
+
+  it("pass when every count is 0, and when a later statement's pre-check reads a column an earlier one adds", async () => {
+    const { venv } = await setup((sql) => {
+      if (sql.includes("dup1")) throw new Error('column "c0" does not exist');
+      return [{ n: 0 }];
+    });
+    const two = migration("20261009T1100-two", m1.id, [unique(0), unique(1)]);
+    expect((await apply(venv, [m1, two])).applied).toEqual([m1.id, two.id]);
   });
 });

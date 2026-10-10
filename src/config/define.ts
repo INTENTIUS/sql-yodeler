@@ -332,12 +332,17 @@ export interface PolicyStep {
   op?: string;
 }
 
-/** The rules `lint.rules` can set: every lint rule, and the replay check's. */
-export type LintRuleName = LintRuleId | "replay";
+/** The rules `lint.rules` can set: every lint rule, the replay check's, and the sql lexicon's schema checks (`SQLPG101`, `SQLCH113`). */
+export type LintRuleName = LintRuleId | "replay" | `SQLPG${number}` | `SQLCH${number}`;
+
+/** A naming rule: a preset, or a regular expression the whole name must match. */
+export type NamingRuleConfig = "snake_case" | "camelCase" | "PascalCase" | (string & {});
 
 export interface LintConfig {
   /** Each rule's level. The integrity rules (fork, directory, checksum, unreadable-object) are always errors. */
   rules?: Partial<Record<LintRuleName, LevelSetting>>;
+  /** The names a migration adds, per kind of object (rule `naming`): `{ table: "snake_case", index: "[a-z_]+_idx" }`. */
+  naming?: Partial<Record<"table" | "column" | "index" | "constraint", NamingRuleConfig>>;
 }
 
 /** Returns `config` as is; it types the default export of `yodel.config.ts`. */

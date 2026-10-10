@@ -19,6 +19,8 @@ import { mapMigrationSql, type Silence } from "./silences.js";
 import { createdObjects, refusedStep, stepFindings, unreadableStep, type Dialect } from "./statements.js";
 import { routineFindings } from "./routines.js";
 import { accessFindings } from "./access.js";
+import { namingFindings } from "./naming.js";
+import { SCHEMA_RULES, schemaFindings } from "./schema-checks.js";
 
 /** One thing a rule found. */
 export interface Finding {
@@ -174,7 +176,7 @@ function unreadableObjects(schema: BuildOutput, options: { defaultDatabase?: str
  * object it cannot read is reported once, in the first migration that
  * records it; a failure no single object explains is reported whole.
  */
-function schemaFindings(migrations: readonly Migration[], dialect: Dialect | undefined): RawFinding[] {
+function recordedSchemaFindings(migrations: readonly Migration[], dialect: Dialect | undefined): RawFinding[] {
   const out: RawFinding[] = [];
   const byId = new Map(migrations.map((m) => [m.id, m]));
   const reported = new Set<string>();
@@ -229,9 +231,17 @@ const stepName = (s: MigrationStep): string | undefined => (typeof (s as { name?
 export async function lintMigrations(dir: string, options: LintOptions = {}): Promise<LintReport> {
   const scan = scanMigrations(dir);
   const extra = options.rules ?? [];
-  const rules: Record<string, LintRule> = { ...LINT_RULES, ...Object.fromEntries(extra.map((r) => [r.rule.id, r.rule])) };
+  const rules: Record<string, LintRule> = { ...LINT_RULES, ...SCHEMA_RULES, ...Object.fromEntries(extra.map((r) => [r.rule.id, r.rule])) };
   const dialect = options.dialect;
-  const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history, scan.migrations), ...schemaFindings(scan.migrations, dialect), ...checkpointFindings(scan.migrations)];
+  const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history, scan.migrations), ...recordedSchemaFindings(scan.migrations, dialect), ...checkpointFindings(scan.migrations)];
+
+  // Over the recorded schemas (#51): the lexicon's schema checks and the naming rules, each at a step a silence can name.
+  const chantRules = (options.project?.config as { lint?: { rules?: Record<string, unknown> } } | undefined)?.lint?.rules;
+  const configured = new Set(Object.keys(options.settings?.levels ?? {}));
+  const bySchema = new Map<string, RawFinding[]>();
+  for (const f of [...schemaFindings(scan.migrations, { dialect, configured, chantRules }), ...namingFindings(scan.migrations, options.settings?.naming ?? {})]) {
+    bySchema.set(f.migration, [...(bySchema.get(f.migration) ?? []), f]);
+  }
 
   const silenceable = new Set(Object.values(rules).filter((r) => r.silenceable).map((r) => r.id));
   const silences: Record<string, Silence[]> = {};
@@ -272,6 +282,11 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
         if (silence) used.add(silence);
         statementRaw.push({ rule: f.rule, migration: m.id, step: f.step, ...(name !== undefined ? { object: name } : {}), message: f.message, ...(silence ? { silence } : {}) });
       }
+    }
+    for (const f of bySchema.get(m.id) ?? []) {
+      const silence = f.step === undefined ? undefined : map.silences.find((s) => s.step === f.step && s.rule === f.rule);
+      if (silence) used.add(silence);
+      statementRaw.push({ ...f, ...(silence ? { silence } : {}) });
     }
     for (const s of map.silences) {
       if (used.has(s)) continue;

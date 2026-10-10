@@ -9,14 +9,20 @@
  *
  * A level is `error` (fails the run), `warning` (reported, does not fail)
  * or `off`. The integrity rules (`fork`, `directory`, `checksum`,
- * `unreadable-object`) are always errors and cannot be set.
+ * `unreadable-object`) are always errors and cannot be set. A schema
+ * check's id (`SQLPG101`) is a rule like any other.
+ *
+ * `lint.naming` sets the naming rules (`./naming.ts`).
  */
 
 import { YodelError } from "../project.js";
+import { namingSettings, type NamingSettings } from "./naming.js";
 import type { LevelSetting, LintRule } from "./rules.js";
 
 export interface LintSettings {
   levels: Record<string, LevelSetting>;
+  /** `lint.naming`, compiled; absent when it sets none. */
+  naming?: NamingSettings;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -26,8 +32,10 @@ const LEVELS: readonly string[] = ["error", "warning", "off"];
 export function lintSettings(raw: Record<string, unknown> | undefined, rules: Readonly<Record<string, LintRule>>, where = "yodel.config.ts"): LintSettings {
   const levels: Record<string, LevelSetting> = {};
   if (raw === undefined) return { levels };
-  for (const k of Object.keys(raw)) if (k !== "rules") throw new YodelError(`${where}: lint.${k}: unknown setting (expected rules)`);
-  if (raw.rules === undefined) return { levels };
+  for (const k of Object.keys(raw)) if (k !== "rules" && k !== "naming") throw new YodelError(`${where}: lint.${k}: unknown setting (expected rules, naming)`);
+  const naming = namingSettings(raw.naming, where);
+  const withNaming = (s: LintSettings): LintSettings => (Object.keys(naming).length > 0 ? { ...s, naming } : s);
+  if (raw.rules === undefined) return withNaming({ levels });
   if (!isRecord(raw.rules)) throw new YodelError(`${where}: lint.rules: expected an object of rule: "error" | "warning" | "off"`);
   for (const [id, level] of Object.entries(raw.rules)) {
     const rule = rules[id];
@@ -36,7 +44,7 @@ export function lintSettings(raw: Record<string, unknown> | undefined, rules: Re
     if (!rule.configurable && level !== "error") throw new YodelError(`${where}: lint.rules.${id}: ${id} is an integrity rule and is always an error`);
     levels[id] = level as LevelSetting;
   }
-  return { levels };
+  return withNaming({ levels });
 }
 
 /** The level a rule runs at. */
