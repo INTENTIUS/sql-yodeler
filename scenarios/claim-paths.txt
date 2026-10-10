@@ -19,6 +19,7 @@
 # None of them is read by a claim run, so none changes a verdict.
 docs/                                  -
 examples/                              -
+bench/                                 -
 test/                                  -
 .github/                               -
 *.md                                   -
