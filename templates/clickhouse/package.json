@@ -15,7 +15,7 @@
   "dependencies": {
     "@intentius/chant": "0.115.0",
     "@intentius/chant-lexicon-sql": "0.115.0",
-    "@intentius/sql-yodeler": "^0.1.0"
+    "@intentius/sql-yodeler": "^0.2.0"
   },
   "devDependencies": {
     "@intentius/chant-lexicon-forgejo": "0.115.0",
