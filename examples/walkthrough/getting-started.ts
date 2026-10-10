@@ -45,6 +45,7 @@ export const walkthrough: Walkthrough = {
   }),
   shown: () => [
     [url().replace(/\/+$/, ""), "http://127.0.0.1:8123"],
+    [new URL(url()).host, "127.0.0.1:8123"],
     ["<tmp>/clickhouse/my-schema", "<my-schema>"],
   ],
   sql,

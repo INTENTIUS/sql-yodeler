@@ -58,7 +58,7 @@ The first migration creates what `src/schema.ts` declares. `yodel new` needs no 
 <!-- quote: template#template-new -->
 ```console
 $ npx yodel new init
-Wrote migrations/20261010T0437-init/ (2 statements; the first migration)
+Wrote migrations/20261010T0511-init/ (2 statements; the first migration)
 $ npx yodel lint
 1 migration: 0 errors, 0 warnings, 0 silenced.
 ```
@@ -86,15 +86,15 @@ $ npx yodel init --from dev --force
 read 2 object(s) from dev
 wrote src/schema.ts
 planned against dev: no change
-wrote migrations/20261010T0438-baseline (2 statements)
+wrote migrations/20261010T0521-baseline (2 statements)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-recorded 20261010T0438-baseline applied in yodeler.history as a baseline; none of its statements was run
+recorded 20261010T0521-baseline applied in yodeler.history as a baseline; none of its statements was run
 Adopted dev (clickhouse): 2 objects
   Database shop
   Table shop.events
 
 Declarations: src/schema.ts
-Baseline:     migrations/20261010T0438-baseline/ (2 statements, sha256:864e674b579b5a914fc6d0af2e8e73bae2802cf58d7bb1073f89630741204414)
+Baseline:     migrations/20261010T0521-baseline/ (2 statements, sha256:b29a0b128fea52df5522931703828513b5999d4db2b13b5e73fb9aba757013ec)
 Recorded:     applied in yodeler.history as a baseline; none of its statements was run
 
 yodel plan dev shows no change, and yodel status dev lists the baseline applied.
@@ -128,10 +128,10 @@ and the history:
 <!-- quote: clickhouse#adopt-status -->
 ```console
 $ npx yodel status dev
-Migrations in dev (history yodeler.history, topology single (default))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (default))
 
 Applied (1):
-  20261010T0438-baseline  2026-10-10 04:38:15.336067 by yodel@example
+  20261010T0521-baseline  2026-10-10 05:21:21.438403 by yodel@example
 
 Pending: none
 ```

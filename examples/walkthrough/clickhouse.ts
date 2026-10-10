@@ -61,7 +61,10 @@ The run happened in a temporary copy of this directory, a git repository with a 
   keep: ["src", "migrations", "ops", "backfills"],
   env: () => ({ DEV_CLICKHOUSE_URL: url(), REPLAY_CLICKHOUSE_URL: url() }),
   // The server as a reader's emulator is: what the transcripts show does not depend on where the run was.
-  shown: () => [[url().replace(/\/+$/, ""), "http://127.0.0.1:8123"]],
+  shown: () => [
+    [url().replace(/\/+$/, ""), "http://127.0.0.1:8123"],
+    [new URL(url()).host, "127.0.0.1:8123"],
+  ],
   sql,
   reset: async (rename = (text: string) => text) => {
     await sql(rename("DROP DATABASE IF EXISTS shop SYNC"));

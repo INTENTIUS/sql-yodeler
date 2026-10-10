@@ -18,7 +18,7 @@ Per environment, first one set wins: `environments.<env>.topology` in `yodel.con
 <!-- quote: clickhouse#status -->
 ```console
 $ npx yodel status dev
-Migrations in dev (history yodeler.history, topology single (default))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (default))
 ...
 ```
 

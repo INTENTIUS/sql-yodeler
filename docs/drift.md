@@ -66,11 +66,11 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
   - events (ClickHouse::Table)
       columns[4].default.expr: 'web' → 'app' [from: authored]
 [phase] Snapshot
-  ✓ lifecycleSnapshot(env=dev)   1.0s
+  ✓ lifecycleSnapshot(env=dev)   897ms
 [phase] Diff
-  ✓ lifecycleDiff(env=dev, live=true)   904ms
+  ✓ lifecycleDiff(env=dev, live=true)   746ms
     [outcome] Drift=true
-Op "watch-dev" completed in 2.1s
+Op "watch-dev" completed in 1.8s
 ```
 
 `chant run` exits 0 when the watch completes, drift or not. The drift is the run's `Drift` outcome, in its run record on the local `chant/lifecycle` branch. The starter templates' `scripts/watch-outcome.ts` reads the newest record after `chant run` and exits 1 when the run failed or found drift, so a scheduled run that found drift shows red.

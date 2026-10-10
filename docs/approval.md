@@ -50,15 +50,15 @@ It is chant's plan digest (`jcs1-sha256:...`), so `chant approve <op> <gate> --p
 <!-- quote: clickhouse#plan -->
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodeler.history (single (default))): 1 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history (single (default))): 1 applied, 1 pending
 
-20261010T0438-add-country
+20261010T0521-add-country
   0  statement  SQLCH201 metadata  shop.events
        ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`
 
-Plan digest: jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf
+Plan digest: jcs1-sha256:8f73c4f9a14d6343a433b3724fed15990c116f6f28c7bc561173a1387fa09f3b
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:8f73c4f9a14d6343a433b3724fed15990c116f6f28c7bc561173a1387fa09f3b
 
 Not approved yet. Approving binds exactly this digest; if anything it covers changes before the apply runs, the gate asks again and nothing is applied.
 ```
@@ -69,9 +69,9 @@ Not approved yet. Approving binds exactly this digest; if anything it covers cha
 
 <!-- quote: clickhouse#approve -->
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T04:38:29.140Z
-This approves the plan jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:8f73c4f9a14d6343a433b3724fed15990c116f6f28c7bc561173a1387fa09f3b
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T05:22:26.084Z
+This approves the plan jcs1-sha256:8f73c4f9a14d6343a433b3724fed15990c116f6f28c7bc561173a1387fa09f3b, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -85,10 +85,10 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf, by yodel at 2026-10-10T04:38:29.140Z
-20261010T0438-add-country: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:8f73c4f9a14d6343a433b3724fed15990c116f6f28c7bc561173a1387fa09f3b, by yodel at 2026-10-10T05:22:26.084Z
+20261010T0521-add-country: applying
   statement 0: ok (SQLCH201 metadata, shop.events)
-20261010T0438-add-country: applied
+20261010T0521-add-country: applied
 ...
 ```
 
@@ -115,7 +115,7 @@ $ npx yodel plan dev --format markdown
 
 ClickHouse, history `yodeler.history (single (default))`: 2 applied, **1 pending**.
 
-#### `20261010T0438-events-by-id`
+#### `20261010T0522-events-by-id`
 
 | # | Step | Rule | Class | Object |
 |---|---|---|---|---|
@@ -138,18 +138,18 @@ Op steps:
 
 #### Approval
 
-Plan digest the apply gate binds: `jcs1-sha256:e38e232a1505b0f73506bc9ac6085560c2b3419e1b83faef0ecc9715b71a3e17`
+Plan digest the apply gate binds: `jcs1-sha256:6b6cd61948bd060182ffc3de080343ea86b7336ab96c4a1af7d08e6f3036577c`
 
 Approve it with:
 
 ```sh
-chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:e38e232a1505b0f73506bc9ac6085560c2b3419e1b83faef0ecc9715b71a3e17
+chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:6b6cd61948bd060182ffc3de080343ea86b7336ab96c4a1af7d08e6f3036577c
 ```
 
-The newest approval of `approve-migrate-dev`, by yodel at 2026-10-10T04:38:29.140Z, is for `jcs1-sha256:6125bad3937eb704f4ad5c9e1f814e69ef72b71313cd2c948b1b64ca69601ebf`, not this plan; it does not hold.
-What moved (as far as yodel can tell): history changed: applied since: 20261010T0438-add-country (by yodel@example at 2026-10-10 04:38:33.669649); pending migrations changed: committed to since approval: 20261010T0438-events-by-id (02dfe0d at 2026-10-09T22:38:39-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+The newest approval of `approve-migrate-dev`, by yodel at 2026-10-10T05:22:26.084Z, is for `jcs1-sha256:8f73c4f9a14d6343a433b3724fed15990c116f6f28c7bc561173a1387fa09f3b`, not this plan; it does not hold.
+What moved (as far as yodel can tell): history changed: applied since: 20261010T0521-add-country (by yodel@example at 2026-10-10 05:22:43.085473); pending migrations changed: committed to since approval: 20261010T0522-events-by-id (048aec0 at 2026-10-09T23:22:54-06:00); live schema changed: as expected after the history change above: applying a migration changes the live schema, and yodel cannot rebuild the live schema as it was at approval, so it cannot confirm that nothing else in it changed.
 
-<!-- yodel:subject eyJlbnZpcm9ubWVudCI6ImRldiIsImhpc3RvcnlEYXRhYmFzZSI6InlvZGVsZXIiLCJ0b3BvbG9neSI6eyJraW5kIjoic2luZ2xlIn0sImFwcGxpZWQiOlt7ImlkIjoiMjAyNjEwMTBUMDQzOC1iYXNlbGluZSIsImNoZWNrc3VtIjoic2hhMjU2Ojg2NGU2NzRiNTc5YjVhOTE0ZmM2ZDBhZjJlOGU3M2JhZTI4MDJjZjU4ZDdiYjEwNzNmODk2MzA3NDEyMDQ0MTQifSx7ImlkIjoiMjAyNjEwMTBUMDQzOC1hZGQtY291bnRyeSIsImNoZWNrc3VtIjoic2hhMjU2Ojc5MzYzNWMxODE0ZjNhMzZlZmRjMThhYzNhNTIwN2UxZTNhMTAxNmQ0MmMzNjNiMjdiOTYwM2M2NGU0NWFhODkifV0sInBlbmRpbmciOlt7ImlkIjoiMjAyNjEwMTBUMDQzOC1ldmVudHMtYnktaWQiLCJjaGVja3N1bSI6InNoYTI1NjpjYTRkYWRmMWQxZDMwMDU3YWQyMzc0NzcwZTk0ZDk2NzNjODc4ZDYxYTQ4OWQxMmFiZTU4MzhmMmI4ODM1Nzk3IiwiZG9uZSI6W119XSwibGl2ZSI6InNoYTI1NjpiYTA4MzBmYjk2NjkzNWMzYTNiNmQ1Nzg3ODIwNGJhMzMzMzQxMTg2YzJkMzk4M2E3YTMwN2IxMjk4MmFiMmY1In0 -->
+<!-- yodel:subject eyJlbnZpcm9ubWVudCI6ImRldiIsImhpc3RvcnlEYXRhYmFzZSI6InlvZGVsZXIiLCJ0b3BvbG9neSI6eyJraW5kIjoic2luZ2xlIn0sImFwcGxpZWQiOlt7ImlkIjoiMjAyNjEwMTBUMDUyMS1iYXNlbGluZSIsImNoZWNrc3VtIjoic2hhMjU2OmIyOWEwYjEyOGZlYTUyZGY1NTIyOTMxNzAzODI4NTEzYjU5OTlkNGRiMmIxM2I1ZTczZmI5YWJhNzU3MDEzZWMifSx7ImlkIjoiMjAyNjEwMTBUMDUyMS1hZGQtY291bnRyeSIsImNoZWNrc3VtIjoic2hhMjU2OjZkMjNmY2U0YmE5YmExOTFkODIxM2VhMzU2ZDM1ODUxODFkNGEzZWFlZWQ5ZWVmNDAyNjI2YWYzOTljMDIyYzUifV0sInBlbmRpbmciOlt7ImlkIjoiMjAyNjEwMTBUMDUyMi1ldmVudHMtYnktaWQiLCJjaGVja3N1bSI6InNoYTI1NjowMzIxMzU5ZjYyZjQ0NDYyNzQ2NGQ5OWJlZjRkMTQyMGYzMWE4NTE4ZmE0ZjZiN2JmMjE3YzczMTQ4MmU0NmI0IiwiZG9uZSI6W119XSwibGl2ZSI6InNoYTI1NjpiYTA4MzBmYjk2NjkzNWMzYTNiNmQ1Nzg3ODIwNGJhMzMzMzQxMTg2YzJkMzk4M2E3YTMwN2IxMjk4MmFiMmY1In0 -->
 ````
 
 The hidden `yodel:subject` line at the end records the state the plan was made from; the next `--comment` run reads it from the comment it updates, to say what moved. The forge, the repository, the request and the API come from the CI job's environment:
@@ -171,25 +171,25 @@ In the ClickHouse example a plan is approved, then someone adds a column by hand
 <!-- quote: clickhouse#plan-add-source -->
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodeler.history (single (default))): 4 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history (single (default))): 4 applied, 1 pending
 
-20261010T0440-add-source
+20261010T0524-add-source
   0  statement  SQLCH201 metadata  shop.events
        ALTER TABLE `shop`.`events` ADD COLUMN source LowCardinality(String) DEFAULT 'web' AFTER `country`
 
-Plan digest: jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
+Plan digest: jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
 
-The newest approval of approve-migrate-dev, by yodel at 2026-10-10T04:40:20.247Z, is for jcs1-sha256:ff7d85264ae74e87cfbea7f15774d5f868cdb228bc5def49eaf6f33ad97f43fc, not this plan; it does not hold.
-What moved: history changed: applied since: 20261010T0440-fill-country (by yodel@example at 2026-10-10 04:40:26.187571); pending migrations changed: new pending migration: 20261010T0440-add-source.
+The newest approval of approve-migrate-dev, by yodel at 2026-10-10T05:24:15.830Z, is for jcs1-sha256:939dad30058556bc3a978732c63276c1cb3f598b77338a9de122bfdaba1b89e9, not this plan; it does not hold.
+What moved: history changed: applied since: 20261010T0524-fill-country (by yodel@example at 2026-10-10 05:24:19.672518); pending migrations changed: new pending migration: 20261010T0524-add-source.
 ```
 
 <!-- quote: clickhouse#approve-add-source -->
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T04:40:33.166Z
-This approves the plan jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T05:24:23.872Z
+This approves the plan jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -203,22 +203,22 @@ $ npx yodel apply dev
 ...
 Running migrate-dev (<tmp>/clickhouse/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   936ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   859ms
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f (by yodel at 2026-10-10T04:40:33.166Z); planned: jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965 (by yodel at 2026-10-10T05:24:23.872Z); planned: jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.8s
-  plan    : jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe
-  expires : 2026-10-12T04:40:35.805Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 1.5s
+  plan    : jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796
+  expires : 2026-10-12T05:24:26.269Z
 
-Nothing was applied. The approval of jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f (by yodel at 2026-10-10T04:40:33.166Z) does not hold: the plan moved since. What moved, as far as yodel can tell: live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965 (by yodel at 2026-10-10T05:24:23.872Z) does not hold: the plan moved since. What moved, as far as yodel can tell: live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796
 then run yodel apply dev again.
 [exit 3]
 ```
@@ -228,33 +228,33 @@ Dropping the column puts the live schema back, and the digest is the approved on
 <!-- quote: clickhouse#asked-again-plan -->
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodeler.history (single (default))): 4 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history (single (default))): 4 applied, 1 pending
 
-20261010T0440-add-source
+20261010T0524-add-source
   0  statement  SQLCH201 metadata  shop.events
        ALTER TABLE `shop`.`events` ADD COLUMN source LowCardinality(String) DEFAULT 'web' AFTER `country`
 
-Plan digest: jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
+Plan digest: jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
 
-The newest approval of approve-migrate-dev, by yodel at 2026-10-10T04:40:33.166Z, is for this plan's digest, but approval was asked for again after it at 2026-10-10T04:40:35.805Z (a run holding jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe), so it does not hold; approve this plan again.
+The newest approval of approve-migrate-dev, by yodel at 2026-10-10T05:24:23.872Z, is for this plan's digest, but approval was asked for again after it at 2026-10-10T05:24:26.269Z (a run holding jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796), so it does not hold; approve this plan again.
 ```
 
 <!-- quote: clickhouse#asked-again-apply -->
 ```console
 $ npx yodel apply dev
 ...
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.7s
-  plan    : jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
-  expires : 2026-10-12T04:40:40.645Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 1.4s
+  plan    : jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
+  expires : 2026-10-12T05:24:30.377Z
 
-Nothing was applied. The approval of jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f (by yodel at 2026-10-10T04:40:33.166Z) is for this plan's digest, but approval was asked for again after it at 2026-10-10T04:40:35.805Z (a run holding jcs1-sha256:2d1d55be210fd3f8d8dc4b277c0373b9d608a001bdd926830352983361246bfe), so it does not hold; approve this plan again.
+Nothing was applied. The approval of jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965 (by yodel at 2026-10-10T05:24:23.872Z) is for this plan's digest, but approval was asked for again after it at 2026-10-10T05:24:26.269Z (a run holding jcs1-sha256:2e8073454ea979bef82b3ea2aa511b1d2d1b6aab024ab63d4b03c523229df796), so it does not hold; approve this plan again.
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ce752b838cedf6b5afb460406054b0d2145c6bf0bccef1a0185802c56bb1621f
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:bca6651328f214c8a0b5be2ca786cd1ed1a533f06fa90610956e832da129a965
 then run yodel apply dev again.
 [exit 3]
 ```

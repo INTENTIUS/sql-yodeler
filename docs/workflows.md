@@ -57,19 +57,19 @@ MISSING (declared, provider reports not in cloud):
   - events [queried http://127.0.0.1:8123 shop.events] [definition 9f20bfc4d4ef488a683af5646837a026beea36f8affb953ecfb1e118c3f4a21a]
   - shop [queried http://127.0.0.1:8123 shop] [definition aecfb2aa109301003bbc1a7ee057c2bb2610d824e610588317907171ed70c610]
 [phase] Build
-  ✓ chantBuild(path=.)   1.2s
+  ✓ chantBuild(path=.)   1.3s
 [phase] Plan
-  ✓ lifecycleDiff(env=dev, live=true)   1.1s
+  ✓ lifecycleDiff(env=dev, live=true)   1.2s
     [outcome] Drift=true
 [phase] Approve
   • gate:approve-apply-dev()   skipped
 [phase] Apply
   • nativeApply(target=clickhouse, env=dev, output=dist/schema.json, deleteMode=never)   skipped
-Op "apply-dev" is gated on "approve-apply-dev" after 3.2s
+Op "apply-dev" is gated on "approve-apply-dev" after 3.6s
   Approve apply to dev (delete mode: never)
   plan    : jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
   approve : chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
-  expires : 2026-10-12T04:38:03.530Z
+  expires : 2026-10-12T05:21:04.106Z
 
 apply-dev is waiting at gate "approve-apply-dev" for approval of this plan.
 Approve it with:
@@ -81,7 +81,7 @@ then run yodel apply dev again.
 <!-- quote: clickhouse#declarative-approve -->
 ```console
 $ npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
-Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-10T04:38:06.315Z
+Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-10T05:21:06.790Z
 This approves the plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run apply-dev` and it walks through gate "approve-apply-dev".
 ```

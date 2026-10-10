@@ -1,0 +1,129 @@
+{
+  "format": 1,
+  "id": "20261010T0519-drop-coupon",
+  "parent": "20261010T0518-rename-email",
+  "checksum": "sha256:8616e6ac91e0ddd7dbacd0f7c119077887e83870c690be201771e18e7ae8527f",
+  "createdAt": "2026-10-10T05:19:02Z",
+  "dialect": "postgres",
+  "defaultSchema": "public",
+  "major": 18,
+  "refused": false,
+  "hints": [],
+  "steps": [
+    {
+      "kind": "statement",
+      "object": "orders",
+      "type": "Postgres::Table",
+      "name": "shop.orders",
+      "class": "metadata",
+      "destructive": true,
+      "rule": "SQLPG204",
+      "sql": "ALTER TABLE shop.orders DROP COLUMN coupon",
+      "transactional": true
+    }
+  ],
+  "schema": {
+    "applyOrder": [
+      "shopSchema",
+      "orders",
+      "ordersStatusIdx"
+    ],
+    "dialect": "postgres",
+    "objects": [
+      {
+        "comment": "The SQL Yodeler Postgres example",
+        "ddl": "CREATE SCHEMA shop;\n  COMMENT ON SCHEMA shop IS 'The SQL Yodeler Postgres example'",
+        "dependsOn": [],
+        "export": "shopSchema",
+        "name": "shop",
+        "sqlName": "shop",
+        "type": "Postgres::Schema"
+      },
+      {
+        "checks": [
+          {
+            "expr": "amount > 0",
+            "name": "orders_amount_positive"
+          }
+        ],
+        "columns": [
+          {
+            "generated": {
+              "always": true,
+              "kind": "identity"
+            },
+            "name": "id",
+            "type": "bigint"
+          },
+          {
+            "name": "email",
+            "notNull": true,
+            "type": "text"
+          },
+          {
+            "default": "'placed'::text",
+            "name": "status",
+            "notNull": true,
+            "type": "text"
+          },
+          {
+            "name": "amount",
+            "notNull": true,
+            "type": "numeric(12,2)"
+          },
+          {
+            "default": "now()",
+            "name": "placed_at",
+            "notNull": true,
+            "type": "timestamp with time zone"
+          },
+          {
+            "name": "refunded_at",
+            "type": "timestamp with time zone"
+          }
+        ],
+        "ddl": "CREATE TABLE shop.orders (\n      id bigint GENERATED ALWAYS AS IDENTITY,\n      email text NOT NULL, -- previously: customer_email\n      status text DEFAULT 'placed'::text NOT NULL,\n      amount numeric(12,2) NOT NULL,\n      placed_at timestamp with time zone DEFAULT now() NOT NULL,\n      refunded_at timestamp with time zone,\n      CONSTRAINT orders_pkey PRIMARY KEY (id),\n      CONSTRAINT orders_amount_positive CHECK (amount > 0)\n  )",
+        "dependsOn": [
+          "shopSchema"
+        ],
+        "exclusions": [],
+        "export": "orders",
+        "foreignKeys": [],
+        "inherits": [],
+        "like": [],
+        "name": "orders",
+        "primaryKey": {
+          "columns": [
+            "id"
+          ],
+          "name": "orders_pkey"
+        },
+        "schema": "shop",
+        "sqlName": "shop.orders",
+        "type": "Postgres::Table",
+        "uniques": []
+      },
+      {
+        "ddl": "CREATE INDEX orders_status_idx ON shop.orders USING btree (status)",
+        "dependsOn": [
+          "orders"
+        ],
+        "elements": [
+          {
+            "column": "status",
+            "expr": "status"
+          }
+        ],
+        "export": "ordersStatusIdx",
+        "method": "btree",
+        "name": "orders_status_idx",
+        "schema": "shop",
+        "sqlName": "shop.orders_status_idx",
+        "table": "orders",
+        "tableName": "shop.orders",
+        "type": "Postgres::Index"
+      }
+    ],
+    "postgresMajor": 18
+  }
+}

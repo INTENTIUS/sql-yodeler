@@ -33,19 +33,37 @@ Usage: yodel <command> [options]
 Schema management and migrations for ClickHouse and Postgres.
 
 Commands:
-  init    adopt a live database: its declarations, a baseline migration, recorded applied
+  init    adopt a live database: declarations and a baseline recorded applied
   plan    show what apply would change in an environment
   apply   bring an environment to the declared schema or the pending migrations
   new     write the next migration from the declared schema
   lint    check the migrations against the lint rules
   status  list applied, pending and out-of-order migrations
-  drift   report declared objects changed out of band or gone from an environment
+  drift   report declared objects changed out of band or gone
   rebase  move a migration onto a new parent and recompute its schema
   repair  record a new checksum for an applied migration, with a reason
 
 Options:
   -h, --help     show this help
   -v, --version  print the version
+
+yodel <command> --help (or yodel help <command>) shows a command's options.
+Docs: https://intentius.io/sql-yodeler/
+
+Exit codes (yodel <command> --help lists a command's own):
+  0  done, or nothing to do
+  1  an error
+  2  something yodel will not do itself (a change that needs an Op it does not
+     run, a manual step); for yodel drift, drift found
+  3  something outstanding: apply stopped at its approval gate, status found
+     pending migrations, lint found errors
+  4  refused, nothing done: a checksum mismatch, an applied migration gone from
+     the directory, an out-of-order migration, a fork or another problem in the
+     migrations directory
+  5  another apply holds the lock
+  yodel plan exits 0 when migrations are pending: it reports, and a CI job that
+  posts the plan on a pull request should not fail because the pull request adds
+  a migration. To gate on pending migrations, use yodel status.
 ```
 
 `yodel <command> --help` lists each command's options and exit codes. The exit codes mean the same across commands where they can: 0 done, or nothing to do; 1 an error; 2 something `yodel` will not do itself (a change that needs an Op it does not run, a manual step); for `yodel drift`, drift found; 3 something outstanding: apply stopped at its approval gate, status found pending migrations, lint found errors; 4 refused, nothing done: a checksum mismatch, an applied migration gone from the directory, an out-of-order migration, a fork or another problem in the migrations directory; 5 another apply holds the lock. `yodel apply` exits with the code of its Op's Apply step, so a lock held by another apply is 5 there too. `yodel plan` exits 0 when migrations are pending: it reports, and a CI job that posts the plan on a pull request should not fail because the pull request adds a migration. To gate on pending migrations, use `yodel status`.
