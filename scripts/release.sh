@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Release @intentius/sql-yodeler: npm run release -- <version> [--dry-run] [--commit <sha>]
+# Release @intentius/sql-yodeler: npm run release -- <version> [--dry-run] [--commit <sha>] [--skip-ci]
 #
 # Two runs make a release (AGENTS.md, Releasing):
 #
@@ -13,6 +13,11 @@
 #      --commit, which must pass the same test), tags it v<version> and
 #      pushes the tag. .github/workflows/publish.yml publishes on that tag.
 #
+# --skip-ci (or YODEL_RELEASE_SKIP_CI=1) tags without looking at the ci and
+# claims runs, for a commit whose local gates passed (AGENTS.md, Checks):
+# the commit named with --commit, or else origin/main. It must still be on
+# main and at <version>.
+#
 # It refuses a version that is not X.Y.Z, a tag that exists here or on
 # origin, a version already on npm, and a version below main's.
 #
@@ -24,7 +29,7 @@ PKG="@intentius/sql-yodeler"
 WORKFLOWS=(ci.yml claims.yml)
 
 usage() {
-  echo "usage: npm run release -- <version> [--dry-run] [--commit <sha>]" >&2
+  echo "usage: npm run release -- <version> [--dry-run] [--commit <sha>] [--skip-ci]" >&2
   exit 2
 }
 
@@ -36,9 +41,12 @@ fail() {
 version=""
 commit=""
 dry=0
+skip_ci=0
+case "${YODEL_RELEASE_SKIP_CI:-}" in "" | 0 | false) ;; *) skip_ci=1 ;; esac
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run | -n) dry=1 ;;
+    --skip-ci) skip_ci=1 ;;
     --commit)
       [ $# -ge 2 ] || usage
       commit="$2"
@@ -119,7 +127,7 @@ if [ "$at_main" != "$version" ]; then
   git push --quiet -u origin "$branch"
   gh pr create --base main --head "$branch" --title "chore: release $version" --body "Bumps $PKG to $version in package.json and package-lock.json.
 
-Once this is merged and the \`ci\` and \`claims\` runs on its commit on main are green, \`npm run release -- $version\` tags that commit $tag, and the publish workflow publishes it."
+Merge it on its local gates (AGENTS.md, Checks). Then \`npm run release -- $version --skip-ci --commit <sha>\` tags that commit of main $tag once its local check and claims pass, and the publish workflow publishes it."
   exit 0
 fi
 
@@ -154,11 +162,15 @@ green() {
   return "$ok"
 }
 
-if [ -n "$commit" ]; then
-  sha=$(git rev-parse --verify --quiet "$commit^{commit}") || fail "\"$commit\" is not a commit here"
+if [ -n "$commit" ] || [ "$skip_ci" = 1 ]; then
+  sha=$(git rev-parse --verify --quiet "${commit:-$main}^{commit}") || fail "\"$commit\" is not a commit here"
   git merge-base --is-ancestor "$sha" "$main" || fail "$(short "$sha") is not on origin/main"
   [ "$(version_at "$sha")" = "$version" ] || fail "$(short "$sha") is at $(version_at "$sha"), not $version"
-  green "$sha" || fail "$(short "$sha") is not green on both ci and claims"
+  if [ "$skip_ci" = 1 ]; then
+    echo "  $(short "$sha"): ci and claims not checked (--skip-ci): its local check and claims are the gate" >&2
+  else
+    green "$sha" || fail "$(short "$sha") is not green on both ci and claims"
+  fi
 else
   sha=""
   for c in $(git rev-list --first-parent --max-count 100 "$main"); do
