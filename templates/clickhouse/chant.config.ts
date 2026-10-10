@@ -8,22 +8,24 @@ import "@intentius/chant-lexicon-sql";
  *   `readonly = 1`, SELECT and SHOW on the schema's database and the history
  *   database). Pull request jobs, the drift watch and anyone on their laptop
  *   use it.
- * - writer: YODEL_CREDENTIALS=writer. Only the apply job after a merge sets
- *   it, and only that job holds the writer's secrets.
+ * - writer: YODEL_CREDENTIALS=writer:<env> for that environment alone (or
+ *   =writer for every one). Only an environment's wave job after a merge
+ *   sets it, and only that job holds that environment's writer secrets; it
+ *   reads the environment before it (waves[].requires) with the reader.
  *
  * Credentials are named by environment variable, never written here:
  * <ENV>_CLICKHOUSE_URL, <ENV>_CLICKHOUSE_READER_USER,
  * <ENV>_CLICKHOUSE_READER_PASSWORD, <ENV>_CLICKHOUSE_WRITER_USER and
  * <ENV>_CLICKHOUSE_WRITER_PASSWORD.
  */
-const role = process.env.YODEL_CREDENTIALS === "writer" ? "WRITER" : "READER";
+const role = (env: string) => (process.env.YODEL_CREDENTIALS === "writer" || process.env.YODEL_CREDENTIALS === `writer:${env}` ? "WRITER" : "READER");
 
 function clickhouse(env: string, url: string) {
   const prefix = env.toUpperCase();
   return {
     url: process.env[`${prefix}_CLICKHOUSE_URL`] ?? url,
-    user: { env: `${prefix}_CLICKHOUSE_${role}_USER` },
-    password: { env: `${prefix}_CLICKHOUSE_${role}_PASSWORD` },
+    user: { env: `${prefix}_CLICKHOUSE_${role(env)}_USER` },
+    password: { env: `${prefix}_CLICKHOUSE_${role(env)}_PASSWORD` },
     databases: ["{{chant:database}}"],
   };
 }

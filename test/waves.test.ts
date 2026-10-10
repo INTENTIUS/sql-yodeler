@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { checkYodelConfig, loadYodelConfigAtBase } from "../src/config/index.js";
-import { describeWave, destructiveSteps, waveGate, wavePlanDigest } from "../src/waves/index.js";
+import { describeWave, destructiveSteps, promotionRefusal, requiredIn, waveGate, wavePlanDigest } from "../src/waves/index.js";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -112,12 +112,59 @@ describe("yodel.config.ts at the base commit", () => {
 });
 
 describe("the wave in yodel plan", () => {
-  const view = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", planDigest: "p", digest: "jcs1-sha256:d", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:d" };
+  const view = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", planDigest: "p", digest: "jcs1-sha256:d", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:d", promotions: [], blocked: false };
   it("says whether the pipeline waits, and why", () => {
     expect(describeWave({ ...view, destructiveSteps: [], waits: false })).toBe("The apply pipeline applies this in wave 2 with no approval (gate on-destructive at aaaaaaaaaaaa: nothing pending is destructive).");
     expect(describeWave({ ...view, destructiveSteps: [{ migration: "m1", step: 0, what: "", why: "destructive" }], waits: true })).toBe(
       "The apply pipeline waits in wave 2 for an approval of jcs1-sha256:d (gate on-destructive at aaaaaaaaaaaa: m1 step 0 (destructive)).",
     );
     expect(describeWave({ ...view, gate: "never", destructiveSteps: [], waits: false })).toBe("The apply pipeline applies this in wave 2 with no approval (gate never at aaaaaaaaaaaa).");
+    const promotions = [{ env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c", ran: "not applied" as const }] }];
+    expect(describeWave({ ...view, destructiveSteps: [], waits: false, promotions, blocked: true })).toBe(
+      "The apply pipeline refuses this in wave 2 until staging has applied it; approve it then (gate on-destructive at aaaaaaaaaaaa).",
+    );
+  });
+});
+
+describe("promotion", () => {
+  it("requires the wave before unless a wave names another or false", () => {
+    const config = { waves: [{ env: "dev" }, { env: "staging" }, { env: "prod", requires: "dev" }, { env: "qa", requires: false as const }] };
+    expect(requiredIn(config, "dev")).toBeUndefined();
+    expect(requiredIn(config, "staging")).toBe("dev");
+    expect(requiredIn(config, "prod")).toBe("dev");
+    expect(requiredIn(config, "qa")).toBeUndefined();
+    expect(requiredIn(config, "elsewhere")).toBeUndefined();
+    expect(requiredIn(undefined, "prod")).toBeUndefined();
+  });
+
+  it("refuses, exit 4, naming the environment and each migration it has not applied with the same checksum", () => {
+    const ok = { env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c1", ran: "applied" as const }] };
+    expect(promotionRefusal("prod", [ok])).toBeUndefined();
+    const refusal = promotionRefusal("prod", [
+      {
+        env: "staging",
+        from: "yodel.config.ts",
+        migrations: [
+          { id: "m1", checksum: "c1", ran: "applied" },
+          { id: "m2", checksum: "c2", ran: "not applied" },
+          { id: "m3", checksum: "c3", ran: "applied with another checksum", recorded: "c0" },
+        ],
+      },
+    ]);
+    expect(refusal?.exitCode).toBe(4);
+    expect(refusal?.message).toBe(
+      "refused: prod applies only migrations staging applied first, and 2 pending ones have not run there:\n" +
+        "  m2: staging's history does not record it applied (required by yodel.config.ts)\n" +
+        "  m3: staging applied it with checksum c0, and its files now hash to c3 (required by yodel.config.ts)\n" +
+        "Nothing was applied. Apply them to staging first.",
+    );
+  });
+
+  it("takes requires in yodel.config.ts, refusing one that is not an environment or is the wave's own", () => {
+    const check = (waves: unknown) => () => checkYodelConfig({ waves }, "/p/yodel.config.ts", ["dev", "prod"]);
+    expect(check([{ env: "dev" }, { env: "prod", requires: "dev" }])).not.toThrow();
+    expect(check([{ env: "dev" }, { env: "prod", requires: false }])).not.toThrow();
+    expect(check([{ env: "prod", requires: "qa" }])).toThrow(/waves\[0\]\.requires: qa is not an environment/);
+    expect(check([{ env: "prod", requires: "prod" }])).toThrow(/prod cannot require itself/);
   });
 });

@@ -201,7 +201,7 @@ describe("each command's --json output validates against its schema", () => {
       ),
     );
     expectValid("plan", planJsonVersioned(versionedPlan({ kind: "no-op", message: "no migrations Op for prod\n\ndeclare one" })));
-    const wave = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }], waits: true, planDigest: "sha256:w", digest: "sha256:s", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan sha256:s" };
+    const wave = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }], waits: true, planDigest: "sha256:w", digest: "sha256:s", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan sha256:s", promotions: [{ env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c", ran: "applied with another checksum" as const, recorded: "c0" }] }], blocked: true };
     expectValid("plan", planJsonVersioned({ ...versionedPlan({ kind: "no-op", message: "no migrations Op for prod" }), wave }));
     expectValid("plan", planJsonVersioned({ environment: "dev", dialect: "postgres", appliedCount: 0, pending: [], problems: [], refusal: { exitCode: 4, message: "a fork" }, notes: [] }));
   });
@@ -214,6 +214,7 @@ describe("each command's --json output validates against its schema", () => {
       { status: "unchanged" },
       { status: "refused" },
       { status: "refused", preChecks: { migration: "20261010T0910-rebuild", checks: [{ name: "no-nulls", passed: false, detail: "3 rows" }] } },
+      { status: "refused", refusal: { exitCode: 4, message: "refused: prod applies only migrations staging applied first" } },
       { status: "denied", policy: [{ id: "online-only", outcome: "denied", reasons: ["a rebuild is not online"] }] },
       { status: "stood-down", stoodDown: "standing down: main on origin is at b, newer than this run's a" },
       { status: "stood-down", stoodDown: "standing down", op: "migrate-dev" },
@@ -228,7 +229,7 @@ describe("each command's --json output validates against its schema", () => {
     expectValid("apply", applyJson({ mode: "execute", environment: "dev", planDigest: "sha256:d", result: { applied: [], skipped: [], lock: { kind: "local", where: "(not taken: this run stood down)" }, stoodDown: "standing down" } }));
     // --wave-apply, and the plan file --wave-plan writes (src/waves/).
     expectValid("apply", applyJson({ mode: "execute", environment: "dev", planDigest: "sha256:d", wavePlanDigest: "sha256:w", result: { applied: ["a"], skipped: [], lock: { kind: "advisory", where: "Postgres advisory lock" } } }));
-    expectValid("apply", applyJson({ mode: "wave-plan", plan: { planDigest: "sha256:w", destructive: true, empty: false, environment: "prod", migrations: "sha256:d", gate: "on-destructive", base: "a".repeat(40), pending: ["m1"], destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }] } }));
+    expectValid("apply", applyJson({ mode: "wave-plan", plan: { planDigest: "sha256:w", destructive: true, empty: false, environment: "prod", migrations: "sha256:d", gate: "on-destructive", base: "a".repeat(40), pending: ["m1"], destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }], requires: [{ env: "staging", applied: [{ id: "m1", checksum: "c" }] }] } }));
     const plan = planJson(declarative("clickhouse"));
     const declared: DeclarativeOutcome[] = [
       { status: "refused", plan },

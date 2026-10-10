@@ -36,6 +36,9 @@ import { EXIT_REFUSED } from "../exit.js";
 import { currentDigest, inspect, selectToApply, type VersionedEnv } from "../versioned/engine.js";
 import { gitLedger, NOT_APPROVED, verifyApproval } from "../versioned/approval.js";
 import type { PendingMigration } from "../versioned/state.js";
+import { enforcePromotion, promotionEvidence, readPromotions, type Promotion } from "./promotion.js";
+
+export * from "./promotion.js";
 
 /** The waves spec the CI script writes and every wave job reads. */
 export const WAVES_SPEC_FILE = "yodel-waves.json";
@@ -95,10 +98,18 @@ export interface WavePlanFile {
   base: string;
   pending: string[];
   destructiveSteps: DestructiveStep[];
+  /** Each environment this one requires, and the pending migrations its history records applied. */
+  requires: Array<{ env: string; applied: Array<{ id: string; checksum: string }> }>;
 }
 
 /** The wave plan's digest: over what the run would do and the policy it is gated under. */
-export async function wavePlanDigest(subject: { environment: string; migrations: string; gate: WaveGate; destructive: boolean }): Promise<string> {
+export async function wavePlanDigest(subject: {
+  environment: string;
+  migrations: string;
+  gate: WaveGate;
+  destructive: boolean;
+  requires?: ReadonlyArray<{ env: string; applied: ReadonlyArray<{ id: string; checksum: string }> }>;
+}): Promise<string> {
   const { computePlanDigest } = await import("@intentius/chant/lifecycle/plan-digest");
   return computePlanDigest(WAVE_PLAN_KIND, subject);
 }
@@ -113,12 +124,14 @@ export async function gateAtBase(project: Project, env: string): Promise<{ gate:
 export async function planWave(project: Project, venv: VersionedEnv, ordered: readonly Migration[], options: { allowOutOfOrder: boolean }): Promise<WavePlanFile> {
   const { status } = await inspect(venv, ordered);
   const toApply = selectToApply(status, options.allowOutOfOrder);
+  // Before the gate: a pending migration the required environment has not applied refuses here (exit 4).
+  const requires = promotionEvidence(await enforcePromotion(project, venv.environment, ordered, toApply));
   const migrations = await currentDigest(venv, status, toApply);
   const { gate, at } = await gateAtBase(project, venv.environment);
   const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", toApply);
   const destructive = steps.length > 0;
   return {
-    planDigest: await wavePlanDigest({ environment: venv.environment, migrations, gate, destructive }),
+    planDigest: await wavePlanDigest({ environment: venv.environment, migrations, gate, destructive, requires }),
     destructive,
     empty: toApply.length === 0,
     environment: venv.environment,
@@ -127,6 +140,7 @@ export async function planWave(project: Project, venv: VersionedEnv, ordered: re
     base: at.sha,
     pending: toApply.map((p) => p.id),
     destructiveSteps: steps,
+    requires,
   };
 }
 
@@ -233,6 +247,10 @@ export interface WaveView {
   digest: string;
   /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`. */
   approve: string;
+  /** What each required environment's history records of the pending migrations. */
+  promotions: Promotion[];
+  /** A pending migration has not run where it must first: the wave refuses until it has, so there is nothing to approve yet. */
+  blocked: boolean;
 }
 
 /**
@@ -241,16 +259,18 @@ export interface WaveView {
  * gate is the base commit's: on a pull request, the merge base with the
  * target branch.
  */
-export async function waveView(project: Project, env: string, pending: readonly PendingMigration[], migrations: string): Promise<WaveView | undefined> {
+export async function waveView(project: Project, env: string, ordered: readonly Migration[], pending: readonly PendingMigration[], migrations: string): Promise<WaveView | undefined> {
   const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === env) + 1;
   if (k === 0) return undefined;
   const { gate, at } = await gateAtBase(project, env);
   const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", pending);
   const destructive = steps.length > 0;
-  const planDigest = await wavePlanDigest({ environment: env, migrations, gate, destructive });
+  const promotions = await readPromotions(project, env, ordered, pending);
+  const blocked = promotions.some((p) => p.migrations.some((m) => m.ran !== "applied"));
+  const planDigest = await wavePlanDigest({ environment: env, migrations, gate, destructive, requires: promotionEvidence(promotions) });
   const { waveSetDigest, waveGateName } = await import("@intentius/chant/gated-waves");
   const digest = waveSetDigest([{ member: env, planDigest }]);
-  const waits = pending.length > 0 && (gate === "always" || (gate === "on-destructive" && destructive));
+  const waits = !blocked && pending.length > 0 && (gate === "always" || (gate === "on-destructive" && destructive));
   return {
     wave: k,
     gate,
@@ -261,12 +281,18 @@ export async function waveView(project: Project, env: string, pending: readonly 
     planDigest,
     digest,
     approve: `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${digest}`,
+    promotions,
+    blocked,
   };
 }
 
 /** One line on the wave, for text and markdown. */
 export function describeWave(w: WaveView, code: (s: string) => string = (s) => s): string {
   const at = `gate ${code(w.gate)} at ${code(w.base.slice(0, 12))}`;
+  if (w.blocked) {
+    const envs = [...new Set(w.promotions.filter((p) => p.migrations.some((m) => m.ran !== "applied")).map((p) => code(p.env)))];
+    return `The apply pipeline refuses this in wave ${String(w.wave)} until ${envs.join(" and ")} ${envs.length === 1 ? "has" : "have"} applied it; approve it then (${at}).`;
+  }
   if (!w.waits) {
     const why = w.gate === "never" ? "" : `: nothing pending is destructive`;
     return `The apply pipeline applies this in wave ${String(w.wave)} with no approval (${at}${why}).`;

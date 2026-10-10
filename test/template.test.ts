@@ -104,7 +104,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("has a migrate Op yodel apply runs and a WatchOp on a schedule for each environment, in each forge's pipelines", async () => {
     const envs = await environments(dir);
-    expect(envs).toEqual({ dialect, names: ["dev", "prod"], replay: true, waves: [{ env: "dev", gate: "always" }, { env: "prod", gate: "always" }] });
+    expect(envs).toEqual({ dialect, names: ["dev", "prod"], replay: true, waves: [{ env: "dev", gate: "always" }, { env: "prod", gate: "always", requires: "dev" }] });
     for (const env of envs.names) {
       const migrate = (await import(pathToFileURL(join(dir, "ops", `migrate-${env}.op.ts`)).href)) as { op: { props: OpConfig } };
       expect(migrateOpParts(migrate.op.props, env)).toEqual({ gate: `approve-migrate-${env}`, quorum: false });
@@ -144,9 +144,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     expect(main.stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "ops"]);
   });
 
-  it("gives the writer's credentials to the apply jobs only, and the reader's to the rest", () => {
-    const readers = ["dev", "prod"].flatMap((e) => readerVariables(e, dialect));
-    const writerOnly = ["dev", "prod"].flatMap((e) => writerVariables(e, dialect).slice(1));
+  it("gives an environment's writer to its wave job only, with the reader of the wave before, and the reader to the rest", () => {
+    const writerOnly = (e: string) => writerVariables(e, dialect).slice(1);
     let applyJobs = 0;
     for (const f of files(dir).filter((f) => PIPELINES(f) && f.endsWith(".yml"))) {
       const doc = load(readFileSync(join(dir, f), "utf8")) as Record<string, unknown>;
@@ -154,13 +153,17 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       for (const [name, job] of Object.entries(jobs)) {
         if (typeof job !== "object" || job === null || name === "stages" || name === "variables") continue;
         const text = JSON.stringify(job);
-        if (name.startsWith("wave-")) {
+        const wave = /^wave-\d+-(\w+)$/.exec(name)?.[1];
+        if (wave) {
           applyJobs++;
-          expect(text, `${f} ${name}`).toContain('"YODEL_CREDENTIALS":"writer"');
-          for (const v of readers.filter((r) => !r.endsWith("_URL"))) expect(text, `${f} ${name}`).not.toContain(v);
+          expect(text, `${f} ${name}`).toContain(`"YODEL_CREDENTIALS":"writer:${wave}"`);
+          for (const other of ["dev", "prod"].filter((e) => e !== wave)) for (const v of writerOnly(other)) expect(text, `${f} ${name}`).not.toContain(v);
+          for (const v of readerVariables(wave, dialect).slice(1)) expect(text, `${f} ${name}`).not.toContain(v);
+          // prod's wave reads dev's history with dev's reader (GitLab's jobs have the unscoped readers already).
+          if (wave === "prod" && !f.startsWith(".gitlab")) for (const v of readerVariables("dev", dialect)) expect(text, `${f} ${name}`).toContain(v);
         } else {
           expect(text, `${f} ${name}`).not.toContain("YODEL_CREDENTIALS");
-          for (const v of writerOnly) expect(text, `${f} ${name}`).not.toContain(v);
+          for (const v of ["dev", "prod"].flatMap(writerOnly)) expect(text, `${f} ${name}`).not.toContain(v);
         }
       }
     }
@@ -229,11 +232,12 @@ describe("the templates' scripts", () => {
       writeFileSync(join(dir, "yodel.config.ts"), waves === undefined ? "export default {};\n" : `export default { waves: ${waves} };\n`);
       return dir;
     };
-    expect(await readWaves(project(undefined), ["dev", "prod"])).toEqual([{ env: "dev", gate: "always" }, { env: "prod", gate: "always" }]);
+    expect(await readWaves(project(undefined), ["dev", "prod"])).toEqual([{ env: "dev", gate: "always" }, { env: "prod", gate: "always", requires: "dev" }]);
     expect(await readWaves(project('[{ env: "dev", gate: "never" }, { env: "prod", gate: "on-destructive" }]'), ["dev", "prod"])).toEqual([
       { env: "dev", gate: "never" },
-      { env: "prod", gate: "on-destructive" },
+      { env: "prod", gate: "on-destructive", requires: "dev" },
     ]);
+    expect(await readWaves(project('[{ env: "dev" }, { env: "prod", requires: false }]'), ["dev", "prod"])).toEqual([{ env: "dev", gate: "always" }, { env: "prod", gate: "always" }]);
     await expect(readWaves(project('[{ env: "staging" }]'), ["dev", "prod"])).rejects.toThrow(/staging is not an environment/);
     await expect(readWaves(project('[{ env: "dev", gate: "sometimes" }]'), ["dev", "prod"])).rejects.toThrow(/sometimes is not/);
   });

@@ -84,6 +84,15 @@ export interface WaveConfig {
    * the change itself.
    */
   gate?: WaveGate;
+  /**
+   * The environment that must have applied a migration first: `yodel
+   * apply <env>` reads its history (with its reader) and refuses, exit 4,
+   * any pending migration it does not record as applied with the same
+   * checksum. Default: the wave before this one; `false` for none. Both
+   * the working tree's and the base commit's requirement are enforced, so a
+   * change cannot drop its own.
+   */
+  requires?: string | false;
 }
 
 export interface YodelConfig {

@@ -108,7 +108,7 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
   value.forEach((wave: unknown, i) => {
     const at = `${where}[${String(i)}]`;
     if (!isRecord(wave)) throw new YodelError(`${at}: expected { env, gate }`);
-    for (const k of Object.keys(wave)) if (!["env", "gate"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate)`);
+    for (const k of Object.keys(wave)) if (!["env", "gate", "requires"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate, requires)`);
     const env = wave.env;
     if (typeof env !== "string" || env === "") throw new YodelError(`${at}.env: expected an environment's name`);
     if (profiles && !profiles.includes(env)) throw new YodelError(`${at}.env: ${env} is not an environment chant.config.ts declares${notDeclared(profiles)}`);
@@ -116,6 +116,12 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
     seen.add(env);
     if (wave.gate !== undefined && !WAVE_GATES.includes(wave.gate as never)) {
       throw new YodelError(`${at}.gate: ${JSON.stringify(wave.gate)} is not a gate policy (expected ${WAVE_GATES.join(", ")})`);
+    }
+    const req = wave.requires;
+    if (req !== undefined && req !== false) {
+      if (typeof req !== "string" || req === "") throw new YodelError(`${at}.requires: expected an environment's name, or false`);
+      if (req === env) throw new YodelError(`${at}.requires: ${env} cannot require itself`);
+      if (profiles && !profiles.includes(req)) throw new YodelError(`${at}.requires: ${req} is not an environment chant.config.ts declares${notDeclared(profiles)}`);
     }
   });
 }

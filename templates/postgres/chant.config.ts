@@ -7,8 +7,10 @@ import "@intentius/chant-lexicon-sql";
  * - reader (the default): a role that can only read (USAGE and SELECT on the
  *   schema and the history schema, `default_transaction_read_only = on`).
  *   Pull request jobs, the drift watch and anyone on their laptop use it.
- * - writer: YODEL_CREDENTIALS=writer. Only the apply job after a merge sets
- *   it, and only that job holds the writer's secrets.
+ * - writer: YODEL_CREDENTIALS=writer:<env> for that environment alone (or
+ *   =writer for every one). Only an environment's wave job after a merge
+ *   sets it, and only that job holds that environment's writer secrets; it
+ *   reads the environment before it (waves[].requires) with the reader.
  *
  * Credentials are named by environment variable, never written here:
  * <ENV>_POSTGRES_URL, <ENV>_POSTGRES_READER_USER,
@@ -16,14 +18,14 @@ import "@intentius/chant-lexicon-sql";
  * <ENV>_POSTGRES_WRITER_PASSWORD. The URL names the database:
  * postgres://db.example.com:5432/app.
  */
-const role = process.env.YODEL_CREDENTIALS === "writer" ? "WRITER" : "READER";
+const role = (env: string) => (process.env.YODEL_CREDENTIALS === "writer" || process.env.YODEL_CREDENTIALS === `writer:${env}` ? "WRITER" : "READER");
 
 function postgres(env: string, url: string) {
   const prefix = env.toUpperCase();
   return {
     url: process.env[`${prefix}_POSTGRES_URL`] ?? url,
-    user: { env: `${prefix}_POSTGRES_${role}_USER` },
-    password: { env: `${prefix}_POSTGRES_${role}_PASSWORD` },
+    user: { env: `${prefix}_POSTGRES_${role(env)}_USER` },
+    password: { env: `${prefix}_POSTGRES_${role(env)}_PASSWORD` },
     schemas: ["{{chant:schema}}"],
   };
 }

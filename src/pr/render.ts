@@ -16,7 +16,10 @@ import { asBackfill } from "../steps/kinds.js";
 import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
 import { describeResults, type RuleResult } from "../versioned/policy.js";
-import { describeWave } from "../waves/index.js";
+import { describeWave, type Promotion } from "../waves/index.js";
+
+/** Whether a required environment's history records the migration applied. */
+const ranOn = (p: Promotion, id: string): string => p.migrations.find((m) => m.id === id)?.ran ?? "not read";
 
 /** The marker that identifies one environment's plan comment. */
 export const commentMarker = (env: string): string => `<!-- yodel:plan env=${env} -->`;
@@ -90,6 +93,10 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   if (plan.refusal) lines.push("", `yodel apply would refuse (exit ${String(plan.refusal.exitCode)}): ${plan.refusal.message}`);
   if (plan.policy && plan.policy.length > 0) lines.push("", "Policy:", ...describeResults(plan.policy).map((l) => `  ${l.replace(/^policy /, "")}`));
   if (plan.sinceLast) lines.push("", `Since the last comment's plan (${plan.sinceLast.approved}): ${describeMove(plan.sinceLast)}`);
+  if (plan.wave && plan.wave.promotions.length > 0) {
+    lines.push("", "Where each pending migration has run:");
+    for (const m of plan.pending) lines.push(`  ${m.id}: ${plan.wave.promotions.map((p) => `${p.env} ${ranOn(p, m.id)}`).join(", ")}`);
+  }
   if (plan.wave) {
     lines.push("", describeWave(plan.wave));
     if (plan.wave.waits) lines.push(`Approve it for the pipeline with:`, `  ${run(plan.wave.approve)}`);
@@ -201,7 +208,13 @@ export function renderPlanMarkdown(plan: VersionedPlan, options: { sql?: boolean
   if (plan.policy && plan.policy.length > 0) out.push("", ...policyMarkdown(plan.policy, plan.environment));
   if (plan.sinceLast) out.push("", `Since the previous version of this comment (\`${plan.sinceLast.approved}\`): ${describeMove(plan.sinceLast)}.`);
   if (plan.wave) {
-    out.push("", "#### The apply pipeline", "", describeWave(plan.wave, (c) => `\`${c}\``));
+    out.push("", "#### The apply pipeline");
+    const promotions = plan.wave.promotions;
+    if (promotions.length > 0) {
+      out.push("", `| Migration | ${promotions.map((p) => `\`${cell(p.env)}\``).join(" | ")} |`, `|---|${promotions.map(() => "---|").join("")}`);
+      for (const m of plan.pending) out.push(`| \`${m.id}\` | ${promotions.map((p) => ranOn(p, m.id)).join(" | ")} |`);
+    }
+    out.push("", describeWave(plan.wave, (c) => `\`${c}\``));
     if (plan.wave.waits) out.push("", "Approve it before merging:", "", fence(plan.wave.approve, "sh"));
   }
   if (plan.digest) {

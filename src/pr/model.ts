@@ -208,7 +208,7 @@ async function collectWith(
   }
   if (report.digest && !report.refusal) {
     try {
-      plan.wave = await waveView(project, env.name, status.pending, report.digest);
+      plan.wave = await waveView(project, env.name, ordered, status.pending, report.digest);
     } catch (e) {
       plan.notes.push(`The wave's gate could not be read at the base commit: ${e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e)}`);
     }

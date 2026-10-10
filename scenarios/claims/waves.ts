@@ -32,9 +32,15 @@ import { addColumn, mainTable } from "../lib/schema.js";
  * - approval-at-base: a change that sets prod's gate to `never` merges and
  *   prod still waits under the base's `always`. BREAK: the policy is read
  *   from the change itself (`--base HEAD`, YODEL_BASE=HEAD), so prod applies.
+ * - promotion (#43): prod requires staging (the wave before, by default).
+ *   prod's wave run on its own, and `yodel apply` of prod, refuse (exit 4,
+ *   nothing applied) a migration staging has not applied; `yodel plan` of
+ *   prod shows it has not run on staging; once staging has applied it, prod
+ *   applies it. BREAK: the requirement is removed (`requires: false`), so the
+ *   column reaches prod first.
  */
 
-const PARTS = ["gate-policy", "wave-order", "approval-at-base"] as const;
+const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion"] as const;
 type Part = (typeof PARTS)[number];
 
 interface Envs {
@@ -62,10 +68,10 @@ function breaks(ctx: Ctx, part: Part): boolean {
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean } = {}): Promise<void> {
   const { p } = st;
   const ws: readonly Wave[] = options.allNever ? waves.map((w): Wave => ({ ...w, gate: "never" })) : waves;
-  p.write("yodel.config.ts", yodelConfig(st, waves));
+  p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true));
   const files = await applyPipelines(p.dir, { dialect: p.ctx.dialect === "ch" ? "clickhouse" : "postgres", names: ws.map((w) => w.env), replay: false, waves: ws });
   for (const f of files) {
     let content = f.content;
@@ -119,7 +125,7 @@ const job = (st: State, k: number, env: keyof Envs) => `wave-${String(k)}-${st.e
 
 // ── The project ──────────────────────────────────────────────────────────────
 
-function yodelConfig(st: State, waves: readonly Wave[]): string {
+function yodelConfig(st: State, waves: readonly Wave[], noRequires = false): string {
   const history = st.p.ctx.db.history;
   return `import type { YodelConfig } from "@intentius/sql-yodeler";
 
@@ -128,7 +134,7 @@ export default {
 ${ENV_KEYS.map((k) => `    "${st.envs[k]}": { history: { database: "${history}" } },`).join("\n")}
   },
   waves: [
-${waves.map((w) => `    { env: "${w.env}", gate: "${w.gate}" },`).join("\n")}
+${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i > 0 ? ", requires: false" : ""} },`).join("\n")}
   ],
 } satisfies YodelConfig;
 `;
@@ -320,10 +326,34 @@ async function approvalAtBase(ctx: Ctx, st: State, broken: boolean): Promise<voi
   hold(!(await st.columnOn("prod", "extra")), "prod applied the change under the gate the change itself set");
 }
 
+async function promotion(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+  // Both waves never: only the requirement stands between the change and prod.
+  await render(st, waves(st, "never", "never"), { noRequires: broken });
+  await st.p.commit("the waves: both never, prod after staging");
+  addColumn(st.p, "promo");
+  await migrate(st, "add-promo", "feat: a promo column");
+
+  // prod's job alone (a re-run, or staging's skipped): refused before anything is applied.
+  const alone = await run("chant", ["run", "wave", "--spec", "yodel-waves.json", "--wave", "2"], { cwd: st.p.dir, env: st.p.envFor(), timeoutMs: 600_000 });
+  hold(!(await st.columnOn("prod", "promo")), "prod applied a migration staging has not applied");
+  hold(alone.code !== 0 && /refused: \S+ applies only migrations \S+ applied first/.test(`${alone.out}${alone.err}`), `prod's wave did not refuse a migration staging has not applied (exit ${String(alone.code)})`);
+  const local = await st.p.yodel(["apply", st.envs.prod, "--json"], { timeoutMs: 600_000 });
+  hold(local.code === 4, `yodel apply ${st.envs.prod} did not refuse (exit 4) a migration staging has not applied (exit ${String(local.code)})`);
+  const plan = await st.p.yodel(["plan", st.envs.prod, "--json"]);
+  const wave = (JSON.parse(plan.out.slice(plan.out.indexOf("{"))) as { wave?: { blocked?: boolean; promotions?: Array<{ env: string; migrations: Array<{ ran: string }> }> } }).wave;
+  hold(wave?.blocked === true && wave.promotions?.[0]?.env === st.envs.staging && wave.promotions[0].migrations.some((m) => m.ran === "not applied"), "yodel plan of prod does not show the migration has not run on staging");
+
+  // The pipeline: staging, then prod.
+  const ran = await pipeline(st);
+  hold(ran.get(job(st, 1, "staging"))?.ok === true && ran.get(job(st, 2, "prod"))?.ok === true, "once staging applied the migration, the waves did not both apply");
+  hold((await st.columnOn("staging", "promo")) && (await st.columnOn("prod", "promo")), "the column is not on both servers after the pipeline");
+}
+
 const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {
   "gate-policy": gatePolicy,
   "wave-order": waveOrder,
   "approval-at-base": approvalAtBase,
+  promotion,
 };
 
 async function body(ctx: Ctx): Promise<void> {
@@ -368,6 +398,6 @@ async function level(st: State): Promise<void> {
 
 export const wavesClaim: Claim = {
   name: "waves",
-  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit",
+  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, and applies only what the wave before applied",
   dialects: { ch: body, pg: body },
 };
