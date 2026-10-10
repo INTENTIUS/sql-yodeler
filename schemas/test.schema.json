@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/test.schema.json",
+  "title": "yodel test --json",
+  "description": "Version 1. The cases of tests/*.test.ts, each run on a database built from the migrations on a throwaway server: what passed, what failed and why. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["files", "summary", "cases"],
+  "properties": {
+    "environment": { "description": "The throwaway server's profile.", "type": "string" },
+    "dialect": { "enum": ["clickhouse", "postgres"] },
+    "where": { "description": "The server, without credentials.", "type": "string" },
+    "scope": { "description": "The databases (ClickHouse) or schemas (Postgres) each case empties and builds.", "$ref": "common.schema.json#/$defs/stringList" },
+    "reset": { "description": "The target held what the history names, and was emptied first (--reset).", "type": "boolean" },
+    "files": { "description": "The test files, relative to the project directory.", "$ref": "common.schema.json#/$defs/stringList" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "errors"],
+      "properties": { "passed": { "type": "integer", "minimum": 0 }, "failed": { "type": "integer", "minimum": 0 }, "errors": { "type": "integer", "minimum": 0 } }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "name", "status", "ms", "failures", "before", "after"],
+        "properties": {
+          "file": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "description": "passed: every expectation held. failed: one did not. error: the case could not run (a migration or seed statement failed, an unknown migration id).", "enum": ["passed", "failed", "error"] },
+          "ms": { "type": "integer", "minimum": 0 },
+          "failures": { "description": "The expectations that did not hold, one line each.", "$ref": "common.schema.json#/$defs/stringList" },
+          "error": { "type": "string" },
+          "before": { "description": "The migrations replayed before the seed.", "$ref": "common.schema.json#/$defs/stringList" },
+          "after": { "description": "The migrations run after the seed, with their steps.", "$ref": "common.schema.json#/$defs/stringList" }
+        }
+      }
+    }
+  }
+}

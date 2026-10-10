@@ -49,6 +49,7 @@ Commands:
   new         write the next migration from the declared schema
   checkpoint  write a checkpoint: the newest recorded schema from nothing
   lint        check the migrations against the lint rules
+  test        run tests/*.test.ts on databases built from the migrations
   status      list applied, pending and out-of-order migrations
   report      each environment's migrations side by side, and the audit log
   drift       report declared objects changed out of band or gone

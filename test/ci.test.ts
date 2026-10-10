@@ -5,7 +5,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -151,6 +151,22 @@ describe("yodel ci", () => {
     expect(existsSync(join(dir, ".github/workflows/yodel-apply-resume.yml"))).toBe(false);
     expect(existsSync(join(dir, ".forgejo/workflows/yodel-apply-resume.yml"))).toBe(false);
     expect(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")).not.toContain("resume");
+  });
+
+  it("runs yodel test after the replay check, on its server, when the project has tests/*.test.ts (#54)", async () => {
+    const dir = project('{ forges: ["github", "gitlab", "forgejo"] }');
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    expect(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")).not.toContain("yodel test");
+    mkdirSync(join(dir, "tests"));
+    writeFileSync(join(dir, "tests", "events.test.ts"), "export default [];\n");
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    for (const file of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
+      const text = readFileSync(join(dir, file), "utf8");
+      const replay = text.indexOf("yodel lint --replay replay --reset");
+      const test = text.indexOf("yodel test --env replay --reset --junit yodel-test.xml");
+      expect(replay, file).toBeGreaterThan(0);
+      expect(test, file).toBeGreaterThan(replay);
+    }
   });
 
   it("checks ci.resume's schedule", () => {

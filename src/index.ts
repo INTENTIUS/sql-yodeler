@@ -12,3 +12,5 @@ export type { EnvironmentConfig, PolicyConfig, PolicyMigration, PolicyPlan, Poli
 export { verifyWebhook, signWebhook } from "./notify/verify.js";
 export type { NotifyEvent, NotifyEventKind } from "./notify/index.js";
 export type { DdlSource } from "./sources/index.js";
+export { defineTests, expectError, expectRows, expectValue } from "./testing/define.js";
+export type { ErrorExpectation, Expectation, RowsExpectation, TestCase, ValueExpectation } from "./testing/define.js";
