@@ -51,11 +51,12 @@
           "const": "versioned"
         },
         "status": {
-          "description": "planned (--plan, something pending), unchanged, refused, gated (waiting at the Op's gate for a person's approval), failed, applied.",
+          "description": "planned (--plan, something pending), unchanged, refused, denied (a policy rule denies the plan, with no override), gated (waiting at the Op's gate for a person's approval), failed, applied.",
           "enum": [
             "planned",
             "unchanged",
             "refused",
+            "denied",
             "gated",
             "failed",
             "applied"
@@ -80,6 +81,10 @@
               }
             }
           }
+        },
+        "policy": {
+          "description": "denied: each policy rule's outcome.",
+          "$ref": "common.schema.json#/$defs/policy"
         },
         "op": {
           "type": "string"

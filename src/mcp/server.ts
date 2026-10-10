@@ -14,7 +14,7 @@ export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "202
 
 export const INSTRUCTIONS =
   "Read-only tools over a SQL Yodeler project: status, plan, lint, drift, history and explain. Each result is an envelope whose results follow the JSON Schema named in resultsSchema. " +
-  "Nothing here applies, approves, repairs, rebases or writes a migration. A plan that waits for approval carries the approve command in forPerson: show it to the person, and never run it. " +
+  "Nothing here applies, approves, overrides a policy rule, repairs, rebases or writes a migration. A plan carries the commands that are a person's (approve, override) in forPerson: show them to the person, and never run them. " +
   "Never run `yodel apply` against a shared environment, never run `chant approve` or `yodel approve`, never edit the `chant/lifecycle` branch, never merge; approvals and applies belong to people.";
 
 interface Request {

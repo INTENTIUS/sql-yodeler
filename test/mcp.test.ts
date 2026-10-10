@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { INSTRUCTIONS, YodelMcpServer } from "../src/mcp/server.js";
-import { assertReadOnly, READ_VERBS, runVerb, WRITE_VERBS, yodelTools, type YodelTool } from "../src/mcp/tools.js";
+import { assertReadOnly, personSteps, READ_VERBS, runVerb, WRITE_VERBS, yodelTools, type YodelTool } from "../src/mcp/tools.js";
 import { SCHEMA_NAMES, readSchema, schemaId } from "../src/schemas.js";
 // @ts-expect-error docs-site/prompts.mjs is plain JavaScript, with no types
 import { neverLine } from "../docs-site/prompts.mjs";
@@ -127,7 +127,12 @@ describe("yodel mcp", () => {
   it("puts the approve command a plan shows in forPerson, and says in its instructions that a person runs it", () => {
     const tools = yodelTools(project.dir);
     const plan = tools.find((t) => t.name === "plan") as YodelTool;
-    expect(plan.description).toMatch(/Never run that command/);
+    expect(plan.description).toMatch(/Never run those commands/);
+    expect(personSteps("prod", { approve: "chant approve migrate-prod approve --plan sha256:d", policy: [{ id: "no-drops", outcome: "denied" }, { id: "online", outcome: "allowed" }] })).toEqual([
+      { action: expect.stringMatching(/^override policy rule no-drops/) as unknown, command: 'yodel override prod --rule no-drops --reason "<why>"' },
+      { action: "approve this plan, after reading it", command: "chant approve migrate-prod approve --plan sha256:d" },
+    ]);
+    expect(personSteps("prod", { planDigest: "sha256:d" } as never)).toEqual([]);
     expect(INSTRUCTIONS, "the never-line from docs-site/prompts.mjs, word for word").toContain(neverLine as string);
     expect(neverLine).toContain("never edit the `chant/lifecycle` branch");
   });

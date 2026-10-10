@@ -118,6 +118,20 @@ const envInput = (required: boolean, what: string) => ({
   additionalProperties: false,
 });
 
+interface PlanResults {
+  approve?: unknown;
+  policy?: Array<{ id: string; outcome: string }>;
+}
+
+/** A plan's steps that are a person's: overriding each policy rule that denies it (when it should not stand), and approving it. */
+export function personSteps(env: string, plan: PlanResults | null): NonNullable<ToolEnvelope["forPerson"]> {
+  const steps = (plan?.policy ?? [])
+    .filter((r) => r.outcome === "denied")
+    .map((r) => ({ action: `override policy rule ${r.id}, if a person on policy.overriders decides it should not stand`, command: `yodel override ${env} --rule ${r.id} --reason "<why>"` }));
+  if (typeof plan?.approve === "string") steps.push({ action: "approve this plan, after reading it", command: plan.approve });
+  return steps;
+}
+
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
 const ENV = "The environment, as chant.config.ts names it.";
@@ -135,14 +149,15 @@ export function yodelTools(dir: string): YodelTool[] {
     },
     {
       name: "plan",
-      description: `yodel plan <env> --json: what yodel apply would run, the plan digest, and when a person must approve it, the approve command (forPerson). Never run that command: approvals belong to people. results: ${schemaId(COMMAND_SCHEMAS.plan)}`,
+      description: `yodel plan <env> --json: what yodel apply would run and the plan digest. When a person must approve the plan, or may override a policy rule that denies it, forPerson has the command they run. Never run those commands: approvals and overrides belong to people. results: ${schemaId(COMMAND_SCHEMAS.plan)}`,
       inputSchema: envInput(true, ENV),
       annotations: READ_ONLY,
       verbs: ["plan"],
       handler: async (a) => {
-        const e = await envelope("plan", "plan", [envArg(a, true) as string, ...dirArgs(dir)], schemaId(COMMAND_SCHEMAS.plan));
-        const approve = (e.results as { approve?: unknown } | null)?.approve;
-        return typeof approve === "string" ? { ...e, forPerson: [{ action: "approve this plan, after reading it", command: approve }] } : e;
+        const env = envArg(a, true) as string;
+        const e = await envelope("plan", "plan", [env, ...dirArgs(dir)], schemaId(COMMAND_SCHEMAS.plan));
+        const forPerson = personSteps(env, e.results as PlanResults | null);
+        return forPerson.length > 0 ? { ...e, forPerson } : e;
       },
     },
     {

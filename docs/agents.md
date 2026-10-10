@@ -67,7 +67,7 @@ An agent that should look at a project's state without a shell can use `yodel mc
 | Tool | Runs | Gives |
 |---|---|---|
 | `status` | `yodel status <env> --json` | applied, pending, out-of-order and part-way migrations, checksum mismatches, the plan digest apply would ask approval for |
-| `plan` | `yodel plan <env> --json` | what `yodel apply` would run and, when the plan waits for approval, the approve command in `forPerson` |
+| `plan` | `yodel plan <env> --json` | what `yodel apply` would run; in `forPerson`, the approve command when the plan waits for approval, and `yodel override` for each policy rule that denies it |
 | `lint` | `yodel lint [--env <env>] --json` | the findings and silences; with `env`, against that environment's history |
 | `drift` | `yodel drift <env> --json` | the declared objects changed out of band or gone |
 | `history` | `yodel status <env> --json` | the migrations the history records applied: who, when, under which digest, and any repairs |
@@ -75,4 +75,4 @@ An agent that should look at a project's state without a shell can use `yodel mc
 
 Each tool answers with one envelope ([`mcp.schema.json`](https://intentius.io/sql-yodeler/schemas/v1/mcp.schema.json)): `schema` (the envelope's version, `1`), `tool`, `command` (the command line it ran), `exit` (its exit code, the same as on a terminal), `results` (what it printed with `--json`, or `null` when it failed), `resultsSchema` (the `$id` of the schema `results` follows), `error` (what it wrote to stderr) and `forPerson` (steps that belong to a person, each with the command the person runs).
 
-There is no tool that applies, approves, repairs, rebases, writes a migration or touches `chant/lifecycle`. The server refuses to start with a tool named for `apply`, `approve`, `repair`, `rebase`, `new`, `init` or `override`, a tool that runs any command besides `status`, `plan`, `lint` and `drift`, or a tool not marked read-only, and no tool passes a flag that writes (`--replay`, `--update-checksum`, `--comment`, `--execute`). The approve command in `forPerson` is the person's to run: the agent shows it and stops, as the never-line above says.
+There is no tool that applies, approves, overrides a policy rule, repairs, rebases, writes a migration or touches `chant/lifecycle`. The server refuses to start with a tool named for `apply`, `approve`, `repair`, `rebase`, `new`, `init` or `override`, a tool that runs any command besides `status`, `plan`, `lint` and `drift`, or a tool not marked read-only, and no tool passes a flag that writes (`--replay`, `--update-checksum`, `--comment`, `--execute`). The commands in `forPerson` are the person's to run: the agent shows them and stops, as the never-line above says.

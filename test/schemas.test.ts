@@ -24,6 +24,7 @@ import type { VersionedPlan } from "../src/pr/model.js";
 import { planJsonVersioned } from "../src/pr/render.js";
 import { replayJson, type ReplayResult } from "../src/replay/index.js";
 import { COMMAND_SCHEMAS, SCHEMA_BASE, SCHEMA_NAMES, readSchema, schemaId, schemasDir, type SchemaName } from "../src/schemas.js";
+import type { RuleResult } from "../src/versioned/policy.js";
 import { statusJson, type StatusReport } from "../src/versioned/report.js";
 import { json, projectFrom, repoRoot, yodel } from "./helpers/run.js";
 
@@ -126,6 +127,11 @@ const declarative = (dialect: "clickhouse" | "postgres"): Plan =>
     ? ({ environment: "dev", dialect, diff: chDiff, refused: [] } as unknown as Plan)
     : ({ environment: "dev", dialect, diff: { changes: [{ object: "orders (shop.orders)", field: "columns.amount.type", rule: "SQLPG310", class: "rewrite", destructive: true }], refused: [], hints: [] }, refused: [] } as unknown as Plan);
 
+const policy: RuleResult[] = [
+  { id: "no-drops", description: "no destructive step in prod", outcome: "overridden", reasons: ["step 0 of 20261010T0910-rebuild is destructive"], override: { rule: "no-drops", by: "alice", at: "2026-10-10T09:00:00Z", reason: "the column was never read", digest: "sha256:d" } },
+  { id: "online-only", outcome: "allowed", reasons: [] },
+];
+
 const versionedPlan = (approval: VersionedPlan["approval"]): VersionedPlan => ({
   environment: "prod",
   dialect: "clickhouse",
@@ -150,6 +156,7 @@ const versionedPlan = (approval: VersionedPlan["approval"]): VersionedPlan => ({
   approval,
   sinceLast: { approved: "sha256:old", now: "sha256:d", confirmed: true, changes: [{ part: "pending", message: "a migration was added" }] },
   notes: ["the history is read from the reader's credentials"],
+  policy,
 });
 
 // ---------- the commands ----------
@@ -201,6 +208,7 @@ describe("each command's --json output validates against its schema", () => {
     for (const extra of [
       { status: "planned" },
       { status: "unchanged" },
+      { status: "denied", policy: [{ ...policy[1], outcome: "denied", reasons: ["a rebuild is not online"] }] },
       { status: "refused", preChecks: { migration: "20261010T0910-rebuild", checks: [{ name: "no-nulls", passed: false, detail: "3 rows" }] } },
       { status: "gated", op: "migrate-dev", gate: "approve", moved: { approved: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: true, changes: [], askedAgain: { at: "2026-10-10T09:30:00Z" } }, approve: "chant approve migrate-dev approve --plan sha256:d", gatePlanDigest: "sha256:d" },
       { status: "failed", op: "migrate-dev", exitCode: 5, chantExitCode: 1 },

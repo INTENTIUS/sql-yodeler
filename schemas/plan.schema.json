@@ -263,6 +263,9 @@
           "description": "The digest the migrations Op's gate binds; absent when apply would refuse or has nothing to do.",
           "type": "string"
         },
+        "policy": {
+          "$ref": "common.schema.json#/$defs/policy"
+        },
         "op": {
           "description": "The migrations Op.",
           "type": "string"

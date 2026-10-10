@@ -15,8 +15,8 @@ stdin and stdout: status, plan, lint, drift, history and explain. Each runs
 the yodel command of the same name with --json, in the project, and returns
 its exit code and output in an envelope (schemas/mcp.schema.json). There is
 no tool that applies, approves, repairs, rebases or writes a migration, and
-the server refuses to start with one. A plan waiting for approval carries
-the approve command for a person to run.
+the server refuses to start with one. A plan carries the commands that are a
+person's to run: the approve command, and an override for a denied policy rule.
 
 Start it with the reader's credentials in the environment, the ones
 yodel plan uses; the tools read the servers chant.config.ts names.
