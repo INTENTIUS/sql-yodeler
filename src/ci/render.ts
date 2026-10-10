@@ -95,6 +95,7 @@ import {
   Artifacts as GitLabArtifacts,
   Image,
   Job as GitLabJob,
+  Pipeline as GitLabPipeline,
   Rule,
   Service as GitLabService,
   Workflow as GitLabWorkflow,
@@ -394,9 +395,11 @@ export const reportArtifact = (job: string): string => `yodel-report-${job}`;
 const UPLOAD_ARTIFACT = "actions/upload-artifact@v4";
 
 /**
- * The comment at the top of every file. Added here, not by chant: neither the
- * github nor the gitlab lexicon's serializer writes YAML comments
- * (INTENTIUS/chant#3667, INTENTIUS/chant#3669).
+ * The comment at the top of every file, as `#` lines. The files declared here
+ * (the review workflows and .gitlab-ci.yml) take theirs as the Workflow's or
+ * Pipeline's `comment`, which chant writes. The files chant's
+ * generateOpWavesPipeline and generateOpsPipeline write take no comment, so
+ * withHeader puts it above their YAML.
  */
 const HEADER = [
   "# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.",
@@ -404,6 +407,9 @@ const HEADER = [
 ];
 
 const withHeader = (header: readonly string[], yaml: string): string => `${[...header, ""].join("\n")}${yaml}`;
+
+/** `#` lines as a declaration's `comment`: the text without its `# `, which the serializer writes back. */
+const asComment = (header: readonly string[]): string => header.map((l) => l.replace(/^# ?/, "")).join("\n");
 
 /** A serializer's output for one file: its YAML, refusing anything else (a second file, a warning). */
 function oneFile(forge: Forge, out: string | SerializerResult): string {
@@ -440,9 +446,8 @@ function reportSteps(env: string, job: string, tc: Toolchain): AStep[] {
 
 /** `inContainer`: the job runs in the toolchain's image, which has node, so it needs no setup-node. */
 function setupSteps(inContainer: boolean, tc: Toolchain): AStep[] {
-  // Step inputs are strings in the lexicon's schema (INTENTIUS/chant#3670); the actions read them as strings either way.
-  const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": "0" } })];
-  if (!inContainer) steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": "22", cache: "npm" } }));
+  const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": 0 } })];
+  if (!inContainer) steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": 22, cache: "npm" } }));
   steps.push(...installLines(tc, "github").map((run) => new Step({ run })), new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }));
   return steps;
 }
@@ -512,13 +517,6 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
   }
   Object.assign(jobs, ownJobs<AJob>(own?.actions, jobs, "actions"));
   const clouds = cloudsOf(envs_, envs.flatMap((env) => planRoles(waves, env)));
-  const workflow = new ActionsWorkflow({
-    name: "yodel-pr",
-    on: { pull_request: { branches: [MAIN] } },
-    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
-    concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
-    jobs,
-  });
   const header = [
     ...HEADER,
     "#",
@@ -532,9 +530,17 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
       : []),
     ...identityHeader(forge, clouds),
   ];
+  const workflow = new ActionsWorkflow({
+    comment: asComment(header),
+    name: "yodel-pr",
+    on: { pull_request: { branches: [MAIN] } },
+    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
+    concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
+    jobs,
+  });
   return {
     path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-pr.yml`,
-    content: withHeader(header, renderActions(forge, workflow)),
+    content: renderActions(forge, workflow),
   };
 }
 
@@ -606,28 +612,6 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     );
   }
   for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, Object.fromEntries(jobs), "gitlab"))) jobs.set(name, job);
-  const serialize = (entities: Map<string, Declarable>): string => oneFile("gitlab", gitlabSerializer.serialize(entities));
-  // Exception (INTENTIUS/chant#3669): the gitlab serializer writes no
-  // top-level include or variables, and its stages are only the ones the
-  // declared jobs name, so not the watch file's ops. It writes those stages
-  // first; they are replaced by GITLAB_STAGES, and include and variables are
-  // written beside them.
-  const jobsYaml = serialize(jobs);
-  const end = jobsYaml.indexOf("\n\n");
-  const derivedStages = (parseYAMLDocument(jobsYaml.slice(0, end + 1)) as { stages?: unknown }).stages;
-  if (!jobsYaml.startsWith("stages:\n") || !Array.isArray(derivedStages) || derivedStages[0] !== "review") throw new Error("gitlab: expected the jobs' YAML to start with their stages, review first");
-  const derived = jobsYaml.slice(0, end + 2);
-  // The stages this file's jobs use (review, then any the project's own jobs add), then the apply file's waves and the watch file's ops.
-  // A pr-review wave (#48) adds the merge request job that records the plans, in chant's stage "plans".
-  const plans = waves.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
-  const stages = [...new Set([...derivedStages.map(String), ...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : []), "ops"])];
-  const topLevel = [
-    emitYAMLEntry("include", [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }]),
-    emitYAMLEntry("stages", stages),
-    emitYAMLEntry("variables", { GIT_DEPTH: "0" }),
-  ];
-  const yaml = `${serialize(new Map([["workflow", workflow]]))}\n${topLevel.join("\n\n")}\n\n${jobsYaml.slice(derived.length)}`;
-
   const variables = envs.flatMap((env) => {
     const creds = envs_.credentials?.[env];
     const writer = writerVariables(env, dialect, creds).slice(1);
@@ -667,7 +651,18 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     "# that environment's wave job sets.",
     ...identityHeader("gitlab", cloudsOf(envs_, envs.flatMap((env) => [...planRoles(waves, env), ...waveRoles(waves, env), [env, "reader"] as [string, Role]]))),
   ];
-  return { path: ".gitlab-ci.yml", content: withHeader(header, yaml) };
+  // The stages this file's jobs use (review, then any the project's own jobs add), then the apply file's waves and the watch file's ops.
+  // A pr-review wave (#48) adds the merge request job that records the plans, in chant's stage "plans".
+  const jobStages = [...jobs.values()].map((job) => (job as { props?: { stage?: unknown } }).props?.stage).filter((stage) => typeof stage === "string");
+  const plans = waves.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
+  const pipeline = new GitLabPipeline({
+    comment: asComment(header),
+    include: [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }],
+    stages: [...new Set([...jobStages, ...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : []), "ops"])],
+    variables: { GIT_DEPTH: "0" },
+  });
+  const entities = new Map<string, Declarable>([["pipeline", pipeline], ["workflow", workflow], ...jobs]);
+  return { path: ".gitlab-ci.yml", content: oneFile("gitlab", gitlabSerializer.serialize(entities)) };
 }
 
 // ── The apply waves, through chant's generateOpWavesPipeline ───────────────

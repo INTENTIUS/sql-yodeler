@@ -167,4 +167,8 @@ export function declarativeAccessRefusal(project: Pick<Project, "configPath" | "
   );
 }
 
+/** The declarative path's refusals for environment `name`: on ClickHouse the topology's, then on either dialect the access switch's. */
+export const declarativeRefusal = (project: Pick<Project, "config" | "configPath" | "yodel" | "profileAccess" | "dialect">, name: string): YodelError | undefined =>
+  (project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, name) : undefined) ?? declarativeAccessRefusal(project, name);
+
 const sorted = (t: Topology): [string, unknown][] => Object.entries(t).sort(([a], [b]) => a.localeCompare(b));

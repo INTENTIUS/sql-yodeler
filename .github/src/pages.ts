@@ -1,7 +1,7 @@
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
-import { checkout } from "./shared.js";
+import { checkout, rendered } from "./shared.js";
 
-export const comment = `Builds docs-site/ and publishes it to GitHub Pages, at
+const comment = `Builds docs-site/ and publishes it to GitHub Pages, at
 https://intentius.io/sql-yodeler/, on every push to main. The pages come
 from docs/*.md at build time (docs-site/pages.mjs); the build fails when the
 output has an internal link that leads nowhere
@@ -14,7 +14,7 @@ type AStep = InstanceType<typeof Step>;
 export const siteBuildSteps = (): AStep[] => [
   new Step({
     uses: "actions/setup-node@v4",
-    with: { "node-version": "22", cache: "npm", "cache-dependency-path": "docs-site/package-lock.json" },
+    with: { "node-version": 22, cache: "npm", "cache-dependency-path": "docs-site/package-lock.json" },
   }),
   new Step({ name: "npm ci", "working-directory": "docs-site", run: "npm ci" }),
   new Step({ name: "Build the site", "working-directory": "docs-site", run: "npm run build" }),
@@ -25,6 +25,7 @@ const uploadPagesArtifact = "actions/upload-pages-artifact@fc324d3547104276b827a
 const deployPages = "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346"; // v5.0.1
 
 export const workflow = new Workflow({
+  comment: rendered("pages.ts", comment),
   name: "pages",
   on: { push: { branches: ["main"] }, workflow_dispatch: null },
   permissions: { contents: "read" },

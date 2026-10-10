@@ -5,7 +5,7 @@ import type { Command } from "../command.js";
 import { eventFromDrift, sendEvent } from "../notify/index.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
-import { declarativeAccessRefusal, declarativeTopologyRefusal } from "../config/settings.js";
+import { declarativeRefusal } from "../config/settings.js";
 import {
   declaredColumns,
   driftExitCode,
@@ -19,7 +19,7 @@ import {
   type DriftAgainst,
 } from "../chant/drift.js";
 import { buildSchema, type Build, type BuildOutput } from "../chant/build.js";
-import { clickhouseAccessRefusal } from "../chant/access.js";
+import { clickhouseAccessManaged } from "../chant/access.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -90,16 +90,15 @@ function recordedBuild(schema: BuildOutput): Build {
 }
 
 /**
- * ClickHouse access in a drift (#46): refused where the environment does
- * not manage access and the compared schema declares some (chant would
- * read it anyway), and the declared grants compared, which chant's
- * lifecycle diff leaves unobserved.
+ * ClickHouse access in a drift (#46): where the environment manages access,
+ * the declared grants compared, which chant's lifecycle diff leaves
+ * unobserved. Where it does not, chant reads no access and says so for each
+ * access declaration, and so does the drift.
  */
 async function clickhouseAccess(project: Project, env: Environment, drift: Drift, recorded: BuildOutput | undefined): Promise<Drift> {
+  if (!clickhouseAccessManaged(project, env.name)) return drift;
   const build = recorded ? recordedBuild(recorded) : await buildSchema(project);
   try {
-    const refusal = clickhouseAccessRefusal(project, env.name, build.output, recorded ? "the schema the history records" : "the declared schema");
-    if (refusal) throw refusal;
     return await withClickHouseGrants(drift, project, env, build);
   } finally {
     build.dispose();
@@ -261,7 +260,7 @@ export const drift: Command = {
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
       // chant renders the declaration for sql.profiles.<env>.topology alone; a different one in yodel.config.ts would show every replicated engine as drift.
-      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : declarativeAccessRefusal(project, env.name);
+      const refusal = declarativeRefusal(project, env.name);
       if (refusal) throw refusal;
       const versioned = hasMigrations(project);
       const source = a.against ?? (versioned ? "history" : "src");

@@ -69,6 +69,8 @@ async function adopted(ctx: Ctx, s: Adoption): Promise<NonNullable<Adoption["don
   await handMade(ctx);
   const before = { comment: await comment(ctx), rows: await rows(ctx) };
   const p = await Project.create(ctx, { noSource: true });
+  // A function belongs to no database, and ClickHouse writes a call to one into what calls it as its body, so chant's import adopts only the functions the profile names.
+  if (ctx.dialect === "ch") p.edit("chant.config.ts", "databases: [", `importFunctions: ["${chNames(ctx).fn}"], databases: [`);
   if (s.access !== undefined) manageAccess(p, s.access);
   const init = await p.yodel(["init", "--from", p.env, "--json"]);
   const doc = parse<InitDoc>(init);
@@ -135,7 +137,7 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
 /**
  * `yodel init --from <env>` adopts a database made by hand (on Postgres,
  * with a trigger function and a trigger; on ClickHouse, with a dictionary
- * and a function): it writes the declarations and a
+ * and a function the profile's importFunctions names): it writes the declarations and a
  * baseline migration, records the baseline applied without running it (the objects keep their data and stay as they were),
  * and then yodel plan shows no change and yodel apply has nothing to do.
  * BREAK: one adopted declaration is edited after init (a column's type),
@@ -183,7 +185,7 @@ async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
 
 /** The second environment's profile in chant.config.ts, with the access the first one has. */
 function secondProfile(ctx: Ctx, server: SecondServer, access: boolean): string {
-  if (ctx.dialect === "ch") return `{ url: "${server.url}", databases: ["${ctx.db.name}"] }`;
+  if (ctx.dialect === "ch") return `{ url: "${server.url}", databases: ["${ctx.db.name}"]${access ? ", access: true" : ""} }`;
   return `{ url: "${server.url}", user: { env: "YODEL_CLAIMS_POSTGRES_USER" }, password: { env: "YODEL_CLAIMS_POSTGRES_PASSWORD" }, schemas: ["${ctx.db.name}"], lockTimeoutMs: 500${access ? ", access: true" : ""} }`;
 }
 
@@ -261,8 +263,6 @@ export const adopt: Claim = {
   name: "adopt",
   says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
   dialects: { ch: body, pg: body },
-  // init --from reads every function on the ClickHouse server, so another run's function, made or dropped mid-import, would be adopted or planned as a create.
-  shares: ["ch:udf"],
   parts: partNames(parts),
   partDialects: partDialects(parts),
 };

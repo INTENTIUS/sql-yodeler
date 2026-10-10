@@ -10,12 +10,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
-import { accessItems, clickhouseAccessRefusal, describeAccessSteps, isAccessChange, renderAccessReview, takesAccessAway } from "../src/chant/access.js";
+import { accessItems, clickhouseAccessManaged, describeAccessSteps, isAccessChange, renderAccessReview, takesAccessAway } from "../src/chant/access.js";
 import { declaredChanges, planExitCode, type Plan } from "../src/chant/plan.js";
 import { recordedAccessSource } from "../src/chant/drift.js";
 import { templateOf, withoutAuthentication } from "../src/init/clickhouse-access.js";
 import { lintMigrations } from "../src/lint/index.js";
 import { createMigration, newestMigration, readMigrations, writeMigration, type CreatedMigration } from "../src/migrations/index.js";
+import { declarativeRefusal } from "../src/config/settings.js";
 import { projectFromConfig, type ProjectConfig } from "../src/project.js";
 import { alterToDeclared, clickhouseDatabases, clickhouseGlobals, dropGlobal } from "../src/replay/clickhouse.js";
 import { renderForEnvironment } from "../src/topology/render.js";
@@ -84,13 +85,17 @@ describe("ClickHouse access in a plan", () => {
     expect(planExitCode(plan([], [{ object: "yodel_46.odd", type: "ClickHouse::Dictionary", reason: "its definition does not parse" }]))).toBe(2);
   });
 
-  it("refuses the declarative path where the environment does not manage access and the build declares some", () => {
-    const config: ProjectConfig = { lexicons: ["sql"], sql: { dialect: "clickhouse", profiles: { dev: { url: "http://h:8123" } } } };
-    const off = projectFromConfig("/p", "/p/chant.config.ts", config);
-    expect(clickhouseAccessRefusal(off, "dev", ch(daily, scale))).toBeUndefined();
-    expect(clickhouseAccessRefusal(off, "dev", ch(reader, readEvents))?.message).toMatch(/declares access control \(reader, readEvents\), but dev does not manage access \(off by default\).*Set environments\.dev\.access to true/);
-    const on = projectFromConfig("/p", "/p/chant.config.ts", config, { path: "/p/yodel.config.ts", config: { environments: { dev: { access: true } } } });
-    expect(clickhouseAccessRefusal(on, "dev", ch(reader, readEvents))).toBeUndefined();
+  it("leaves access to chant's profile switch, and refuses a yodel.config.ts that says otherwise on the declarative path", () => {
+    const config = (access?: boolean): ProjectConfig => ({ lexicons: ["sql"], sql: { dialect: "clickhouse", profiles: { dev: { url: "http://h:8123", ...(access === undefined ? {} : { access }) } } } });
+    const yodel = (access: boolean) => ({ path: "/p/yodel.config.ts", config: { environments: { dev: { access } } } });
+    const off = projectFromConfig("/p", "/p/chant.config.ts", config());
+    expect(clickhouseAccessManaged(off, "dev")).toBe(false);
+    expect(declarativeRefusal(off, "dev")).toBeUndefined();
+    expect(clickhouseAccessManaged(projectFromConfig("/p", "/p/chant.config.ts", config(true)), "dev")).toBe(true);
+    const both = projectFromConfig("/p", "/p/chant.config.ts", config(true), yodel(true));
+    expect(clickhouseAccessManaged(both, "dev")).toBe(true);
+    expect(declarativeRefusal(both, "dev")).toBeUndefined();
+    expect(declarativeRefusal(projectFromConfig("/p", "/p/chant.config.ts", config(), yodel(true)), "dev")?.message).toMatch(/sets environments\.dev\.access to true, but .* reads sql\.profiles\.dev\.access .* \(unset, so off\)/);
   });
 });
 
@@ -102,9 +107,10 @@ describe("ClickHouse access in a migration", () => {
     ]);
     const sql = first?.files.sql ?? "";
     for (const want of ["CREATE DICTIONARY yodel_46.daily_n", "CREATE FUNCTION yodel_46_scale", "CREATE ROLE yodel_46_reader", "CREATE ROW POLICY clicks", "GRANT SELECT ON"]) expect(sql).toContain(want);
-    // A user declared without IDENTIFIED is the environment's to create.
+    // A user declared without IDENTIFIED is the environment's to create; its declared clauses (DEFAULT ROLE) are set on it (SQLCH271).
     expect(sql).not.toContain("CREATE USER");
-    expect(describeAccessSteps(first?.statements.steps ?? [])[0]).toMatch(/^Access control: \d+ steps \(SQLCH200 create, SQLCH273 metadata\)$/);
+    expect(sql).toMatch(/ALTER USER \S*yodel_46_svc\S* DEFAULT ROLE/);
+    expect(describeAccessSteps(first?.statements.steps ?? [])[0]).toMatch(/^Access control: \d+ steps \(SQLCH200 create, SQLCH271 metadata, SQLCH273 metadata\)$/);
     const lines = describeAccessSteps(second?.statements.steps ?? []).join("\n");
     expect(lines).toContain("1 taking access away");
     expect(lines).toContain("revokes a privilege that no declaration grants any more: REVOKE INSERT ON");

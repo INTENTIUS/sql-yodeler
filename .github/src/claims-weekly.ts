@@ -1,7 +1,7 @@
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
-import { checkout, claimsEnv, emulatorSteps, setupNode } from "./shared.js";
+import { checkout, claimsEnv, emulatorSteps, rendered, setupNode } from "./shared.js";
 
-export const comment = `Every claim, weekly, against @intentius/sql-yodeler as npm serves it
+const comment = `Every claim, weekly, against @intentius/sql-yodeler as npm serves it
 (\`npm i @intentius/sql-yodeler@latest\`), not against this checkout: the
 claims link that install's node_modules (YODEL_CLAIMS_NODE_MODULES,
 scenarios/lib/project.ts). The run rewrites the committed record,
@@ -15,6 +15,7 @@ const page = "docs/claims.md";
 const branch = "claims-weekly";
 
 export const workflow = new Workflow({
+  comment: rendered("claims-weekly.ts", comment),
   name: "claims-weekly",
   on: { schedule: [{ cron: "0 6 * * 1" }], workflow_dispatch: null },
   permissions: { contents: "read" },

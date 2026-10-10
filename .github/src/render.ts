@@ -9,10 +9,9 @@
  * hand edit to a rendered file, or a declaration changed without rendering,
  * fails the check.
  *
- * The comment at the top of each file is added here, not by chant: the
- * github lexicon's serializer writes no YAML comments (INTENTIUS/chant#3667),
- * so a declaration exports the file's comment as `comment`, and comments on
- * steps stay in the declarations.
+ * Each workflow's comment at the top of its file is the Workflow's `comment`
+ * (rendered() in shared.ts). The docker lexicon's serializer writes no
+ * comments, so the Dockerfile's is added here, from image.ts's `comment`.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -27,10 +26,10 @@ import * as claimsWeekly from "./claims-weekly.js";
 import * as image from "./image.js";
 import * as pages from "./pages.js";
 import * as publish from "./publish.js";
+import { rendered } from "./shared.js";
 
 interface Declared {
   workflow: unknown;
-  comment?: string;
 }
 
 /** Output file name (without .yml) to its declaration. publish must stay publish: npm's trusted publisher names the file. */
@@ -38,19 +37,16 @@ const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claims
 
 const repoDir = fileURLToPath(new URL("../../", import.meta.url));
 
-/** The comment lines at the top of a rendered file, from its declaration and its own comment. */
-const header = (source: string, comment?: string): string => {
-  const head = [`Rendered from .github/src/${source} by \`npm run workflows\`. Edit that file, not this one.`];
-  if (comment) head.push("", ...comment.split("\n"));
-  return head.map((l) => (l ? `# ${l}` : "#")).join("\n");
-};
+/** The Dockerfile's comment lines, from image.ts's `comment`. */
+const header = (comment: string): string =>
+  rendered("image.ts", comment).split("\n").map((l) => (l ? `# ${l}` : "#")).join("\n");
 
 /** The CI image's Dockerfile: the docker lexicon's serializer writes it as Dockerfile.<export name>. */
 function renderImage(): string {
   const result = dockerSerializer.serialize(new Map([["image", image.image]]));
   const dockerfile = typeof result === "string" ? undefined : result.files?.["Dockerfile.image"];
   if (dockerfile === undefined) throw new Error("image.ts: the docker serializer wrote no Dockerfile");
-  return `${header("image.ts", image.comment)}\n\n${dockerfile}`;
+  return `${header(image.comment)}\n\n${dockerfile}`;
 }
 
 /** Each rendered file's path in the repository and its content. */
@@ -59,7 +55,7 @@ export function render(): Map<string, string> {
   for (const [name, mod] of Object.entries(declared)) {
     const yaml = githubSerializer.serialize(new Map([["workflow", mod.workflow as Declarable]]));
     if (typeof yaml !== "string") throw new Error(`${name}: expected one workflow file, got several`);
-    out.set(`.github/workflows/${name}.yml`, `${header(`${name}.ts`, mod.comment)}\n\n${yaml}`);
+    out.set(`.github/workflows/${name}.yml`, yaml);
   }
   out.set(".github/image/Dockerfile", renderImage());
   return out;

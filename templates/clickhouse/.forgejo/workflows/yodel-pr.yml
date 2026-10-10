@@ -8,6 +8,7 @@
 # fails the job when the server lets it through.
 # The comment is posted with the job's own token (Forgejo gives a same-repository
 # pull request one that can comment).
+
 name: yodel-pr
 
 on:
@@ -34,7 +35,7 @@ jobs:
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
@@ -59,7 +60,7 @@ jobs:
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
@@ -95,7 +96,7 @@ jobs:
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)

@@ -10,7 +10,7 @@ type AStep = InstanceType<typeof Step>;
 export const checkout = (): AStep => new Step({ uses: "actions/checkout@v4" });
 
 export const setupNode = (version: number, cache = true): AStep =>
-  new Step({ uses: "actions/setup-node@v4", with: { "node-version": String(version), ...(cache ? { cache: "npm" } : {}) } });
+  new Step({ uses: "actions/setup-node@v4", with: { "node-version": version, ...(cache ? { cache: "npm" } : {}) } });
 
 /** Where the claims find the emulator on the runner, and where each run's log goes. */
 export const claimsEnv: Record<string, string> = {
@@ -69,3 +69,7 @@ exit 1
 `,
   }),
 ];
+
+/** A rendered file's comment: where it is rendered from, then the declaration's own comment. */
+export const rendered = (source: string, comment?: string): string =>
+  [`Rendered from .github/src/${source} by \`npm run workflows\`. Edit that file, not this one.`, ...(comment ? ["", comment] : [])].join("\n");

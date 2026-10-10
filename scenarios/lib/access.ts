@@ -14,15 +14,17 @@ import type { Project } from "./project.js";
 export const reader = (ctx: Ctx): string => `${ctx.db.name}__reader`;
 
 /**
- * Turns access on for the claim's environment: in yodel.config.ts
+ * Turns access on (or off) for the claim's environment: in yodel.config.ts
  * (`environments.<env>.access`, what yodel's own plan, new and init read)
- * and, on Postgres, the chant profile, which the declarative path's ApplyOp
- * reads (chant's ClickHouse apply has no switch of its own, #46). `on:
- * false` writes yodel.config.ts alone, off.
+ * and in the chant profile (`sql.profiles.<env>.access`), which the
+ * declarative path's ApplyOp and chant's drift read, on either dialect.
  */
 export function manageAccess(p: Project, on = true): void {
   p.write("yodel.config.ts", `import { defineConfig } from "@intentius/sql-yodeler";\n\nexport default defineConfig({\n  environments: { ${JSON.stringify(p.env)}: { access: ${String(on)} } },\n});\n`);
-  if (on && p.ctx.dialect === "pg") p.edit("chant.config.ts", "lockTimeoutMs: 500,", "lockTimeoutMs: 500,\n        access: true,");
+  const [plain, managed] = p.ctx.dialect === "pg" ? ["lockTimeoutMs: 500,", "lockTimeoutMs: 500,\n        access: true,"] : ["databases: [", "access: true, databases: ["];
+  const config = p.read("chant.config.ts");
+  if (on && !config.includes(managed)) p.edit("chant.config.ts", plain, managed);
+  if (!on && config.includes(managed)) p.edit("chant.config.ts", managed, plain);
 }
 
 /** Declares the role, a policy on orders for it and grants on the schema and orders, in src/access.ts; and forces row-level security on orders. */

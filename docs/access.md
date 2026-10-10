@@ -53,13 +53,9 @@ On the declarative path, the apply is the project's `ApplyOp` run by `chant run`
 yodel plan: yodel.config.ts sets environments.dev.access to true, but the declarative path applies through chant, which reads sql.profiles.dev.access in chant.config.ts (unset, so off). Set sql.profiles.dev.access to true as well, or leave access to chant.config.ts.
 ```
 
-With access off, the access declarations are left out of the plan (chant's hint counts them), the server's policies and privileges are not read, and a table is created without its `ROW LEVEL SECURITY` statements. With access on, the declared privileges are all the privileges on the declared objects: one granted by hand is revoked by the next apply.
+On Postgres, with access off, the access declarations are left out of the plan (chant's hint counts them), the server's policies and privileges are not read, and a table is created without its `ROW LEVEL SECURITY` statements. With access on, the declared privileges are all the privileges on the declared objects: one granted by hand is revoked by the next apply.
 
-On ClickHouse the setting works differently on the declarative path, because chant's ClickHouse apply has no switch: it plans and applies every user, role, row policy and grant the build declares. So yodel does not need `sql.profiles.<env>.access` to agree there. Instead, where the environment does not manage access and `src/` declares any of them, `yodel plan`, `yodel apply` and `yodel drift` refuse rather than leave them out of the plan and have the apply make them:
-
-```text
-yodel plan: the declared schema declares access control (reader, clicksOnly, readEvents), but dev does not manage access (off by default). On ClickHouse the declarative apply and drift run chant, which plans every user, role, row policy and grant it is given, so yodel will not plan them away here and apply them there. Set environments.dev.access to true in yodel.config.ts, or move the access declarations out of the source directory.
-```
+The same holds on ClickHouse: with access off, chant leaves the users, roles, row policies and grants out of the plan and the apply and does not read the server's, and `yodel drift` lists each access declaration as not compared.
 
 ## What the schema owns and what the environment owns
 

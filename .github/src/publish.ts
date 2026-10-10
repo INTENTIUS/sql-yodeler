@@ -5,9 +5,9 @@
 
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { IMAGE_REPOSITORY } from "./image.js";
-import { checkout, setupNode } from "./shared.js";
+import { checkout, rendered, setupNode } from "./shared.js";
 
-export const comment = `Publishes @intentius/sql-yodeler to npm when a v<version> tag is pushed.
+const comment = `Publishes @intentius/sql-yodeler to npm when a v<version> tag is pushed.
 \`npm run release -- <version>\` (scripts/release.sh) pushes the tag, and only
 on a main commit whose ci and claims runs are both green; AGENTS.md,
 Releasing, has the steps.
@@ -153,6 +153,7 @@ echo "$IMAGE@$digest" | tee -a "$GITHUB_STEP_SUMMARY"
 });
 
 export const workflow = new Workflow({
+  comment: rendered("publish.ts", comment),
   name: "publish",
   on: { push: { tags: ["v*"] } },
   permissions: { contents: "read" },
