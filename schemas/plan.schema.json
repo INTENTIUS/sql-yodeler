@@ -354,7 +354,9 @@
             "waits",
             "planDigest",
             "digest",
-            "approve"
+            "approve",
+            "promotions",
+            "blocked"
           ],
           "properties": {
             "wave": {
@@ -397,6 +399,63 @@
             "approve": {
               "description": "The chant approve command for the wave, for a person to run.",
               "type": "string"
+            },
+            "promotions": {
+              "description": "Each environment this one requires (waves[].requires) and what its history records of each pending migration.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "env",
+                  "from",
+                  "migrations"
+                ],
+                "properties": {
+                  "env": {
+                    "type": "string"
+                  },
+                  "from": {
+                    "description": "Where the requirement is declared: yodel.config.ts, at the base commit, or both.",
+                    "type": "string"
+                  },
+                  "migrations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "checksum",
+                        "ran"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "checksum": {
+                          "type": "string"
+                        },
+                        "ran": {
+                          "enum": [
+                            "applied",
+                            "not applied",
+                            "applied with another checksum"
+                          ]
+                        },
+                        "recorded": {
+                          "description": "The checksum the required environment recorded, when it differs.",
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "blocked": {
+              "description": "A pending migration has not run where it must first: the wave refuses it until it has.",
+              "type": "boolean"
             }
           }
         },

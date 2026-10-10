@@ -138,6 +138,20 @@ To let a waiting wave through, run the approve command it printed, push `chant/l
 
 The policy comes from the base commit, the first parent of the commit being applied, never from the change. A pull request that sets prod's gate to `never` merges, and prod still waits under the gate main had. Only the gate is read there: the waves, their order and the migrations come from the commit being applied. yodel reads its own config at the base the same way: `YODEL_BASE` names another commit, and on a pull request it is the merge base with the target branch.
 
+### Promotion: what the wave before has applied
+
+A wave applies only migrations the environment before it has applied. `waves[].requires` names that environment; it defaults to the wave before, and `requires: false` turns it off. Before anything is asked or applied, `yodel apply <env>` (in a wave job, run by hand, or the migrations Op's Apply step) reads the required environment's history with that environment's own profile, which outside its own wave job is its reader, and refuses any pending migration the history does not record as applied with the checksum its files have now. It exits 4 and applies nothing, with a message like this one:
+
+```text
+yodel apply: refused: prod applies only migrations staging applied first, and 1 pending one has not run there:
+  20261010T0644-add-promo: staging's history does not record it applied (required by yodel.config.ts and yodel.config.ts at aa556870d420)
+Nothing was applied. Apply it to staging first.
+```
+
+The requirement is read from the working tree's `yodel.config.ts` and from the base commit's, and both hold, so a change that drops its own requirement is still held to the base's. A re-run of prod's job, a manual `yodel apply prod`, or a staging wave someone skipped all stop here. The wave plan's digest covers the requirement and which pending migrations the required history records, so prod's approval is of a plan staging has already run: approve prod's wave after staging applied.
+
+`yodel plan <env>` and the pull request comment list, for each pending migration, whether the required environment has run it. The templates give each plan job and each wave job the required environment's reader for that.
+
 ## The pull request comment
 
 `yodel plan <env> --comment` posts the plan as one comment per environment on the pull (merge) request, and updates that comment on the next push rather than adding another. `--format markdown` prints the same Markdown without posting. From the ClickHouse example, for its rebuild:

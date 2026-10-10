@@ -19,8 +19,9 @@
 #   GITLAB_TOKEN: a project access token with the api scope (Reporter), for
 #     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN
 #     cannot write merge request notes or issues.
-# The jobs that hold no writer read with the reader: chant.config.ts picks
-# the writer only under YODEL_CREDENTIALS=writer, which only the wave jobs set.
+# The jobs that hold no writer read with the reader: chant.config.ts picks an
+# environment's writer only under YODEL_CREDENTIALS=writer:<env>, which only
+# that environment's wave job sets.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

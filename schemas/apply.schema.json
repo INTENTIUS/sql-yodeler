@@ -319,7 +319,8 @@
         "gate",
         "base",
         "pending",
-        "destructiveSteps"
+        "destructiveSteps",
+        "requires"
       ],
       "properties": {
         "planDigest": {
@@ -358,6 +359,42 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/destructiveStep"
+          }
+        },
+        "requires": {
+          "description": "Each environment this one requires, and the pending migrations its history records applied; part of the plan digest.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "env",
+              "applied"
+            ],
+            "properties": {
+              "env": {
+                "type": "string"
+              },
+              "applied": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "checksum"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "checksum": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

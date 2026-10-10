@@ -55,12 +55,12 @@ If 127.0.0.1 reaches another server (a Postgres installed on this machine), `jus
 
 ## Credentials
 
-Each environment has two Postgres roles. `chant.config.ts` picks the reader unless `YODEL_CREDENTIALS=writer`, and only the apply job sets that.
+Each environment has two Postgres roles. `chant.config.ts` picks the reader unless `YODEL_CREDENTIALS=writer` (every environment) or `writer:<env>` (that one), and only an environment's wave job sets that, for its own environment.
 
 | Variable | Held by |
 |---|---|
 | `<ENV>_POSTGRES_URL` | every job for that environment, e.g. `postgres://db.example.com:5432/app` |
-| `<ENV>_POSTGRES_READER_USER`, `<ENV>_POSTGRES_READER_PASSWORD` | the plan comment and the drift watch |
+| `<ENV>_POSTGRES_READER_USER`, `<ENV>_POSTGRES_READER_PASSWORD` | the plan comment and the drift watch, and the next wave's jobs, which read this environment's history before they apply |
 | `<ENV>_POSTGRES_WRITER_USER`, `<ENV>_POSTGRES_WRITER_PASSWORD` | the environment's wave job, after a merge to main, and nothing else |
 
 `<ENV>` is `DEV` or `PROD`. The roles, for example, where the writer creates both schemas on the first apply:
@@ -98,7 +98,7 @@ chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:...
 git push origin chant/lifecycle
 ```
 
-The approval is a commit on the `chant/lifecycle` branch; every job fetches that branch. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; approve and push, then re-run the failed job (GitLab: retry it). If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
+The approval is a commit on the `chant/lifecycle` branch; every job fetches that branch. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; approve and push, then re-run the failed job (GitLab: retry it). A wave applies only migrations the wave before it has applied: `yodel apply <env>` reads that environment's history and refuses (exit 4, nothing applied) a migration it does not record, so approve prod's wave once dev has run it. If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
 
 ### Drift
 

@@ -95,7 +95,7 @@ export default defineConfig({
 | lint rule levels | `lint.rules` | | | each rule's own |
 | the apply pipeline's waves and their gates | `waves` | | | none: every environment waits for an approval |
 
-`waves` lists the environments in the order the apply pipeline applies them, each with a gate policy: `[{ env: "dev", gate: "never" }, { env: "prod", gate: "on-destructive" }]`. An environment it does not name, or a wave without `gate`, waits for an approval whenever it has a migration to apply (`always`). The pipeline reads a wave's gate from the commit a change merges onto, not from the change; [Approval](approval.md#waves-a-gate-per-environment) has the rest.
+`waves` lists the environments in the order the apply pipeline applies them, each with a gate policy: `[{ env: "dev", gate: "never" }, { env: "prod", gate: "on-destructive" }]`. An environment it does not name, or a wave without `gate`, waits for an approval whenever it has a migration to apply (`always`). The pipeline reads a wave's gate from the commit a change merges onto, not from the change; [Approval](approval.md#waves-a-gate-per-environment) has the rest. A wave applies only migrations the wave before it has applied; `requires: "<env>"` names another environment, `requires: false` none ([Promotion](approval.md#promotion-what-the-wave-before-has-applied)).
 
 `sources` names DDL sources, the tables an ORM defines read from the DDL it prints; see [Schema from an ORM](orm.md).
 

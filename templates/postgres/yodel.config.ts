@@ -18,6 +18,9 @@ export default {
   // "on-destructive" (a drop, a table rewrite or lock-heavy statement, a
   // rebuild, an Op or manual step) or "never". The pipeline reads the gate
   // from the commit before the push, so a change cannot loosen its own.
+  // A wave applies only migrations the wave before it has applied (its
+  // history records them, with the same checksum); `requires: "<env>"` names
+  // another environment, `requires: false` none.
   waves: [
     { env: "dev", gate: "always" },
     { env: "prod", gate: "always" },

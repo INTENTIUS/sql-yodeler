@@ -7,7 +7,9 @@
 # has it (yodel.config.ts waves, rendered), and a wave that needs an approval
 # exits 3 with the chant approve command, so the waves after it do not run.
 # Approve, push chant/lifecycle, and run the failed job again. These are the
-# only jobs that hold a writer's credentials, one environment's each.
+# only jobs that hold a writer's credentials, one environment's each, with
+# the reader of the environment before (waves[].requires): yodel apply refuses
+# a migration that environment's history does not record as applied.
 name: yodel-apply
 
 on:
@@ -30,7 +32,7 @@ jobs:
     environment:
       name: dev
     env:
-      YODEL_CREDENTIALS: writer
+      YODEL_CREDENTIALS: writer:dev
       YODEL_LOCK_WAIT: '10m'
       YODEL_STAND_DOWN: '1'
       DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
@@ -65,7 +67,7 @@ jobs:
     environment:
       name: prod
     env:
-      YODEL_CREDENTIALS: writer
+      YODEL_CREDENTIALS: writer:prod
       YODEL_LOCK_WAIT: '10m'
       YODEL_STAND_DOWN: '1'
       PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
@@ -73,6 +75,9 @@ jobs:
       PROD_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_WRITER_PASSWORD }}'
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
+      DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
+      DEV_CLICKHOUSE_READER_USER: '${{ secrets.DEV_CLICKHOUSE_READER_USER }}'
+      DEV_CLICKHOUSE_READER_PASSWORD: '${{ secrets.DEV_CLICKHOUSE_READER_PASSWORD }}'
     steps:
       - uses: actions/checkout@v7
         with:

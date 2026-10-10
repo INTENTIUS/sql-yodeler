@@ -14,7 +14,7 @@ import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "..
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_REFUSED } from "../exit.js";
-import { planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile } from "../waves/index.js";
+import { enforcePromotion, planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile } from "../waves/index.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -195,8 +195,11 @@ Exit codes:
   3  stopped at the gate, waiting for approval of this plan
   4  versioned: refused, nothing applied: a checksum mismatch, an applied
      migration gone from the directory, an out-of-order migration
-     without --allow-out-of-order, a pre-migration check that failed, or a
-     policy rule that denies the plan with no override
+     without --allow-out-of-order, a pre-migration check that failed, a
+     policy rule that denies the plan with no override, or a pending
+     migration the environment this one requires (yodel.config.ts
+     waves[].requires, default the wave before) does not record as applied
+     with the same checksum
   5  versioned: another apply holds the lock (after --lock-wait, if given)
   1  anything else failed: a statement (the history records where; rerun to
      resume), a plan that moved since approval, a bad config
@@ -385,6 +388,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
       ...(a.standDown ? { standDown: standingDown(project, env) } : {}),
       approve: async (digest) => {
+        // Under the lock: every pending migration ran first where this environment requires (exit 4 otherwise).
+        await enforcePromotion(project, env.name, ordered, (await inspect(venv, ordered)).status.pending);
         const by = await verifyApproval(ledger, op, digest);
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
       },
@@ -431,6 +436,15 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   if (stood) {
     if (!a.json) io.out(`${stood}\n`);
     return emit({ status: "stood-down", stoodDown: stood }, 0);
+  }
+
+  // Before the gate: a pending migration the required environment has not applied refuses, and nothing is asked.
+  try {
+    await enforcePromotion(project, env.name, ordered, report.status.pending);
+  } catch (e) {
+    if (!(e instanceof YodelError) || e.exitCode !== EXIT_REFUSED) throw e;
+    if (!a.json) io.err(`yodel apply: ${e.message}\n`);
+    return emit({ status: "refused", refusal: { exitCode: EXIT_REFUSED, message: e.message } }, EXIT_REFUSED);
   }
 
   // The first pending migration's checks (#52) read the data as it is now: one that fails refuses before anyone is asked to approve. The Apply step runs every migration's again under the lock.

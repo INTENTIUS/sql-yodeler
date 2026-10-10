@@ -340,12 +340,13 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean): AJob {
   });
 }
 
-export function actionsReview(forge: Actions, { dialect, names: envs, replay }: Environments): RenderedFile {
+export function actionsReview(forge: Actions, { dialect, names: envs, replay, waves }: Environments): RenderedFile {
   const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay) };
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
       ...runner(inContainer(forge)),
-      env: secrets([...readerVariables(env, dialect), ...WEBHOOK_VARIABLES]),
+      // The plan shows where each migration has run: the required environment's reader too.
+      env: secrets([...[env, ...requiredOf(waves, env)].flatMap((e) => readerVariables(e, dialect)), ...WEBHOOK_VARIABLES]),
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
         ...setupSteps(inContainer(forge)),
@@ -469,8 +470,9 @@ export function gitlabPipeline({ dialect, names: envs, replay, waves }: Environm
     "#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for",
     "#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN",
     "#     cannot write merge request notes or issues.",
-    "# The jobs that hold no writer read with the reader: chant.config.ts picks",
-    "# the writer only under YODEL_CREDENTIALS=writer, which only the wave jobs set.",
+    "# The jobs that hold no writer read with the reader: chant.config.ts picks an",
+    "# environment's writer only under YODEL_CREDENTIALS=writer:<env>, which only",
+    "# that environment's wave job sets.",
   ];
   return { path: ".gitlab-ci.yml", content: withHeader(header, yaml) };
 }
@@ -484,7 +486,19 @@ const WAVE_GATES: readonly WaveGate[] = ["always", "on-destructive", "never"];
 export interface Wave {
   env: string;
   gate: WaveGate;
+  /**
+   * The environment whose history must record a migration applied before
+   * this one applies it (yodel.config.ts `waves[].requires`, default the
+   * wave before): this wave's jobs, and its plan job, read it with its reader.
+   */
+  requires?: string;
 }
+
+/** The environment `env`'s wave requires, as a list. */
+const requiredOf = (waves: readonly Wave[], env: string): string[] => {
+  const r = waves.find((w) => w.env === env)?.requires;
+  return r ? [r] : [];
+};
 
 /** The waves spec: committed, and read by every wave job (its gate policy at the commit before the push). */
 export const WAVES_SPEC = "yodel-waves.json";
@@ -540,11 +554,16 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
   };
   const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(wavesSpec(waves), null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
-  const variables = (forge: Forge) => (env: string) => ({
-    YODEL_CREDENTIALS: "writer",
-    ...APPLY_LOCK,
-    ...(forge === "gitlab" ? {} : secrets([...writerVariables(env, dialect), ...WEBHOOK_VARIABLES])),
-  });
+  const variables = (forge: Forge) => (env: string) => {
+    const required = waves.find((w) => w.env === env)?.requires;
+    return {
+      YODEL_CREDENTIALS: `writer:${env}`,
+      ...APPLY_LOCK,
+      ...(forge === "gitlab"
+        ? {}
+        : { ...secrets([...writerVariables(env, dialect), ...WEBHOOK_VARIABLES]), ...(required ? secrets(readerVariables(required, dialect)) : {}) }),
+    };
+  };
   const header = [
     ...HEADER,
     "#",
@@ -554,7 +573,9 @@ export async function applyPipelines(dir: string, { dialect, waves }: Environmen
     "# has it (yodel.config.ts waves, rendered), and a wave that needs an approval",
     "# exits 3 with the chant approve command, so the waves after it do not run.",
     "# Approve, push chant/lifecycle, and run the failed job again. These are the",
-    "# only jobs that hold a writer's credentials, one environment's each.",
+    "# only jobs that hold a writer's credentials, one environment's each, with",
+    "# the reader of the environment before (waves[].requires): yodel apply refuses",
+    "# a migration that environment's history does not record as applied.",
   ];
   for (const forge of FORGES) {
     const path = forge === "gitlab" ? 'export PATH="$PWD/node_modules/.bin:$PATH"' : 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"';
@@ -623,14 +644,16 @@ export async function readWaves(dir: string, envs: readonly string[]): Promise<W
   const file = join(dir, "yodel.config.ts");
   const config = existsSync(file) ? ((await import(pathToFileURL(file).href)) as { default?: { waves?: unknown } }).default : undefined;
   const declared = config?.waves;
-  if (declared === undefined) return envs.map((env) => ({ env, gate: "always" }));
+  if (declared === undefined) return envs.map((env, i) => ({ env, gate: "always", ...(i > 0 ? { requires: envs[i - 1] } : {}) }));
   if (!Array.isArray(declared) || declared.length === 0) throw new Error("yodel.config.ts: waves must list at least one { env, gate }");
-  return declared.map((w: { env?: unknown; gate?: unknown }, i) => {
+  return declared.map((w: { env?: unknown; gate?: unknown; requires?: unknown }, i, all: Array<{ env?: unknown }>) => {
     const env = String(w.env);
     if (!envs.includes(env)) throw new Error(`yodel.config.ts: waves[${String(i)}].env ${env} is not an environment (${envs.join(", ")})`);
     const gate = (w.gate ?? "always") as WaveGate;
     if (!WAVE_GATES.includes(gate)) throw new Error(`yodel.config.ts: waves[${String(i)}].gate ${String(w.gate)} is not ${WAVE_GATES.join(", ")}`);
-    return { env, gate };
+    const requires = w.requires === false ? undefined : w.requires === undefined ? (i > 0 ? String(all[i - 1]?.env) : undefined) : typeof w.requires === "string" ? w.requires : JSON.stringify(w.requires);
+    if (requires !== undefined && !envs.includes(requires)) throw new Error(`yodel.config.ts: waves[${String(i)}].requires ${requires} is not an environment (${envs.join(", ")})`);
+    return { env, gate, ...(requires ? { requires } : {}) };
   });
 }
 
