@@ -165,15 +165,15 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
   const approveJs = join(installed, "dist", "commands", "approve.js");
-  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !readFileSync(join(installed, "dist", "ci", "render.js"), "utf8").includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js"))) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130) or no lint annotations (#129) yet: this checkout's, packed and committed with the project.
+  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !readFileSync(join(installed, "dist", "ci", "render.js"), "utf8").includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !readFileSync(join(installed, "dist", "ci", "render.js"), "utf8").includes("code.forgejo.org/forgejo/upload-artifact")) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129) or no Forgejo report upload that works on Forgejo yet: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
     const file = packed.out.trim().split("\n").at(-1) ?? "";
     if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
     await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
-    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130) or no lint annotations (#129): the project takes this checkout's yodel, vendor/${file}`);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129) or no Forgejo report upload that works on Forgejo: the project takes this checkout's yodel, vendor/${file}`);
   }
   // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
   mkdirSync(join(dir, "ci"), { recursive: true });
