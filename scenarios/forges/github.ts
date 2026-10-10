@@ -11,7 +11,12 @@
  * act runs the generated workflow file as it was pushed, with no changes.
  * A job without a container runs on the Docker host's network, as GitHub
  * runs it on the runner's host, so the plan and apply jobs reach the mock
- * and the emulator at localhost. The lint job runs in a job container on
+ * and the emulator at localhost. Each run has an id (GITHUB_RUN_ID) the
+ * mock is told of when it ends, and a job's push (a pending record on
+ * chant/lifecycle) carries the token, as GitHub's checkout gives a job with
+ * contents: write. A re-run the mock is asked for (#47: yodel approve
+ * resuming a waiting wave) is act again on the same commit, with the same
+ * run id and the next attempt. The lint job runs in a job container on
  * the network act makes for its replay service, and reaches that server by
  * the service's name, so it never meets the emulator's 8123 or 5432 on the
  * host. From there the mock is not on localhost, so the lint job's fetch of
@@ -86,9 +91,12 @@ export function githubForge(): Forge {
       /**
        * act on a fresh clone of `sha` (as branch `branch`), running `workflow` for `event`.
        * `apiHost`: how the job reaches the mock's API; a job in a container (the watch) is not on the host's localhost.
+       * `rerun`: the run id and attempt of a re-run; a new run takes the next id.
        */
-      const act = async (event: string, workflow: string, branch: string, sha: string, payload: Record<string, unknown>, apiHost = "localhost"): Promise<ForgeRun> => {
+      const act = async (event: string, workflow: string, branch: string, sha: string, payload: Record<string, unknown>, apiHost = "localhost", rerun?: { id: number; attempt: number }): Promise<ForgeRun> => {
         n += 1;
+        const runId = rerun?.id ?? 1000 + n;
+        const attempt = rerun?.attempt ?? 1;
         const dir = join(ctx.work, `act-${String(n)}`);
         const git = async (...args: string[]) => {
           const ran = await run("git", args, { cwd: ctx.work });
@@ -98,6 +106,8 @@ export function githubForge(): Forge {
         await git("-C", dir, "checkout", "-q", "-B", branch, sha);
         // The job's git (the approvals on chant/lifecycle) reads from the mock as the job sees it.
         await git("-C", dir, "remote", "set-url", "origin", `http://localhost:${port}/${USER}/${name}.git`);
+        // A push from the job (a wave's pending record) carries the token, as checkout's credentials do on GitHub.
+        await git("-C", dir, "config", `http.http://localhost:${port}/.extraHeader`, `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`);
         const eventFile = join(ctx.work, `act-${String(n)}-event.json`);
         writeFileSync(eventFile, JSON.stringify({ ...payload, repository }));
         ctx.log(`act ${event} ${workflow} on ${name}@${sha.slice(0, 8)} (${branch})`);
@@ -113,18 +123,38 @@ export function githubForge(): Forge {
             ...ACTIONS.flatMap((a) => ["--replace-ghe-action-with-github-com", a]),
             "--env", `GITHUB_API_URL=http://${apiHost}:${port}/api/v3`,
             "--env", "GITHUB_SERVER_URL=https://github.com",
+            "--env", `GITHUB_RUN_ID=${String(runId)}`,
+            "--env", `GITHUB_RUN_ATTEMPT=${String(attempt)}`,
             "--secret-file", secretFile,
           ],
           { cwd: dir, timeoutMs: 20 * 60_000 },
         );
         const status = ran.code === 0 ? "success" : ran.timedOut ? "timed out" : `failure (act exited ${String(ran.code)})`;
-        ctx.log(`act ${event} on ${sha.slice(0, 8)}: ${status}`);
-        return { ok: ran.code === 0, status, log: ran.out + ran.err };
+        ctx.log(`act ${event} on ${sha.slice(0, 8)} (run ${String(runId)}, attempt ${String(attempt)}): ${status}`);
+        await api("PUT", `/repos/${USER}/${name}/actions/runs/${String(runId)}`, { status: "completed", conclusion: ran.code === 0 ? "success" : "failure", run_attempt: attempt });
+        return { ok: ran.code === 0, status, log: ran.out + ran.err, id: runId };
       };
+      const pushRun = (sha: string, rerun?: { id: number; attempt: number }) =>
+        act("push", "yodel-apply.yml", "main", sha, { ref: "refs/heads/main", before: "0".repeat(40), after: sha }, "localhost", rerun);
 
       return {
         remote,
-        pushed: (sha) => act("push", "yodel-apply.yml", "main", sha, { ref: "refs/heads/main", before: "0".repeat(40), after: sha }),
+        pushed: (sha) => pushRun(sha),
+        // The mock's token: on GitHub, one with Actions: read and write.
+        resumeEnv: () => Promise.resolve({ GITHUB_TOKEN: token }),
+        async resumed(sha, waited, withinMs) {
+          if (waited.id === undefined) throw new Error("the waiting run has no id");
+          const deadline = Date.now() + withinMs;
+          for (;;) {
+            const run = await api<{ status: string; run_attempt: number }>("GET", `/repos/${USER}/${name}/actions/runs/${String(waited.id)}`);
+            if (run.status === "queued") {
+              ctx.log(`the mock GitHub was asked to re-run run ${String(waited.id)}: act runs it again, attempt ${String(run.run_attempt)}`);
+              return pushRun(sha, { id: waited.id, attempt: run.run_attempt });
+            }
+            if (Date.now() > deadline) return undefined;
+            await new Promise((r) => setTimeout(r, 2_000));
+          }
+        },
         applyAgain: (sha) => act("workflow_dispatch", "yodel-apply.yml", "main", sha, { ref: "refs/heads/main", inputs: {} }),
         async openPr(head, sha, title) {
           const pr = await api<{ number: number; base: { sha: string } }>("POST", `/repos/${USER}/${name}/pulls`, { title, head, base: "main" });

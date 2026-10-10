@@ -20,13 +20,14 @@
  * (replay-clickhouse / replay-postgres), never the shared emulator.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { hold, type Body, type Ctx } from "../lib/claim.js";
 import { endpoints } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { repoRoot } from "../lib/project.js";
-import { NODE_IMAGE, type Forge } from "./forge.js";
+import { NODE_IMAGE, type Forge, type ForgeRepo, type ForgeRun } from "./forge.js";
 import { judgeNotify, startNotifyPart, type NotifyPart } from "./notify-part.js";
 
 const READER = { user: "yodel_34_reader", password: "yodel-34-reader" };
@@ -73,8 +74,15 @@ async function users(ctx: Ctx): Promise<void> {
  * `ci.jobs`): the pull request runs it beside lint and the plan. A yodel
  * that renders differently (a newer release) makes `yodel ci --check` fail
  * until the files are rendered again and committed.
- * BREAK: the pull request is merged without approving its digest, so the
- * apply after the merge applies nothing; the server is not changed by
+ * The first approval is `yodel approve dev` at a terminal (#47): it records
+ * the approval, chant pushes it, and the forge starts the waiting job again
+ * (GitHub re-runs it, Forgejo dispatches the workflow), which applies with
+ * no new push. A forge without resume (GitLab here) is approved with chant
+ * approve and run again by hand.
+ * BREAK: `yodel approve dev --no-resume`, so no job starts again and nothing
+ * applies within the wait (this part is judged on its own: the claim then
+ * runs the job by hand and goes on); the pull request is merged without
+ * approving its digest, so the apply after the merge applies nothing; the server is not changed by
  * hand, so the watch opens no issue; and the installed yodel is built to
  * drop the project's own jobs, so the pull request does not run it.
  */
@@ -141,15 +149,16 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(/^\^\d+\.\d+\.\d+$/.test(range), `the template's package.json takes @intentius/sql-yodeler as ${range}, not a registry range`);
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
-  if (!existsSync(join(installed, "dist", "ci", "render.js"))) {
-    // The release in the template's range has no yodel ci yet: this checkout's, packed and committed with the project.
+  const approveJs = join(installed, "dist", "commands", "approve.js");
+  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"')) {
+    // The release in the template's range has no yodel ci (#65) or no yodel approve that resumes (#47) yet: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
     const file = packed.out.trim().split("\n").at(-1) ?? "";
     if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
     await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
-    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65): the project takes this checkout's yodel, vendor/${file}`);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65) or no resuming yodel approve (#47): the project takes this checkout's yodel, vendor/${file}`);
   }
   // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
   mkdirSync(join(dir, "ci"), { recursive: true });
@@ -224,9 +233,13 @@ export const gitlab = {
     await sh("npx", ["chant", ...cmd.split(" ").slice(1)]);
     await sh("git", ["push", "-q", "origin", "chant/lifecycle"]);
   };
-  await approve(firstCmd);
-  const second = await repo.applyAgain(await head());
-  hold(second.ok, `the apply after the approval ended ${second.status}`);
+  const second = repo.resumed && repo.resumeEnv ? await approveAndResume(ctx, { dir, env: local, repo, sha: await head(), waited: first, digest: /--plan (\S+)/.exec(firstCmd)?.[1] ?? "", table }) : undefined;
+  if (!second) {
+    if (repo.resumed && repo.resumeEnv) await sh("git", ["push", "-q", "origin", "chant/lifecycle"]);
+    else await approve(firstCmd);
+  }
+  const applied = second ?? (await repo.applyAgain(await head()));
+  hold(applied.ok, `the apply after the approval ended ${applied.status}`);
   hold(await ctx.db.tableExists(table), `${ctx.db.name}.${table} is not on the server after the approved apply`);
 
   // 2. A pull request: lint with the replay, and the plan comment.
@@ -283,6 +296,73 @@ export const gitlab = {
   hold(clean.ok, `the drift watch ended ${clean.status} with dev put back`);
   const closed = await tracking();
   hold(closed.length === 1 && closed[0]?.number === issue.number && !closed[0].open, `the watch did not close #${String(issue.number)} once dev was put back: ${JSON.stringify(closed.map((i) => ({ n: i.number, open: i.open })))}`);
+}
+
+/**
+ * `yodel approve dev` at a terminal, the answer typed being `dev`, with the
+ * token the forge's resume needs (#47). It records the approval of the
+ * waiting wave's digest, chant pushes it and starts the waiting job again,
+ * and the run the forge starts applies without a new push: that run is
+ * returned. BREAK: `--no-resume`, so no run starts within the wait and the
+ * table is not created; the approval is recorded all the same, and
+ * undefined is returned for the caller to run the job by hand. The part is
+ * judged here, on its own: a run that starts anyway under BREAK fails the
+ * claim (not caught).
+ */
+async function approveAndResume(
+  ctx: Ctx,
+  a: { dir: string; env: NodeJS.ProcessEnv; repo: ForgeRepo; sha: string; waited: ForgeRun; digest: string; table: string },
+): Promise<ForgeRun | undefined> {
+  const { repo } = a;
+  if (!repo.resumed || !repo.resumeEnv) throw new Error("the forge has no resume");
+  const env = { ...Object.fromEntries(Object.entries(a.env).filter(([k]) => !["CHANT_FORGE_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "NODE_OPTIONS"].includes(k))), ...(await repo.resumeEnv()) };
+  const args = ["approve", "dev", "--plan", a.digest, ...(ctx.broken ? ["--no-resume"] : [])];
+  if (ctx.broken) ctx.log("BREAK: yodel approve dev --no-resume, so the waiting job is not started again");
+  const ran = await run("node", [askingYodel(ctx, a.dir), "dev", ...args], { cwd: a.dir, env, timeoutMs: 600_000 });
+  ctx.log(`yodel ${args.join(" ")} exited ${String(ran.code)}:\n${ran.out}${ran.err}`);
+  if (ran.code !== 0) throw new Error(`yodel ${args.join(" ")} exited ${String(ran.code)}`);
+  const resumed = await repo.resumed(a.sha, a.waited, ctx.broken ? 60_000 : 120_000);
+  const caught = (): string | undefined => {
+    if (!resumed) return "after yodel approve dev, the forge started no run of the waiting apply again";
+    if (!resumed.ok) return `the resumed apply ended ${resumed.status}`;
+    return undefined;
+  };
+  const why = caught() ?? ((await ctx.db.tableExists(a.table)) ? undefined : `${ctx.db.name}.${a.table} is not on the server after the resumed apply`);
+  if (!ctx.broken) {
+    hold(why === undefined, why ?? "");
+    return resumed;
+  }
+  if (why === undefined) throw new Error("BREAK: yodel approve --no-resume, and the waiting job applied anyway; the resume part did not catch its break");
+  hold(!(await ctx.db.tableExists(a.table)), `BREAK: ${ctx.db.name}.${a.table} exists with the job not resumed`);
+  ctx.log(`BREAK caught (resume): ${why}; the job is run again by hand so the parts after it are judged on their own`);
+  return undefined;
+}
+
+/**
+ * The project's yodel CLI (vendored or installed) with a terminal that
+ * answers every question with argv[2]: a person typing the environment's name.
+ */
+function askingYodel(ctx: Ctx, dir: string): string {
+  const root = join(ctx.work, "yodel-ask");
+  const file = join(root, "ask.mjs");
+  if (existsSync(file)) return file;
+  mkdirSync(root, { recursive: true });
+  symlinkSync(join(dir, "node_modules"), join(root, "node_modules"));
+  const cli = pathToFileURL(join(realpathSync(join(dir, "node_modules", "@intentius", "sql-yodeler")), "dist", "cli.js")).href;
+  writeFileSync(
+    file,
+    `import { register } from "tsx/esm/api";
+register();
+const { main } = await import(${JSON.stringify(cli)});
+const [answer, ...args] = process.argv.slice(2);
+process.exitCode = await main(args, {
+  out: (t) => process.stdout.write(t),
+  err: (t) => process.stderr.write(t),
+  ask: async (q) => { process.stderr.write(q + answer + "\\n"); return answer; },
+});
+`,
+  );
+  return file;
 }
 
 /**

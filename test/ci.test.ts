@@ -111,6 +111,54 @@ describe("yodel ci", () => {
     expect(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")).toContain("; yodel report dev --json");
   });
 
+  it("with ci.resume, renders the scheduled resume job on each forge, with that forge's least token (#47)", async () => {
+    const dir = project('{ resume: { schedule: "*/10 * * * *" } }');
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    type ResumeDoc = { on: { schedule: Array<{ cron: string }> }; permissions?: Record<string, string>; jobs: { resume: { steps: Array<{ run?: string; env?: Record<string, string> }> } } };
+    const read = (f: string) => parseYAMLDocument(readFileSync(join(dir, f), "utf8")) as ResumeDoc;
+    const step = (doc: ResumeDoc) => doc.jobs.resume.steps.find((s) => s.run === "chant run resume --op yodel-apply");
+
+    // GitHub: the job's own token, allowed to re-run a run and nothing more.
+    const github = read(".github/workflows/yodel-apply-resume.yml");
+    expect(github.on.schedule).toEqual([{ cron: "*/10 * * * *" }]);
+    expect(github.permissions).toEqual({ contents: "read", actions: "write" });
+    expect(step(github)?.env).toEqual({ GITHUB_TOKEN: "${{ github.token }}" });
+    // Forgejo: no re-run API, and the job's token cannot dispatch; a write:repository token in CHANT_FORGE_TOKEN.
+    const forgejo = read(".forgejo/workflows/yodel-apply-resume.yml");
+    expect(forgejo.on.schedule).toEqual([{ cron: "*/10 * * * *" }]);
+    expect(step(forgejo)?.env).toEqual({ CHANT_FORGE_TOKEN: "${{ secrets.CHANT_FORGE_TOKEN }}" });
+    expect(readFileSync(join(dir, ".forgejo/workflows/yodel-apply-resume.yml"), "utf8")).toContain("write:repository");
+    // The fetch of chant/lifecycle before it, where the approvals are.
+    for (const doc of [github, forgejo]) expect(doc.jobs.resume.steps.some((s) => s.run?.includes("refs/heads/chant/lifecycle"))).toBe(true);
+
+    // GitLab: a schedule-only job in the apply file, its stage in the main file, and a Developer token named.
+    const apply = parseYAMLDocument(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { stage?: string; rules?: unknown; script?: string[] }>;
+    expect(apply["yodel-apply-resume"]).toMatchObject({ stage: "resume", rules: [{ if: '$CI_PIPELINE_SOURCE == "schedule"' }] });
+    expect(apply["yodel-apply-resume"]?.script?.at(-1)).toBe("chant run resume --op yodel-apply");
+    const main = readFileSync(join(dir, ".gitlab-ci.yml"), "utf8");
+    expect((parseYAMLDocument(main) as { stages: string[] }).stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "resume", "ops"]);
+    expect(main).toContain("GITLAB_TOKEN: a project access token with the api scope (Developer)");
+
+    // The spec the wave jobs read is the same with or without it.
+    expect(JSON.parse(readFileSync(join(dir, "yodel-waves.json"), "utf8"))).not.toHaveProperty("resume");
+    expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
+  });
+
+  it("renders no resume job without ci.resume", async () => {
+    const dir = project('{ forges: ["github", "gitlab", "forgejo"] }');
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    expect(existsSync(join(dir, ".github/workflows/yodel-apply-resume.yml"))).toBe(false);
+    expect(existsSync(join(dir, ".forgejo/workflows/yodel-apply-resume.yml"))).toBe(false);
+    expect(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")).not.toContain("resume");
+  });
+
+  it("checks ci.resume's schedule", () => {
+    expect(() => checkYodelConfig({ ci: { resume: { schedule: "every ten minutes" } } }, "yodel.config.ts")).toThrow(/ci\.resume: \{ schedule \} with a five-field cron/);
+    expect(() => checkYodelConfig({ ci: { resume: { schedule: "*/10 * * * *", by: "me" } } }, "yodel.config.ts")).toThrow(/ci\.resume/);
+    expect(checkYodelConfig({ ci: { resume: { schedule: "*/10 * * * *" } } }, "yodel.config.ts").ci).toEqual({ resume: { schedule: "*/10 * * * *" } });
+  });
+
   it("takes --check or --replay, not both, and options after -- only with --replay", async () => {
     expect((await yodel(["ci", "--check", "--replay"])).err).toContain("--check and --replay are two things");
     expect((await yodel(["ci", "--", "--json"])).err).toContain("options after -- are for --replay");

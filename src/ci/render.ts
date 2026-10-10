@@ -152,6 +152,8 @@ export interface Environments {
   jobs?: ProjectJobs;
   /** yodel.config.ts `ci.image`: the yodel image every job runs in, by digest. */
   image?: string;
+  /** yodel.config.ts `ci.resume`: the scheduled job that resumes a wave whose approval arrived. */
+  resume?: { schedule: string };
   /** The apply pipeline's waves, in order. */
   waves: readonly Wave[];
   /** chant.config.ts declares the `replay` profile, so the lint job runs the replay check. */
@@ -424,6 +426,9 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
 export const GITLAB_WATCH_FILE = ".gitlab/yodel-watch.gitlab-ci.yml";
 export const GITLAB_APPLY_FILE = ".gitlab/yodel-apply.gitlab-ci.yml";
 
+/** The stage of the scheduled resume job in GITLAB_APPLY_FILE, as chant names it. */
+const RESUME_STAGE = "resume";
+
 /** The stage of each wave's job in GITLAB_APPLY_FILE, as chant names it. */
 const waveStages = (waves: readonly Wave[]): string[] => waves.map((w, i) => `wave-${String(i + 1)}-${w.env}`);
 
@@ -488,7 +493,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   if (!jobsYaml.startsWith("stages:\n") || !Array.isArray(derivedStages) || derivedStages[0] !== "review") throw new Error("gitlab: expected the jobs' YAML to start with their stages, review first");
   const derived = jobsYaml.slice(0, end + 2);
   // The stages this file's jobs use (review, then any the project's own jobs add), then the apply file's waves and the watch file's ops.
-  const stages = [...new Set([...derivedStages.map(String), ...waveStages(waves), "ops"])];
+  const stages = [...new Set([...derivedStages.map(String), ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : []), "ops"])];
   const topLevel = [
     emitYAMLEntry("include", [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }]),
     emitYAMLEntry("stages", stages),
@@ -513,9 +518,18 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     "# protected or scoped to an environment, so the split between reader and",
     "# writer is in the variables' settings (Settings > CI/CD > Variables):",
     ...variables,
-    "#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for",
-    "#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN",
-    "#     cannot write merge request notes or issues.",
+    ...(envs_.resume
+      ? [
+          "#   GITLAB_TOKEN: a project access token with the api scope (Developer), for",
+          "#     the plan comment, the drift watch's tracking issue and the resume job's",
+          "#     retry of a wave whose approval arrived; CI_JOB_TOKEN cannot write merge",
+          "#     request notes or issues, or retry a job.",
+        ]
+      : [
+          "#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for",
+          "#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN",
+          "#     cannot write merge request notes or issues.",
+        ]),
     "# The jobs that hold no writer read with the reader: chant.config.ts picks an",
     "# environment's writer only under YODEL_CREDENTIALS=writer:<env>, which only",
     "# that environment's wave job sets.",
@@ -571,13 +585,15 @@ interface WavesSpec {
     environment?: { name: string };
     variables?: Record<string, string>;
   }>;
+  /** The scheduled resume job (yodel.config.ts `ci.resume`); only the pipelines are rendered from it, the spec file leaves it out. */
+  resume?: { schedule: string };
 }
 
 /**
  * The waves spec. What the file holds is the same for every forge; each
  * forge's jobs get their own variables on top (`variables`).
  */
-export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
@@ -593,6 +609,7 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
       ...(w.shares !== undefined && w.shares > 1 ? { shares: w.shares } : {}),
       ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
     })),
+    ...(resume ? { resume } : {}),
   };
 }
 
@@ -629,14 +646,25 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
     `# wave's gate policy is read from ${WAVES_SPEC} as the commit before the push`,
     "# has it (yodel.config.ts waves, rendered), and a wave that needs an approval",
     "# exits 3 with the chant approve command, so the waves after it do not run.",
-    "# Approve, push chant/lifecycle, and run the failed job again. These are the",
-    "# only jobs that hold a writer's credentials, one environment's each, with",
+    "# yodel approve <env> records the approval and starts the waiting job again",
+    "# (or approve, push chant/lifecycle, and run the failed job again). These are",
+    "# the only jobs that hold a writer's credentials, one environment's each, with",
     "# the reader of the environment before (waves[].requires): yodel apply refuses",
     "# a migration that environment's history does not record as applied.",
   ];
+  const resumeHeader = (forge: Forge): string[] => [
+    ...HEADER,
+    "#",
+    `# On its schedule: chant run resume --op ${APPLY_PIPELINE} starts again each apply wave`,
+    "# that waits at its gate and whose approval has arrived since. It approves",
+    "# nothing; a wave whose approval does not count waits again.",
+    ...(forge === "github"
+      ? ["# It re-runs the run's failed jobs with the job's token (actions: write)."]
+      : ["# Forgejo has no re-run: it dispatches yodel-apply.yml again on main, with the", "# CHANT_FORGE_TOKEN secret, a token with the write:repository scope."]),
+  ];
   for (const forge of FORGES) {
     const result = await generateOpWavesPipeline(
-      wavesSpec(waves, variables(forge)),
+      wavesSpec(waves, variables(forge), envs.resume),
       forge,
       {
         specFile: WAVES_SPEC,
@@ -649,7 +677,10 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
     if (!result.success || !result.files) throw new Error(`${forge}: ${result.error ?? "generateOpWavesPipeline rendered nothing"}`);
     for (const file of result.files) {
       const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
-      out.push({ path: at, content: withHeader(header, withWaveReports(forge, file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`, waves, tc)) });
+      const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
+      // The resume workflow (GitHub, Forgejo) has no wave job to report on.
+      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), yaml) });
+      else out.push({ path: at, content: withHeader(header, withWaveReports(forge, yaml, waves, tc)) });
     }
   }
   return out;
@@ -819,6 +850,7 @@ export async function environments(dir: string): Promise<Environments> {
     forges: ci?.forges ?? FORGES,
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
     ...(ci?.image ? { image: ci.image } : {}),
+    ...(ci?.resume ? { resume: { schedule: ci.resume.schedule } } : {}),
   };
 }
 

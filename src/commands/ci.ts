@@ -29,6 +29,13 @@ yodel.config.ts ci:
            declared with chant: actions (github lexicon Jobs, for GitHub and
            Forgejo) and gitlab (gitlab lexicon Jobs). They are added to the
            pull request pipeline after yodel's jobs, on every render.
+  image    the CI image every job runs in, pinned by its digest
+  resume   { schedule: "<cron>" }: a scheduled yodel-apply-resume job that
+           starts again an apply wave whose approval has arrived (chant run
+           resume); it approves nothing. GitHub uses the job's token
+           (actions: write), Forgejo the CHANT_FORGE_TOKEN secret
+           (write:repository), GitLab a pipeline schedule you create, with
+           GITLAB_TOKEN (api scope, Developer)
 
 Options:
   --check          write nothing; exit 1 naming each file that differs from

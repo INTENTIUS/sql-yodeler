@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main } from "../src/cli.js";
+import { chantApproveArgs } from "../src/commands/approve.js";
 import type { Io } from "../src/command.js";
 import { installedLocally, onPath, runnable } from "../src/chant/runnable.js";
 import { renderPlanText } from "../src/pr/render.js";
@@ -93,5 +94,27 @@ describe("yodel approve", () => {
     const code = await main(["approve", "e2e", "--dir", fixture("clickhouse")], c.io);
     expect(code).toBe(1);
     expect(c.text().err).toMatch(/yodel approve is for versioned migrations/);
+  });
+});
+
+describe("yodel approve resumes the waiting job (#47)", () => {
+  const digest = `jcs1-sha256:${"0".repeat(64)}`;
+
+  it("asks chant to resume the job by default, for the migrations Op's gate and for a wave's gate", () => {
+    expect(chantApproveArgs("migrate-dev", "approve-migrate-dev", digest, true)).toEqual(["approve", "migrate-dev", "approve-migrate-dev", "--plan", digest, "--resume"]);
+    expect(chantApproveArgs("yodel-apply", "yodel-apply-wave-2", digest, true)).toEqual(["approve", "yodel-apply", "yodel-apply-wave-2", "--plan", digest, "--resume"]);
+  });
+
+  it("records only with --no-resume", () => {
+    expect(chantApproveArgs("migrate-dev", "approve-migrate-dev", digest, false)).toEqual(["approve", "migrate-dev", "approve-migrate-dev", "--plan", digest]);
+    expect(chantApproveArgs("yodel-apply", "yodel-apply-wave-1", digest, false)).not.toContain("--resume");
+  });
+
+  it("takes --plan and --no-resume, and its help names each forge's token", async () => {
+    let out = "";
+    expect(await main(["approve", "--help"], { out: (t) => (out += t), err: () => undefined })).toBe(0);
+    expect(out).toContain("--no-resume");
+    expect(out).toContain("--plan <digest>");
+    expect(out).toMatch(/GitHub needs actions: write, GitLab the api scope with the Developer role,\s+Forgejo write:repository/);
   });
 });
