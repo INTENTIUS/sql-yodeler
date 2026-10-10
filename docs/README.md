@@ -17,6 +17,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
+| [Webhook events](notify.md) | `notify` in `yodel.config.ts`: signed events for an apply waiting for approval, a refusal, a failure and drift, and checking them in a receiver |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
 | [Set up with a coding agent](agents.md) | the prompt to hand a coding agent, the steps it follows to add SQL Yodeler to a repository, and what it leaves to people |
 | [Glossary](glossary.md) | the chant terms yodel's commands and output use, in yodel's terms |

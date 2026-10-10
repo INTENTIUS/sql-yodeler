@@ -12,6 +12,7 @@ import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "..
 import { declarativeTopologyRefusal, LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
 import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
+import { eventFromRun, sendEvent } from "../notify/index.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -233,14 +234,24 @@ export const apply: Command = {
 async function versionedApply(project: Project, env: Environment, a: ApplyArgs, io: Io): Promise<number> {
   const ordered = readChain(project);
   const venv = await openVersioned(project, env);
+  const outcome: Outcome = {};
+  let code: number;
   try {
-    return await versionedApplyWith(project, env, a, io, ordered, venv);
+    code = await versionedApplyWith(project, env, a, io, ordered, venv, outcome);
   } finally {
     await closeVersioned(venv);
   }
+  // Waiting, refused or failed: the webhook in yodel.config.ts notify hears of it (#61).
+  if (outcome.doc) await sendEvent(project.yodel?.config.notify, eventFromRun("apply", outcome.doc), { io, verb: "apply" });
+  return code;
 }
 
-async function versionedApplyWith(project: Project, env: Environment, a: ApplyArgs, io: Io, ordered: readonly Migration[], venv: VersionedEnv): Promise<number> {
+/** The document a run printed (or would have, with --json), for the event it sends. */
+interface Outcome {
+  doc?: Record<string, unknown>;
+}
+
+async function versionedApplyWith(project: Project, env: Environment, a: ApplyArgs, io: Io, ordered: readonly Migration[], venv: VersionedEnv, outcome: Outcome = {}): Promise<number> {
 
   if (a.digest) {
     const { status } = await inspect(venv, ordered);
@@ -285,7 +296,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
 
   const report = await statusReport(venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
   const emit = (doc: Record<string, unknown>, code: number) => {
-    if (a.json) io.out(`${JSON.stringify({ ...statusJson(report), mode: "versioned", ...doc }, null, 2)}\n`);
+    outcome.doc = { ...statusJson(report), mode: "versioned", ...doc };
+    if (a.json) io.out(`${JSON.stringify(outcome.doc, null, 2)}\n`);
     return code;
   };
   if (a.plan) {
@@ -372,7 +384,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})${run.stepExit ? `: its Apply step, yodel apply ${env.name} --execute, exited ${String(run.stepExit)}` : ""}\n`);
       io.out(`\n${renderStatus(after)}`);
     }
-    if (a.json) io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "failed", op: op.name, exitCode: code, chantExitCode: run.code }, null, 2)}\n`);
+    outcome.doc = { ...statusJson(after), mode: "versioned", status: "failed", op: op.name, exitCode: code, chantExitCode: run.code };
+    if (a.json) io.out(`${JSON.stringify(outcome.doc, null, 2)}\n`);
     return code;
   }
   // The Apply step stood down (a newer commit came while it waited for the lock): what it applied is nothing, and that is not a failure.
@@ -390,18 +403,35 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
 }
 
 async function declarativeApply(project: Project, env: Environment, a: ApplyArgs, io: Io): Promise<number> {
-  const json = a.json;
   const op = await findApplyOp(project, env, a.op);
   let server: ServerInfo | undefined;
+  let printed: Record<string, unknown> | undefined;
   const report = (doc: Record<string, unknown>, code: number) => {
-    if (json) io.out(`${JSON.stringify({ environment: env.name, dialect: project.dialect, ...(server ? { server } : {}), op: op.name, ...doc }, null, 2)}\n`);
+    printed = { environment: env.name, dialect: project.dialect, ...(server ? { server } : {}), op: op.name, ...doc };
+    if (a.json) io.out(`${JSON.stringify(printed, null, 2)}\n`);
     return code;
   };
+  const code = await declarativeRun(project, env, a, io, op, report, (s) => (server = s));
+  if (printed) await sendEvent(project.yodel?.config.notify, eventFromRun("apply", printed), { io, verb: "apply" });
+  return code;
+}
+
+async function declarativeRun(
+  project: Project,
+  env: Environment,
+  a: ApplyArgs,
+  io: Io,
+  op: Awaited<ReturnType<typeof findApplyOp>>,
+  report: (doc: Record<string, unknown>, code: number) => number,
+  setServer: (s: ServerInfo | undefined) => void,
+): Promise<number> {
+  const json = a.json;
 
   const build = await buildSchema(project);
   try {
     const before = await planEnvironment(project, env, build);
-    server = await probeServer(project, env);
+    const server = await probeServer(project, env);
+    setServer(server);
     if (!json) io.out(`${await renderPlan(before, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name})`)}\n`);
     if (planExitCode(before) === PLAN_NEEDS_OP) {
       if (!json) io.err(`yodel apply: refused: ${String(before.refused.length)} change(s) need their own Op; nothing was applied\n`);

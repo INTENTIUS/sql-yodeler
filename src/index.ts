@@ -8,4 +8,6 @@
  */
 
 export { defineConfig } from "./config/define.js";
-export type { EnvironmentConfig, PolicyConfig, PolicyMigration, PolicyPlan, PolicyRule, PolicyStep, Topology, TopologySetting, YodelConfig } from "./config/define.js";
+export type { EnvironmentConfig, PolicyConfig, PolicyMigration, PolicyPlan, PolicyRule, PolicyStep, NotifyConfig, Topology, TopologySetting, YodelConfig } from "./config/define.js";
+export { verifyWebhook, signWebhook } from "./notify/verify.js";
+export type { NotifyEvent, NotifyEventKind } from "./notify/index.js";

@@ -34,8 +34,8 @@ export const COMMAND_SCHEMAS = {
   repair: "repair",
 } as const;
 
-/** Every schema file: the commands', the definitions they share, and the MCP tool results. */
-export const SCHEMA_NAMES = ["common", ...Object.values(COMMAND_SCHEMAS), "mcp"] as const;
+/** Every schema file: the commands', the definitions they share, the MCP tool results, and the webhook event (#61). */
+export const SCHEMA_NAMES = ["common", ...Object.values(COMMAND_SCHEMAS), "mcp", "event"] as const;
 
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 

@@ -99,6 +99,10 @@ src/pr/                                pr-comment drift template template-github
 src/commands/drift.ts                  drift template template-github template-gitlab
 src/chant/drift.ts                     drift template template-github template-gitlab
 
+# Webhook events (#61): sent by apply, plan and drift only when yodel.config.ts
+# names a webhook, which only the template claims' projects do.
+src/notify/                            template template-github template-gitlab
+
 # yodel rebase and yodel repair.
 src/commands/rebase.ts                 out-of-order
 src/commands/repair.ts                 out-of-order

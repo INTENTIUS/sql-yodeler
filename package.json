@@ -12,6 +12,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./webhook": {
+      "types": "./dist/notify/verify.d.ts",
+      "default": "./dist/notify/verify.js"
     }
   },
   "bin": {
