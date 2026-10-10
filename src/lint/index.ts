@@ -5,6 +5,7 @@
  *   migrationSilences(m)           a migration's `-- yodel:allow` lines, as the history records them
  *   updateChecksum(m)              writes migration.json's checksum to match its files
  *   renderLint / lintJson          the output; lintExitCode the exit code
+ *   workflowCommands / codeQuality the findings as forge annotations (#129)
  *
  * The rules are in `./rules.ts`, how a silence is read in `./silences.ts`.
  */
@@ -15,6 +16,7 @@ import { MIGRATION_JSON, serializeDocument, verifyChecksum, type Migration } fro
 import { silenceableRules } from "./rules.js";
 import { mapMigrationSql, silencesJson, type Silence } from "./silences.js";
 
+export * from "./annotations.js";
 export * from "./check.js";
 export * from "./config.js";
 export * from "./report.js";

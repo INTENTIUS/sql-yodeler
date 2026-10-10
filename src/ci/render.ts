@@ -77,6 +77,7 @@ import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
 import { testFiles } from "../testing/files.js";
+import { CODE_QUALITY_FILE } from "../lint/annotations.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
@@ -314,6 +315,15 @@ export const waitFor = (host: string, port: number): string =>
   `node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(${String(port)}, "${host}", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("${host}:${String(port)} did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'`;
 
 export const LINT = "yodel lint";
+
+/**
+ * The lint job's `yodel lint`, with its findings where the forge shows them
+ * (#129): workflow commands on GitHub and Forgejo, which annotate the
+ * migration files in the pull request; on GitLab the code quality report,
+ * which the job keeps as its `artifacts:reports:codequality`
+ * ({@link CODE_QUALITY_FILE}) and the merge request shows.
+ */
+export const lintCommand = (forge: Forge): string => (forge === "gitlab" ? `${LINT} --format gitlab --output ${CODE_QUALITY_FILE}` : `${LINT} --format github`);
 export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 
 /** yodel test (#54), after the replay check on the same throwaway server, its outcome as JUnit XML. */
@@ -423,7 +433,7 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
   const steps = [
     ...setupSteps(container, tc),
     new Step({ name: "The pipelines are up to date", run: CI_CHECK }),
-    new Step({ name: "yodel lint", run: LINT }),
+    new Step({ name: "yodel lint", run: lintCommand(forge) }),
   ];
   if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
   const svc = REPLAY_SERVICE[dialect];
@@ -535,11 +545,13 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: [CI_CHECK, LINT, waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : [])],
+            script: [CI_CHECK, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : [])],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
-        : { script: [CI_CHECK, LINT] }),
+        : { script: [CI_CHECK, lintCommand("gitlab")] }),
+      // The code quality report, kept when lint fails too: that is when it has something to show.
+      artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
     }),
   );
   for (const env of envs) {

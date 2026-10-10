@@ -239,7 +239,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
   it("lints and runs the replay check on pull requests", () => {
     for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
       const text = readFileSync(join(dir, f), "utf8");
-      expect(text, f).toContain("yodel lint\n");
+      // The findings as the forge shows them (#129).
+      expect(text, f).toContain(f === ".gitlab-ci.yml" ? "yodel lint --format gitlab --output gl-code-quality-report.json\n" : "yodel lint --format github\n");
       expect(text, f).toContain(REPLAY);
       expect(text, f).toContain("yodel ci --check");
       expect(text, f).toContain("yodel plan dev --comment");

@@ -165,15 +165,15 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
   const approveJs = join(installed, "dist", "commands", "approve.js");
-  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !readFileSync(join(installed, "dist", "ci", "render.js"), "utf8").includes("the record-plans job has no chant run wave --record-plans")) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48) or no write probe in the plans job (#130) yet: this checkout's, packed and committed with the project.
+  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !readFileSync(join(installed, "dist", "ci", "render.js"), "utf8").includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js"))) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130) or no lint annotations (#129) yet: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
     const file = packed.out.trim().split("\n").at(-1) ?? "";
     if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
     await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
-    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50), no approval modes (#48) or no write probe in the plans job (#130): the project takes this checkout's yodel, vendor/${file}`);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130) or no lint annotations (#129): the project takes this checkout's yodel, vendor/${file}`);
   }
   // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
   mkdirSync(join(dir, "ci"), { recursive: true });
@@ -201,8 +201,11 @@ export const gitlab = {
     const text = readFileSync(render, "utf8");
     const broken = text.replace(/Object\.assign\(jobs, ownJobs\(/, "(() => {})(").replace(/for \(const \[name, job\] of Object\.entries\(ownJobs\(/, "for (const [name, job] of Object.entries(((..._a) => ({}))(");
     if (broken === text) throw new Error(`the project's jobs are not merged in ${render}; the broken build cannot drop them`);
-    writeFileSync(render, broken);
-    ctx.log("BREAK: the installed yodel drops the project's own jobs");
+    // BREAK (#129): and renders the lint job's plain `yodel lint`, with no annotations.
+    const plain = broken.replace(/export const lintCommand = \(forge\) => /, "export const lintCommand = (_forge) => LINT;\nconst annotatedLint = (forge) => ");
+    if (plain === broken) throw new Error(`no lintCommand in ${render}; the broken build cannot render plain lint`);
+    writeFileSync(render, plain);
+    ctx.log("BREAK: the installed yodel drops the project's own jobs, and renders plain yodel lint");
   }
   await sh("npx", ["yodel", "new", "init"]);
   // The webhook (#61): notify in yodel.config.ts and a receiver, before the pipelines are rendered again.
@@ -286,6 +289,7 @@ export const gitlab = {
   const cmd = /```sh\n(chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64})\n/.exec(comment)?.[1];
   hold(cmd !== undefined, "the pull request has no plan comment with an approve command");
   hold(!(await ctx.db.columnExists(table, "note")), "the pull request's jobs changed the server");
+  await annotationPart(ctx, forge, { dir, repo, sh, head });
 
   // 3. Approve from the comment (not under BREAK), merge, and the apply adds the column.
   await sh("git", ["checkout", "-q", "main"]);
@@ -340,6 +344,53 @@ function judgeWriteProbe(ctx: Ctx, log: string): void {
   }
   if (!wrote) throw new Error("BREAK: the writer mapped into the pull request job, and its write probe did not fail it; the write-probe part did not catch its break");
   ctx.log("BREAK caught (write probe): the pull request job holding the writer was failed by yodel config check --write-probe");
+}
+
+/**
+ * Lint findings where the forge shows them (#129): a pull request from
+ * add-note with a second migration that follows the same parent, a fork.
+ * Its lint job fails, and the fork is annotated on the newer migration's
+ * migration.sql: a workflow command naming the file on Forgejo and GitHub,
+ * and on GitLab the code quality report the job keeps as its artifact.
+ * BREAK: the installed yodel renders plain `yodel lint` (no format), so
+ * the log names no file and GitLab finds no report to keep. Judged here, on
+ * its own: a broken run that annotates anyway fails the claim (not caught).
+ * The pull request stays open; nothing after this reads it.
+ */
+async function annotationPart(
+  ctx: Ctx,
+  forge: Forge,
+  p: { dir: string; repo: ForgeRepo; sh: (cmd: string, args: string[], timeoutMs?: number) => Promise<Ran>; head: () => Promise<string> },
+): Promise<void> {
+  const migrations = join(p.dir, "migrations");
+  const newest = readdirSync(migrations).filter((f) => existsSync(join(migrations, f, "migration.json"))).sort().at(-1);
+  if (!newest) throw new Error("the add-note branch has no migration to fork");
+  const forked = `${newest}-again`;
+  await p.sh("git", ["checkout", "-q", "-b", "fork-note"]);
+  mkdirSync(join(migrations, forked));
+  for (const f of readdirSync(join(migrations, newest))) copyFileSync(join(migrations, newest, f), join(migrations, forked, f));
+  const json = join(migrations, forked, "migration.json");
+  const doc = readFileSync(json, "utf8");
+  if (!doc.includes(`"id": "${newest}"`)) throw new Error(`${newest}'s migration.json does not record its id`);
+  writeFileSync(json, doc.replace(`"id": "${newest}"`, `"id": "${forked}"`));
+  // Its checksum recorded, so the fork is the only finding; lint exits 3 on the fork all the same.
+  await run("npx", ["yodel", "lint", "--update-checksum", forked], { cwd: p.dir, timeoutMs: 300_000 });
+  await p.sh("git", ["add", "-A"]);
+  await p.sh("git", ["commit", "-qm", "feat: the note again, a fork"]);
+  await p.sh("git", ["push", "-q", "origin", "fork-note"]);
+  const pr = await p.repo.openPr("fork-note", await p.head(), "feat: the note again, a fork");
+  await p.sh("git", ["checkout", "-q", "add-note"]);
+  hold(!pr.checks.ok, `the forked pull request's lint ended ${pr.checks.status}`);
+  hold(pr.checks.log.includes(`${forked} both follow`), "the forked pull request's lint did not report the fork");
+  const file = `migrations/${forked}/migration.sql`;
+  const annotated = forge.name === "GitLab" ? /gl-code-quality-report\.json: found 1 matching/.test(pr.checks.log) : pr.checks.log.includes(`file=${file}`);
+  const what = forge.name === "GitLab" ? "the lint job kept the code quality report as its artifact" : `the lint job annotated ${file}`;
+  if (!ctx.broken) {
+    hold(annotated, `the forked pull request's findings are not on the forge: not ${what}`);
+    return;
+  }
+  if (annotated) throw new Error(`BREAK: the installed yodel renders plain yodel lint, and still ${what}; the annotation part did not catch its break`);
+  ctx.log(`BREAK caught (annotations): plain yodel lint, so not ${what}`);
 }
 
 /**
