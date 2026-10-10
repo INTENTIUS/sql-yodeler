@@ -21,7 +21,7 @@ afterEach(() => {
   for (const d of dirs.splice(0)) d();
 });
 
-/** docs/README.md's exit-code sentence and `yodel --help` say the same as src/exit.ts. */
+/** docs/cli.md's exit-code table and `yodel --help` say the same as src/exit.ts. */
 describe("the exit code table (#13)", () => {
   it("yodel --help lists every code", () => {
     const text = help().replace(/\s+/g, " ");
@@ -29,10 +29,12 @@ describe("the exit code table (#13)", () => {
     expect(text).toContain(PLAN_PENDING_NOTE);
   });
 
-  it("docs/README.md lists every code with the same meaning", () => {
-    const text = readFileSync(join(repoRoot, "docs", "README.md"), "utf8").replace(/\s+/g, " ").replace(/`/g, "");
-    for (const [code, meaning] of EXIT_CODES) expect(text).toContain(`${String(code)} ${meaning}`);
-    expect(text).toContain(PLAN_PENDING_NOTE);
+  it("docs/cli.md's exit-code table lists every code with the same meaning", () => {
+    const text = readFileSync(join(repoRoot, "docs", "cli.md"), "utf8");
+    const section = text.slice(text.indexOf("\n## Exit codes\n"), text.indexOf("\n## JSON output\n"));
+    const rows = [...section.matchAll(/^\| (\d+) \| (.+) \|$/gm)].map((m) => [Number(m[1]), (m[2] ?? "").replace(/`/g, "")]);
+    expect(rows).toEqual(EXIT_CODES.map(([code, meaning]) => [code, meaning]));
+    expect(section.replace(/\s+/g, " ").replace(/`/g, "")).toContain(PLAN_PENDING_NOTE);
   });
 
   it("an Op step's exit code reaches the outer apply through the file it names", () => {

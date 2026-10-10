@@ -1,7 +1,7 @@
 /**
  * yodel's exit codes (#13). Every command uses them with these meanings;
  * each command's `--help` lists the ones it can return. `yodel --help` and
- * docs/README.md print {@link EXIT_CODES}, and test/exit-codes.test.ts
+ * docs/cli.md print {@link EXIT_CODES}, and test/exit-codes.test.ts
  * keeps them in agreement.
  */
 
