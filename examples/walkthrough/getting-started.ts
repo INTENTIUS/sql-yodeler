@@ -35,7 +35,7 @@ export const walkthrough: Walkthrough = {
   keep: [],
   env: () => ({
     DEV_CLICKHOUSE_URL: url(),
-    DEV_CLICKHOUSE_READER_USER: "default",
+    DEV_CLICKHOUSE_READER_USER: "reader",
     DEV_CLICKHOUSE_READER_PASSWORD: "",
     DEV_CLICKHOUSE_WRITER_USER: "default",
     DEV_CLICKHOUSE_WRITER_PASSWORD: "",
@@ -54,6 +54,10 @@ export const walkthrough: Walkthrough = {
     if (!url()) throw new Error("set YODEL_GETTING_STARTED_CLICKHOUSE_URL to a throwaway ClickHouse");
     await sql("DROP DATABASE IF EXISTS events SYNC");
     await sql("DROP DATABASE IF EXISTS yodeler SYNC");
+    // The reader docs/getting-started.md has the reader make on the emulator; the writer is its default user.
+    await sql("DROP USER IF EXISTS reader");
+    await sql("CREATE USER reader IDENTIFIED WITH no_password SETTINGS readonly = 1");
+    await sql("GRANT SELECT, SHOW ON *.* TO reader");
   },
   steps: [
     {
@@ -70,7 +74,7 @@ export const walkthrough: Walkthrough = {
     { run: "git add -A && git commit -q -m 'feat: the first migration'", cwd: dir, code: 0, hide: true },
     { run: "npx yodel plan dev", cwd: dir, code: 0, expect: ["1 pending"], quote: "getting-started.md#plan" },
     { say: "" },
-    { run: "npx yodel apply dev", cwd: dir, code: 3, expect: ["is waiting at gate"], quote: "getting-started.md#apply" },
+    { run: "YODEL_CREDENTIALS=writer npx yodel apply dev", cwd: dir, code: 3, expect: ["is waiting at gate"], quote: "getting-started.md#apply" },
     { say: "" },
     {
       run: 'npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"',
@@ -78,7 +82,7 @@ export const walkthrough: Walkthrough = {
       code: 0,
       quote: "getting-started.md#approve",
     },
-    { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve" },
+    { run: "YODEL_CREDENTIALS=writer npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve" },
     { run: "npx yodel status dev", cwd: dir, code: 0, quote: "getting-started.md#approve" },
     { say: "" },
     {
@@ -97,7 +101,7 @@ export const walkthrough: Walkthrough = {
       code: 0,
       quote: "getting-started.md#approve-second",
     },
-    { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve-second" },
+    { run: "YODEL_CREDENTIALS=writer npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve-second" },
     { say: "" },
     { sql: "ALTER TABLE events.events MODIFY COLUMN country LowCardinality(String) DEFAULT 'US'" },
     { run: "npx yodel drift dev", cwd: dir, code: 2, expect: ["Changed out of band"], quote: "getting-started.md#drift" },

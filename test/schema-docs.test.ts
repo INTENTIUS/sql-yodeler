@@ -80,10 +80,10 @@ describe("yodel docs", () => {
   it("lists the migrations that changed an object, and --migration documents a recorded schema", async () => {
     const dir = join(repoRoot, "examples", "postgres");
     const html = schemaHtml(await docsInput(await loadProject(dir)));
-    expect(html).toContain("<td><code>20261010T0532-rename-email</code></td><td><code>PostgresMigrationOp step (SQLPG205 columns.email)</code></td>");
-    const first = await docsInput(await loadProject(dir), "20261010T0531-baseline");
-    expect(first.source).toBe("the schema migration 20261010T0531-baseline recorded");
-    expect(first.migrations?.map((m) => m.id)).toEqual(["20261010T0531-baseline"]);
+    expect(html).toContain("<td><code>20261010T1724-rename-email</code></td><td><code>PostgresMigrationOp step (SQLPG205 columns.email)</code></td>");
+    const first = await docsInput(await loadProject(dir), "20261010T1723-baseline");
+    expect(first.source).toBe("the schema migration 20261010T1723-baseline recorded");
+    expect(first.migrations?.map((m) => m.id)).toEqual(["20261010T1723-baseline"]);
     expect(erdMermaid(first.output)).toContain("text customer_email\n");
     const unknown = await yodel(["docs", "--dir", dir, "--migration", "nope", "--out", join(tmpdir(), "yodel-docs-unused")]);
     expect(unknown.code).toBe(1);

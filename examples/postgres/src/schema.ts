@@ -22,3 +22,6 @@ export const ordersStatusIdx = index`
 
 export const ordersPlacedAt = index`
   CREATE INDEX CONCURRENTLY orders_placed_at_idx ON ${orders} (placed_at)`;
+
+export const ordersRefundedAt = index`
+  CREATE INDEX CONCURRENTLY orders_refunded_at_idx ON ${orders} (refunded_at)`;

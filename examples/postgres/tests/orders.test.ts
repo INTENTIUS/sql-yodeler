@@ -11,9 +11,9 @@ import type { TestCase } from "@intentius/sql-yodeler";
 export default [
   {
     name: "rename-email keeps every order's email",
-    at: "20261010T0532-validate-amount",
+    at: "20261010T1724-refunds",
     seed: ["INSERT INTO shop.orders (customer_email, amount) VALUES ('a@example.com', 10), ('b@example.com', 20)"],
-    through: "20261010T0532-rename-email",
+    through: "20261010T1724-rename-email",
     expect: [{ kind: "rows", sql: "SELECT email FROM shop.orders ORDER BY id", rows: [["a@example.com"], ["b@example.com"]] }],
   },
   {

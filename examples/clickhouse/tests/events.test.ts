@@ -7,8 +7,8 @@
  */
 import type { TestCase } from "@intentius/sql-yodeler";
 
-const addCountry = "20261010T0528-add-country";
-const eventsById = "20261010T0528-events-by-id";
+const addCountry = "20261010T1722-add-country";
+const eventsById = "20261010T1722-events-by-id";
 
 export default [
   {

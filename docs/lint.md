@@ -106,19 +106,18 @@ On ClickHouse, `ch-access` flags a privilege or role revoked from a user or role
 
 Two Postgres rules read a step with the rest of its migration (#44). `pg-signature` flags a function or procedure dropped and created with another signature: SQLPG281 (the result type, an output parameter, an input parameter's name or a removed default, which `CREATE OR REPLACE` refuses, or other parameter types between two builds), or a routine dropped and one of the same name with other parameter types created in the same migration. A caller written for the old signature fails once it runs; it can be silenced for the statement. `pg-routine-in-use` flags a function dropped while a trigger in the migration's recorded schema still executes it, which happens when the trigger names the function in its text rather than through its declaration. The `DROP` would fail on the server, so it cannot be silenced: declare the function again, or drop the trigger in the same migration.
 
-Findings from the Postgres example. A CHECK constraint added in place:
+Findings from the Postgres example. A CHECK constraint added to a table that holds rows, which `yodel new` writes `NOT VALID` and then validates, so the validation carries a pre-check ([Statements that can fail on the data](#statements-that-can-fail-on-the-data)); the baseline's warning is [`SQLPG112`](#schema-checks), a column that looks like personal data with no comment:
 
-<!-- quote: postgres#pg-rewrite -->
+<!-- quote: postgres#data-dependent -->
 ```console
 $ npx yodel lint
-20261010T0532-coupons
-  error    pg-rewrite: step 1: SQLPG218 Add a CHECK constraint on shop.orders: blocks reads and writes on the table while it runs (ADD CONSTRAINT ... CHECK reads every row under ACCESS EXCLUSIVE. Declare it NOT VALID, then remove NOT VALID to validate it under SHARE UPDATE EXCLUSIVE (SQLPG220).)
+20261010T1723-baseline
+  warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
 
-A statement rule can be silenced for one statement, with a reason the history records when it applies:
-  a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
+20261010T1723-coupons
+  warning  data-dependent: step 1: SQLPG217 Add a constraint NOT VALID on shop.orders: can fail on the rows already there (rows that fail the check orders_amount_positive (amount > 0)); yodel apply runs this pre-check before the migration's first statement and refuses when it is not 0: SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0)
 
-2 migrations: 1 error, 0 warnings, 0 silenced.
-[exit 3]
+2 migrations: 0 errors, 2 warnings, 0 silenced.
 ```
 
 an index built without `CONCURRENTLY`:
@@ -126,17 +125,26 @@ an index built without `CONCURRENTLY`:
 <!-- quote: postgres#pg-lock -->
 ```console
 $ npx yodel lint
-20261010T0533-drop-coupon
+20261010T1723-baseline
+  warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
+
+20261010T1723-coupons
+  warning  data-dependent: step 1: SQLPG217 Add a constraint NOT VALID on shop.orders: can fail on the rows already there (rows that fail the check orders_amount_positive (amount > 0)); yodel apply runs this pre-check before the migration's first statement and refuses when it is not 0: SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0)
+
+20261010T1724-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
-20261010T0533-index-placed-at
+20261010T1724-rename-email
+  warning  SQLPG112: step 0: orders.email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
+
+20261010T1725-index-placed-at
   error    pg-lock: step 0: SQLPG241 Create an index without CONCURRENTLY on shop.orders_placed_at_idx: builds an index without CONCURRENTLY: SHARE on the table, blocking every write until the build ends; declare the index CONCURRENTLY
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
-6 migrations: 1 error, 0 warnings, 1 silenced.
+6 migrations: 1 error, 3 warnings, 1 silenced.
 [exit 3]
 ```
 
@@ -145,13 +153,22 @@ and a column dropped:
 <!-- quote: postgres#destructive -->
 ```console
 $ npx yodel lint
-20261010T0533-drop-coupon
+20261010T1723-baseline
+  warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
+
+20261010T1723-coupons
+  warning  data-dependent: step 1: SQLPG217 Add a constraint NOT VALID on shop.orders: can fail on the rows already there (rows that fail the check orders_amount_positive (amount > 0)); yodel apply runs this pre-check before the migration's first statement and refuses when it is not 0: SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0)
+
+20261010T1724-drop-coupon
   error    destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
+
+20261010T1724-rename-email
+  warning  SQLPG112: step 0: orders.email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
-5 migrations: 1 error, 0 warnings, 0 silenced.
+5 migrations: 1 error, 3 warnings, 0 silenced.
 [exit 3]
 ```
 
@@ -174,7 +191,7 @@ The `sql` lexicon's schema checks, the ones `chant lint` runs over a build, run 
 A finding is reported once, in the migration whose recorded schema first has it: the parent's recorded schema is checked too, and what it already had is left out. It is placed at the migration's first step on the object it names, so a `-- yodel:allow SQLPG101 <reason>` line above that step silences it. In the Postgres example, the first migration's `customer_email` column and the later rename's `email` are each reported where they appear:
 
 ```text
-20261010T0531-baseline
+20261010T1723-baseline
   warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
 ```
 
@@ -237,8 +254,8 @@ The reason is required. For an Op step, the line goes above the step's comment. 
 
 <!-- quote: postgres#silence-sql -->
 ```sql
--- yodel migration 20261010T0533-drop-coupon
--- parent: 20261010T0532-rename-email
+-- yodel migration 20261010T1724-drop-coupon
+-- parent: 20261010T1724-rename-email
 
 -- orders (shop.orders): SQLPG204 metadata, destructive
 -- yodel:allow destructive no order ever had a coupon; checked on dev
@@ -250,8 +267,8 @@ The line is part of `migration.sql`, so it changes the migration's checksum, and
 <!-- quote: clickhouse#checksum -->
 ```console
 $ npx yodel lint
-20261010T0528-events-by-id
-  error    checksum: 20261010T0528-events-by-id: its files hash to sha256:e6cb32f46db79611af518459f51b4e2a45a70784a7f7d7ee4b2ddedf796c2c10, but migration.json records sha256:54254e89d129da3f9617204d714e67294518a27832828572f42086dcb0927962; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261010T0528-events-by-id; if it is, undo the edit, or record it with yodel repair 20261010T0528-events-by-id --reason ... <env>
+20261010T1722-events-by-id
+  error    checksum: 20261010T1722-events-by-id: its files hash to sha256:957ddc1e1c31ff222c7fa567e8bcb5bc6cedef03f621d0263da0913a7c4f953c, but migration.json records sha256:e3c2c97aea554b9df6c0ad70147403180c045dc321f545c0cef0dee9bb7358c4; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261010T1722-events-by-id; if it is, undo the edit, or record it with yodel repair 20261010T1722-events-by-id --reason ... <env>
   silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 
@@ -263,13 +280,22 @@ For a migration not applied anywhere yet, `--update-checksum <id>` (repeatable) 
 
 <!-- quote: postgres#update-checksum -->
 ```console
-$ npx yodel lint --update-checksum 20261010T0533-drop-coupon
-20261010T0533-drop-coupon: checksum sha256:ba19680b8db2c23fe9e84b445602a4d3dec2e1910923121636ce21fde6ab3bd2 is now sha256:4d629ea6b3b71520270b61696af81a22569982c02bc55adce08d0488d9de990e
-20261010T0533-drop-coupon
+$ npx yodel lint --update-checksum 20261010T1724-drop-coupon
+20261010T1724-drop-coupon: checksum sha256:a249036ee571dacb3190a254750b79e55d6920c82aeed07f779e55e911d0973b is now sha256:326cf9df2b47950bfe361be91935ad57382906f28f8f2555dcf930b030cc6a4e
+20261010T1723-baseline
+  warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
+
+20261010T1723-coupons
+  warning  data-dependent: step 1: SQLPG217 Add a constraint NOT VALID on shop.orders: can fail on the rows already there (rows that fail the check orders_amount_positive (amount > 0)); yodel apply runs this pre-check before the migration's first statement and refuses when it is not 0: SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0)
+
+20261010T1724-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
-5 migrations: 0 errors, 0 warnings, 1 silenced.
+20261010T1724-rename-email
+  warning  SQLPG112: step 0: orders.email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
+
+5 migrations: 0 errors, 3 warnings, 1 silenced.
 ```
 
 With `--env <env>` it refuses a migration that environment has applied. An applied migration's edit is recorded with `yodel repair` instead ([Migrations](migrations.md#yodel-repair)).
@@ -319,14 +345,14 @@ $ npx yodel lint --replay replay --reset --reset-shared dev
 ...
 Replay of 5 migrations (clickhouse) into http://127.0.0.1:8123 (sql.profiles.replay)
   databases: shop (emptied first)
-  ok      20261010T0528-baseline (2 statements)
-  ok      20261010T0528-add-country (1 statement)
-  ok      20261010T0528-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (shop.events) (swapped))
-  ok      20261010T0530-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
-  ok      20261010T0530-add-source (1 statement)
+  ok      20261010T1722-baseline (2 statements)
+  ok      20261010T1722-add-country (1 statement)
+  ok      20261010T1722-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (shop.events) (swapped))
+  ok      20261010T1722-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
+  ok      20261010T1723-add-source (1 statement)
 Every migration replays to its recorded schema.
 
-20261010T0528-events-by-id
+20261010T1722-events-by-id
   silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 
@@ -343,7 +369,7 @@ import { defineTests, expectError, expectRows, expectValue } from "@intentius/sq
 export default defineTests([
   {
     name: "fill-country fills the country of each event in the months it covers",
-    at: "20261010T0528-events-by-id",
+    at: "20261010T1722-events-by-id",
     seed: ["INSERT INTO shop.events (id, kind, at) VALUES (1, 'view', '2026-06-03 10:00:00')"],
     expect: [expectRows("SELECT id, country FROM shop.events ORDER BY id", [[1, "FR"]])],
   },
