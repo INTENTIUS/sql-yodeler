@@ -23,7 +23,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { hold, type Body, type Ctx } from "../lib/claim.js";
+import { hold, NotCaught, Violation, type Body, type Ctx } from "../lib/claim.js";
 import { endpoints } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { repoRoot } from "../lib/project.js";
@@ -32,6 +32,8 @@ import { judgeNotify, startNotifyPart, type NotifyPart } from "./notify-part.js"
 
 const READER = { user: "yodel_34_reader", password: "yodel-34-reader" };
 const WRITER = { user: "yodel_34_writer", password: "yodel-34-writer" };
+/** BREAK: a user of its own that can write, in the reader's secrets. yodel refuses a reader and writer that are one user in every job, so the break is a reader that writes, not the writer itself. */
+const LEAKY = { user: "yodel_34_reader_writes", password: "yodel-34-reader-writes" };
 
 /** The reader and the writer for the template's dev profile, on the emulator. */
 async function users(ctx: Ctx): Promise<void> {
@@ -44,6 +46,9 @@ async function users(ctx: Ctx): Promise<void> {
       `CREATE USER IF NOT EXISTS ${WRITER.user} IDENTIFIED WITH plaintext_password BY '${WRITER.password}'`,
       `GRANT ALL ON ${name}.* TO ${WRITER.user}`,
       `GRANT ALL ON ${history}.* TO ${WRITER.user}`,
+      `CREATE USER IF NOT EXISTS ${LEAKY.user} IDENTIFIED WITH plaintext_password BY '${LEAKY.password}'`,
+      `GRANT ALL ON ${name}.* TO ${LEAKY.user}`,
+      `GRANT ALL ON ${history}.* TO ${LEAKY.user}`,
     ]) {
       await ctx.db.exec(sql);
     }
@@ -51,9 +56,12 @@ async function users(ctx: Ctx): Promise<void> {
     await ctx.db.exec(`DO $$ BEGIN
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${READER.user}') THEN CREATE ROLE ${READER.user} LOGIN PASSWORD '${READER.password}'; END IF;
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${WRITER.user}') THEN CREATE ROLE ${WRITER.user} LOGIN PASSWORD '${WRITER.password}'; END IF;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${LEAKY.user}') THEN CREATE ROLE ${LEAKY.user} LOGIN PASSWORD '${LEAKY.password}'; END IF;
     END $$`);
     await ctx.db.exec(`GRANT pg_read_all_data TO ${READER.user}`);
     await ctx.db.exec(`GRANT CREATE ON DATABASE postgres TO ${WRITER.user}`);
+    // Every privilege the writer has, the writer's own objects included.
+    await ctx.db.exec(`GRANT ${WRITER.user} TO ${LEAKY.user}`);
   }
 }
 
@@ -98,8 +106,12 @@ async function users(ctx: Ctx): Promise<void> {
  * approving its digest, so the apply after the merge applies nothing; the server is not changed by
  * hand, so the watch opens no issue; the installed yodel is built to
  * drop the project's own jobs, so the pull request does not run it; and the
- * reader's secrets hold the writer, so the pull request's write probe goes
- * through and fails the job (judged on its own, as the resume is).
+ * reader's secrets hold a user of their own that can write (not the writer:
+ * yodel refuses a reader and writer that are one user in every job), so the
+ * pull request's write probe goes through and fails the job. Under BREAK=1
+ * each of these is judged on its own and the flow goes on (the merged change
+ * is approved by hand after its break), so the run reaches every part and is
+ * caught only when each part caught its own break.
  */
 export function templateBody(makeForge: () => Forge): Body {
   return async (ctx: Ctx): Promise<void> => {
@@ -121,6 +133,17 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   const dir = join(ctx.work, "project");
   const table = "events"; // the table both templates declare
   await users(ctx);
+  // A part judged on its own (BREAK=1 breaks each): plain, `broke` must be false; broken, it must be true, and the flow goes on.
+  const caught: string[] = [];
+  const judge = (part: string, broke: boolean, plainWhat: string, heldWhat: string): void => {
+    if (!ctx.broken) {
+      hold(!broke, plainWhat);
+      return;
+    }
+    if (!broke) throw new NotCaught(`BREAK (${part}): ${heldWhat}; the ${part} part did not catch its break`);
+    ctx.log(`BREAK caught (${part}): ${plainWhat}`);
+    caught.push(part);
+  };
 
   // The project, from the template in this tree.
   const chant = join(repoRoot, "node_modules", ".bin", "chant");
@@ -205,7 +228,15 @@ export const gitlab = {
     const plain = broken.replace(/export const lintCommand = \(forge\) => /, "export const lintCommand = (_forge) => LINT;\nconst annotatedLint = (forge) => ");
     if (plain === broken) throw new Error(`no lintCommand in ${render}; the broken build cannot render plain lint`);
     writeFileSync(render, plain);
-    ctx.log("BREAK: the installed yodel drops the project's own jobs, and renders plain yodel lint");
+    // The jobs run the same broken build: packed and committed with the project, as a release would be. Otherwise their yodel ci --check finds the pipelines stale and the lint job stops before it lints.
+    const vendor = join(dir, "vendor");
+    mkdirSync(vendor, { recursive: true });
+    const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor, realpathSync(join(dir, "node_modules", "@intentius", "sql-yodeler"))], { cwd: dir, timeoutMs: 300_000 });
+    const file = packed.out.trim().split("\n").at(-1) ?? "";
+    if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of the broken build failed: ${packed.err}`);
+    await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
+    if (!readFileSync(render, "utf8").includes("const annotatedLint = ")) throw new Error("the broken build did not survive npm install from vendor/");
+    ctx.log("BREAK: the installed yodel drops the project's own jobs, and renders plain yodel lint; the jobs install the same build from vendor/");
   }
   await sh("npx", ["yodel", "new", "init"]);
   // The webhook (#61): notify in yodel.config.ts and a receiver, before the pipelines are rendered again.
@@ -222,9 +253,9 @@ export const gitlab = {
   await sh("git", ["commit", "-qm", "feat: the schema"]);
   await upgraded(dir, sh);
 
-  // The repository, fresh, with the secrets the pipelines name. BREAK: the writer mapped into the jobs that read, the pull request's among them.
-  const read = ctx.broken ? WRITER : READER;
-  if (ctx.broken) ctx.log("BREAK: the reader's secrets hold the writer, so the pull request job holds the writer");
+  // The repository, fresh, with the secrets the pipelines name. BREAK: the reader's secrets hold a user that can write, so the jobs that read, the pull request's among them, can write.
+  const read = ctx.broken ? LEAKY : READER;
+  if (ctx.broken) ctx.log(`BREAK: the reader's secrets hold ${LEAKY.user}, a user that can write, so the pull request job can write`);
   const repo = await forge.repo(ctx, repoName, {
     [`DEV_${DIALECT}_URL`]: forge.jobUrl(d),
     [`DEV_${DIALECT}_READER_USER`]: read.user,
@@ -282,22 +313,34 @@ export const gitlab = {
   await sh("git", ["push", "-q", "origin", "add-note"]);
   const pr = await repo.openPr("add-note", await head(), "feat: a note column");
   judgeWriteProbe(ctx, pr.checks.log);
-  hold(pr.checks.log.includes("the project job, 42"), "the pull request did not run the project's own job, declared in ci/jobs.ts and rendered by yodel ci");
-  hold(pr.checks.ok, `the pull request's lint and plan ended ${pr.checks.status}`);
+  judge("project job", !pr.checks.log.includes("the project job, 42"), "the pull request did not run the project's own job, declared in ci/jobs.ts and rendered by yodel ci", "the pull request ran the project's own job");
   hold(pr.checks.log.includes("Every migration replays to its recorded schema."), "the pull request's lint job did not replay the migrations into its own server");
-  const comment = (await repo.comments(pr.id)).find((c) => c.startsWith("<!-- yodel:plan env=dev -->")) ?? "";
-  const cmd = /```sh\n(chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64})\n/.exec(comment)?.[1];
-  hold(cmd !== undefined, "the pull request has no plan comment with an approve command");
+  // Under BREAK the write probe failed the plan job before its plan, so there is no comment to approve from.
+  let cmd: string | undefined;
+  if (!ctx.broken) {
+    hold(pr.checks.ok, `the pull request's lint and plan ended ${pr.checks.status}`);
+    const comment = (await repo.comments(pr.id)).find((c) => c.startsWith("<!-- yodel:plan env=dev -->")) ?? "";
+    cmd = /```sh\n(chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64})\n/.exec(comment)?.[1];
+    hold(cmd !== undefined, "the pull request has no plan comment with an approve command");
+  }
   hold(!(await ctx.db.columnExists(table, "note")), "the pull request's jobs changed the server");
   await annotationPart(ctx, forge, { dir, repo, sh, head });
 
   // 3. Approve from the comment (not under BREAK), merge, and the apply adds the column.
   await sh("git", ["checkout", "-q", "main"]);
-  if (!ctx.broken) await approve(cmd);
+  if (cmd !== undefined) await approve(cmd);
   const merged = await repo.merge(pr.id);
   const after = await repo.pushed(merged);
-  hold(after.ok, `the apply after the merge ended ${after.status}`);
-  hold(await ctx.db.columnExists(table, "note"), `${ctx.db.name}.${table}.note is not on the server after the merge's apply`);
+  const added = after.ok && (await ctx.db.columnExists(table, "note"));
+  judge("approval", !added, `the apply after the merge ended ${after.status}, and ${ctx.db.name}.${table}.note is ${added ? "" : "not "}on the server`, "the apply after the merge added the column with its digest not approved");
+  if (ctx.broken) {
+    // The wave waits for the digest nobody approved: approve it now and run the job again, so the watch is judged on its own.
+    const waiting = WAVE_CMD.exec(after.log)?.[0];
+    if (!waiting) throw new Error("the waiting wave after the merge printed no chant approve command");
+    await approve(waiting);
+    const levelled = await repo.applyAgain(merged);
+    if (!levelled.ok || !(await ctx.db.columnExists(table, "note"))) throw new Error(`levelling after the approval break: the apply ended ${levelled.status}`);
+  }
 
   // 4. The drift watch's tracking issue: opened, updated, closed.
   const n = ctx.db.name;
@@ -310,9 +353,14 @@ export const gitlab = {
   const tracking = async () => (await repo.issues()).filter((i) => i.body.includes("<!-- yodel:drift ") && i.body.includes("env=dev"));
   if (!ctx.broken) for (const sql of byHand) await ctx.db.exec(sql);
   const found = await repo.watch(merged);
-  hold(!found.ok, `the drift watch ended ${found.status} with dev changed by hand`);
   const opened = await tracking();
-  hold(opened.length === 1 && opened[0]?.open === true, `the drift watch did not open one tracking issue: ${JSON.stringify(opened.map((i) => ({ n: i.number, open: i.open, title: i.title })))}`);
+  const one = !found.ok && opened.length === 1 && opened[0]?.open === true;
+  judge("watch", !one, `the drift watch ended ${found.status} and did not open one tracking issue: ${JSON.stringify(opened.map((i) => ({ n: i.number, open: i.open, title: i.title })))}`, "the drift watch opened a tracking issue with nothing changed by hand");
+  if (ctx.broken) {
+    // Every part has been judged on its own: the run is caught when each caught its break.
+    throw new Violation(`each part caught its own break (the ones before are logged as caught above); the last: ${caught.join("; ")}`);
+  }
+  hold(opened[0] !== undefined, "no tracking issue");
   const issue = opened[0];
   hold(/^Drift in dev: .*events/.test(issue.title) && issue.body.includes("`events`"), `the tracking issue does not name dev and events: ${issue.title}`);
   for (const sql of byHandAgain) await ctx.db.exec(sql);
