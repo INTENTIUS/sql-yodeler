@@ -29,6 +29,7 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { dockerSerializer } from "@intentius/chant-lexicon-docker";
 import { publishedPort, uniqueContainerName } from "@intentius/chant-lexicon-sql/core/container";
@@ -42,7 +43,21 @@ const USER = "yodel34";
 const REVIEWER = "yodel34-reviewer";
 const ACT = process.env.YODEL_CLAIMS_ACT ?? "act";
 /** The actions the workflows use, which act fetches from github.com, not the mock. */
-const ACTIONS = ["actions/checkout", "actions/setup-node"];
+const ACTIONS = ["actions/checkout", "actions/setup-node", "actions/upload-artifact"];
+
+/** A port free on this host, for the artifact server act starts per run. */
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, () => {
+      const { port } = server.address() as AddressInfo;
+      server.close(() => {
+        resolve(port);
+      });
+    });
+  });
+}
 
 export function githubForge(): Forge {
   let down: (() => Promise<void>) | undefined;
@@ -128,6 +143,9 @@ export function githubForge(): Forge {
             "--env", `GITHUB_RUN_ID=${String(runId)}`,
             "--env", `GITHUB_RUN_ATTEMPT=${String(attempt)}`,
             "--secret-file", secretFile,
+            // The apply and watch jobs keep their report with upload-artifact, which needs act's artifact server.
+            "--artifact-server-path", join(ctx.work, "artifacts"),
+            "--artifact-server-port", String(await freePort()),
           ],
           { cwd: dir, timeoutMs: 20 * 60_000 },
         );
