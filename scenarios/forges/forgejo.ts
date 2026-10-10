@@ -76,6 +76,22 @@ async function jobs(repo: string, runId: number): Promise<Job[]> {
   return Array.isArray(json) ? json : (json.jobs ?? []);
 }
 
+const FINISHED = ["success", "failure", "cancelled", "skipped"];
+
+/**
+ * A run's jobs once every one has finished. Forgejo marks a run failed as
+ * soon as one job fails, while the others may still be running, so a log
+ * read then misses their ends.
+ */
+async function finishedJobs(repo: string, runId: number): Promise<Job[]> {
+  const deadline = Date.now() + 10 * 60_000;
+  for (;;) {
+    const all = await jobs(repo, runId);
+    if (all.every((j) => FINISHED.includes(j.status)) || Date.now() > deadline) return all;
+    await new Promise((res) => setTimeout(res, 3_000));
+  }
+}
+
 async function jobText(repo: string, jobId: number): Promise<string> {
   const res = await fetch(`${forgejo.url}/api/v1/repos/${repo}/actions/jobs/${String(jobId)}/logs`, { headers: { Authorization: auth() } });
   return res.text();
@@ -118,9 +134,9 @@ async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after
     last = state;
     if (!r && startBy !== undefined && Date.now() > startBy) return undefined;
     if (r && ["success", "failure", "cancelled", "skipped"].includes(r.status)) {
+      const all = await finishedJobs(repo, r.id);
       if (r.status !== "success") await printLogs(ctx, repo, r.id);
       let log = "";
-      const all = await jobs(repo, r.id);
       for (const job of all) log += await jobText(repo, job.id);
       return { ok: r.status === "success", status: r.status, log, failed: all.filter((j) => j.status !== "success").map((j) => j.name), id: r.id };
     }
@@ -144,8 +160,9 @@ async function waitAll(ctx: Ctx, repo: string, sha: string, event: string): Prom
       let log = "";
       const failedJobs: string[] = [];
       for (const r of runs) {
+        const all = await finishedJobs(repo, r.id);
         if (r.status !== "success") await printLogs(ctx, repo, r.id);
-        for (const job of await jobs(repo, r.id)) {
+        for (const job of all) {
           log += await jobText(repo, job.id);
           if (job.status !== "success") failedJobs.push(job.name);
         }
