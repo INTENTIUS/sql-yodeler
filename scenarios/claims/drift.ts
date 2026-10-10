@@ -61,7 +61,8 @@ async function declarativePart(ctx: Ctx): Promise<void> {
 async function historyPart(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx, { name: "versioned" });
   const created = await p.newMigration("create");
-  if (created === undefined || (await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
+  if (created === undefined) throw new Error("yodel new wrote no first migration");
+  await p.setupApply();
   addColumn(p, "pending_note");
   if ((await p.newMigration("add-pending-note")) === undefined) throw new Error("yodel new wrote no migration");
   await p.commit("a migration merged, not applied");

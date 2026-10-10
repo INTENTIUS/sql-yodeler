@@ -68,7 +68,7 @@ export function renderPage(record: ClaimsRecord | undefined, claims: readonly Cl
     "",
     "<!-- Written by `npm run claims:page` from scenarios/claims-record.json. Do not edit by hand. -->",
     "",
-    "Each scenario claim (`scenarios/claims/`) is a promise the docs make, run against chant's emulator. A claim runs twice: plain, where it should pass, and broken (`BREAK=1`), where the claim's own check should catch the fault it plants. `npm run claims` runs them; see the comment at the top of `scenarios/run.ts`.",
+    "Each scenario claim (`scenarios/claims/`) is a promise the docs make, run against chant's emulator. A claim runs twice: plain, where it should pass, and broken (`BREAK=1`), where the claim's own check should catch the fault it plants; a claim of several parts is caught only when each part catches the fault planted in it. `npm run claims` runs them; see the comment at the top of `scenarios/run.ts`.",
     "",
     record
       ? `The record was last written at ${when(record.recorded)}, at commit ${commitOf(record)}. A row run in an earlier run keeps that run's commit and date.`

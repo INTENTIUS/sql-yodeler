@@ -1,5 +1,5 @@
 ---
-claims: [new, resume, out-of-order, lock-retry, approve-and-apply]
+claims: [new, resume, out-of-order, lock-retry, approval]
 ---
 
 # Migrations

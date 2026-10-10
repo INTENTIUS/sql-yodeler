@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "recorded": "2026-10-10T07:31:57.483Z",
-  "commit": "d69ee66",
+  "recorded": "2026-10-10T08:29:37.785Z",
+  "commit": "3762652",
   "dirty": false,
   "rows": [
     {
@@ -12,11 +12,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 38,
-        "break": 24
+        "plain": 9,
+        "break": 4
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
@@ -27,71 +27,71 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 38,
-        "break": 24
+        "plain": 9,
+        "break": 4
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "new",
       "dialect": "ch",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 145,
-        "break": 81
+        "plain": 12,
+        "break": 7
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "new",
       "dialect": "pg",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 141,
-        "break": 80
+        "plain": 21,
+        "break": 9
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
-      "claim": "lint-ci",
+      "claim": "lint",
       "dialect": "ch",
-      "says": "yodel lint, offline, fails a migrations directory with a fork (exit 3), naming both migrations",
+      "says": "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 47,
-        "break": 47
+        "plain": 12,
+        "break": 13
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
-      "claim": "lint-ci",
+      "claim": "lint",
       "dialect": "pg",
-      "says": "yodel lint, offline, fails a migrations directory with a fork (exit 3), naming both migrations",
+      "says": "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 47,
-        "break": 48
+        "plain": 12,
+        "break": 13
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -102,11 +102,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 111,
-        "break": 125
+        "plain": 16,
+        "break": 13
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -117,191 +117,116 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 111,
-        "break": 124
+        "plain": 16,
+        "break": 15
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
-      "claim": "approve-and-apply",
+      "claim": "approval",
       "dialect": "ch",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 61,
+        "plain": 65,
+        "break": 86
+      },
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
+      "dirty": false
+    },
+    {
+      "claim": "approval",
+      "dialect": "pg",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 88,
+        "break": 86
+      },
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
+      "dirty": false
+    },
+    {
+      "claim": "resume",
+      "dialect": "ch",
+      "says": "an interrupted apply resumes where it stopped: a hand-written backfill step from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 34,
+        "break": 37
+      },
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
+      "dirty": false
+    },
+    {
+      "claim": "resume",
+      "dialect": "pg",
+      "says": "an interrupted apply resumes where it stopped: a hand-written backfill step from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 34,
+        "break": 34
+      },
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
+      "dirty": false
+    },
+    {
+      "claim": "out-of-order",
+      "dialect": "ch",
+      "says": "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 23,
+        "break": 17
+      },
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
+      "dirty": false
+    },
+    {
+      "claim": "out-of-order",
+      "dialect": "pg",
+      "says": "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 26,
+        "break": 16
+      },
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
+      "dirty": false
+    },
+    {
+      "claim": "rebuild",
+      "dialect": "ch",
+      "says": "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 92,
         "break": 111
       },
-      "recorded": "2026-10-10T07:31:57.483Z",
-      "commit": "d69ee66",
-      "dirty": false
-    },
-    {
-      "claim": "approve-and-apply",
-      "dialect": "pg",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 61,
-        "break": 112
-      },
-      "recorded": "2026-10-10T07:31:57.483Z",
-      "commit": "d69ee66",
-      "dirty": false
-    },
-    {
-      "claim": "digest-moved",
-      "dialect": "ch",
-      "says": "an approval is refused once the migration changed after it, and nothing is applied",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 143,
-        "break": 159
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "digest-moved",
-      "dialect": "pg",
-      "says": "an approval is refused once the migration changed after it, and nothing is applied",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 141,
-        "break": 157
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "resume",
-      "dialect": "ch",
-      "says": "a migration that failed part way resumes at the statement that failed, never resending one that ran",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 219,
-        "break": 225
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "resume",
-      "dialect": "pg",
-      "says": "a migration that failed part way resumes at the statement that failed, never resending one that ran",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 218,
-        "break": 224
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "out-of-order",
-      "dialect": "ch",
-      "says": "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 260,
-        "break": 160
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "out-of-order",
-      "dialect": "pg",
-      "says": "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 258,
-        "break": 158
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "rebuild-refused",
-      "dialect": "ch",
-      "says": "ClickHouse: a sort-key change is a rebuild step that does not run without an approval, never an ALTER or a drop",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 143,
-        "break": 192
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "rebuild-as-step",
-      "dialect": "ch",
-      "says": "ClickHouse: an approved sort-key change runs as a ClickHouseRebuildOp step inside the migration, keeping every row",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 214,
-        "break": 94
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "backfill-resumed",
-      "dialect": "ch",
-      "says": "a hand-written backfill step interrupted part way resumes from its receipts, running each batch once",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 170,
-        "break": 208
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "backfill-resumed",
-      "dialect": "pg",
-      "says": "a hand-written backfill step interrupted part way resumes from its receipts, running each batch once",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 115,
-        "break": 49
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -312,11 +237,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 50,
-        "break": 59
+        "plain": 26,
+        "break": 25
       },
-      "recorded": "2026-10-10T06:32:12.280Z",
-      "commit": "a231637",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -327,86 +252,56 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 51,
-        "break": 59
+        "plain": 27,
+        "break": 25
       },
-      "recorded": "2026-10-10T06:32:12.280Z",
-      "commit": "a231637",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
       "claim": "declarative",
       "dialect": "ch",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 166,
-        "break": 175
+        "plain": 94,
+        "break": 92
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "declarative",
       "dialect": "pg",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 187,
-        "break": 132
+        "plain": 113,
+        "break": 91
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "replay",
-      "dialect": "ch",
-      "says": "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 31,
-        "break": 38
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
-      "dirty": false
-    },
-    {
-      "claim": "replay",
-      "dialect": "pg",
-      "says": "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 30,
-        "break": 39
-      },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "topology",
       "dialect": "ch",
-      "says": "ClickHouse: one migrations directory applies to a single node and to a Replicated database, each rendered for its topology",
+      "says": "ClickHouse: one migrations directory applies to a single node and to a Replicated database, and one to a sharded cluster with drift read there, each rendered for its topology",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 284,
-        "break": 165
+        "plain": 234,
+        "break": 144
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -417,11 +312,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 50,
-        "break": 29
+        "plain": 18,
+        "break": 19
       },
-      "recorded": "2026-10-10T06:38:42.829Z",
-      "commit": "856a189",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -432,11 +327,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 32,
-        "break": 37
+        "plain": 25,
+        "break": 30
       },
-      "recorded": "2026-10-10T06:38:42.829Z",
-      "commit": "856a189",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -447,11 +342,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 145,
-        "break": 74
+        "plain": 10,
+        "break": 8
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -462,11 +357,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 576,
-        "break": 283
+        "plain": 139,
+        "break": 136
       },
-      "recorded": "2026-10-10T07:12:25.871Z",
-      "commit": "2607992",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     },
     {
@@ -477,11 +372,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 575,
-        "break": 282
+        "plain": 142,
+        "break": 132
       },
-      "recorded": "2026-10-10T07:12:25.871Z",
-      "commit": "2607992",
+      "recorded": "2026-10-10T08:23:34.390Z",
+      "commit": "6897d81",
       "dirty": false
     }
   ]

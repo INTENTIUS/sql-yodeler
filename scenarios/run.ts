@@ -6,6 +6,8 @@
  *   npm run claims                     every claim, plain and under BREAK=1, in parallel
  *   npm run claims -- resume drift     the named claims, both ways
  *   BREAK=1 npm run claims -- resume   the broken run only; it must print "caught"
+ *   BREAK=statement npm run claims -- resume
+ *                                      the broken run, breaking that part of the claim alone
  *   npm run claims -- --plain          the plain runs only
  *   npm run claims -- --dialect pg     one dialect's runs
  *   npm run claims -- --record FILE    every run, then the verdicts as JSON in FILE
@@ -26,7 +28,8 @@
  *   CLAIM name=<n> dialect=<ch|pg> verdict=pass|caught|fail|pending mode=plain|break seconds=<s> [why="..."] [needs=#N]
  *
  * pass: the claim held. caught: under BREAK=1 the property was broken and a
- * check of the claim saw it. fail: a check did not hold on a plain run, a
+ * check of the claim saw it; for a claim of several parts, each part broke
+ * its own property and caught it. fail: a check did not hold on a plain run, a
  * broken run held anyway (break=not-caught), or the run errored, timed out
  * or stalled; an error under BREAK is a fail, not a catch. pending: the
  * feature is not built yet, and needs= names the issue that builds it; a
@@ -37,7 +40,9 @@
  * A claim makes a scratch project from scenarios/fixtures/<dialect>, runs
  * the built yodel bin in it (node_modules/.bin/yodel, dist/bin.js), and
  * checks the result by querying the server: ClickHouse database or Postgres
- * schema yodel_34_<claim>, history yodel_34_<claim>_history. Server
+ * schema yodel_34_<claim> (yodel_34_<claim>_break for the broken run),
+ * history yodel_34_<claim>_history; YODEL_CLAIMS_DB_PREFIX replaces
+ * yodel_34, so two people running claims on one server do not collide. Server
  * addresses come from YODEL_CLAIMS_CLICKHOUSE_URL, YODEL_CLAIMS_POSTGRES_URL,
  * YODEL_CLAIMS_POSTGRES_USER and YODEL_CLAIMS_POSTGRES_PASSWORD
  * (scenarios/lib/db.ts has the defaults). On a Mac with its own Postgres on
@@ -47,9 +52,9 @@
  * output in <log dir>/<claim>.<dialect>.<plain|break>.log, under
  * YODEL_CLAIMS_LOG_DIR (default scenarios/.logs/<time>). Runs go
  * YODEL_CLAIMS_JOBS at a time (default 6). A run holds its own database
- * (so a claim's plain and broken runs on one dialect never overlap) and
+ * (the plain and the broken run each have one, so they run at once) and
  * whatever its claim lists in `shares`; a run waits while another holds
- * any of them. A run whose log has not grown for YODEL_CLAIMS_STALL_MIN
+ * any of them. The slowest claims start first. A run whose log has not grown for YODEL_CLAIMS_STALL_MIN
  * minutes (default 5, or the claim's own stallMinutes), or that runs past
  * YODEL_CLAIMS_TIMEOUT_MIN (default 20), has its process group killed and
  * fails as stalled, its last lines printed. Verdict lines print as runs
@@ -155,7 +160,7 @@ if (opt.list) {
   for (const c of claims) {
     if (opt.affected && !named.includes(c.name)) continue;
     const ds = (Object.entries(c.dialects) as Array<[Dialect, unknown]>).map(([d, b]) => (typeof b === "function" ? d : `${d}(${(b as { needs: string }).needs})`));
-    process.stdout.write(`${c.name.padEnd(18)} ${ds.join(",").padEnd(16)} ${c.says}\n`);
+    process.stdout.write(`${c.name.padEnd(18)} ${ds.join(",").padEnd(16)} ${c.says}${c.parts ? ` (parts: ${c.parts.join(", ")})` : ""}\n`);
   }
   process.exit(0);
 }
@@ -170,6 +175,8 @@ if (opt.dialect !== undefined && opt.dialect !== "ch" && opt.dialect !== "pg") {
   process.exit(2);
 }
 const envBreak = !!process.env.BREAK && process.env.BREAK !== "0";
+// BREAK=<part>: the broken runs break that part alone, so only claims with that part run.
+const breakPart = envBreak && process.env.BREAK !== "1" ? process.env.BREAK : undefined;
 const modes: Array<"plain" | "break"> = opt.plain ? ["plain"] : opt.break || envBreak ? ["break"] : ["plain", "break"];
 if (opt.record && modes.length !== 2) {
   process.stderr.write("claims: --record runs every claim both ways; drop --plain, --break and BREAK\n");
@@ -208,7 +215,8 @@ interface Verdict {
   seconds: number | null;
 }
 
-const selected = claims.filter((c) => (!named.length || named.includes(c.name)) && !skipped.includes(c.name));
+const selected = claims.filter((c) => (!named.length || named.includes(c.name)) && !skipped.includes(c.name) && (breakPart === undefined || c.parts?.includes(breakPart)));
+if (breakPart !== undefined && !selected.length) fail2(`BREAK=${breakPart}: no claim selected has that part; --list shows the parts`);
 const verdicts = new Map<string, Verdict>(); // key: claim:dialect:mode
 const key = (c: string, d: string, m: string) => `${c}:${d}:${m}`;
 const queue: Run[] = [];
@@ -232,9 +240,25 @@ for (const c of selected) {
       continue;
     }
     for (const m of modes) {
-      queue.push({ claim: c.name, dialect: d, mode: m, holds: [`db:${c.name}:${d}`, ...(c.shares ?? [])], stallMin: c.stallMinutes ?? stallMin, log: join(logDir, `${c.name}.${d}.${m}.log`) });
+      queue.push({ claim: c.name, dialect: d, mode: m, holds: [`db:${c.name}:${d}:${m}`, ...(c.shares ?? [])], stallMin: c.stallMinutes ?? stallMin, log: join(logDir, `${c.name}.${d}.${m}.log`) });
     }
   }
+}
+// The longest runs first, by the committed record, so the last to finish is not a slow one started late.
+{
+  const committed = (() => {
+    try {
+      return readRecord(join(here, "claims-record.json"));
+    } catch {
+      return undefined;
+    }
+  })();
+  // A claim not in the record yet goes first: nothing says it is quick.
+  const took = (r: Run) => {
+    const row = committed?.rows.find((x) => x.claim === r.claim && x.dialect === r.dialect);
+    return (r.mode === "plain" ? row?.seconds.plain : row?.seconds.break) ?? Number.MAX_SAFE_INTEGER;
+  };
+  queue.sort((a, b) => took(b) - took(a));
 }
 
 async function reachable(): Promise<void> {
@@ -270,7 +294,7 @@ function start(run: Run): Running {
   const fd = openSync(run.log, "w");
   const child = spawn(process.execPath, ["--import", "tsx", join(here, "claim.ts"), run.claim, run.dialect], {
     cwd: root,
-    env: { ...process.env, BREAK: run.mode === "break" ? "1" : "" },
+    env: { ...process.env, BREAK: run.mode === "break" ? (breakPart ?? "1") : "" },
     stdio: ["ignore", fd, fd],
     detached: true,
   });

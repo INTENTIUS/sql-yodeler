@@ -8,6 +8,11 @@
  * verdict "caught". Any other error (a command that timed out, a setup step
  * that failed) is a "fail" both ways: a claim that crashes under BREAK has
  * not shown that it would notice the property breaking.
+ *
+ * A claim of several parts runs them in order with {@link runParts}, each
+ * a function of its own. Under BREAK=1 every part breaks its own property
+ * and the run is caught only when each part caught its own break; under
+ * BREAK=<part> that part alone is broken and the others must hold.
  */
 
 import type { Db } from "./db.js";
@@ -26,6 +31,9 @@ export class Pending extends Error {
   }
 }
 
+/** A broken run that held: the property was broken and no check saw it. */
+export class NotCaught extends Error {}
+
 /** Throws a {@link Violation} unless `cond`. */
 export function hold(cond: boolean, what: string): asserts cond {
   if (!cond) throw new Violation(what);
@@ -34,11 +42,13 @@ export function hold(cond: boolean, what: string): asserts cond {
 export interface Ctx {
   claim: string;
   dialect: Dialect;
-  /** BREAK=1: break the property this claim is about. */
+  /** BREAK=1: break the property this claim is about. Inside a part, whether that part is broken. */
   broken: boolean;
+  /** BREAK=<part>: the one part a run of a claim with parts breaks; undefined under BREAK=1 (every part) or a plain run. */
+  breaking?: string;
   /** The claim's own database (ClickHouse) or schema (Postgres) and its history. */
   db: Db;
-  /** The environment name the scratch project's profile and Ops use: the claim's name. */
+  /** The environment name the scratch project's profile and Ops use: the claim's name, with -break on a broken run. */
   env: string;
   /** A directory removed after the run. */
   work: string;
@@ -60,4 +70,42 @@ export interface Claim {
   shares?: string[];
   /** Minutes before the runner kills a run whose log stopped growing. Default: the runner's. */
   stallMinutes?: number;
+  /** The parts {@link runParts} runs, in order; BREAK=<part> breaks one of them alone. */
+  parts?: readonly string[];
+}
+
+export type Part<S> = (ctx: Ctx, state: S) => Promise<void>;
+
+/**
+ * Runs a claim's parts in order on one state (a project, a cluster), each
+ * with `ctx.broken` saying whether that part is the one broken.
+ *
+ * Plain, a part that does not hold stops the run, the Violation naming the
+ * part. Broken, every part runs: a broken part must throw a Violation (it
+ * caught its own break) and a part not broken must hold, so each part is
+ * written to go on from whatever the parts before it left, broken or not.
+ * The run is caught when every broken part caught its break; otherwise it
+ * fails, naming the part that held with its property broken.
+ */
+export async function runParts<S>(ctx: Ctx, state: S, parts: ReadonlyArray<readonly [string, Part<S>]>): Promise<void> {
+  const names = parts.map(([n]) => n);
+  if (ctx.breaking !== undefined && !names.includes(ctx.breaking)) throw new Error(`BREAK=${ctx.breaking}: ${ctx.claim}'s parts are ${names.join(", ")}`);
+  const caught: string[] = [];
+  const held: string[] = [];
+  for (const [name, part] of parts) {
+    const broken = ctx.broken && (ctx.breaking === undefined || ctx.breaking === name);
+    ctx.log(`part ${name}${broken ? " (broken)" : ""}`);
+    try {
+      await part({ ...ctx, broken }, state);
+    } catch (e) {
+      if (!(e instanceof Violation)) throw e;
+      if (!broken) throw new (ctx.broken ? Error : Violation)(`${name}: ${e.message}`);
+      ctx.log(`part ${name} caught its break: ${e.message}`);
+      caught.push(`${name}: ${e.message}`);
+      continue;
+    }
+    if (broken) held.push(name);
+  }
+  if (held.length) throw new NotCaught(`${held.join(", ")} held with ${held.length === 1 ? "its property" : "their properties"} broken`);
+  if (caught.length) throw new Violation(caught.join("; "));
 }

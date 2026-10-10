@@ -1,5 +1,5 @@
 ---
-claims: [declarative, new, approve-and-apply, waves, adopt]
+claims: [declarative, new, approval, waves, adopt]
 ---
 
 # The two workflows

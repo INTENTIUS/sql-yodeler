@@ -1,5 +1,5 @@
 ---
-claims: [approve-and-apply]
+claims: [approval]
 ---
 
 # Reports and the audit log

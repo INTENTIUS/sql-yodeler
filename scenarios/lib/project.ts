@@ -213,6 +213,34 @@ export class Project {
     return { ...second, ...(first.doc.planDigest ? { approved: first.doc.planDigest } : {}) };
   }
 
+  /**
+   * Applies what is pending through the migrations Op's own steps, run by
+   * hand without the outer `chant run`: the Plan step's `yodel apply
+   * --digest`, `chant approve` of that digest, and the Apply step's `yodel
+   * apply --execute`, whose exit code is returned (1 for a statement or a
+   * step that failed; a plan the Plan step refuses returns its code). It is three processes where {@link approvedApply}
+   * starts eight. Claims about what the engine does (a resume, a rebuild,
+   * a backfill) apply this way; the approval claim goes the whole way
+   * through `yodel apply` and its gate. `vars` are set for both steps;
+   * `env` is the environment (default the project's), whose Op is
+   * migrate-<env> with the gate approve-migrate-<env>.
+   */
+  async stepsApply(vars: Record<string, string | undefined> = {}, env = this.env): Promise<Ran> {
+    const digest = await this.yodel(["apply", env, "--digest"], { env: vars });
+    const plan = digest.out.trim();
+    // A plan yodel apply refuses (2 for a manual step, 4 for a refusal) stops at the Plan step, with its exit code.
+    if (digest.code !== 0) return digest;
+    if (!plan.startsWith("jcs1-")) throw new Error(`yodel apply ${env} --digest printed no digest`);
+    await this.approve(`chant approve migrate-${env} approve-migrate-${env} --plan ${plan}`);
+    return this.yodel(["apply", env, "--execute"], { env: { ...vars, YODEL_APPROVED_PLAN: plan }, timeoutMs: 600_000 });
+  }
+
+  /** {@link stepsApply} for a claim's setup: anything but exit 0 is a setup error, never a verdict. */
+  async setupApply(env = this.env): Promise<void> {
+    const ran = await this.stepsApply({}, env);
+    if (ran.code !== 0) throw new Error(`setup: yodel apply ${env} --execute exited ${String(ran.code)}`);
+  }
+
   /** `yodel status <env> --json`. */
   async status(): Promise<{ ran: Ran; doc: ApplyDoc }> {
     const ran = await this.yodel(["status", this.env, "--json"]);

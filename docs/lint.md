@@ -1,5 +1,5 @@
 ---
-claims: [lint-ci, replay, new]
+claims: [lint, new]
 ---
 
 # Lint

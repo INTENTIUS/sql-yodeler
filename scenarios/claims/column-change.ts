@@ -14,7 +14,7 @@ async function body(ctx: Ctx): Promise<void> {
     `import { table } from "@intentius/chant-lexicon-sql/postgres";\nimport { db } from "./schema.js";\n\nexport const people = table\`\n  CREATE TABLE \${db}.people (\n    id bigint PRIMARY KEY,\n    ${column}\n  )\`;\n`;
   p.write("src/people.ts", people("login text NOT NULL"));
   await p.newMigration("create");
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
+  await p.setupApply();
   await ctx.db.exec(`INSERT INTO ${ctx.db.name}.people (id, login) SELECT g, 'user' || g FROM generate_series(1, 2500) g`);
 
   p.write("src/people.ts", people(ctx.broken ? "handle text NOT NULL" : "handle text NOT NULL -- previously: login"));
@@ -24,8 +24,8 @@ async function body(ctx: Ctx): Promise<void> {
   const kinds = p.migration(id).steps.map((s) => s.op ?? s.kind);
   ctx.log(`the migration's steps: ${kinds.join(", ")}`);
 
-  const applied = await p.approvedApply();
-  hold(applied.ran.code === 0, `the rename did not apply (exit ${String(applied.ran.code)}; steps ${kinds.join(", ")})`);
+  const applied = await p.stepsApply();
+  hold(applied.code === 0, `the rename did not apply (exit ${String(applied.code)}; steps ${kinds.join(", ")})`);
   const columns = (await ctx.db.scalar(`SELECT string_agg(column_name, ',' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_schema = '${ctx.db.name}' AND table_name = 'people'`)) || "";
   hold(columns === "id,handle", `people's columns are ${columns}, not id,handle`);
   const kept = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.name}.people WHERE handle = 'user' || id`);

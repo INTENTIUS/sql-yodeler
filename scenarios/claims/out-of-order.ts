@@ -17,7 +17,7 @@ async function body(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx);
   await p.newMigration("create");
   await p.commit("create");
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
+  await p.setupApply();
 
   await p.git("checkout", "-q", "-b", "feature");
   addTable(p, "late");
@@ -28,7 +28,7 @@ async function body(ctx: Ctx): Promise<void> {
   const b = await p.newMigration("add-note");
   await p.commit("add note");
   if (a === undefined || b === undefined) throw new Error("yodel new wrote no migration");
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error(`${b} did not apply`);
+  await p.setupApply();
   await p.git("merge", "-q", "--no-edit", "feature");
 
   if (ctx.broken) {
@@ -48,8 +48,9 @@ async function body(ctx: Ctx): Promise<void> {
   hold(refused.ran.code === 4, `yodel apply exited ${String(refused.ran.code)}, not 4, with ${a} out of order`);
   hold(!(await ctx.db.tableExists("late")), `${a} was applied out of order without --allow-out-of-order`);
 
-  const allowed = await p.approvedApply(["--allow-out-of-order"]);
-  hold(allowed.ran.code === 0 && (await ctx.db.tableExists("late")), `with --allow-out-of-order ${a} did not apply (exit ${String(allowed.ran.code)})`);
+  // What yodel apply --allow-out-of-order hands the Op's steps.
+  const allowed = await p.stepsApply({ YODEL_ALLOW_OUT_OF_ORDER: "1" });
+  hold(allowed.code === 0 && (await ctx.db.tableExists("late")), `with --allow-out-of-order ${a} did not apply (exit ${String(allowed.code)})`);
 }
 
 export const outOfOrder: Claim = {

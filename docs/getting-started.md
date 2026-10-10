@@ -1,5 +1,5 @@
 ---
-claims: [new, lint-ci, approve-and-apply, drift]
+claims: [new, lint, approval, drift]
 ---
 
 # Your first migration

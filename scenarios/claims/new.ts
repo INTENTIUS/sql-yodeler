@@ -22,8 +22,8 @@ async function column(ctx: Ctx, p: Project, offline: Offline): Promise<void> {
   hold(p.read(`migrations/${second}/migration.sql`).includes("note"), `migrations/${second}/migration.sql does not add the column`);
   await p.commit("add note");
 
-  const applied = await p.approvedApply();
-  hold(applied.ran.code === 0, `the migration yodel new wrote did not apply (exit ${String(applied.ran.code)})`);
+  const applied = await p.stepsApply();
+  hold(applied.code === 0, `the migration yodel new wrote did not apply (exit ${String(applied.code)})`);
   hold(await ctx.db.columnExists(mainTable(ctx), "note"), `${ctx.db.name}.${mainTable(ctx)} has no column note`);
 }
 
@@ -51,8 +51,8 @@ async function routines(ctx: Ctx, p: Project, offline: Offline): Promise<void> {
   hold(clean.code === 0, `yodel lint flags the migration that creates the routines (exit ${String(clean.code)})`);
   await p.commit("routines");
 
-  const applied = await p.approvedApply();
-  hold(applied.ran.code === 0, `the routines migration did not apply (exit ${String(applied.ran.code)})`);
+  const applied = await p.stepsApply();
+  hold(applied.code === 0, `the routines migration did not apply (exit ${String(applied.code)})`);
   const on = await routinesOnServer(ctx);
   hold(on.fn && on.proc && on.trigger, `on the server: function ${String(on.fn)}, procedure ${String(on.proc)}, trigger ${String(on.trigger)}`);
   hold((await insertedStatus(ctx)) === "shipped", "the trigger did not lower-case an inserted status");
@@ -72,8 +72,7 @@ async function body(ctx: Ctx): Promise<void> {
   const offline = ctx.dialect === "ch" ? { YODEL_CLAIMS_CLICKHOUSE_URL: "http://127.0.0.1:9" } : { YODEL_CLAIMS_POSTGRES_URL: "postgres://127.0.0.1:9/postgres" };
   const first = await p.newMigration("create", [], offline);
   hold(first !== undefined, "yodel new wrote no first migration with no server to reach");
-  const created = await p.approvedApply();
-  if (created.ran.code !== 0) throw new Error(`the first migration did not apply (exit ${String(created.ran.code)})`);
+  await p.setupApply();
 
   await parts(ctx, [
     ["column", () => column(ctx, p, offline)],
