@@ -61,12 +61,14 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   report` show it behind. BREAK: the wave is rendered with the first
  *   tenant alone, so the others never get the migrations.
  * - pre-check (#64): staging has steps around apply, read at the base
- *   commit: a before step that fails with `onFailure: "approve"`, and an
- *   after step. Under gate `never`, the wave is held: nothing is applied
- *   and the job prints the approval it needs. Approved, it applies, and the
- *   history records both steps' outcomes, which `yodel report` lists.
- *   BREAK: the steps removed from yodel.config.ts, so the wave applies
- *   with no one asked.
+ *   commit: a before step that fails with `onFailure: "approve"`, a before
+ *   command that appends a line to a file, and an after step. Under gate
+ *   `never`, the wave is held: nothing is applied, the command has not run,
+ *   and the job prints the approval it needs. Approved, it applies, the
+ *   command having run once (#107), and the history records the steps'
+ *   outcomes, which `yodel report` lists. BREAK: the pipeline runs a yodel
+ *   built to run commands when the wave is planned too, so the command runs
+ *   in both places.
  */
 
 const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants", "pre-check"] as const;
@@ -405,7 +407,7 @@ async function promotion(ctx: Ctx, st: State, broken: boolean): Promise<void> {
  * one file of its build (a part's broken build), and `ask.mjs` beside it:
  * yodel's CLI with a terminal that answers every question with argv[2].
  */
-function yodelBuild(ctx: Ctx, p: Project, name: string, patch?: { file: string; from: string; to: string }): { ask: (answer: string, args: string[]) => Promise<Ran> } {
+function yodelBuild(ctx: Ctx, p: Project, name: string, patch?: { file: string; from: string; to: string }): { ask: (answer: string, args: string[]) => Promise<Ran>; bin: string } {
   const root = join(ctx.work, name);
   if (!existsSync(root)) {
     const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
@@ -413,6 +415,8 @@ function yodelBuild(ctx: Ctx, p: Project, name: string, patch?: { file: string; 
     cpSync(join(pkg, "dist"), join(root, "dist"), { recursive: true });
     copyFileSync(join(pkg, "package.json"), join(root, "package.json"));
     symlinkSync(p.path("node_modules"), join(root, "node_modules"));
+    mkdirSync(join(root, "bin"));
+    symlinkSync("../dist/bin.js", join(root, "bin", "yodel"));
     if (patch) {
       const file = join(root, "dist", patch.file);
       const text = readFileSync(file, "utf8");
@@ -435,6 +439,8 @@ process.exitCode = await main(args, {
   }
   return {
     ask: (answer, args) => run("node", [join(root, "ask.mjs"), answer, ...args], { cwd: p.dir, env: p.envFor(), timeoutMs: 600_000 }),
+    // A directory holding this build as `yodel`, to put first on a pipeline's PATH.
+    bin: join(root, "bin"),
   };
 }
 
@@ -547,24 +553,35 @@ async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const db = ctx.db.name;
   const table = mainTable(ctx);
   // "SELECT 1" returns a row, and a step expects none by default: the before step fails, every time.
-  const steps = `{ before: [{ name: "replication-lag", sql: "SELECT 1", onFailure: "approve" }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
-  if (broken) ctx.log("BREAK: the steps are removed from yodel.config.ts");
-  await render(st, waves(st, "never", "never"), broken ? {} : { steps });
+  // A command with a side effect (#107): a line in a file outside the project, each time it runs.
+  const notified = join(ctx.work, "notify.log");
+  const notify = `echo "$YODEL_ENV" >> ${notified}`;
+  const runs = () => (existsSync(notified) ? readFileSync(notified, "utf8").split("\n").filter(Boolean).length : 0);
+  const steps = `{ before: [{ name: "replication-lag", sql: "SELECT 1", onFailure: "approve" }, { name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
+  // Broken: the pipeline's yodel runs a command when it plans the wave, as it does under the lock.
+  const env: Record<string, string> = broken
+    ? { PATH: [yodelBuild(ctx, st.p, "yodel-runs-commands-when-planning", { file: "waves/index.js", from: 'commands: "plan"', to: 'commands: "run"' }).bin, st.p.envFor().PATH ?? ""].join(":") }
+    : {};
+  if (broken) ctx.log("BREAK: the pipeline runs a yodel built to run before commands when the wave is planned too");
+  await render(st, waves(st, "never", "never"), { steps });
   await st.p.commit("the waves: both never, staging with steps around apply");
   addColumn(st.p, "checked");
   await migrate(st, "add-checked", "feat: a checked column");
 
   // Held at staging under gate never: nothing applied, the approval it needs printed, prod not run.
-  const ran = await pipeline(st);
+  const ran = await pipeline(st, new Map(), env);
   const staging = ran.get(job(st, 1, "staging"));
   hold(staging?.ok === false, `staging's wave applied with its before step failing (exit ${String(staging?.code)})`);
+  hold(runs() === 0, `the before command ran ${String(runs())} time(s) for a wave that was held, with nothing applied`);
+  hold(/before step notify will run under the lock/.test(staging.out), "the wave plan did not say the before command will run under the lock");
   hold(!(await st.columnOn("staging", "checked")), "staging applied the column with its before step failing and no approval");
   hold(/replication-lag failed with onFailure approve/.test(staging.out), "staging's wave did not say which before step held it");
   hold(!ran.has(job(st, 2, "prod")), "prod's wave ran while staging's was held");
 
   await st.p.approve(approveCommand(staging));
-  const again = await pipeline(st, ran);
+  const again = await pipeline(st, ran, env);
   hold(again.get(job(st, 1, "staging"))?.ok === true && (await st.columnOn("staging", "checked")), "staging's wave did not apply once its held plan was approved");
+  hold(runs() === 1, `the before command ran ${String(runs())} times for one apply, not once`);
   hold(again.get(job(st, 2, "prod"))?.ok === true, "prod's wave did not apply after staging's");
 
   // The history records both steps, and yodel report lists them.
@@ -572,6 +589,7 @@ async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const recorded = report.audit.filter((e) => e.kind === "step").map((e) => e.detail ?? "");
   hold(recorded.some((d) => d.startsWith("before step replication-lag failed, held for approval")), "the history does not record the held before step");
   hold(recorded.some((d) => d.startsWith("after step smoke passed")), "the history does not record the after step");
+  hold(recorded.some((d) => d.startsWith("before step notify passed")), "the history does not record the before command");
 }
 
 const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {

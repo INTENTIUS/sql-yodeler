@@ -398,6 +398,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       `${env.name}: ${plan.empty ? "nothing to apply" : `${String(plan.pending.length)} pending (${plan.pending.join(", ")})`}; gate ${plan.gate} at ${plan.base.slice(0, 12)}` +
         `${plan.destructive ? `; destructive: ${plan.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : ""}; plan ${plan.planDigest}\n`,
     );
+    // The before steps (#64): the SQL checks as they ran, and each command as one that will run under the lock (#107).
+    for (const o of plan.steps ?? []) io.err(`${describeStep(o)}\n`);
     // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
     const forecast = await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
@@ -451,10 +453,14 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         if (now.planDigest !== planned.planDigest) {
           throw new YodelError(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`, 1);
         }
-        // The before steps (#64) ran again in that plan, under the lock; a held one needs a person's approval whatever the gate.
-        before = now.steps ?? [];
-        for (const o of before) io.err(`${describeStep(o)}\n`);
-        const verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest, now.held ?? []);
+        // The before steps' SQL checks (#64) ran again in that plan, under the lock; a held one needs a person's approval whatever the gate.
+        const checked = (now.steps ?? []).filter((o) => !o.deferred);
+        for (const o of checked) io.err(`${describeStep(o)}\n`);
+        let verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest, now.held ?? []);
+        // The commands (#107) run once, here, once the wave may apply: one that fails refuses; a held one needs the approval too.
+        const commands = await runBeforeSteps(project, venv, env, steps.steps?.before?.filter((s) => s.sql === undefined), "under the lock", io);
+        before = [...checked, ...commands];
+        if (heldSteps(commands).length > 0 && verified.wave.status !== "approved") verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest, [...(now.held ?? []), ...heldSteps(commands)]);
         wave = verified.wave;
         io.err(`${verified.line}\n`);
       },
@@ -559,11 +565,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     }
   }
 
-  // The before steps (#64), as the base commit has them: one that fails refuses before anyone is asked; the Apply step runs them again under the lock.
+  // The before steps (#64), as the base commit has them: a SQL check that fails refuses before anyone is asked; the Apply step runs them again under the lock.
+  // A command runs there alone (#107), once per apply: here the plan only says it will.
   const steps = await stepsAtBase(project, env.name);
   if (steps.note && !a.json) io.err(`${steps.note}\n`);
   try {
-    const outcomes = await runBeforeSteps(project, venv, env, steps.steps?.before, "before the gate", a.json ? undefined : io);
+    const outcomes = await runBeforeSteps(project, venv, env, steps.steps?.before, "before the gate", a.json ? undefined : io, "plan");
     if (!a.json && heldSteps(outcomes).length > 0) io.out(`before step ${heldSteps(outcomes).join(", ")} failed with onFailure approve: approving this plan lets it through\n`);
   } catch (e) {
     if (!(e instanceof YodelError) || e.exitCode !== EXIT_REFUSED) throw e;
@@ -723,9 +730,9 @@ function standingDown(project: Project, env: Environment): () => Promise<string 
 }
 
 /** Runs `env`'s before steps (#64); throws the refusal for one that fails with onFailure fail. */
-async function runBeforeSteps(project: Project, venv: VersionedEnv, env: Environment, list: readonly ApplyStep[] | undefined, when: string, io: Io | undefined): Promise<StepOutcome[]> {
+async function runBeforeSteps(project: Project, venv: VersionedEnv, env: Environment, list: readonly ApplyStep[] | undefined, when: string, io: Io | undefined, commands: "run" | "plan" = "run"): Promise<StepOutcome[]> {
   if (!list || list.length === 0) return [];
-  const outcomes = await runApplySteps(venv.driver, list, "before", { dir: project.dir, env: env.name });
+  const outcomes = await runApplySteps(venv.driver, list, "before", { dir: project.dir, env: env.name, commands });
   for (const o of outcomes) io?.err(`${describeStep(o)}\n`);
   const refusal = stepsRefusal(env.name, outcomes, when);
   if (refusal) throw refusal;
