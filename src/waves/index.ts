@@ -140,8 +140,9 @@ export async function planWave(project: Project, venv: VersionedEnv, ordered: re
   const { gate, at } = await gateAtBase(project, venv.environment);
   const steps = destructiveSteps(project.dialect === "postgres" ? "postgres" : "clickhouse", toApply);
   // The before steps (#64), as the base commit declares them: one that fails refuses; one that fails with onFailure approve holds the wave for a person.
+  // A command is not run here (#107): it may have side effects, so it runs once, under the lock (yodel apply --wave-apply), and the plan shows that it will.
   const before = toApply.length > 0 ? ((await stepsAtBase(project, venv.environment)).steps?.before ?? []) : [];
-  const outcomes = before.length > 0 ? await runApplySteps(venv.driver, before, "before", { dir: project.dir, env: venv.environment }) : [];
+  const outcomes = before.length > 0 ? await runApplySteps(venv.driver, before, "before", { dir: project.dir, env: venv.environment, commands: "plan" }) : [];
   const refusal = stepsRefusal(venv.environment, outcomes, "as the wave was planned");
   if (refusal) throw refusal;
   const held = heldSteps(outcomes);

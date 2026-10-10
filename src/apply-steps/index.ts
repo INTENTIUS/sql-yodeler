@@ -6,10 +6,13 @@
  * - Read at the base commit (`../config/base.ts`), as the plan policy is:
  *   a pull request that adds, removes or loosens a step is run under the
  *   steps the branch had. A checkout with no base to read runs none.
- * - `before` steps run under the lock before the first migration (and, in a
- *   wave, when the wave is planned). One that fails refuses the run (exit 4)
- *   unless its `onFailure` is `approve`: then the wave is held for a person,
- *   whatever its gate, and the plan they approve says which steps failed.
+ * - `before` steps run under the lock before the first migration. SQL
+ *   checks also run when the run is planned (the wave plan, or `yodel apply`
+ *   before the gate), since they only read; a command, which may have side
+ *   effects, runs once per apply, under the lock, and the plan only shows
+ *   that it will (#107). One that fails refuses the run (exit 4) unless its
+ *   `onFailure` is `approve`: then the wave is held for a person, whatever
+ *   its gate, and the plan they approve says which steps failed.
  * - `after` steps run under the lock once the last migration's statements
  *   succeeded. One that fails fails the run (exit 1); the migrations stay
  *   applied.
@@ -37,6 +40,8 @@ export interface StepOutcome {
   /** What the query returned, or how the command exited, in a few words. */
   detail: string;
   onFailure: "fail" | "approve";
+  /** A command not run because the run was only planned: it runs under the lock. */
+  deferred?: true;
 }
 
 /** The steps that apply to `env`: the base commit's, and a note when the working tree's differ. */
@@ -63,8 +68,17 @@ export async function stepsAtBase(project: Pick<Project, "dir" | "yodel">, env: 
 
 const lastLine = (text: string): string => text.trim().split("\n").at(-1)?.slice(0, 200) ?? "";
 
-/** Runs `list` in order and returns each outcome; a failing step does not stop the ones after it. */
-export async function runApplySteps(driver: Pick<VersionedDriver, "readCheck">, list: readonly ApplyStep[], when: StepWhen, ctx: { dir: string; env: string; processEnv?: NodeJS.ProcessEnv }): Promise<StepOutcome[]> {
+/**
+ * Runs `list` in order and returns each outcome; a failing step does not
+ * stop the ones after it. With `commands: "plan"` (a run being planned, not
+ * applied) a command is not run: its outcome says it runs under the lock.
+ */
+export async function runApplySteps(
+  driver: Pick<VersionedDriver, "readCheck">,
+  list: readonly ApplyStep[],
+  when: StepWhen,
+  ctx: { dir: string; env: string; processEnv?: NodeJS.ProcessEnv; commands?: "run" | "plan" },
+): Promise<StepOutcome[]> {
   const out: StepOutcome[] = [];
   for (const step of list) {
     const onFailure = step.onFailure ?? "fail";
@@ -75,6 +89,10 @@ export async function runApplySteps(driver: Pick<VersionedDriver, "readCheck">, 
       } catch (e) {
         out.push({ name: step.name, when, kind: "sql", passed: false, detail: `the query failed: ${(e instanceof Error ? e.message : String(e)).split("\n")[0] ?? ""}`, onFailure });
       }
+      continue;
+    }
+    if (ctx.commands === "plan") {
+      out.push({ name: step.name, when, kind: "command", passed: true, detail: "a command: it runs under the lock, not when the run is planned", onFailure, deferred: true });
       continue;
     }
     const ran = spawnSync("sh", ["-c", step.command ?? ""], {
@@ -92,7 +110,7 @@ export async function runApplySteps(driver: Pick<VersionedDriver, "readCheck">, 
 
 /** One line for an outcome. */
 export const describeStep = (o: StepOutcome): string =>
-  `${o.when} step ${o.name} ${o.passed ? "passed" : o.onFailure === "approve" ? "failed, held for approval" : "failed"} (${o.detail})`;
+  o.deferred ? `${o.when} step ${o.name} will run under the lock (${o.detail})` : `${o.when} step ${o.name} ${o.passed ? "passed" : o.onFailure === "approve" ? "failed, held for approval" : "failed"} (${o.detail})`;
 
 /** The `before` steps that failed with `onFailure: "approve"`: the run waits for a person. */
 export const heldSteps = (outcomes: readonly StepOutcome[]): string[] => outcomes.filter((o) => !o.passed && o.when === "before" && o.onFailure === "approve").map((o) => o.name);

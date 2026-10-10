@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { heldSteps, runApplySteps, stepsOfNote, stepsRefusal, type StepOutcome } from "../src/apply-steps/index.js";
+import { describeStep, heldSteps, runApplySteps, stepsOfNote, stepsRefusal, type StepOutcome } from "../src/apply-steps/index.js";
 import { checkYodelConfig } from "../src/config/load.js";
 import type { HistoryRow } from "../src/history/index.js";
 import { deriveAudit } from "../src/report/audit.js";
@@ -56,6 +56,24 @@ describe("running steps", () => {
     expect(refusal?.exitCode).toBe(4);
     expect(refusal?.message).toMatch(/before step no failed \(exit 2: nope\)/);
     expect(refusal?.message).not.toMatch(/broken/);
+  });
+
+  it("runs the sql checks but not a command when the run is only planned (#107)", async () => {
+    const out = await runApplySteps(
+      driver({ "SELECT lag": [{ lag: 3 }] }),
+      [
+        { name: "lag", sql: "SELECT lag", onFailure: "approve" },
+        { name: "notify", command: "exit 1", onFailure: "approve" },
+      ],
+      "before",
+      { dir: process.cwd(), env: "prod", commands: "plan" },
+    );
+    expect(out.map((o) => [o.name, o.passed, o.deferred ?? false])).toEqual([
+      ["lag", false, false],
+      ["notify", true, true],
+    ]);
+    expect(heldSteps(out)).toEqual(["lag"]);
+    expect(describeStep(out[1] as StepOutcome)).toMatch(/^before step notify will run under the lock/);
   });
 
   it("fails the run, exit 1, for an after step, the migrations applied", () => {
