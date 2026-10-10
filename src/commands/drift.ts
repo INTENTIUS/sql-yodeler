@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { parseArgs } from "node:util";
 import { promisify } from "node:util";
 import type { Command } from "../command.js";
+import { eventFromDrift, sendEvent } from "../notify/index.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
@@ -271,6 +272,8 @@ export const drift: Command = {
         const issueDoc = action && "issue" in action ? { action: action.action, number: action.issue.number, ...(action.issue.url ? { url: action.issue.url } : {}) } : action ? { action: action.action } : undefined;
         if (a.json) io.out(`${JSON.stringify({ ...result, dialect: project.dialect, ...(server ? { server } : {}), drifted: code === 2, fingerprint, ...(issueDoc ? { issue: issueDoc } : {}), ...(issueError ? { issueError } : {}) }, null, 2)}\n`);
         else io.out(renderDrift(result, server));
+        // The watch runs yodel drift on a schedule: drift found goes to the webhook yodel.config.ts notify names (#61), with the fingerprint so a receiver can tell a repeat.
+        await sendEvent(project.yodel?.config.notify, eventFromDrift({ ...result, drifted: code === 2, fingerprint }), { io, verb: "drift" });
         return issueError && code !== 2 ? 1 : code;
       } catch (e) {
         // The drift could not be read: the tracking issue stays as it is.

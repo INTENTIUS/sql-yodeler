@@ -19,6 +19,9 @@
 import type { Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 
 import type { LevelSetting, LintRuleId } from "../lint/rules.js";
+import type { NotifyConfig } from "../notify/index.js";
+
+export type { NotifyConfig };
 
 export type { Topology };
 
@@ -60,6 +63,12 @@ export interface YodelConfig {
   lint?: LintConfig;
   /** Rules over the plan (#53) that `yodel plan` reports and `yodel apply` enforces; see {@link PolicyConfig}. */
   policy?: PolicyConfig;
+  /**
+   * Webhook events (#61): the NAMES of the environment variables holding a
+   * webhook's URL and signing key, and optionally a Slack incoming webhook's
+   * URL. `{ webhook: "YODEL_WEBHOOK_URL", key: "YODEL_WEBHOOK_KEY" }`.
+   */
+  notify?: NotifyConfig;
 }
 
 /**

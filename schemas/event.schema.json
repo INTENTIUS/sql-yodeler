@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/event.schema.json",
+  "title": "a yodel webhook event",
+  "description": "Version 1. The body yodel apply, yodel plan and yodel drift post to the webhook yodel.config.ts notify names, signed with HMAC-SHA256 over '<x-yodel-timestamp>.<body>' in the x-yodel-signature header. Within a version, fields are only added; a receiver ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "event", "at", "environment", "command", "status", "summary", "migrations"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "description": "Unique per event; also the x-yodel-delivery header." },
+    "event": { "enum": ["waiting", "refused", "failed", "drift"] },
+    "at": { "type": "string", "format": "date-time" },
+    "environment": { "type": "string" },
+    "command": { "enum": ["apply", "plan", "drift"] },
+    "status": { "type": "string", "description": "The command's own word for the outcome: gated, refused, denied, failed, incomplete, drifted." },
+    "summary": { "type": "string" },
+    "migrations": { "type": "array", "items": { "type": "string" }, "description": "The pending migrations, for apply and plan." },
+    "digest": { "type": "string", "description": "The plan digest the run computed." },
+    "approve": { "type": "string", "description": "On waiting: the command that approves the plan." },
+    "reason": { "type": "string" },
+    "drift": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed", "missing"],
+      "properties": {
+        "changed": { "type": "array", "items": { "type": "string" } },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "fingerprint": { "type": "string", "description": "The same drift has the same fingerprint run after run, so a receiver can tell a repeat from new drift." }
+      }
+    },
+    "runUrl": { "type": "string" },
+    "repository": { "type": "string" },
+    "commit": { "type": "string" }
+  }
+}

@@ -24,6 +24,7 @@ import { endpoints } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { repoRoot } from "../lib/project.js";
 import type { Forge } from "./forge.js";
+import { judgeNotify, startNotifyPart, type NotifyPart } from "./notify-part.js";
 
 const READER = { user: "yodel_34_reader", password: "yodel-34-reader" };
 const WRITER = { user: "yodel_34_writer", password: "yodel-34-writer" };
@@ -71,15 +72,17 @@ async function users(ctx: Ctx): Promise<void> {
 export function templateBody(makeForge: () => Forge): Body {
   return async (ctx: Ctx): Promise<void> => {
     const forge = makeForge();
+    const notify: { part?: NotifyPart | undefined } = {};
     try {
-      await flow(ctx, forge);
+      await flow(ctx, forge, notify);
     } finally {
+      await notify.part?.close();
       await forge.close();
     }
   };
 }
 
-async function flow(ctx: Ctx, forge: Forge): Promise<void> {
+async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefined }): Promise<void> {
   const d = ctx.dialect;
   const DIALECT = d === "ch" ? "CLICKHOUSE" : "POSTGRES";
   const repoName = `yodel-34-${ctx.claim}-${d}${ctx.broken ? "-break" : ""}`;
@@ -128,6 +131,8 @@ async function flow(ctx: Ctx, forge: Forge): Promise<void> {
   hold(/^\^\d+\.\d+\.\d+$/.test(range), `the template's package.json takes @intentius/sql-yodeler as ${range}, not a registry range`);
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   await sh("npx", ["yodel", "new", "init"]);
+  // The webhook (#61): notify in yodel.config.ts and a receiver, before the pipelines are rendered again.
+  notify.part = await startNotifyPart(ctx, dir);
   // chant finds Ops from the git root, so the repository comes before rendering the pipelines again for dev alone.
   await sh("git", ["init", "-q", "-b", "main"]);
   await sh("git", ["config", "user.name", "yodel34"]);
@@ -144,6 +149,7 @@ async function flow(ctx: Ctx, forge: Forge): Promise<void> {
     [`DEV_${DIALECT}_READER_PASSWORD`]: READER.password,
     [`DEV_${DIALECT}_WRITER_USER`]: WRITER.user,
     [`DEV_${DIALECT}_WRITER_PASSWORD`]: WRITER.password,
+    ...(notify.part?.secrets ?? {}),
   });
   await sh("git", ["remote", "add", "origin", repo.remote]);
   const head = async () => (await sh("git", ["rev-parse", "HEAD"])).out.trim();
@@ -155,6 +161,8 @@ async function flow(ctx: Ctx, forge: Forge): Promise<void> {
   hold(first.log.includes("approve migrate-dev approve-migrate-dev --plan jcs1-sha256:"), "the failed apply does not give the chant approve command");
   hold(!first.log.includes("SQL_YODELER_TOKEN"), "the apply job still has a step for SQL_YODELER_TOKEN; sql-yodeler installs from npm with no token");
   hold(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists with nothing approved`);
+  // The apply stopped at the gate: the receiver has the waiting event, signed with the key (BREAK: checked with another).
+  judgeNotify(ctx, notify.part);
 
   // Approve what yodel plan shows, push the approval, run the apply again.
   const approveCmd = async (): Promise<string> => {

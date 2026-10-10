@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { eventFromRun, sendEvent } from "../notify/index.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
@@ -183,8 +184,11 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
     const posted = await upsertComment(client, marker, renderPlanMarkdown(result), existing);
     io.err(`yodel plan: ${posted.action} the plan comment on ${target.forge} ${target.repo}#${String(target.pr)}${posted.comment.url ? ` (${posted.comment.url})` : ` (comment ${String(posted.comment.id)})`}\n`);
   }
-  if (a.format === "json") io.out(`${JSON.stringify(planJsonVersioned(result), null, 2)}\n`);
+  const doc = planJsonVersioned(result);
+  if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
   else if (a.format === "markdown") io.out(renderPlanMarkdown(result));
   else io.out(renderPlanText(result, { runnable: (c) => runnable(c, project.dir) }));
+  // A plan that is refused, or that the policy denies, is news before anyone merges it (#61).
+  await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
   return code;
 }
