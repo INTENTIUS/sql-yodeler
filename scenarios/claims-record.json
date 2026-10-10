@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "recorded": "2026-10-10T03:08:29.272Z",
-  "commit": "322e789",
+  "recorded": "2026-10-10T06:38:42.829Z",
+  "commit": "856a189",
   "dirty": false,
   "rows": [
     {
@@ -411,17 +411,32 @@
     },
     {
       "claim": "lock-retry",
-      "dialect": "pg",
-      "says": "Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds",
+      "dialect": "ch",
+      "says": "Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 125,
-        "break": 107
+        "plain": 50,
+        "break": 29
       },
-      "recorded": "2026-10-10T03:08:29.272Z",
-      "commit": "322e789",
+      "recorded": "2026-10-10T06:38:42.829Z",
+      "commit": "856a189",
+      "dirty": false
+    },
+    {
+      "claim": "lock-retry",
+      "dialect": "pg",
+      "says": "Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 32,
+        "break": 37
+      },
+      "recorded": "2026-10-10T06:38:42.829Z",
+      "commit": "856a189",
       "dirty": false
     },
     {
