@@ -32,8 +32,15 @@ export const pagePrompts = {
 	].join('\n'),
 	adoption: [
 		`Take the existing database of the environment I name into versioned migrations with SQL Yodeler, following ${pageUrl('adoption')}.`,
-		'Write chant.config.ts with its profile first, and ask me before running `npx yodel init --from <env>`: it writes one row to that environment\'s history.',
+		'Make the project from the starter template with the existing database or schema name first, and ask me before running `YODEL_CREDENTIALS=writer npx yodel init --from <env> --force`: it writes one row to that environment\'s history.',
 		'Open a pull request with src/, the baseline migration and the config.',
+		neverLine,
+	].join('\n'),
+	'from-other-tools': [
+		`Move this repository's database migrations from the tool it uses now to SQL Yodeler, following ${pageUrl('from-other-tools')}.`,
+		'Make the project from the starter template, move the old migration files out of migrations/, and ask me before running `YODEL_CREDENTIALS=writer npx yodel init --from <env> --force` against the environment I name: it writes one row to that environment\'s history.',
+		'Leave the old tool\'s history table in the database.',
+		'Open a pull request with src/, the baseline migration, the config and the pipelines, with the old tool\'s migration jobs removed and listed in its description.',
 		neverLine,
 	].join('\n'),
 	workflows: [

@@ -30,6 +30,16 @@ just apply                  # applies the approved plan to dev
 
 Then create the users and the forge's secrets (below), and push. Every change after that is a pull request: edit `src/schema.ts`, run `just new <name>`, commit both.
 
+### When schema `{{chant:schema}}` already exists
+
+To adopt a database that already holds the schema (one another migration tool managed, or one made by hand), run `yodel init` in place of `just new init`, as the environment's writer, since it writes the baseline's row to the history:
+
+```sh
+YODEL_CREDENTIALS=writer npx yodel init --from <env> --force
+```
+
+`--force` lets it write over the placeholder `src/schema.ts` with the declarations it reads from the database. It writes the baseline migration and records it applied in that environment without running it. Coming from another tool, move its migration files out of `migrations/` first. [Coming from another migration tool](https://intentius.io/sql-yodeler/from-other-tools/) in the SQL Yodeler docs covers the rest: the other tool's history table, the other environments, and rollback.
+
 ## The targets
 
 `just` is optional. Each target is a thin wrapper in `justfile`, and the command beside it here does the same without `just`. `[env]` defaults to `dev`. Every target reads `.env` when there is one (`.gitignore` keeps it out of git): put the variables of the environments you reach from this machine there, as `just up` prints them for dev on the emulator.

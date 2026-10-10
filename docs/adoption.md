@@ -82,7 +82,15 @@ On Postgres, when the environment manages access (`environments.<env>.access` in
 
 The live database is only read. The one write is the history row (and the history's database or schema and table, when they are not there yet).
 
-What it needs first: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect` and `sql.profiles.<env>`, with the project's databases (ClickHouse, `databases`) or schemas (Postgres, `schemas`) listed and the history's database or schema not among them, and a `package.json` from which chant and the `sql` lexicon resolve. `init` does not write `chant.config.ts`. It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, or the environment holds nothing.
+What it needs first:
+
+- A project: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect` and `sql.profiles.<env>`, with the project's databases (ClickHouse, `databases`) or schemas (Postgres, `schemas`) listed and the history's database or schema not among them, and a `package.json` from which chant and the `sql` lexicon resolve. `init` does not write `chant.config.ts`. The usual way to get one is a [starter template](#a-new-project-from-a-template) made with the existing database's name (`--param database=<name>` for ClickHouse, `--param schema=<name>` for Postgres); its `src/schema.ts` is a placeholder, so run `init` with `--force` to write over it.
+- The writer's credentials. `init` writes the history row, and creates the history's database or schema and table when they are not there. The templates read the reader's credentials, which their READMEs create read-only, unless `YODEL_CREDENTIALS=writer`, so with a template it is `YODEL_CREDENTIALS=writer npx yodel init --from <env> --force`.
+- No subdirectory in `migrations/`. Move another tool's migration files out of it first.
+
+It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, or the environment holds nothing.
+
+`init` adopts every object in the profile's databases or schemas, except the history tables of other migration tools (golang-migrate's and dbmate's `schema_migrations`, goose's `goose_db_version`, Flyway's `flyway_schema_history`, and others), which it leaves out with a warning. There is no exclude list: a table the project should not own belongs in a database or schema the profile does not list. [Coming from another migration tool](from-other-tools.md) covers adopting a database another tool manages: the old tool's files and table, more than one environment, cutting CI over, and rollback.
 
 Both examples adopt a database this way. The ClickHouse example's run, where the database was first made on the declarative path, so `src/schema.ts` was there and `--force` writes over it:
 
