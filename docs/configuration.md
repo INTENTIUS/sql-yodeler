@@ -94,6 +94,8 @@ export default defineConfig({
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
 | lint rule levels | `lint.rules` | | | each rule's own |
 
+`sources` names DDL sources, the tables an ORM defines read from the DDL it prints; see [Schema from an ORM](orm.md).
+
 The first one set wins. On ClickHouse, `yodel status <env>` and `yodel plan <env>` print the topology and where it came from (`topology single (default)`); Postgres has no topology, and they print none.
 
 The declarative path plans and applies through chant, which reads only `sql.profiles.<env>.topology`. So a topology set in `yodel.config.ts` alone is refused there unless it is `single`, which is what chant renders when its profile sets none:

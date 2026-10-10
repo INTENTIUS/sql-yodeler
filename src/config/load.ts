@@ -10,6 +10,7 @@ import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology"
 import { YodelError } from "../project.js";
 import type { EnvironmentConfig, YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
+import { checkSources } from "../sources/index.js";
 
 export const CONFIG_FILE = "yodel.config.ts";
 
@@ -107,8 +108,9 @@ function checkPolicy(value: unknown, where: string, profiles?: readonly string[]
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
-    if (k !== "environments" && k !== "lint" && k !== "policy" && k !== "notify") throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify)`);
+    if (!["environments", "lint", "policy", "notify", "sources"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources)`);
   }
+  if (value.sources !== undefined) checkSources(value.sources, `${path}: sources`);
   if (value.notify !== undefined) {
     const problem = notifyConfigProblem(value.notify);
     if (problem) throw new YodelError(`${path}: ${problem}`);
