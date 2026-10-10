@@ -10,7 +10,7 @@
 export { defineConfig } from "./config/define.js";
 export { credentials, roleOf } from "./credentials.js";
 export type { CloudToken, Credentials, EnvRef, ProfileCredentials, Role, RoleCredentials, TokenSource } from "./credentials.js";
-export type { ApprovalMode, EnvironmentApprovalMode, EnvironmentConfig, PolicyConfig, PolicyMigration, PolicyPlan, PolicyRule, PolicyStep, NotifyConfig, Topology, TopologySetting, YodelConfig } from "./config/define.js";
+export type { ApprovalMode, AwsLogin, AzureLogin, CiLogin, CloudLogins, EnvironmentApprovalMode, EnvironmentConfig, GcpLogin, PolicyConfig, PolicyMigration, PolicyPlan, PolicyRule, PolicyStep, NotifyConfig, Topology, TopologySetting, YodelConfig } from "./config/define.js";
 export { verifyWebhook, signWebhook } from "./notify/verify.js";
 export type { NotifyEvent, NotifyEventKind } from "./notify/index.js";
 export type { DdlSource } from "./sources/index.js";

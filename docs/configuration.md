@@ -112,10 +112,30 @@ A token is reused until 80% of its lifetime has passed (`ttlSeconds`; 900 for `r
 | Forge | What `yodel ci` renders |
 |---|---|
 | GitHub | `permissions: id-token: write` on the workflow (the pull request, apply or watch workflow whose jobs hold such a role) |
-| GitLab | `id_tokens` on each job holding such a role: `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`, which the workload identity provider must allow) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
+| GitLab | `id_tokens` on each job holding such a role: `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`, or the provider's own audience with `ci.login.gcp`) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
 | Forgejo | nothing: Forgejo gives a job no OIDC token, so the runner's own cloud identity (an instance profile, a workload or managed identity) mints. The rendered files say so. |
 
-The cloud's command line then has to reach that identity in the job. A runner that carries the identity itself needs nothing more; otherwise the cloud's federation setup (the role ARN and token file for AWS, the credential configuration for Google Cloud, `az login --federated-token` for Azure) is the runner's or the image's configuration. Trust the writer's cloud role from the apply job only: on GitHub by the subject `repo:<owner>/<repo>:environment:<env>`, on GitLab by `ref:main` and the environment.
+The cloud's command line then has to reach that identity in the job. A runner that carries the identity itself needs nothing more. Otherwise `ci.login` in yodel.config.ts tells `yodel ci` how to exchange the token, and each job holding such a role logs in before yodel runs:
+
+```ts
+ci: {
+  forges: ["github", "gitlab"],
+  login: {
+    aws: { roleArn: "arn:aws:iam::123456789012:role/yodel-dev" },
+    gcp: { workloadIdentityProvider: "projects/123456789/locations/global/workloadIdentityPools/ci/providers/forge", serviceAccount: "yodel@shop.iam.gserviceaccount.com" },
+    azure: { clientId: "<application id>", tenantId: "<directory id>" },
+    environments: { prod: { aws: { roleArn: "arn:aws:iam::123456789012:role/yodel-prod" } } },
+  },
+},
+```
+
+| Cloud (token source) | The login step |
+|---|---|
+| `aws` (`rds-iam`) | the token in a file, and `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_SESSION_NAME` (`sessionName`, default `yodel`), which the aws command line assumes the role with |
+| `gcp` (`cloud-sql-iam`) | the token in a file, a workload identity credential configuration over it that impersonates `serviceAccount`, `gcloud auth login --cred-file` with it, and `GOOGLE_APPLICATION_CREDENTIALS` |
+| `azure` (`entra`) | the token in a file, `az login --service-principal --federated-token`, and `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` |
+
+On GitHub the step requests the job's OIDC token for the cloud's audience and writes the variables to `$GITHUB_ENV`, so the later steps (the report too) have them. On GitLab the job writes its `id_tokens` variable to the file, and the variables are the job's own, so `after_script` has them. Forgejo gives a job no token, so there a login is rendered only when `tokenFile` names a token the runner provides; without one, the runner's identity mints. `tokenFile` also moves the file on GitHub (default `$RUNNER_TEMP/yodel-<cloud>-token`) and GitLab (`/tmp/yodel-<cloud>-token`). `environments.<env>` gives one environment's roles a login of their own; a job that holds two environments' roles with different logins for one cloud is refused, since it logs in once per cloud. The job's image needs the cloud's command line (`aws`, `gcloud`, `az`). `yodel ci` only renders these steps; nothing calls a cloud until the job runs. Trust the writer's cloud role from the apply job only: on GitHub by the subject `repo:<owner>/<repo>:environment:<env>`, on GitLab by `ref:main` and the environment.
 
 ### yodel config check
 

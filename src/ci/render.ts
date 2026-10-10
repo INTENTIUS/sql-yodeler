@@ -72,7 +72,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, type ApprovalMode, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, type ApprovalMode, type CiLogin, type YodelConfig } from "../config/define.js";
+import { audience, CLOUD_OF, jobLogins, loginSteps, type Login, type LoginSteps } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
@@ -169,6 +170,8 @@ export interface Environments {
    * password, if any. An environment not here reads the default variables.
    */
   credentials?: Record<string, EnvCredentials>;
+  /** yodel.config.ts `ci.login` (#132): the cloud login a job runs before yodel when a role it holds is cloud-minted. */
+  login?: CiLogin;
 }
 
 /** What a job holding one role of an environment needs: the variables it reads, and the cloud identity its token source mints from. */
@@ -216,8 +219,48 @@ const cloudsOf = (envs: Pick<Environments, "credentials">, held: ReadonlyArray<r
   ...new Set(held.map(([env, role]) => envs.credentials?.[env]?.[role].cloud).filter((c): c is CloudToken => c !== undefined)),
 ];
 
-/** A GitLab job's `id_tokens` for `clouds`. */
-const idTokens = (clouds: readonly CloudToken[]): Record<string, { aud: string }> => Object.fromEntries(clouds.map((c) => [ID_TOKENS[c].variable, { aud: ID_TOKENS[c].aud }]));
+/** A GitLab job's `id_tokens` for `clouds`, each for its login's audience when the job logs in (#132): GCP's is the workload identity provider's own. */
+const idTokens = (clouds: readonly CloudToken[], logins: readonly Login[] = []): Record<string, { aud: string }> =>
+  Object.fromEntries(
+    clouds.map((c) => {
+      const login = logins.find((l) => l.cloud === CLOUD_OF[c]);
+      return [ID_TOKENS[c].variable, { aud: login ? audience(login) : ID_TOKENS[c].aud }];
+    }),
+  );
+
+/** The cloud logins (#132) of a job holding the roles `held`, from yodel.config.ts `ci.login`. */
+const loginsOf = (envs: Pick<Environments, "credentials" | "login">, held: ReadonlyArray<readonly [string, Role]>): Login[] =>
+  jobLogins(envs.login, held, (env, role) => envs.credentials?.[env]?.[role].cloud);
+
+/** A job's login steps as the github lexicon's Steps. */
+const actionsLogin = (forge: Actions, logins: readonly Login[]): AStep[] => loginSteps(forge, logins).steps.map((st) => new Step({ name: st.name, run: st.lines.join("\n") }));
+
+/** A job's login steps as plain step objects, for YAML chant rendered and yodel edits. */
+const rawLogin = (forge: Actions, logins: readonly Login[]): Array<Record<string, unknown>> => loginSteps(forge, logins).steps.map((st) => ({ name: st.name, run: st.lines.join("\n") }));
+
+/** A GitLab job's login: its script lines and its variables. */
+const gitlabLogin = (logins: readonly Login[]): { lines: string[]; variables: LoginSteps["variables"] } => {
+  const out = loginSteps("gitlab", logins);
+  return { lines: out.steps.flatMap((st) => st.lines), variables: out.variables };
+};
+
+/** Puts `steps` before the first step `at` picks (refusing a job without one). */
+function insertSteps(steps: Array<Record<string, unknown>>, add: ReadonlyArray<Record<string, unknown>>, at: (step: Record<string, unknown>) => boolean, what: string): void {
+  if (add.length === 0) return;
+  const i = steps.findIndex(at);
+  if (i < 0) throw new Error(`${what}: no step to log in before`);
+  steps.splice(i, 0, ...add);
+}
+
+/** Puts `lines` before the first script line `at` picks (refusing a job without one). */
+function insertLines(script: string[] | undefined, add: readonly string[], at: (line: string) => boolean, what: string): void {
+  if (add.length === 0) return;
+  const i = script?.findIndex(at) ?? -1;
+  if (!script || i < 0) throw new Error(`${what}: no script line to log in before`);
+  script.splice(i, 0, ...add);
+}
+
+const runsChant = (st: Record<string, unknown>): boolean => typeof st.run === "string" && st.run.startsWith("chant run ");
 
 /** The roles a pull request's plan job for `env` holds: the environment's reader and the reader of the one it requires. */
 const planRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> => [env, ...requiredOf(waves, env)].map((e) => [e, "reader"]);
@@ -459,6 +502,8 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
         ...setupSteps(inContainer(forge, tc), tc),
+        // The cloud login (#132), when a reader here is cloud-minted.
+        ...actionsLogin(forge, loginsOf(envs_, planRoles(waves, env))),
         new Step({ name: "This job cannot write", run: writeProbe(read) }),
         new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
         ...reportSteps(env, `plan-${env}`, tc),
@@ -544,14 +589,17 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   );
   for (const env of envs) {
     const clouds = cloudsOf(envs_, planRoles(waves, env));
+    const logins = loginsOf(envs_, planRoles(waves, env));
+    const login = gitlabLogin(logins);
     jobs.set(
       `plan-${env}`,
       new GitLabJob({
         extends: ".yodel",
         stage: "review",
         rules: mr(),
-        script: [writeProbe([env, ...requiredOf(waves, env)]), `yodel plan ${env} --comment`],
-        ...(clouds.length > 0 ? { id_tokens: idTokens(clouds) } : {}),
+        ...(Object.keys(login.variables).length > 0 ? { variables: login.variables } : {}),
+        script: [...login.lines, writeProbe([env, ...requiredOf(waves, env)]), `yodel plan ${env} --comment`],
+        ...(clouds.length > 0 ? { id_tokens: idTokens(clouds, logins) } : {}),
         after_script: [reportCommand(env, tc)],
         artifacts: new GitLabArtifacts({ name: reportArtifact(`plan-${env}`), when: "always", paths: [`${REPORT_DIR}/`] }),
       }),
@@ -803,7 +851,7 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
  * back chant's text unchanged before anything is added, so a change in
  * chant's emitter fails here instead of rendering something else.
  */
-function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc: Toolchain, envs: Pick<Environments, "credentials"> = {}): string {
+function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc: Toolchain, envs: Pick<Environments, "credentials" | "login"> = {}): string {
   // A wide wave's jobs are wave-<k>-<env>-decide and -share-<i>.
   const envOf = (job: string) => waves.find((w, i) => new RegExp(`^wave-${String(i + 1)}-${w.env.replace(/[^A-Za-z0-9]/g, "\\$&")}(-decide|-share-\\d+)?$`).test(job))?.env;
   const body = yaml.search(/^[^#\n]/m);
@@ -821,14 +869,24 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
       const at = record.script?.findIndex((l) => l.includes("--record-plans")) ?? -1;
       if (!record.script || at < 0) throw new Error("gitlab: the record-plans job has no chant run wave --record-plans line");
       record.script.splice(at, 0, writeProbe(waveEnvs));
-      const readers = cloudsOf(envs, waveEnvs.map((e): [string, Role] => [e, "reader"]));
-      if (readers.length > 0) record.id_tokens = idTokens(readers);
+      const readerRoles = waveEnvs.map((e): [string, Role] => [e, "reader"]);
+      const readers = cloudsOf(envs, readerRoles);
+      const logins = loginsOf(envs, readerRoles);
+      if (readers.length > 0) record.id_tokens = idTokens(readers, logins);
+      const login = gitlabLogin(logins);
+      insertLines(record.script, login.lines, (l) => l === writeProbe(waveEnvs), "gitlab: the record-plans job");
+      if (Object.keys(login.variables).length > 0) record.variables = { ...record.variables, ...login.variables };
     }
     for (const [name, job] of Object.entries(doc)) {
       const env = envOf(name);
       if (!env || typeof job !== "object" || job === null) continue;
       const clouds = cloudsOf(envs, waveRoles(waves, env));
-      Object.assign(job, { after_script: [reportCommand(env, tc)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] }, ...(clouds.length > 0 ? { id_tokens: idTokens(clouds) } : {}) });
+      const logins = loginsOf(envs, waveRoles(waves, env));
+      const login = gitlabLogin(logins);
+      const w = job as { script?: string[]; variables?: Record<string, string> };
+      insertLines(w.script, login.lines, (l) => l.startsWith("chant run "), `gitlab: ${name}`);
+      if (Object.keys(login.variables).length > 0) w.variables = { ...w.variables, ...login.variables };
+      Object.assign(job, { after_script: [reportCommand(env, tc)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] }, ...(clouds.length > 0 ? { id_tokens: idTokens(clouds, logins) } : {}) });
     }
     return emit(doc);
   }
@@ -841,6 +899,8 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
   for (const [name, job] of Object.entries(jobs)) {
     const env = envOf(name);
     if (!env) continue;
+    // The cloud login (#132) before the wave's chant run, when a role it holds is cloud-minted.
+    insertSteps(job.steps, rawLogin(forge, loginsOf(envs, waveRoles(waves, env))), runsChant, `${forge}: ${name}`);
     job.steps.push(
       { name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) },
       // chant's forgejo output is already in Forgejo's dialect, so the action is named as the forgejo lexicon names it.
@@ -857,7 +917,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
  * on its job. The output is parsed and emitted again, checked first to give
  * back chant's text unchanged.
  */
-function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], dialect: Dialect, creds: Pick<Environments, "credentials"> = {}): string {
+function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], dialect: Dialect, creds: Pick<Environments, "credentials" | "login"> = {}): string {
   const at = yaml.indexOf("\njobs:\n");
   if (at < 0) throw new Error(`${forge}: the plans workflow has no jobs`);
   const doc = parseYAMLDocument(yaml) as { jobs: Record<string, Record<string, unknown>> };
@@ -871,7 +931,7 @@ function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], di
   // It holds readers only, and shows it before it plans, as every pull request job does (#50, #130).
   const recordAt = steps.findIndex((st) => typeof st.run === "string" && st.run.includes("--record-plans"));
   if (recordAt < 0) throw new Error(`${forge}: the record-plans job has no chant run wave --record-plans step`);
-  steps.splice(recordAt, 0, { name: "This job cannot write", run: writeProbe(envs) });
+  steps.splice(recordAt, 0, ...(forge === "gitlab" ? [] : rawLogin(forge, loginsOf(creds, envs.map((e): [string, Role] => [e, "reader"])))), { name: "This job cannot write", run: writeProbe(envs) });
   delete job.steps;
   Object.assign(job, { env: { [RECORD_PLANS_ENV]: "1", ...secrets(envs.flatMap((e) => readerVariables(e, dialect, creds.credentials?.[e]))) }, steps });
   // A reader whose password is a cloud token (#50) is minted from the job's identity.
@@ -948,8 +1008,28 @@ function withIdToken(forge: Forge, top: string, clouds: readonly CloudToken[]): 
   return added;
 }
 
-/** The GitLab watch file with `id_tokens` on each watch job whose reader is cloud-minted. Parsed and emitted again, checked against chant's text first. */
-function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "credentials">): string {
+/**
+ * A GitHub or Forgejo watch file with the cloud login (#132) before the
+ * job's chant run, when its reader is cloud-minted and logs in. Parsed and
+ * emitted again, checked against chant's text first.
+ */
+function withWatchLogin(forge: Actions, yaml: string, env: string, envs: Pick<Environments, "credentials" | "login">): string {
+  const login = rawLogin(forge, loginsOf(envs, [[env, "reader"]]));
+  if (login.length === 0) return yaml;
+  const at = yaml.indexOf("\njobs:\n");
+  if (at < 0) throw new Error(`${forge}: the watch for ${env} has no jobs`);
+  const doc = parseYAMLDocument(yaml) as { jobs: Record<string, { steps: Array<Record<string, unknown>> }> };
+  const top = yaml.slice(0, at + 1);
+  const emitJobs = () => `${emitYAMLEntry("jobs", doc.jobs)}\n`;
+  if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the watch for ${env} does not emit back to chant's text`);
+  const job = doc.jobs[`watch-${env}`];
+  if (!job) throw new Error(`${forge}: the watch for ${env} has no watch-${env} job`);
+  insertSteps(job.steps, login, runsChant, `${forge}: watch-${env}`);
+  return `${top}${emitJobs()}`;
+}
+
+/** The GitLab watch file with `id_tokens` (and the cloud login, #132) on each watch job whose reader is cloud-minted. Parsed and emitted again, checked against chant's text first. */
+function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "credentials" | "login">): string {
   const clouds = (env: string) => cloudsOf(envs, [[env, "reader"]]);
   if (!envs.names.some((env) => clouds(env).length > 0)) return yaml;
   const body = yaml.search(/^[^#\n]/m);
@@ -958,8 +1038,13 @@ function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "cre
   const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
   if (emit(doc) !== yaml) throw new Error("gitlab: the watch file does not emit back to chant's text");
   for (const env of envs.names) {
-    const job = doc[`watch-${env}`];
-    if (clouds(env).length > 0 && typeof job === "object" && job !== null) Object.assign(job, { id_tokens: idTokens(clouds(env)) });
+    const job = doc[`watch-${env}`] as { script?: string[]; variables?: Record<string, string> } | undefined;
+    if (clouds(env).length === 0 || job === undefined) continue;
+    const logins = loginsOf(envs, [[env, "reader"]]);
+    const login = gitlabLogin(logins);
+    insertLines(job.script, login.lines, (l) => l.startsWith("chant run "), `gitlab: watch-${env}`);
+    if (Object.keys(login.variables).length > 0) job.variables = { ...job.variables, ...login.variables };
+    Object.assign(job, { id_tokens: idTokens(clouds(env), logins) });
   }
   return emit(doc);
 }
@@ -987,7 +1072,9 @@ export async function watchPipelines(dir: string, envs_: Environments): Promise<
     for (const file of result.files) {
       const at = forge === "gitlab" ? GITLAB_WATCH_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
-      out.push({ path: at, content: `${HEADER.join("\n")}\n${forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : yaml}` });
+      // A GitHub or Forgejo file is one environment's watch: its name is watch-<env>.yml.
+      const env = file.name.replace(/^watch-|\.yml$/g, "");
+      out.push({ path: at, content: `${HEADER.join("\n")}\n${forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : withWatchLogin(forge, yaml, env, envs_)}` });
     }
   };
   // `chant run` exits 0 when a watch finds drift; the last line, yodel drift, fails the job then.
@@ -1033,6 +1120,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
     ...(ci?.image ? { image: ci.image } : {}),
     ...(ci?.resume ? { resume: { schedule: ci.resume.schedule } } : {}),
+    ...(ci?.login ? { login: ci.login } : {}),
   };
 }
 

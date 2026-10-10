@@ -264,6 +264,69 @@ export interface CiConfig {
    * scope, Developer role). Without it, `yodel approve` resumes the job.
    */
   resume?: { schedule: string };
+  /**
+   * The cloud login a job runs before yodel when a role it holds has a
+   * password minted by a cloud token source (#132): `aws` for `rds-iam`,
+   * `gcp` for `cloud-sql-iam`, `azure` for `entra`. `environments.<env>`
+   * overrides a cloud's login for that environment's roles. See
+   * {@link CiLogin}.
+   */
+  login?: CiLogin;
+}
+
+/**
+ * How a CI job exchanges its OIDC token for a cloud login (#132). On GitHub
+ * the job requests the token for the cloud's audience and writes it to
+ * `tokenFile`; on GitLab the job's `id_tokens` variable is written there.
+ * Forgejo gives a job no OIDC token, so there a login is rendered only when
+ * `tokenFile` names a token the runner provides.
+ *
+ * ```ts
+ * ci: {
+ *   login: {
+ *     aws: { roleArn: "arn:aws:iam::123456789012:role/yodel-dev" },
+ *     environments: { prod: { aws: { roleArn: "arn:aws:iam::123456789012:role/yodel-prod" } } },
+ *   },
+ * }
+ * ```
+ */
+export interface CiLogin extends CloudLogins {
+  /** Per environment: a cloud's login for the roles of that environment, in place of the one above. */
+  environments?: Record<string, CloudLogins>;
+}
+
+export interface CloudLogins {
+  /** AWS web identity: `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE`, which the aws command line assumes the role with. */
+  aws?: AwsLogin;
+  /** gcloud workload identity federation: a credential configuration over the token, and `gcloud auth login --cred-file`. */
+  gcp?: GcpLogin;
+  /** `az login --service-principal --federated-token` with the token. */
+  azure?: AzureLogin;
+}
+
+export interface AwsLogin {
+  /** The role to assume, `arn:aws:iam::<account>:role/<name>`. */
+  roleArn: string;
+  /** Where the token is (default: a file in the job's temporary directory). */
+  tokenFile?: string;
+  /** `AWS_ROLE_SESSION_NAME`. Default: `yodel`. */
+  sessionName?: string;
+}
+
+export interface GcpLogin {
+  /** The workload identity provider, `projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`. */
+  workloadIdentityProvider: string;
+  /** The service account to impersonate, `<name>@<project>.iam.gserviceaccount.com`. */
+  serviceAccount: string;
+  tokenFile?: string;
+}
+
+export interface AzureLogin {
+  /** The application (client) id of the identity with the federated credential. */
+  clientId: string;
+  /** The directory (tenant) id. */
+  tenantId: string;
+  tokenFile?: string;
 }
 
 export interface YodelConfig {
