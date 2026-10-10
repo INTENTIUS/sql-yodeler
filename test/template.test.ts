@@ -142,6 +142,19 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     expect(applyJobs).toBe(6); // dev and prod on each of three forges
   });
 
+  it("never points the replay profile at another profile's server, and gives it the history's database", async () => {
+    const { loadChantConfig } = await import("@intentius/chant/config");
+    const { config } = await loadChantConfig(dir);
+    const profiles = (config as { sql: { profiles: Record<string, { url: string }> } }).sql.profiles;
+    const server = (url: string) => new URL(url).host;
+    const replayServer = server(profiles.replay?.url ?? "");
+    expect(replayServer).toMatch(/\.invalid(:\d+)?$/);
+    for (const [name, p] of Object.entries(profiles)) if (name !== "replay") expect(server(p.url), name).not.toBe(replayServer);
+    const yodel = readFileSync(join(dir, "yodel.config.ts"), "utf8");
+    expect(yodel).toMatch(/^ {4}replay: \{.*history: \{ database: "\{\{chant:history_(database|schema)\}\}" \} \},$/m);
+    expect(readFileSync(join(dir, "README.md"), "utf8")).not.toContain("npx yodel lint --replay replay --reset");
+  });
+
   it("lints and runs the replay check on pull requests", () => {
     for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
       const text = readFileSync(join(dir, f), "utf8");

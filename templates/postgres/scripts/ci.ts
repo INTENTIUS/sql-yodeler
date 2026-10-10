@@ -3,6 +3,7 @@
  *
  *   npm run ci          write the files
  *   npm run ci:check    exit 1 when a file differs from what this renders
+ *   npm run replay      the lint job's replay check on this machine (see replayLocally)
  *
  * Environments are the keys of `sql.profiles` in chant.config.ts, in order,
  * but `replay`, which is the lint job's throwaway server.
@@ -39,6 +40,8 @@
  * needs no token.
  */
 
+import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -152,7 +155,8 @@ interface ReplayService {
   /** The service container's environment. */
   env: Record<string, string>;
   health: string;
-  url: (host: string) => string;
+  /** The server's URL at `host`, on `port` (default: the service's own). */
+  url: (host: string, port?: number) => string;
   /** What the lint job sets besides the URL: the throwaway server's credentials. */
   jobEnv: Record<string, string>;
 }
@@ -165,7 +169,7 @@ export const REPLAY_SERVICE: Record<Dialect, ReplayService> = {
     // The default user, with no password, from outside the container.
     env: { CLICKHOUSE_SKIP_USER_SETUP: "1" },
     health: "clickhouse-client --query 'SELECT 1'",
-    url: (host) => `http://${host}:8123`,
+    url: (host, port = 8123) => `http://${host}:${String(port)}`,
     jobEnv: {},
   },
   postgres: {
@@ -173,8 +177,9 @@ export const REPLAY_SERVICE: Record<Dialect, ReplayService> = {
     image: "postgres:18.6",
     port: 5432,
     env: { POSTGRES_PASSWORD: "replay" },
-    health: "pg_isready -U postgres",
-    url: (host) => `postgres://${host}:5432/postgres`,
+    // Over TCP: during its first start the image runs a server on the socket only, then restarts.
+    health: "pg_isready -h 127.0.0.1 -U postgres",
+    url: (host, port = 5432) => `postgres://${host}:${String(port)}/postgres`,
     jobEnv: { REPLAY_POSTGRES_USER: "postgres", REPLAY_POSTGRES_PASSWORD: "replay" },
   },
 };
@@ -550,8 +555,66 @@ export async function render(dir: string): Promise<RenderedFile[]> {
   return [...reviewAndApply(envs), ...(await watchPipelines(dir, envs))];
 }
 
+// ── The replay check on this machine ────────────────────────────────────────
+
+const docker = (args: string[]): { code: number; out: string } => {
+  const ran = spawnSync("docker", args, { encoding: "utf8" });
+  if (ran.error) throw new Error(`docker: ${ran.error.message}; npm run replay needs Docker`);
+  return { code: ran.status ?? 1, out: `${ran.stdout}${ran.stderr}`.trim() };
+};
+
+/**
+ * `npm run replay [-- <yodel lint options>]`: the lint job's replay check,
+ * run here. Starts a throwaway server with Docker from the image the lint
+ * job's service runs, published on a port Docker picks on 127.0.0.1; points
+ * the `replay` profile at it (REPLAY_<DIALECT>_URL and the server's
+ * credentials); runs REPLAY; and removes the server, whatever the result.
+ * The exit code is yodel's.
+ *
+ * A server of its own because the replay drops and replays the databases
+ * (or schemas) the history names, and those are dev's names too: against
+ * the emulator dev uses on this machine, --reset would drop dev's.
+ */
+export async function replayLocally(dir: string, args: readonly string[]): Promise<number> {
+  const { dialect, replay } = await environments(dir);
+  if (!replay) throw new Error(`chant.config.ts declares no sql.profiles.${REPLAY_PROFILE}, so there is no replay check to run`);
+  const svc = REPLAY_SERVICE[dialect];
+  const name = `yodel-replay-${randomBytes(4).toString("hex")}`;
+  const env = Object.entries(svc.env).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+  const started = docker(["run", "--detach", "--rm", "--name", name, "--publish", `127.0.0.1::${String(svc.port)}`, ...env, svc.image]);
+  if (started.code !== 0) throw new Error(`could not start the replay server (${svc.image}):\n${started.out}`);
+  const stop = () => docker(["rm", "--force", "--volumes", name]);
+  process.once("SIGINT", () => {
+    stop();
+    process.exit(130);
+  });
+  try {
+    const published = /:(\d+)\s*$/m.exec(docker(["port", name, `${String(svc.port)}/tcp`]).out)?.[1];
+    if (!published) throw new Error(`docker did not publish ${name}'s port ${String(svc.port)}`);
+    console.error(`replay server ${name} (${svc.image}) on 127.0.0.1:${published}`);
+    // The service's own health check, run in the container, until it passes.
+    for (let i = 0; docker(["exec", name, "sh", "-c", svc.health]).code !== 0; i++) {
+      if (i >= 90) throw new Error(`${name} did not pass \`${svc.health}\` in 90 s`);
+      await new Promise((ok) => setTimeout(ok, 1000));
+    }
+    const [cmd = "yodel", ...rest] = REPLAY.split(" ");
+    const ran = spawnSync(cmd, [...rest, ...args], {
+      cwd: dir,
+      stdio: "inherit",
+      env: { ...process.env, [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url("127.0.0.1", Number(published)), ...svc.jobEnv },
+    });
+    if (ran.error) throw new Error(`${REPLAY}: ${ran.error.message} (npm run replay puts node_modules/.bin on PATH)`);
+    return ran.status ?? 1;
+  } finally {
+    stop();
+  }
+}
+
+// ── The command ─────────────────────────────────────────────────────────────
+
 async function main(argv: readonly string[]): Promise<number> {
   const dir = resolve(".");
+  if (argv[0] === "--replay") return replayLocally(dir, argv.slice(1));
   const check = argv.includes("--check");
   const files = await render(dir);
   const stale: string[] = [];
@@ -576,5 +639,10 @@ async function main(argv: readonly string[]): Promise<number> {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  process.exitCode = await main(process.argv.slice(2));
+  try {
+    process.exitCode = await main(process.argv.slice(2));
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exitCode = 1;
+  }
 }

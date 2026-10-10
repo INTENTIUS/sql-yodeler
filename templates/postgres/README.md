@@ -10,7 +10,7 @@ The Postgres schema `{{chant:schema}}`, managed with SQL Yodeler (`yodel`) on ch
 | `migrations/` | the versioned migrations, written by `yodel new` |
 | `ops/migrate-<env>.op.ts` | the Op `yodel apply <env>` runs: plan, a gate bound to the plan digest, apply |
 | `ops/watch-<env>.op.ts` | the drift watch, a chant `WatchOp` on a schedule |
-| `scripts/ci.ts` | renders the pipelines below (`npm run ci`) |
+| `scripts/ci.ts` | renders the pipelines below (`npm run ci`), and runs the lint job's replay check on your machine (`npm run replay`) |
 | `.github/workflows/`, `.forgejo/workflows/`, `.gitlab-ci.yml`, `.gitlab/` | the pipelines for GitHub Actions, Forgejo Actions and GitLab CI |
 
 The history table lives in schema `{{chant:history_schema}}`, set per environment in `yodel.config.ts`. The apply lock is a Postgres advisory lock, so it needs no table.
@@ -96,7 +96,11 @@ GitLab CI:
 
 ### The replay check
 
-The `replay` profile in `chant.config.ts` is not an environment: it is the server the lint job starts from the image chant's emulator runs, and `--reset` drops what the history names there before replaying. To run it on your machine, `chant emulator up --lexicon sql`, then `npx yodel lint --replay replay --reset`. Delete the profile and `npm run ci` to stop running the check.
+The `replay` profile in `chant.config.ts` is not an environment: it is a throwaway server, and `--reset` drops what the history names there before replaying. In CI it is the service the lint job starts from the image chant's emulator runs.
+
+On your machine, run `npm run replay` (`scripts/ci.ts`; it needs Docker). It starts a server of its own from the same image on a free port, points `replay` at it with `REPLAY_POSTGRES_URL`, runs `yodel lint --replay replay --reset`, and removes the server. Do not point `replay` at the emulator dev uses: the history names dev's schema, `{{chant:schema}}`, and `--reset` would drop it. Without `REPLAY_POSTGRES_URL` the profile names no server (`replay.invalid`), so a plain `npx yodel lint --replay replay` reaches nothing.
+
+Delete the profile and `npm run ci` to stop running the check.
 
 ## Adding an environment
 

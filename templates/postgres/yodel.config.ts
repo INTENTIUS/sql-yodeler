@@ -9,5 +9,7 @@ export default {
   environments: {
     dev: { history: { database: "{{chant:history_schema}}" } },
     prod: { history: { database: "{{chant:history_schema}}" } },
+    // The lint job's throwaway server (chant.config.ts), with the same history schema.
+    replay: { history: { database: "{{chant:history_schema}}" } },
   },
 } satisfies YodelConfig;

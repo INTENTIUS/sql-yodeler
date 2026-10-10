@@ -41,11 +41,13 @@ export default {
     profiles: {
       dev: clickhouse("dev", "http://127.0.0.1:8123"),
       prod: clickhouse("prod", "https://clickhouse.example.com:8443"),
-      // Not an environment: the throwaway server the pull request's lint job
-      // starts for `yodel lint --replay replay --reset`, which drops and
-      // replays {{chant:database}} there. Never point it at a server whose
-      // data matters. Locally: `chant emulator up --lexicon sql`.
-      replay: { url: process.env.REPLAY_CLICKHOUSE_URL ?? "http://127.0.0.1:8123", databases: ["{{chant:database}}"] },
+      // Not an environment: the throwaway server for `yodel lint --replay
+      // replay --reset`, which drops and replays {{chant:database}} there. The
+      // pull request's lint job starts one as a service; on your machine
+      // `npm run replay` starts one with Docker and sets REPLAY_CLICKHOUSE_URL.
+      // Never dev's server (the emulator on 8123): it holds {{chant:database}}
+      // too, and --reset would drop it. Without REPLAY_CLICKHOUSE_URL it names no server.
+      replay: { url: process.env.REPLAY_CLICKHOUSE_URL ?? "http://replay.invalid:8123", databases: ["{{chant:database}}"] },
     },
   },
 } satisfies ChantConfig;
