@@ -1,7 +1,6 @@
 {
   "name": "@intentius/sql-yodeler",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Schema management and migrations for ClickHouse and Postgres, on chant's sql lexicon",
   "license": "Apache-2.0",
   "repository": {
@@ -21,6 +20,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.12.0"
   },
@@ -31,7 +33,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run test",
-    "claims": "npm run build && tsx scenarios/run.ts"
+    "claims": "npm run build && tsx scenarios/run.ts",
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@intentius/chant": "^0.114.1",

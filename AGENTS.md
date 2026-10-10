@@ -33,6 +33,21 @@ The scenario claims (`npm run claims`, `scenarios/`) run on every pull request i
 
 The docs, READMEs and issues describe what SQL Yodeler does. They do not compare it with other migration tools, and nobody benchmarks another tool's binary from this repository.
 
+## Releasing
+
+`@intentius/sql-yodeler` is published to npm by `.github/workflows/publish.yml` when a `v<version>` tag is pushed. Nobody runs `npm publish` by hand. The workflow checks that the tag matches `package.json`, runs `npm ci`, `build` and `check`, and publishes with npm trusted publishing: npm trusts the workflow by its file name, `publish.yml`, so there is no npm token, and renaming the file breaks publishing until the trusted publisher on npmjs.com is changed too. The repository is private, so npm makes no provenance attestation. After the publish, a smoke job installs `@intentius/sql-yodeler@<version>` from the registry into an empty directory, retrying until the registry serves it, and checks that `npx yodel --version` prints the version.
+
+A release takes two runs of `npm run release` (`scripts/release.sh`, which needs `gh` signed in):
+
+1. `npm run release -- 0.1.1` while main's `package.json` is at an older version: it makes branch `release-0.1.1` from `origin/main` with the version bumped in `package.json` and `package-lock.json`, pushes it and opens a pull request, `chore: release 0.1.1`. That pull request follows the rules above: merged once `check` and `claims` are green.
+2. `npm run release -- 0.1.1` again once main is at that version: it tags `v0.1.1` on the newest commit of main that is at 0.1.1 and whose `ci` and `claims` push runs both concluded success, and pushes the tag. `--commit <sha>` names the commit instead; it must pass the same test. When no commit qualifies yet (claims takes about 35 minutes), it says why and tags nothing.
+
+`--dry-run` (`-n`) runs every check and says what it would do, without making a branch, pull request or tag. The script refuses a version that is not `X.Y.Z`, a tag that already exists, a version already on npm and a version below main's.
+
+The templates take `@intentius/sql-yodeler` with a caret range (`^0.1.0`), which in 0.x does not reach the next minor version. After a minor release is on npm, move both templates' range to it in a pull request; the template claim then installs the new release.
+
+0.1.0 was published by hand, before this workflow, so the first release made this way is 0.1.1 or later.
+
 ## Licence
 
 Apache-2.0 (`LICENSE`). Nothing goes behind a login or a paid plan: no object type, driver, lint rule or safety feature.

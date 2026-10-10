@@ -1,0 +1,110 @@
+name: publish
+
+# Publishes @intentius/sql-yodeler to npm when a v<version> tag is pushed.
+# `npm run release -- <version>` (scripts/release.sh) pushes the tag, and only
+# on a main commit whose ci and claims runs are both green; AGENTS.md,
+# Releasing, has the steps.
+#
+# npm trusts this workflow by its file name (a trusted publisher for
+# INTENTIUS/sql-yodeler, workflow publish.yml), so `npm publish` exchanges the
+# job's OIDC token for a short-lived publish token: no NPM_TOKEN secret. That
+# needs `id-token: write`, npm 11.5.1 or later and Node 22.14 or later.
+#
+# Renaming this file breaks publishing until the trusted publisher is changed
+# on npmjs.com to the new name.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # No registry-url: with it, setup-node writes an .npmrc whose
+      # _authToken is NODE_AUTH_TOKEN, and npm publish sends that instead of
+      # using the OIDC exchange.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: npm 11.5.1 or later, for trusted publishing
+        run: npm install -g npm@^11.5.1 && npm --version
+      - name: The tag matches package.json
+        id: version
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $version (expected v$version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - run: npm run build
+      - run: npx yodel --version
+      - run: npm run check
+      - name: npm publish
+        env:
+          # npm generates provenance by default under trusted publishing, but
+          # only for a public source repository: this one is private, so there
+          # is none. Saying so keeps npm from trying. Drop this once the
+          # repository is public.
+          NPM_CONFIG_PROVENANCE: 'false'
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # A rerun after a publish that went through publishes nothing.
+          if [ "$(npm view "@intentius/sql-yodeler@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "@intentius/sql-yodeler@$VERSION is already on npm; nothing to publish"
+            exit 0
+          fi
+          npm publish --access public
+
+  # The release as a user gets it: installed from the registry into an empty
+  # directory, with no checkout, and run.
+  smoke:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm install @intentius/sql-yodeler@${{ needs.publish.outputs.version }}, then yodel --version
+        env:
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          dir=$(mktemp -d)
+          cd "$dir"
+          npm init -y >/dev/null
+          # The registry can take a few minutes to serve a new version.
+          for attempt in $(seq 1 30); do
+            if npm install --prefer-online --no-audit --no-fund "@intentius/sql-yodeler@$VERSION"; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              echo "::error::@intentius/sql-yodeler@$VERSION did not install from the registry after 30 attempts"
+              exit 1
+            fi
+            echo "not installable yet (attempt $attempt/30); retrying in 20s"
+            sleep 20
+          done
+          printed=$(npx --no-install yodel --version)
+          echo "yodel --version: $printed"
+          if [ "$printed" != "$VERSION" ]; then
+            echo "::error::yodel --version printed $printed, not $VERSION"
+            exit 1
+          fi

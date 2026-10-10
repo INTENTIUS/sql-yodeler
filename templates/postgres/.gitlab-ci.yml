@@ -17,7 +17,7 @@
 #   PROD_POSTGRES_WRITER_USER, PROD_POSTGRES_WRITER_PASSWORD: protected, masked,
 #     environment scope "prod": only apply-prod declares that environment.
 #   SQL_YODELER_TOKEN: optional, masked; a token that can read github.com/INTENTIUS/sql-yodeler,
-#     for npm ci while that repository is private. Unset, the jobs skip it.
+#     only when package.json takes it from git instead of npm. Unset, the jobs skip it.
 #   GITLAB_TOKEN: a project access token with the api scope (Reporter), for
 #     the plan comment; CI_JOB_TOKEN cannot write merge request notes.
 # The jobs that hold no writer read with the reader: chant.config.ts picks

@@ -2,18 +2,24 @@
 
 ## Installing
 
-`@intentius/sql-yodeler` is not published to npm. It installs from git, or from a clone of this repository, linked or packed. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import: `npm install @intentius/chant@0.114.1 @intentius/chant-lexicon-sql@0.114.1`.
-
-### From git
+`@intentius/sql-yodeler` is on npm. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import:
 
 ```sh
-npm install github:INTENTIUS/sql-yodeler#main
+npm install @intentius/sql-yodeler @intentius/chant@0.114.1 @intentius/chant-lexicon-sql@0.114.1
 npx yodel --version
 ```
 
-This is what the starter templates' `package.json` names. npm clones the commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin; `package-lock.json` pins the commit. Use a tag or a commit instead of `#main` to pin it in `package.json` too.
+No token is needed, on your machine or in CI. The starter templates' `package.json` names `^0.1.0`. While the version is 0.x, a caret range stays within one minor version, so moving to the next minor release means changing the range (`npm install @intentius/sql-yodeler@0.2`).
 
-The repository is private, so the install, and every `npm ci` after it, needs read access to it. On your machine, `gh auth setup-git` or an SSH key that GitHub accepts is enough. The lockfile records the dependency as `git+ssh://git@github.com/INTENTIUS/sql-yodeler.git#<commit>`; when SSH fails, npm retries over HTTPS, so an HTTPS token works too. In CI, give the job a token that can read `INTENTIUS/sql-yodeler` (a GitHub Actions job's own `GITHUB_TOKEN` cannot read another private repository) and set it before `npm ci`:
+### From git
+
+A commit that is not released yet installs from git:
+
+```sh
+npm install github:INTENTIUS/sql-yodeler#main
+```
+
+npm clones the commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin; `package-lock.json` pins the commit. The repository is private, so the install, and every `npm ci` after it, needs read access to it. On your machine, `gh auth setup-git` or an SSH key that GitHub accepts is enough. The lockfile records the dependency as `git+ssh://git@github.com/INTENTIUS/sql-yodeler.git#<commit>`; when SSH fails, npm retries over HTTPS, so an HTTPS token works too. In CI, give the job a token that can read `INTENTIUS/sql-yodeler` (a GitHub Actions job's own `GITHUB_TOKEN` cannot read another private repository) and set it before `npm ci`. The templates' pipelines do this when a `SQL_YODELER_TOKEN` secret is set:
 
 ```sh
 git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
@@ -40,11 +46,11 @@ or pack it and install the tarball, which you can commit so CI needs no access t
 ```sh
 mkdir -p vendor
 (cd ../sql-yodeler && npm pack --pack-destination "$OLDPWD/vendor")
-npm install ./vendor/intentius-sql-yodeler-0.0.0.tgz
+npm install ./vendor/intentius-sql-yodeler-0.1.0.tgz
 npx yodel --version
 ```
 
-Installing the tarball rewrites the dependency in `package.json` to `file:vendor/intentius-sql-yodeler-0.0.0.tgz`. The examples in `examples/` use `file:../..`, the clone they sit in.
+Installing the tarball rewrites the dependency in `package.json` to `file:vendor/intentius-sql-yodeler-0.1.0.tgz`. The tarball is named for the version in the clone's `package.json`. The examples in `examples/` use `file:../..`, the clone they sit in.
 
 ## A project
 

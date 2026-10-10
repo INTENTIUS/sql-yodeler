@@ -32,10 +32,11 @@
  * CI_JOB_TOKEN) as with Forgejo's token, which can write. A push that could
  * land would race the approvals people push to chant/lifecycle.
  *
- * Every job installs @intentius/sql-yodeler from git, from a private
- * repository. Before `npm ci`, a job with a SQL_YODELER_TOKEN secret (GitLab:
- * CI/CD variable) rewrites that repository's URLs to HTTPS with the token;
- * without one it skips the step, and npm installs as it would anywhere.
+ * Every job installs @intentius/sql-yodeler from npm, which needs no token.
+ * A project that takes it from git instead (the repository is private) sets
+ * a SQL_YODELER_TOKEN secret (GitLab: CI/CD variable): before `npm ci`, the
+ * job rewrites that repository's URLs to HTTPS with the token. Without the
+ * secret the step only says so, and npm installs as it would anywhere.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -394,7 +395,7 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     "# writer is in the variables' settings (Settings > CI/CD > Variables):",
     ...variables,
     `#   ${YODELER_TOKEN}: optional, masked; a token that can read ${YODELER_REPO},`,
-    "#     for npm ci while that repository is private. Unset, the jobs skip it.",
+    "#     only when package.json takes it from git instead of npm. Unset, the jobs skip it.",
     "#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for",
     "#     the plan comment; CI_JOB_TOKEN cannot write merge request notes.",
     "# The jobs that hold no writer read with the reader: chant.config.ts picks",

@@ -11,16 +11,19 @@
  *   YODEL_CLAIMS_FORGEJO_POSTGRES_URL    default postgres://pgdb:5432/postgres
  *
  * The project is made with `chant init --from <this checkout>#templates/<dialect>`
- * (the template in the tree under test, not main's), keeps `dev` only, and
- * installs @intentius/sql-yodeler from a tarball of this checkout
- * (vendor/), since the package is not on npm. The dev profile is the
+ * (the template in the tree under test, not main's) and keeps `dev` only.
+ * Its package.json is left as the template wrote it, so `npm install` here
+ * and `npm ci` in every Forgejo job take @intentius/sql-yodeler from the npm
+ * registry, at the version the template's range resolves to, with no
+ * SQL_YODELER_TOKEN: the claim runs the project a user gets, and the yodel
+ * its jobs run is the released one, not this checkout. The dev profile is the
  * claim's database yodel_34_template, the history yodel_34_template_history,
  * with a reader and a writer user made for it (yodel_34_reader,
  * yodel_34_writer). The lint job replays into its own service container
  * (replay-clickhouse / replay-postgres), never the shared emulator.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hold, type Claim, type Ctx } from "../lib/claim.js";
 import { endpoints } from "../lib/db.js";
@@ -177,16 +180,6 @@ async function body(ctx: Ctx): Promise<void> {
     if (String(f).includes("prod")) rmSync(join(dir, ".gitlab", String(f)), { force: true });
   }
 
-  // @intentius/sql-yodeler from a tarball of this checkout.
-  mkdirSync(join(dir, "vendor"), { recursive: true });
-  const pack = await run("npm", ["pack", "--pack-destination", join(dir, "vendor")], { cwd: repoRoot, timeoutMs: 300_000, env: { ...process.env, npm_config_loglevel: "error" } });
-  const tgz = pack.out.trim().split("\n").at(-1) ?? "";
-  if (pack.code !== 0 || !tgz.endsWith(".tgz")) throw new Error("npm pack of this checkout failed");
-  const pkgPath = join(dir, "package.json");
-  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { dependencies: Record<string, string> };
-  pkg.dependencies["@intentius/sql-yodeler"] = `file:vendor/${tgz}`;
-  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-
   const local: NodeJS.ProcessEnv = {
     ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "CI" && !k.startsWith("GITHUB_") && !k.startsWith("YODEL_"))),
     PATH: `${join(dir, "node_modules", ".bin")}:${process.env.PATH ?? ""}`,
@@ -201,6 +194,12 @@ async function body(ctx: Ctx): Promise<void> {
     return ran;
   };
   await sh("npm", ["install", "--no-audit", "--no-fund"], 600_000);
+  // The template's range, resolved from the registry; package-lock.json records where from.
+  const range = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { dependencies: Record<string, string> }).dependencies["@intentius/sql-yodeler"] ?? "";
+  const locked = (JSON.parse(readFileSync(join(dir, "package-lock.json"), "utf8")) as { packages: Record<string, { version?: string; resolved?: string } | undefined> }).packages["node_modules/@intentius/sql-yodeler"];
+  ctx.log(`@intentius/sql-yodeler ${range} installed ${locked?.version ?? "nothing"} from ${locked?.resolved ?? "nowhere"}`);
+  hold(/^\^\d+\.\d+\.\d+$/.test(range), `the template's package.json takes @intentius/sql-yodeler as ${range}, not a registry range`);
+  hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   await sh("npx", ["yodel", "new", "init"]);
   // chant finds Ops from the git root, so the repository comes before rendering the pipelines again for dev alone.
   await sh("git", ["init", "-q", "-b", "main"]);
@@ -236,7 +235,9 @@ async function body(ctx: Ctx): Promise<void> {
   await sh("git", ["push", "-q", "origin", "main"]);
   const first = await waitRun(ctx, repo, await head(), "push");
   hold(first.status === "failure", `the first push's apply ended ${first.status}, with nothing approved`);
-  hold((await jobLog(repo, first.id)).includes("approve migrate-dev approve-migrate-dev --plan jcs1-sha256:"), "the failed apply does not give the chant approve command");
+  const firstLog = await jobLog(repo, first.id);
+  hold(firstLog.includes("approve migrate-dev approve-migrate-dev --plan jcs1-sha256:"), "the failed apply does not give the chant approve command");
+  hold(firstLog.includes("SQL_YODELER_TOKEN is not set"), "the apply job's npm ci ran with a SQL_YODELER_TOKEN, or without the step that checks for it");
   hold(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists with nothing approved`);
 
   // Approve what yodel plan shows, push the approval, run the apply again.

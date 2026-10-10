@@ -4,7 +4,7 @@ Schema management and migrations for ClickHouse and Postgres, on chant's `sql` l
 
 ## Documentation
 
-[`docs/`](docs/README.md) covers installing (the package is not on npm; it installs from git, which needs read access to this private repository, or from a clone or a packed tarball), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
+[`docs/`](docs/README.md) covers [installing](docs/configuration.md#installing) (`npm install @intentius/sql-yodeler`), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
 
 [`examples/clickhouse`](examples/clickhouse/README.md) and [`examples/postgres`](examples/postgres/README.md) are example projects, each with a transcript of a run against chant's emulator.
 
@@ -17,7 +17,7 @@ chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=e
 chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
 ```
 
-Each gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `scripts/ci.ts` in the project renders the pipelines again after an environment is added (`npm run ci`). The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup.
+Each gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `scripts/ci.ts` in the project renders the pipelines again after an environment is added (`npm run ci`). The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup. `npm install` in the new project installs `yodel` from npm (`@intentius/sql-yodeler`) with chant and its lexicons, and needs no token.
 
 ## Development
 
