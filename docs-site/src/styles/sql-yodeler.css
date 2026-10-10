@@ -1,0 +1,76 @@
+/* The brand on the docs site: the hat (scripts/brand.py draws it) and its
+   database icon. Everything else is Starlight's own styling. */
+
+/* The hat in the home page's and the 404 page's hero, at a whole multiple of its art. */
+.hero > .hero-html {
+	justify-content: center;
+}
+.sy-hero-hat {
+	max-width: none;
+	height: auto;
+	image-rendering: pixelated;
+}
+
+/* The database icon between two hairlines, over the home page's tagline. */
+.hero .tagline::before {
+	content: '';
+	display: block;
+	width: 7rem;
+	height: 13px;
+	margin: 0 auto 1rem;
+	background:
+		url('/sql-yodeler/brand/database.svg') center / 13px 13px no-repeat,
+		linear-gradient(var(--sl-color-gray-4), var(--sl-color-gray-4)) left center / 2.6rem 1px no-repeat,
+		linear-gradient(var(--sl-color-gray-4), var(--sl-color-gray-4)) right center / 2.6rem 1px no-repeat;
+	image-rendering: pixelated;
+}
+.hero .tagline a {
+	color: var(--sl-color-accent-high);
+}
+@media (min-width: 50rem) {
+	.hero .tagline::before {
+		margin-inline: 0;
+	}
+}
+
+/* Bullets are database icons, and a nested list's are the one-colour icon. Ordered lists keep their numbers. */
+.sl-markdown-content ul:not(.not-content, .not-content *) {
+	padding-left: 0;
+	list-style: none;
+}
+.sl-markdown-content ul:not(.not-content, .not-content *) > li {
+	position: relative;
+	padding-left: 1.4rem;
+}
+.sl-markdown-content ul:not(.not-content, .not-content *) > li::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	top: 0.45em;
+	width: 12px;
+	height: 13px;
+	background: url('/sql-yodeler/brand/database.svg') center / contain no-repeat;
+	image-rendering: pixelated;
+}
+.sl-markdown-content :is(ul, ol) ul:not(.not-content, .not-content *) > li::before {
+	width: 10px;
+	height: 11px;
+	background-image: url('/sql-yodeler/brand/database-mono.svg');
+}
+
+/* "Proven by", where a page's claims are listed, leads with the hat. */
+.sl-markdown-content h2#proven-by::before {
+	content: '';
+	display: inline-block;
+	width: 36px;
+	height: 32px;
+	margin-inline-end: 0.6rem;
+	vertical-align: -0.1em;
+	background: url('/sql-yodeler/brand/hat-small.png') center / contain no-repeat;
+}
+
+/* The header logo: the hat's art is transparent, so it sits on the page itself. */
+.site-title img {
+	padding: 2px 4px;
+	box-sizing: content-box;
+}

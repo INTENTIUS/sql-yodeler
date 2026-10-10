@@ -5,6 +5,7 @@
 // with its own Copy button.
 import Default from '@astrojs/starlight/components/PageTitle.astro';
 import { pageMarkdown, pageUrl } from '../markdown';
+import Hat from './Hat.astro';
 
 const { entry } = Astro.locals.starlightRoute;
 const real = entry.id !== '404';
@@ -23,7 +24,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 {real && prompt && (
 	<figure class="sy-prompt not-content">
 		<figcaption>
-			<span>Optional: hand this page to your coding agent</span>
+			<span class="sy-prompt-label"><Hat scale="small" />Optional: hand this page to your coding agent</span>
 			<button type="button" class="sy-copy" data-copy={prompt} data-label="Copy">Copy</button>
 		</figcaption>
 		<p>The steps below work by hand, with no agent.</p>
@@ -89,6 +90,11 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		border-bottom: 1px solid var(--sl-color-gray-5);
 		font-size: var(--sl-text-sm);
 		color: var(--sl-color-gray-3);
+	}
+	.sy-prompt-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
 	}
 	.sy-prompt p {
 		margin: 0;

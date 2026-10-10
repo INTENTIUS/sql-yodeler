@@ -15,6 +15,7 @@
  * output can be committed and compared.
  */
 
+import { HAT_CSS, HAT_ICON, HAT_IMG } from "../brand.js";
 import type { BuildOutput, BuiltObject } from "../chant/build.js";
 import type { MigrationStep } from "../migrations/index.js";
 
@@ -368,13 +369,15 @@ export function schemaHtml(input: DocsInput): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(input.title)}: schema</title>
+${HAT_ICON}
 <style>
 ${STYLE}
+${HAT_CSS}
 </style>
 </head>
 <body>
 <main>
-<h1>${esc(input.title)}</h1>
+<h1 class="brand">${HAT_IMG}${esc(input.title)}</h1>
 <p class="muted">${esc(dialect)}, ${String(objects.length)} objects, from ${esc(input.source)}. Written by <code>yodel docs</code>.</p>
 <h2>Objects</h2>
 <ul class="toc">

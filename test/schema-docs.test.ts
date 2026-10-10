@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { HAT_ICON, HAT_IMG } from "../src/brand.js";
 import { loadProject } from "../src/project.js";
 import { docsInput } from "../src/commands/docs.js";
 import { erdMermaid, relations, schemaHtml } from "../src/schema-docs/render.js";
@@ -69,7 +70,9 @@ describe("yodel docs", () => {
 
   it("the HTML has each table's engine, sort key, columns and relations, inline and with no script", async () => {
     const html = schemaHtml(await input("docs-clickhouse"));
-    expect(html).not.toMatch(/<script|<link|https?:\/\/(?!www\.w3)/);
+    // The hat beside the title and as the icon is inline as data: URIs; nothing else loads.
+    expect(html).toContain(HAT_IMG);
+    expect(html.replace(HAT_ICON, "").replace(HAT_IMG, "")).not.toMatch(/<script|<link|https?:\/\/(?!www\.w3)/);
     expect(html).toContain("<dt>Engine</dt><dd><code>ReplacingMergeTree(at)</code></dd>");
     expect(html).toContain("<dt>ORDER BY</dt><dd><code>(kind, id)</code></dd>");
     expect(html).toContain("<dt>TTL</dt><dd><code>at + INTERVAL 1 YEAR</code></dd>");
