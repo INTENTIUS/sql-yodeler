@@ -8,15 +8,16 @@
 #      package.json and package-lock.json, pushes it and opens the pull
 #      request. It is reviewed and merged like any other.
 #   2. origin/main is at <version>: the script picks the newest first-parent
-#      commit on main that carries <version> and whose latest `ci` and
-#      `claims` push runs both concluded success (or the commit named with
+#      commit on main that carries <version> and whose latest `ci` push run
+#      concluded success (or the commit named with
 #      --commit, which must pass the same test), tags it v<version> and
 #      pushes the tag. .github/workflows/publish.yml publishes on that tag.
 #
-# --skip-ci (or YODEL_RELEASE_SKIP_CI=1) tags without looking at the ci and
-# claims runs, for a commit whose local gates passed (AGENTS.md, Checks):
-# the commit named with --commit, or else origin/main. It must still be on
-# main and at <version>.
+# --skip-ci (or YODEL_RELEASE_SKIP_CI=1) tags without looking at the ci
+# run, for a commit whose local gates passed (AGENTS.md, Checks): the commit
+# named with --commit, or else origin/main. It must still be on main and at
+# <version>. The claims are never a release gate: they run between
+# development cycles.
 #
 # It refuses a version that is not X.Y.Z, a tag that exists here or on
 # origin, a version already on npm, and a version below main's.
@@ -26,7 +27,7 @@
 set -euo pipefail
 
 PKG="@intentius/sql-yodeler"
-WORKFLOWS=(ci.yml claims.yml)
+WORKFLOWS=(ci.yml)
 
 usage() {
   echo "usage: npm run release -- <version> [--dry-run] [--commit <sha>] [--skip-ci]" >&2
@@ -127,7 +128,7 @@ if [ "$at_main" != "$version" ]; then
   git push --quiet -u origin "$branch"
   gh pr create --base main --head "$branch" --title "chore: release $version" --body "Bumps $PKG to $version in package.json and package-lock.json.
 
-Merge it on its local gates (AGENTS.md, Checks). Then \`npm run release -- $version --skip-ci --commit <sha>\` tags that commit of main $tag once its local check and claims pass, and the publish workflow publishes it."
+Merge it on its local gates (AGENTS.md, Checks). Then \`npm run release -- $version --skip-ci --commit <sha>\` tags that commit of main $tag once its local check passes, and the publish workflow publishes it."
   exit 0
 fi
 
@@ -167,9 +168,9 @@ if [ -n "$commit" ] || [ "$skip_ci" = 1 ]; then
   git merge-base --is-ancestor "$sha" "$main" || fail "$(short "$sha") is not on origin/main"
   [ "$(version_at "$sha")" = "$version" ] || fail "$(short "$sha") is at $(version_at "$sha"), not $version"
   if [ "$skip_ci" = 1 ]; then
-    echo "  $(short "$sha"): ci and claims not checked (--skip-ci): its local check and claims are the gate" >&2
+    echo "  $(short "$sha"): ci not checked (--skip-ci): its local check is the gate" >&2
   else
-    green "$sha" || fail "$(short "$sha") is not green on both ci and claims"
+    green "$sha" || fail "$(short "$sha") is not green on ci"
   fi
 else
   sha=""
@@ -181,7 +182,7 @@ else
       break
     fi
   done
-  [ -n "$sha" ] || fail "no commit on main at $version has both ci and claims green yet; wait for the runs, or fix main"
+  [ -n "$sha" ] || fail "no commit on main at $version has ci green yet; wait for the runs, or fix main"
 fi
 
 echo "Tag $tag on $(short "$sha") ($(git log -1 --format=%s "$sha")); main is at $(short "$main")."

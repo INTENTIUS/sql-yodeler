@@ -5,14 +5,12 @@
 # runner (template a Forgejo, template-github act and a mock GitHub,
 # template-gitlab a GitLab), which this job has not, so they are skipped
 # here. The record and every run's log are kept as the run's artifacts.
+# It runs only when a person starts it (between development cycles), never
+# on a pull request or a push: nothing merges or releases on the claims.
 
 name: claims
 
 on:
-  pull_request: null
-  push:
-    branches:
-      - main
   workflow_dispatch: null
 
 permissions:

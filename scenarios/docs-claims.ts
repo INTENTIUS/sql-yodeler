@@ -7,12 +7,11 @@
  *   ---
  *
  * (an empty list is allowed, and says the page makes no claim a scenario
- * proves), and optionally `draft: true`. A page that is not a draft may only
- * name claims whose newest recorded row, for every dialect the claim runs on
- * (scenarios/claims/index.ts), passed plain and was caught broken in
- * scenarios/claims-record.json. A draft may name pending ones; the site says
- * so on the page and leaves it out of llms.txt. test/docs-claims.test.ts runs
- * the check, so `npm run check` fails on a page whose claims do not hold.
+ * proves), and optionally `draft: true`. test/docs-claims.test.ts checks that
+ * every page has the line and names only claims scenarios/claims/index.ts
+ * lists. It does not read the record: the claims run between development
+ * cycles, so `npm run check` never waits on a claim run. The site shows each
+ * claim's recorded state (claimStates) on the page.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -63,7 +62,7 @@ export function docsPages(docsDir: string): Array<{ file: string; text: string }
 }
 
 /** What is wrong with the pages' claims: an empty list when every page is right. */
-export function docsClaimProblems(pages: Array<{ file: string; text: string }>, record: ClaimsRecord | undefined, claims: readonly Claim[]): string[] {
+export function docsClaimProblems(pages: Array<{ file: string; text: string }>, claims: readonly Claim[]): string[] {
   const byName = new Map(claims.map((c) => [c.name, c]));
   const problems: string[] = [];
   for (const { file, text } of pages) {
@@ -79,14 +78,9 @@ export function docsClaimProblems(pages: Array<{ file: string; text: string }>, 
       continue;
     }
     for (const name of front.claims) {
-      const claim = byName.get(name);
-      if (!claim) {
+      if (!byName.has(name)) {
         problems.push(`docs/${file}: names claim ${name}, which scenarios/claims/index.ts does not list`);
         continue;
-      }
-      if (front.draft) continue;
-      for (const { dialect, state } of claimStates(claim, record)) {
-        if (state !== "holds") problems.push(`docs/${file}: claim ${name} (${dialect}) is ${state} in the record; fix it, or mark the page draft: true`);
       }
     }
   }

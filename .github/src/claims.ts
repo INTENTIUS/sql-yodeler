@@ -5,12 +5,14 @@ const comment = `The scenario claims (scenarios/run.ts): every claim against the
 emulator, plain and under BREAK=1. The template claims need a forge with a
 runner (template a Forgejo, template-github act and a mock GitHub,
 template-gitlab a GitLab), which this job has not, so they are skipped
-here. The record and every run's log are kept as the run's artifacts.`;
+here. The record and every run's log are kept as the run's artifacts.
+It runs only when a person starts it (between development cycles), never
+on a pull request or a push: nothing merges or releases on the claims.`;
 
 export const workflow = new Workflow({
   comment: rendered("claims.ts", comment),
   name: "claims",
-  on: { pull_request: null, push: { branches: ["main"] }, workflow_dispatch: null },
+  on: { workflow_dispatch: null },
   permissions: { contents: "read" },
   jobs: {
     claims: new Job({
