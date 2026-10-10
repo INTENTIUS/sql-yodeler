@@ -4,7 +4,7 @@
  * Docker network `tglab`). Each run makes its own project, with shared
  * runners off, and its own project runner (./gitlab.compose.ts) on that
  * network, so the pipelines run on nothing else's runner. The pipelines are
- * the generated .gitlab-ci.yml: a push to main runs apply-dev, a merge
+ * the generated .gitlab-ci.yml: a push to main runs dev's wave job (wave-<n>-dev), a merge
  * request runs lint and plan-dev, and plan-dev comments with GITLAB_TOKEN,
  * a project access token the claim makes. The variables are set as the
  * template's .gitlab-ci.yml says: the writer's protected and scoped to the
@@ -162,12 +162,12 @@ export function gitlabForge(): Forge {
       return {
         remote: `${gitlab.url.replace("://", `://oauth2:${encodeURIComponent(gitlab.token)}@`)}/${me.username}/${path}.git`,
         pushed: (sha) => waitPipeline(sha, "push"),
-        // What a user does after approving: retry the apply job that stopped at the gate.
+        // What a user does after approving: retry dev's wave job (yodel ci names it wave-<n>-dev), stopped at the gate.
         async applyAgain(sha) {
           const [p] = (await must<Pipeline[]>("GET", `/projects/${pid}/pipelines?sha=${sha}&source=push`)).sort((a, b) => b.id - a.id);
           if (!p) throw new Error(`no push pipeline on ${sha} to run the apply again in`);
-          const job = (await must<Job[]>("GET", `/projects/${pid}/pipelines/${String(p.id)}/jobs`)).find((j) => j.name === "apply-dev");
-          if (!job) throw new Error(`pipeline ${String(p.id)} has no apply-dev job`);
+          const job = (await must<Job[]>("GET", `/projects/${pid}/pipelines/${String(p.id)}/jobs`)).find((j) => /^wave-\d+-dev$/.test(j.name));
+          if (!job) throw new Error(`pipeline ${String(p.id)} has no wave-<n>-dev job`);
           const retried = await must<Job>("POST", `/projects/${pid}/jobs/${String(job.id)}/retry`);
           const deadline = Date.now() + 30 * 60_000;
           for (;;) {
@@ -175,10 +175,10 @@ export function gitlabForge(): Forge {
             if (DONE.includes(j.status)) {
               const log = `----- job ${j.name} (${j.status}) -----\n${(await api("GET", `/projects/${pid}/jobs/${String(j.id)}/trace`)).text}\n`;
               if (j.status !== "success") printFailed([j], log);
-              ctx.log(`apply-dev retried as job ${String(j.id)}: ${j.status}`);
+              ctx.log(`${job.name} retried as job ${String(j.id)}: ${j.status}`);
               return { ok: j.status === "success", status: j.status, log };
             }
-            if (Date.now() > deadline) throw new Error(`the retried apply-dev job ${String(j.id)} did not finish in 30 minutes`);
+            if (Date.now() > deadline) throw new Error(`the retried ${job.name} job ${String(j.id)} did not finish in 30 minutes`);
             await sleep(5_000);
           }
         },
