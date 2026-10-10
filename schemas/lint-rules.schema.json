@@ -41,6 +41,10 @@
         "description": "The dialect it applies to; both when absent.",
         "$ref": "common.schema.json#/$defs/dialect"
       },
+      "schema": {
+        "description": "One of the sql lexicon's schema checks, run on each migration's recorded schema.",
+        "type": "boolean"
+      },
       "configured": {
         "description": "The level in this project.",
         "enum": [

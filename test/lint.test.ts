@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
 import { createMigration, MIGRATION_JSON, MIGRATION_SQL, newestMigration, readMigrations, scanMigrations, serializeDocument, writeMigration, type CreatedMigration, type Migration, type MigrationDocument } from "../src/migrations/index.js";
-import { lintMigrations, lintSettings, LINT_RULES, mapMigrationSql, migrationSilences, silenceableRules, updateChecksum, type Finding, type LintOptions, type ProjectRule } from "../src/lint/index.js";
+import { lintMigrations, lintSettings, LINT_RULES, SCHEMA_RULES, mapMigrationSql, migrationSilences, silenceableRules, updateChecksum, type Finding, type LintOptions, type ProjectRule } from "../src/lint/index.js";
 import { compareHistory } from "../src/versioned/state.js";
 import { deriveState, MIGRATION_ROW, type HistoryRow } from "../src/history/index.js";
 
@@ -309,7 +309,12 @@ describe("yodel lint: Postgres statement rules (from the classifier's classes)",
     // chant plans the CHECK as ADD CONSTRAINT ... NOT VALID (SQLPG217), then VALIDATE (SQLPG220): neither blocks writes.
     expect(got.map(([, code]) => code)).not.toContain("SQLPG218");
     expect(report.findings.find((f) => f.message.includes("SQLPG207"))?.message).toContain("blocks reads and writes");
-    expect(report.errors).toBe(report.findings.length);
+    // The CHECK's first statement carries the count of rows it refuses: a data-dependent warning showing that pre-check.
+    const data = report.findings.filter((f) => f.rule === "data-dependent");
+    expect(data.map((f) => [f.level, f.message.match(/SQLPG\d+/)?.[0]])).toEqual([["warning", "SQLPG217"]]);
+    expect(data[0]?.message).toContain("SELECT count(*) AS n FROM yodel_14.orders WHERE NOT (n > 0)");
+    expect(report.errors).toBe(report.findings.length - data.length);
+    expect(report.warnings).toBe(data.length);
   });
 
   it("flags an index without CONCURRENTLY on an existing table; a foreign key is planned NOT VALID, then VALIDATE", async () => {
@@ -322,8 +327,11 @@ describe("yodel lint: Postgres statement rules (from the classifier's classes)",
     const report = await lint(dir);
     expect(report.findings.map((f) => [f.rule, f.message.match(/SQLPG\d+/)?.[0]])).toEqual([
       ["pg-lock", "SQLPG241"],
+      ["data-dependent", "SQLPG217"],
     ]);
     expect(report.findings[0]?.message).toContain("without CONCURRENTLY");
+    // The key added NOT VALID counts the orphan rows its validation would fail on.
+    expect(report.findings[1]?.message).toMatch(/can fail on the rows already there \(.*\).*SELECT count\(\*\)/);
   });
 
   it("passes the safe forms: CONCURRENTLY, NOT VALID, USING INDEX, and an index on a table created with it", async () => {
@@ -335,7 +343,10 @@ describe("yodel lint: Postgres statement rules (from the classifier's classes)",
       ["reindex", pg(pgOrders("cid bigint UNIQUE, CONSTRAINT fk FOREIGN KEY (cid) REFERENCES yodel_14.customers (id) NOT VALID"), pgIndex("CREATE INDEX CONCURRENTLY ix ON yodel_14.orders (cid, id)"))],
     ]);
     const report = await lint(dir);
-    expect(report.findings).toEqual([]);
+    // Nothing blocks writes; the unique constraint's index build can still fail on duplicates, a warning with its pre-check.
+    expect(report.findings.map((f) => [f.rule, f.level])).toEqual([["data-dependent", "warning"]]);
+    expect(report.findings[0]?.message).toContain("held by more than one row");
+    expect(report.errors).toBe(0);
   });
 });
 
@@ -349,6 +360,118 @@ describe("yodel lint: Postgres Op steps", () => {
     expect(m?.document.steps.map((s) => (s.kind === "op" ? s.op : s.kind))).toEqual(["PostgresMigrationOp"]);
     const report = await lint(dir);
     expect(report.findings).toEqual([]);
+  });
+});
+
+describe("yodel lint: the lexicon's schema checks (#51)", () => {
+  /** A table with no primary key, as chant build serializes it (its columns and keys besides the DDL). */
+  const logs: BuiltObject = {
+    export: "logs",
+    type: "Postgres::Table",
+    ddl: "CREATE TABLE yodel_14.logs (msg text)",
+    dependsOn: ["app"],
+    ...{ name: "logs", sqlName: "yodel_14.logs", schema: "yodel_14", columns: [{ name: "msg", type: "text" }], like: [], uniques: [], checks: [], foreignKeys: [], exclusions: [], inherits: [] },
+  };
+  const all = { ...LINT_RULES, ...SCHEMA_RULES };
+
+  function logsChain(): { dir: string; id: string; next: string } {
+    const dir = tempDir();
+    const [, m, n] = chain(dir, [
+      ["create", pg(pgOrders("n integer"))],
+      ["logs", pg(pgOrders("n integer"), logs)],
+      ["note", pg(pgOrders("n integer, note text"), logs)],
+    ]);
+    return { dir, id: m?.id ?? "", next: n?.id ?? "" };
+  }
+
+  it("reports a check's finding in the migration whose recorded schema first has it, at the check's level, at the step on its object", async () => {
+    const { dir, id, next } = logsChain();
+    const report = await lint(dir, { dialect: "postgres" });
+    const found = report.findings.filter((f) => f.rule === "SQLPG101");
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ migration: id, level: "warning", step: 0, object: "yodel_14.logs" });
+    expect(found[0]?.message).toMatch(/^step 0: logs \(yodel_14\.logs\) has no primary key/);
+    expect(report.findings.some((f) => f.migration === next && f.rule === "SQLPG101")).toBe(false);
+  });
+
+  it("takes yodel.config.ts's level first, then chant.config.ts lint.rules'", async () => {
+    const { dir } = logsChain();
+    const settings = lintSettings({ rules: { SQLPG101: "error" } }, all);
+    expect((await lint(dir, { settings })).findings.find((f) => f.rule === "SQLPG101")?.level).toBe("error");
+    const project = { config: { lint: { rules: { SQLPG101: ["off", {}] } } } } as unknown as LintOptions["project"];
+    expect((await lint(dir, { ...(project ? { project } : {}) })).findings.some((f) => f.rule === "SQLPG101")).toBe(false);
+    const chantError = { config: { lint: { rules: { SQLPG101: "error" } } } } as unknown as LintOptions["project"];
+    expect((await lint(dir, { ...(chantError ? { project: chantError } : {}) })).findings.find((f) => f.rule === "SQLPG101")?.level).toBe("error");
+    // yodel.config.ts wins over chant.config.ts.
+    expect((await lint(dir, { settings: lintSettings({ rules: { SQLPG101: "warning" } }, all), ...(chantError ? { project: chantError } : {}) })).findings.find((f) => f.rule === "SQLPG101")?.level).toBe("warning");
+  });
+
+  it("is silenced by a yodel:allow line above the step on its object", async () => {
+    const { dir, id } = logsChain();
+    editSql(dir, id, above("CREATE TABLE yodel_14.logs", "-- yodel:allow SQLPG101 an append-only log, read in full"));
+    const report = await lint(dir);
+    expect(report.findings.find((f) => f.rule === "SQLPG101")).toMatchObject({ silenced: "an append-only log, read in full" });
+    expect(report.findings.some((f) => f.rule === "silence")).toBe(false);
+  });
+
+  it("leaves out objects recorded with their DDL alone", async () => {
+    const dir = tempDir();
+    chain(dir, [["create", pg(pgIndex("CREATE INDEX ix ON yodel_14.orders (id)"), { ...logs, ddl: logs.ddl, export: "bare", ...{ name: undefined } })]]);
+    expect((await lint(dir)).findings.filter((f) => SCHEMA_RULES[f.rule])).toEqual([]);
+  });
+});
+
+describe("yodel lint: naming rules (#51)", () => {
+  const all = { ...LINT_RULES, ...SCHEMA_RULES };
+  const naming = lintSettings({ naming: { table: "snake_case", column: "snake_case", index: "[a-z_]+_idx", constraint: "[a-z_]+_(pkey|key|fkey|check)" } }, all);
+
+  it("reads presets and expressions, and refuses a kind or an expression it cannot use", () => {
+    expect(naming.naming?.table?.pattern.test("order_items")).toBe(true);
+    expect(naming.naming?.table?.pattern.test("OrderItems")).toBe(false);
+    expect(naming.naming?.index?.pattern.test("orders_cid_idx")).toBe(true);
+    expect(naming.naming?.index?.pattern.test("orders_cid_idx2")).toBe(false);
+    expect(() => lintSettings({ naming: { view: "snake_case" } }, all)).toThrow(/lint\.naming\.view: not a kind/);
+    expect(() => lintSettings({ naming: { table: "(" } }, all)).toThrow(/not a preset or a valid regular expression/);
+    expect(() => lintSettings({ nope: {} }, all)).toThrow(/unknown setting \(expected rules, naming\)/);
+  });
+
+  it("flags the names a Postgres migration adds, not the ones its parent had", async () => {
+    const dir = tempDir();
+    const [first, m, n] = chain(dir, [
+      ["create", pg(pgOrders(`"legacyCol" integer`))],
+      ["add", pg(pgOrders(`"legacyCol" integer, "camelCol" integer, CONSTRAINT positive CHECK ("camelCol" > 0)`), pgIndex(`CREATE INDEX ix ON yodel_14.orders ("camelCol")`))],
+      ["more", pg(pgOrders(`"legacyCol" integer, "camelCol" integer, ok_col integer, CONSTRAINT positive CHECK ("camelCol" > 0)`), pgIndex(`CREATE INDEX ix ON yodel_14.orders ("camelCol")`))],
+    ]);
+    const report = await lint(dir, { settings: naming });
+    const found = report.findings.filter((f) => f.rule === "naming");
+    // legacyCol once, where the first migration adds it.
+    expect(found.map((f) => [f.migration, f.message.replace(/^step \d+: /, "").split(":")[0]])).toEqual([
+      [first?.id, "column legacyCol of yodel_14.orders"],
+      [m?.id, "column camelCol of yodel_14.orders"],
+      [m?.id, "constraint positive on yodel_14.orders"],
+      [m?.id, "index yodel_14.ix"],
+    ]);
+    expect(found.every((f) => f.level === "error")).toBe(true);
+    expect(found[1]?.message).toContain(`"camelCol" does not match the naming rule for columns (snake_case, `);
+    expect(found[3]?.message).toContain("([a-z_]+_idx)");
+    expect(report.findings.some((f) => f.migration === n?.id && f.rule === "naming")).toBe(false);
+    // With no naming rules, nothing.
+    expect((await lint(dir)).findings.filter((f) => f.rule === "naming")).toEqual([]);
+  });
+
+  it("flags a ClickHouse table, column, skip index and constraint, and is silenced like a statement rule", async () => {
+    const dir = tempDir();
+    const [, m] = chain(dir, [
+      ["create", ch(chEvents("id UInt64"))],
+      ["add", ch(chEvents("id UInt64, Kind String DEFAULT '', INDEX KindIdx Kind TYPE bloom_filter GRANULARITY 1"))],
+    ]);
+    const report = await lint(dir, { settings: naming });
+    expect(report.findings.filter((f) => f.rule === "naming").map((f) => f.message.replace(/^step \d+: /, "").split(":")[0])).toEqual(["column Kind of yodel_14.events", "index KindIdx on yodel_14.events"]);
+    const id = m?.id ?? "";
+    const first = m?.document.steps[0];
+    editSql(dir, id, above(first?.kind === "statement" ? first.sql : "", "-- yodel:allow naming the column mirrors an upstream field"));
+    const silenced = await lint(dir, { settings: naming });
+    expect(silenced.findings.filter((f) => f.rule === "naming").every((f) => f.silenced !== undefined)).toBe(true);
   });
 });
 

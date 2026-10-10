@@ -10,16 +10,24 @@
  *   breaks one cannot be applied safely or cannot be checked at all.
  * - Statement rules, from the classes chant's classifier gives each step:
  *   `destructive`, `pg-rewrite`, `pg-lock`, `pg-signature`, `pg-access`,
- *   `pg-rls-not-forced` (a warning), `ch-mutation`, `ch-rebuild`.
+ *   `pg-rls-not-forced` (a warning), `ch-mutation`, `ch-rebuild`,
+ *   `data-dependent` (a warning: a statement that can fail on the rows
+ *   already there, with the pre-check yodel apply runs first), and
+ *   `naming` (the names a migration adds, against `lint.naming`).
  *   Errors by default; a line `-- yodel:allow <rule> <reason>` above the
  *   statement in `migration.sql` silences one for that statement, and the
  *   reason is recorded in the history when the migration applies.
+ *
+ * The lexicon's schema checks (`SQLPG101`, `SQLCH113`, ...) are rules too,
+ * in `./schema-checks.ts`: silenceable, at the level the check gives.
  *
  * The rest (`refused-step`, `pg-routine-in-use`, `migration-sql`,
  * `silence`) say a migration will not apply as written or a silence is
  * wrong. Their level can be
  * changed in `yodel.config.ts`, but they cannot be silenced.
  */
+
+import { SCHEMA_RULES } from "./schema-checks.js";
 
 export type LintLevel = "error" | "warning";
 export type LevelSetting = LintLevel | "off";
@@ -35,6 +43,8 @@ export interface LintRule {
   configurable: boolean;
   /** The dialect it applies to; both when absent. */
   dialect?: "clickhouse" | "postgres";
+  /** One of the sql lexicon's schema checks (`./schema-checks.ts`). */
+  schema?: boolean;
 }
 
 const integrity = (id: string, summary: string): LintRule => ({ id, summary, level: "error", silenceable: false, configurable: false });
@@ -54,6 +64,8 @@ export const LINT_RULES = {
   "pg-routine-in-use": { id: "pg-routine-in-use", summary: "Postgres: a function dropped while a trigger the migration's schema declares still executes it; the DROP fails", level: "error", silenceable: false, configurable: true, dialect: "postgres" },
   "pg-access": statement("pg-access", "Postgres: takes access away: a privilege revoked, a policy dropped, or row-level security turned off or no longer forced on the table's owner", "postgres"),
   "pg-rls-not-forced": { id: "pg-rls-not-forced", summary: "Postgres: a table's row-level security is enabled but not forced, so the table's owner (often the role that applies) bypasses its policies", level: "warning", silenceable: true, configurable: true, dialect: "postgres" },
+  "data-dependent": { id: "data-dependent", summary: "Postgres: a statement that can fail on the rows already there (a unique index over duplicates, SET NOT NULL over NULLs, a check or foreign key some row breaks); yodel apply runs its pre-check first and refuses when it counts any", level: "warning", silenceable: true, configurable: true, dialect: "postgres" },
+  naming: { id: "naming", summary: "a table, column, index or constraint the migration adds breaks yodel.config.ts lint.naming", level: "error", silenceable: true, configurable: true },
   "ch-mutation": statement("ch-mutation", "ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback", "clickhouse"),
   "ch-rebuild": statement("ch-rebuild", "ClickHouse: a rebuild, every row copied into a new table and swapped in (ClickHouseRebuildOp)", "clickhouse"),
   "refused-step": shape("refused-step", "a step yodel apply refuses to run: a manual step, or an Op step it does not run"),
@@ -67,5 +79,5 @@ export const ruleIds = Object.keys(LINT_RULES) as LintRuleId[];
 
 export const isRuleId = (id: string): id is LintRuleId => Object.hasOwn(LINT_RULES, id);
 
-/** The rules a `-- yodel:allow` line can name. */
-export const silenceableRules = (): LintRuleId[] => ruleIds.filter((id) => LINT_RULES[id].silenceable);
+/** The rules a `-- yodel:allow` line can name: the statement rules, and the lexicon's schema checks. */
+export const silenceableRules = (): string[] => [...ruleIds.filter((id) => LINT_RULES[id].silenceable), ...Object.keys(SCHEMA_RULES)];

@@ -13,6 +13,7 @@ import {
   checksProblem,
   createMigration,
   describeExpect,
+  migrationChecks,
   parseCheckArg,
   migrationId,
   MIGRATIONS_DIR,
@@ -189,6 +190,7 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
           manual: refused.filter((s) => s.kind === "manual").map((s) => ({ object: s.object, name: s.name, rules: s.changes.map((c) => c.rule), detail: s.detail })),
           hints: made.document.hints,
           checks: made.document.checks ?? [],
+          prechecks: migrationChecks(made.document).flatMap((c) => (c.step ? [{ name: c.name, step: c.step.index, sql: c.sql, detail: c.step.detail }] : [])),
           access: accessSteps(steps).map((a) => ({
             step: a.index,
             object: a.step.object,
@@ -227,7 +229,10 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
       lines.push(`    ${s.detail}`);
     }
   }
-  for (const c of made.document.checks ?? []) lines.push(`  check ${c.name}: ${c.sql} (${describeExpect(c)}, before the first statement)`);
+  for (const c of migrationChecks(made.document)) {
+    if (c.step) lines.push(`  step ${String(c.step.index)} can fail on the rows already there (${c.step.detail}); yodel apply runs its pre-check ${c.name} before the first statement and refuses unless it returns 0: ${c.sql}`);
+    else lines.push(`  check ${c.name}: ${c.sql} (${describeExpect(c)}, before the first statement)`);
+  }
   for (const l of describeAccessSteps(steps)) lines.push(`  ${l}`);
   for (const h of made.document.hints) lines.push(`  hint: ${h}`);
   io.out(`${lines.join("\n")}\n`);

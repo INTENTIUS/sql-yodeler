@@ -38,6 +38,10 @@ pg-access          error, silenceable, postgres
                    Postgres: takes access away: a privilege revoked, a policy dropped, or row-level security turned off or no longer forced on the table's owner
 pg-rls-not-forced  warning, silenceable, postgres
                    Postgres: a table's row-level security is enabled but not forced, so the table's owner (often the role that applies) bypasses its policies
+data-dependent     warning, silenceable, postgres
+                   Postgres: a statement that can fail on the rows already there (a unique index over duplicates, SET NOT NULL over NULLs, a check or foreign key some row breaks); yodel apply runs its pre-check first and refuses when it counts any
+naming             error, silenceable
+                   a table, column, index or constraint the migration adds breaks yodel.config.ts lint.naming
 ch-mutation        error, silenceable, clickhouse
                    ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback
 ch-rebuild         error, silenceable, clickhouse
@@ -50,6 +54,46 @@ silence            error
                    a yodel:allow line that is malformed, names a rule no statement can silence, has no reason, or silences nothing
 replay             error
                    with --replay <env>: the history, replayed into a fresh database, does not give each migration's recorded schema
+SQLCH101           the check's level, silenceable, clickhouse
+                   schema check: A ClickHouse object names an engine the pinned server does not have
+SQLCH102           the check's level, silenceable, clickhouse
+                   schema check: A PRIMARY KEY is not a prefix of ORDER BY
+SQLCH103           the check's level, silenceable, clickhouse
+                   schema check: An engine's version, sign or is_deleted column has an unsupported type
+SQLCH104           the check's level, silenceable, clickhouse
+                   schema check: A MergeTree engine argument names a column the table does not declare
+SQLCH105           the check's level, silenceable, clickhouse
+                   schema check: A table key clause names a column the table does not declare
+SQLCH106           the check's level, silenceable, clickhouse
+                   schema check: A skip index expression names a column the table does not declare
+SQLCH107           the check's level, silenceable, clickhouse
+                   schema check: A TTL expression is built on a column that is not a Date or DateTime
+SQLCH108           the check's level, silenceable, clickhouse
+                   schema check: CREATE OR REPLACE TABLE in a database that is not Atomic
+SQLCH109           the check's level, silenceable, clickhouse
+                   schema check: A materialized view selects *
+SQLCH110           the check's level, silenceable, clickhouse
+                   schema check: A materialized view writes a column its TO target does not declare
+SQLCH111           the check's level, silenceable, clickhouse
+                   schema check: A String column limited to a few values is not LowCardinality
+SQLCH112           the check's level, silenceable, clickhouse
+                   schema check: A PARTITION BY expression is finer than a day
+SQLCH113           the check's level, silenceable, clickhouse
+                   schema check: A MergeTree table declares no sort key
+SQLCH114           the check's level, silenceable, clickhouse
+                   schema check: A column codec is not one the pinned server has
+SQLCH115           the check's level, silenceable, clickhouse
+                   schema check: A secret- or PII-named column carries no comment, TTL or encryption
+SQLCH116           the check's level, silenceable, clickhouse
+                   schema check: A view is SQL SECURITY DEFINER with no DEFINER
+SQLCH117           the check's level, silenceable, clickhouse
+                   schema check: A MergeTree setting is obsolete at the pinned server
+SQLCH118           the check's level, silenceable, clickhouse
+                   schema check: A MergeTree setting is not one the pinned server has
+SQLCH119           the check's level, silenceable, clickhouse
+                   schema check: An object uses a deprecated or experimental engine
+SQLCH120           the check's level, silenceable, clickhouse
+                   schema check: A MergeTree engine uses the deprecated positional arguments
 ```
 
 `fork`, `directory`, `checksum`, `unreadable-object` and `checkpoint` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
@@ -117,11 +161,69 @@ export default defineConfig({
 });
 ```
 
-The integrity rules cannot be lowered.
+The integrity rules cannot be lowered. A schema check's id is a rule too (`"SQLPG104": "off"`), and `lint.naming` sets the [naming rules](#naming-rules).
+
+## Schema checks
+
+The `sql` lexicon's schema checks, the ones `chant lint` runs over a build, run inside `yodel lint` on each migration's recorded schema, so a project has one lint command and one configuration. Each check is a rule named by its id: `SQLPG101` (a table with no primary key), `SQLPG102` (a foreign key whose columns have no index), `SQLPG104` (a timestamp without time zone), `SQLCH101` (an engine the pinned server does not have), `SQLCH113` (a MergeTree table with no sort key), and the rest that `yodel lint --rules` lists for the project's dialect.
+
+A finding is reported once, in the migration whose recorded schema first has it: the parent's recorded schema is checked too, and what it already had is left out. It is placed at the migration's first step on the object it names, so a `-- yodel:allow SQLPG101 <reason>` line above that step silences it. In the Postgres example, the first migration's `customer_email` column and the later rename's `email` are each reported where they appear:
+
+```text
+20261010T0531-baseline
+  warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
+```
+
+A check's level is, in order: `lint.rules` in `yodel.config.ts`; else `lint.rules` in `chant.config.ts`, the level `chant lint` uses (`info` counts as a warning); else the level the check gives the finding. `"off"` in either file turns it off. The checks read the objects as `chant build` writes them, with their columns, keys and engine besides the DDL; that is what `yodel new` records.
+
+## Naming rules
+
+`lint.naming` in `yodel.config.ts` sets a rule per kind of object: `table`, `column`, `index`, `constraint`. A rule is a preset, `snake_case`, `camelCase` or `PascalCase`, or a regular expression the whole name must match:
+
+```ts
+export default defineConfig({
+  lint: {
+    naming: { table: "snake_case", column: "snake_case", index: "[a-z_]+_idx", constraint: "[a-z_]+_(pkey|key|fkey|check)" },
+  },
+});
+```
+
+Rule `naming` (an error by default) flags each name a migration adds that breaks its kind's rule: a table, column, index or named constraint in its recorded schema that its parent's does not have. A name already there is not reported again, so a rule added to a project with migrations does not fail what was written before it; the first migration's names are all new. The names are the server's: Postgres folds an unquoted name to lower case, so `CREATE TABLE OrderItems` is `orderitems`. A constraint the declaration does not name is named by the server and is not checked. A ClickHouse table's skip indexes and constraints are its indexes and constraints. The finding is at the migration's first step on the object, and `-- yodel:allow naming <reason>` above it silences it.
+
+## Statements that can fail on the data
+
+Some Postgres statements succeed or fail by what is in the table: a unique index or constraint over duplicate values, `SET NOT NULL` over NULLs, a CHECK some row breaks, a foreign key with orphan rows. chant marks each such statement with a pre-check, a query counting the rows it would fail on, and `migration.json` records it on the step (so it is in the checksum and the plan digest). `migration.sql` shows it above the statement:
+
+```sql
+-- ordersStatusKey (yodel_34_lint.orders_status_key): SQLPG240 concurrently, outside a transaction
+-- pre-check, must return 0 (values of (status) held by more than one row, which a unique index fails on): SELECT (SELECT count(*) FROM (SELECT 1 FROM yodel_34_lint.orders WHERE status IS NOT NULL GROUP BY status HAVING count(*) > 1) AS duplicates) AS n
+CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON yodel_34_lint.orders (status);
+```
+
+Rule `data-dependent`, a warning, flags each one with its pre-check, so a reviewer sees what the statement depends on. `yodel apply` runs the pre-checks with the migration's own [pre-migration checks](migrations.md#pre-migration-checks): before the gate, and again under the lock just before the migration's first statement. A pre-check that returns more than 0 refuses the apply with exit 4, naming the statement and the count, and nothing of the migration is sent:
+
+```text
+$ yodel apply lint
+yodel apply: refused: a pre-migration check of 20261010T1311-unique-status failed before the gate. Nothing of 20261010T1311-unique-status was applied:
+  step 0, CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON yodel_34_lint.orders (status), would fail: 2 values of (status) held by more than one row, which a unique index fails on (pre-check precheck-0: SELECT (SELECT count(*) FROM (SELECT 1 FROM yodel_34_lint.orders WHERE status IS NOT NULL GROUP BY status HAVING count(*) > 1) AS duplicates) AS n)
+Fix the data, then run yodel apply again; if the check is wrong, edit it in migration.json and run yodel lint --update-checksum 20261010T1311-unique-status (the plan digest moves, so the plan is approved again). A statement's pre-check is chant's count of the rows the statement fails on: fix those rows, or change the declaration.
+[exit 4]
+```
+
+Both are from the `lint` claim's run, where `orders` holds two rows of each of two statuses and the declaration gains `CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON orders (status)`. `yodel lint` reports the same statement:
+
+```text
+20261010T1311-unique-status
+  warning  data-dependent: step 0: SQLPG240 Create an index CONCURRENTLY on yodel_34_lint.orders_status_key: can fail on the rows already there (values of (status) held by more than one row, which a unique index fails on); yodel apply runs this pre-check before the migration's first statement and refuses when it is not 0: SELECT (SELECT count(*) FROM (SELECT 1 FROM yodel_34_lint.orders WHERE status IS NOT NULL GROUP BY status HAVING count(*) > 1) AS duplicates) AS n
+```
+
+Fix the rows, or change the declaration, and apply again. The plan and the pull request comment list the pre-checks with the migration's checks, and `yodel new` prints them when it writes the migration. A pre-check that reads a table or column an earlier statement of the same migration adds cannot run before the first statement; it is passed, and if the statement then fails on the data, the migration stops there and resumes at it on the next run.
+
+Migrations `yodel new` writes use chant's lock-safe forms. On a table that exists, `SET NOT NULL` is a CHECK (`col IS NOT NULL`) added `NOT VALID` (SQLPG217, no rows read), validated (SQLPG220, under SHARE UPDATE EXCLUSIVE, so reads and writes go on), then `SET NOT NULL`, which the valid check proves without a scan, and the check dropped. A CHECK or a foreign key is added `NOT VALID`, then validated. Each statement runs in a transaction of its own, so no lock that blocks reads or writes is held across a scan. The plan shows each step's rule and class (`metadata`, `validate`, `concurrently`, `rewrite`), and the first statement of each sequence carries the pre-check.
 
 ## Silencing a finding
 
-A line above a statement in its `migration.sql` silences one of the classifier rules for that statement:
+A line above a statement in its `migration.sql` silences one of the classifier rules, `data-dependent`, `naming` or a schema check for that statement:
 
 ```sql
 -- yodel:allow <rule> <reason>

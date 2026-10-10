@@ -45,6 +45,21 @@
         },
         "hints": { "$ref": "common.schema.json#/$defs/stringList" },
         "checks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/check" } },
+        "prechecks": {
+          "description": "Postgres: the statements that can fail on the rows already there, each with the pre-check yodel apply runs before the first statement; it must return 0.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "step", "sql", "detail"],
+            "properties": {
+              "name": { "type": "string" },
+              "step": { "type": "integer", "minimum": 0 },
+              "sql": { "type": "string" },
+              "detail": { "type": "string" }
+            }
+          }
+        },
         "access": {
           "description": "Postgres: the steps about access control (policies, row-level security, roles, grants, revokes, default privileges), each with its rule and class; takesAway says why one takes access away.",
           "type": "array",

@@ -22,6 +22,12 @@
  *   foreign key or domain constraint validated in place rather than added
  *   `NOT VALID` (SQLPG219, SQLPG262).
  *
+ * - `data-dependent`: a Postgres statement chant marks as able to fail on
+ *   the rows already there (its `precheck`: a unique index over
+ *   duplicates, SET NOT NULL over NULLs, a check or foreign key a row
+ *   breaks). The finding shows the pre-check, which yodel apply runs before
+ *   the migration's first statement and refuses on when it is not 0.
+ *
  * `COMMENT ON` statements are skipped: chant writes one after a `CREATE`
  * with the same rule, and a comment is catalog only.
  *
@@ -138,6 +144,7 @@ export function stepFindings(dialect: Dialect, step: MigrationStep, context: Ste
       }
       const lock = pgLock(step);
       if (lock) out.push({ rule: "pg-lock", message: `${what}: ${lock}` });
+      if (step.precheck) out.push({ rule: "data-dependent", message: `${what}: can fail on the rows already there (${step.precheck.detail}); yodel apply runs this pre-check before the migration's first statement and refuses when it is not 0: ${step.precheck.sql}` });
       const away = takesAccessAway(step);
       if (away && !revokesOnNew(step, context.created)) out.push({ rule: "pg-access", message: `${what}: ${away}, which changes what a role can do: ${step.sql.split("\n")[0] ?? ""}` });
     }

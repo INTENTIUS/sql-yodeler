@@ -4,7 +4,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { scanMigrations } from "../migrations/index.js";
 import { inspect, migrationsDir, openVersioned } from "../versioned/index.js";
-import { LINT_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
+import { chantLevel, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
@@ -29,6 +29,15 @@ Rules (yodel lint --rules lists them with their levels):
   pg-lock            Postgres: writes blocked for a whole index build or scan
   pg-signature       Postgres: a function or procedure dropped and created
                      with another signature or result
+  data-dependent     Postgres: a statement that can fail on the rows already
+                     there (a unique index over duplicates, SET NOT NULL
+                     over NULLs), shown with the pre-check yodel apply runs
+                     before the migration's first statement; a warning
+  naming             a table, column, index or constraint the migration adds
+                     breaks yodel.config.ts lint.naming
+  SQLPG1xx, SQLCH1xx the sql lexicon's schema checks (chant lint's), on each
+                     migration's recorded schema: what it adds to its
+                     parent's
   ch-mutation        ClickHouse: a mutation rewriting parts, no rollback
   ch-rebuild         ClickHouse: a rebuild (ClickHouseRebuildOp)
   refused-step       a step yodel apply refuses (a manual step, an Op it
@@ -47,7 +56,8 @@ Rules (yodel lint --rules lists them with their levels):
 Silencing: a line above a statement in its migration.sql,
   -- yodel:allow <rule> <reason>
 silences that statement rule (destructive, pg-rewrite, pg-lock,
-pg-signature, ch-mutation, ch-rebuild) for that one statement. The reason is required,
+pg-signature, data-dependent, naming, ch-mutation, ch-rebuild, or a schema
+check's id) for that one statement. The reason is required,
 and yodel apply records the rule, the statement and the reason in every
 history row the migration writes (the silences column). Adding the line
 changes the migration's checksum: for a migration not yet applied anywhere,
@@ -55,7 +65,14 @@ record the new one with --update-checksum <id>.
 
 Levels: yodel.config.ts lint.rules sets a rule to "error", "warning" or
 "off", e.g. lint: { rules: { "ch-mutation": "warning" } }. fork, directory,
-checksum, unreadable-object and checkpoint are always errors.
+checksum, unreadable-object and checkpoint are always errors. A schema
+check not set there takes chant.config.ts lint.rules' level, else the
+check's own.
+
+Naming: yodel.config.ts lint.naming gives a rule per kind (table, column,
+index, constraint): a preset (snake_case, camelCase, PascalCase) or a
+regular expression the whole name must match, e.g.
+lint: { naming: { table: "snake_case", index: "[a-z_]+_idx" } }.
 
 Options:
   --env <env>             also compare with <env>'s history: a
@@ -146,20 +163,26 @@ function parseLintArgs(args: string[]): LintArgs {
 }
 
 function allRules(): Record<string, LintRule> {
-  return { ...LINT_RULES, ...Object.fromEntries(projectRules.map((r) => [r.rule.id, r.rule])), [REPLAY_RULE.id]: REPLAY_RULE };
+  return { ...LINT_RULES, ...Object.fromEntries(projectRules.map((r) => [r.rule.id, r.rule])), [REPLAY_RULE.id]: REPLAY_RULE, ...SCHEMA_RULES };
 }
 
 function listRules(io: Io, json: boolean, project: Project): number {
   const rules = allRules();
   const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, rules, project.yodel?.path);
-  const rows = Object.values(rules).map((r) => ({ ...r, configured: settings.levels[r.id] ?? r.level }));
+  // The schema checks of the project's dialect only: the other dialect's never run on its migrations.
+  // One not set in yodel.config.ts takes chant.config.ts lint.rules' level, else the level the check gives each finding.
+  const chantRules = (project.config as { lint?: { rules?: Record<string, unknown> } }).lint?.rules;
+  const rows = Object.values(rules)
+    .filter((r) => !r.schema || r.dialect === undefined || r.dialect === project.dialect)
+    .map((r) => ({ ...r, configured: settings.levels[r.id] ?? (r.schema ? chantLevel(chantRules?.[r.id]) : undefined) ?? r.level}));
+  const own = new Set(rows.filter((r) => r.schema === true && settings.levels[r.id] === undefined && chantLevel(chantRules?.[r.id]) === undefined).map((r) => r.id));
   if (json) {
     io.out(`${JSON.stringify(rows, null, 2)}\n`);
     return 0;
   }
   const width = Math.max(...rows.map((r) => r.id.length));
   for (const r of rows) {
-    const marks = [r.configured, r.silenceable ? "silenceable" : "", r.dialect ?? ""].filter(Boolean).join(", ");
+    const marks = [own.has(r.id) ? "the check's level" : r.configured, r.silenceable ? "silenceable" : "", r.dialect ?? ""].filter(Boolean).join(", ");
     io.out(`${r.id.padEnd(width)}  ${marks}\n${" ".repeat(width + 2)}${r.summary}\n`);
   }
   return 0;

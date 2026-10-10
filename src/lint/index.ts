@@ -21,6 +21,8 @@ export * from "./report.js";
 export * from "./rules.js";
 export * from "./silences.js";
 export * from "./statements.js";
+export * from "./naming.js";
+export { SCHEMA_RULES, isSchemaRule, schemaDiagnostics, chantLevel, type SchemaDiagnostic } from "./schema-checks.js";
 
 /** The well-formed `-- yodel:allow` lines of a migration, each with the step it is above. */
 export function silencesOf(m: Pick<Migration, "files" | "document">): Silence[] {

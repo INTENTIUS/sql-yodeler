@@ -8,9 +8,36 @@
  * approval given before does not carry over.
  */
 
-import type { MigrationCheck } from "./document.js";
+import type { MigrationCheck, MigrationDocument } from "./document.js";
 
 export type { MigrationCheck };
+
+/**
+ * A check a migration runs before its first statement: one of its own
+ * `checks`, or a statement's pre-check (#51). chant marks a Postgres
+ * statement that can fail on the rows already there (a unique index over
+ * duplicates, SET NOT NULL over NULLs, a check or foreign key a row breaks)
+ * with a query counting those rows; it must return 0. `migration.json`
+ * records it on the step, so it is in the checksum like a check.
+ */
+export interface RunnableCheck extends MigrationCheck {
+  /** Set on a statement's pre-check: the step, its statement, and what the count is of. */
+  step?: { index: number; sql: string; detail: string };
+}
+
+/** The checks run before a migration's first statement: its `checks`, then each statement's pre-check, named `precheck-<step>`. */
+export function migrationChecks(doc: Pick<MigrationDocument, "checks" | "steps">): RunnableCheck[] {
+  const own: RunnableCheck[] = [...(doc.checks ?? [])];
+  const taken = new Set(own.map((c) => c.name));
+  doc.steps.forEach((s, index) => {
+    if (s.kind !== "statement" || !s.precheck) return;
+    let name = `precheck-${String(index)}`;
+    while (taken.has(name)) name = `${name}-statement`;
+    taken.add(name);
+    own.push({ name, sql: s.precheck.sql, expect: { max: 0 }, step: { index, sql: s.sql, detail: s.precheck.detail } });
+  });
+  return own;
+}
 
 const NAME = /^[a-z0-9][a-z0-9_-]*$/;
 

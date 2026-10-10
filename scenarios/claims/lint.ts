@@ -1,6 +1,6 @@
 import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
 import { addColumn, addTable, mainTable } from "../lib/schema.js";
 
@@ -339,13 +339,66 @@ export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
   hold(await ctx.db.tableExists(mainTable(ctx)), `yodel test emptied ${p.env}, an environment yodel applied to`);
 }
 
-/** The parts, in order, on one project: two migrations replayed, a second branch forking them, a checkpoint on one chain, a revert, then tests on the replayed database. */
+/**
+ * A statement whose success depends on the data (#51): on the environment
+ * the test part applied, orders already holds two rows of each of two
+ * statuses, and the declaration gains a unique index on status. yodel new
+ * writes the index's build with chant's pre-check (the count of status
+ * values held by more than one row) on its step. yodel apply runs that
+ * pre-check before the gate and refuses (exit 4), naming the statement and
+ * the count, 2; the index is not built and the history has no row of the
+ * migration. yodel lint flags the statement (data-dependent) with its
+ * pre-check.
+ * BREAK: the generated pre-check is taken out of migration.json and
+ * migration.sql (the checksum updated), so apply goes on to the gate.
+ */
+export async function dataDependentPart(ctx: Ctx, s: Lint): Promise<void> {
+  const { p } = s;
+  const db = ctx.db.name;
+  // The test part applies the chain at its end; when it stopped before (its break caught), this part applies it.
+  if (!(await ctx.db.tableExists("orders"))) await p.setupApply();
+  await ctx.db.exec(`INSERT INTO ${db}.orders (status, amount) VALUES ('placed', 1), ('placed', 2), ('paid', 3), ('paid', 4), ('shipped', 5)`);
+  p.write(
+    "src/unique-status.ts",
+    `import { index } from "@intentius/chant-lexicon-sql/postgres";\nimport { orders } from "./schema.js";\n\nexport const ordersStatusKey = index\`\n  CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON \${orders} (\${orders.columns.status})\`;\n`,
+  );
+  const id = await p.newMigration("unique-status");
+  if (id === undefined) throw new Error("yodel new wrote no migration for the unique index");
+  const json = `migrations/${id}/migration.json`;
+  const doc = JSON.parse(p.read(json)) as { steps: Array<{ kind: string; sql?: string; precheck?: { sql: string } }> };
+  const at = doc.steps.findIndex((st) => st.kind === "statement" && st.precheck !== undefined && st.sql?.includes("orders_status_key") === true);
+  if (at < 0) throw new Error(`yodel new wrote the unique index of ${id} with no pre-check: ${JSON.stringify(doc.steps)}`);
+  if (ctx.broken) {
+    const check = doc.steps[at]?.precheck?.sql ?? "";
+    delete doc.steps[at]?.precheck;
+    p.write(json, `${JSON.stringify(doc, null, 2)}\n`);
+    p.write(`migrations/${id}/migration.sql`, p.read(`migrations/${id}/migration.sql`).split("\n").filter((l) => !(l.startsWith("-- pre-check") && l.includes(check))).join("\n"));
+    const updated = await p.yodel(["lint", "--update-checksum", id]);
+    if (updated.code === 1) throw new Error(`yodel lint --update-checksum ${id} exited 1`);
+  }
+  await p.commit("a unique index over rows with duplicates");
+
+  const ran = await p.yodel(["apply", p.env], { timeoutMs: 600_000 });
+  hold(
+    ran.code === 4 && ran.err.includes(`step ${String(at)}, CREATE UNIQUE INDEX`) && ran.err.includes("orders_status_key") && /would fail: 2 values of \(status\)/.test(ran.err),
+    `yodel apply exited ${String(ran.code)}, not 4 naming the unique index's statement and its 2 duplicated values: ${ran.err.split("\n").filter((l) => l.startsWith("yodel apply") || l.startsWith("  ")).join(" ").slice(0, 400)}`,
+  );
+  hold((await ctx.db.count(`SELECT count(*) FROM pg_indexes WHERE schemaname = '${db}' AND indexname = 'orders_status_key'`)) === 0, "the unique index was built, or left behind invalid");
+  hold((await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}'`)) === 0, `the history has a row of ${id}: something of it ran`);
+
+  const lint = await p.yodel(["lint", "--json"]);
+  const found = parse<{ findings: Array<{ rule: string; migration?: string; step?: number; message: string }> }>(lint).findings.find((f) => f.rule === "data-dependent" && f.migration === id);
+  hold(found?.step === at && found.message.includes("SELECT"), `yodel lint does not flag ${id}'s step ${String(at)} as data-dependent with its pre-check: ${JSON.stringify(found)}`);
+}
+
+/** The parts, in order, on one project: two migrations replayed, a second branch forking them, a checkpoint on one chain, a revert, tests on the replayed database, then (Postgres) a unique index over duplicate rows. */
 const parts = [
   ["replay", replayPart],
   ["fork", forkPart],
   ["checkpoint", checkpointPart],
   ["revert", revertPart],
   ["test", testPart],
+  ["data-dependent", dataDependentPart, ["pg"]],
 ] as const;
 
 async function body(ctx: Ctx): Promise<void> {
@@ -354,7 +407,8 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const lintClaim: Claim = {
   name: "lint",
-  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history",
+  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent",
   dialects: { ch: body, pg: body },
-  parts: parts.map(([name]) => name),
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };
