@@ -72,7 +72,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, type ApprovalMode, type CiLogin, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
 import { audience, CLOUD_OF, jobLogins, loginSteps, type Login, type LoginSteps } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
@@ -686,10 +686,6 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
 
 // ── The apply waves, through chant's generateOpWavesPipeline ───────────────
 
-/** When a wave waits for an approval; yodel.config.ts `waves[].gate`. */
-export type WaveGate = "always" | "on-destructive" | "never";
-const WAVE_GATES: readonly WaveGate[] = ["always", "on-destructive", "never"];
-
 export interface Wave {
   env: string;
   gate: WaveGate;
@@ -960,7 +956,7 @@ export async function readWaves(dir: string, envs: readonly string[]): Promise<W
     const env = String(w.env);
     if (!envs.includes(env)) throw new Error(`yodel.config.ts: waves[${String(i)}].env ${env} is not an environment (${envs.join(", ")})`);
     const gate = (w.gate ?? "always") as WaveGate;
-    if (!WAVE_GATES.includes(gate)) throw new Error(`yodel.config.ts: waves[${String(i)}].gate ${String(w.gate)} is not ${WAVE_GATES.join(", ")}`);
+    if (!WAVE_GATES.includes(gate)) throw new Error(`yodel.config.ts: waves[${String(i)}].gate ${String(w.gate)} is not ${WAVE_GATES.join(", ")}${waveGateHint(w.gate)}`);
     const requires = w.requires === false ? undefined : w.requires === undefined ? (i > 0 ? String(all[i - 1]?.env) : undefined) : typeof w.requires === "string" ? w.requires : JSON.stringify(w.requires);
     if (requires !== undefined && !envs.includes(requires)) throw new Error(`yodel.config.ts: waves[${String(i)}].requires ${requires} is not an environment (${envs.join(", ")})`);
     const approval = w.approval as ApprovalMode | undefined;

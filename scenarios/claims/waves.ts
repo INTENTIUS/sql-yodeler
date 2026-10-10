@@ -4,7 +4,8 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync
 import { join } from "node:path";
 import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { applyPipelines, withTenants, type Wave, type WaveGate } from "../../src/ci/render.js";
+import { applyPipelines, withTenants, type Wave } from "../../src/ci/render.js";
+import type { WaveGate } from "../../src/config/define.js";
 import { hold, runParts, Violation, type Claim, type Ctx, type Part as RunPart } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";

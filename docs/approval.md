@@ -154,6 +154,8 @@ waves: [
 | `on-destructive` | a pending step drops something, is a Postgres rewrite or lock-heavy statement (lint's `destructive`, `pg-rewrite`, `pg-lock`), a ClickHouse mutation or rebuild (`ch-mutation`, `ch-rebuild`), takes access away (`pg-access`, `ch-access`), or is an Op or manual step |
 | `never` | never; review and branch protection are all that stand in front of it |
 
+terragucci's `on-destroy` is the same rule; SQL Yodeler and chant spell it `on-destructive`, and SQL Yodeler refuses `on-destroy` ([terragucci's gate policies](https://intentius.io/terragucci/reference/stages/#gate-policy)).
+
 `npm run ci` renders the waves as `yodel-waves.json`, a chant Op waves spec, and the `yodel-apply` pipeline from it on GitHub, GitLab and Forgejo: one job per wave, each needing the one before. Every job runs `chant run wave`, which:
 
 1. plans the environment with `yodel apply <env> --wave-plan <file>`: the migrations' plan digest, the gate policy, and whether a pending step is destructive, all in one digest;
