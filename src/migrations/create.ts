@@ -16,6 +16,7 @@ import { MIGRATION_FORMAT, serializeDocument, type MigrationCheck, type Migratio
 import { MIGRATION_NAME, type Migration } from "./directory.js";
 import { asBackfill, BACKFILL_FILE } from "../steps/kinds.js";
 import { backfillStep } from "../steps/backfill.js";
+import { relabelTriggerCreates } from "./routines.js";
 
 export interface CreateMigrationOptions {
   /** The migration's name, the part of its id after the timestamp. */
@@ -135,6 +136,7 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
   } catch (e) {
     throw new YodelError(e instanceof Error ? e.message : String(e));
   }
+  statements = relabelTriggerCreates(statements, before, options.build);
   if (options.backfill) {
     const file = options.backfill.file ?? BACKFILL_FILE;
     statements = { ...statements, refused: true, steps: [...statements.steps, backfillStep(options.name, file) as unknown as MigrationStep] };

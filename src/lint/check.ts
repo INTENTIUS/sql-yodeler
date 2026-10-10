@@ -17,6 +17,7 @@ import { levelOf, type LintSettings } from "./config.js";
 import { LINT_RULES, type LintLevel, type LintRule } from "./rules.js";
 import { mapMigrationSql, type Silence } from "./silences.js";
 import { refusedStep, stepFindings, unreadableStep, type Dialect } from "./statements.js";
+import { routineFindings } from "./routines.js";
 
 /** One thing a rule found. */
 export interface Finding {
@@ -256,6 +257,14 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
         statementRaw.push({ rule: f.rule, ...where, message: `step ${String(i)}: ${f.message}`, ...(silence ? { silence } : {}) });
       }
     });
+    if (d === "postgres") {
+      for (const f of routineFindings(m.document)) {
+        const name = stepName(steps[f.step] as MigrationStep);
+        const silence = map.silences.find((s) => s.step === f.step && s.rule === f.rule);
+        if (silence) used.add(silence);
+        statementRaw.push({ rule: f.rule, migration: m.id, step: f.step, ...(name !== undefined ? { object: name } : {}), message: f.message, ...(silence ? { silence } : {}) });
+      }
+    }
     for (const s of map.silences) {
       if (used.has(s)) continue;
       raw.push({ rule: "silence", level: "warning", migration: m.id, step: s.step, line: s.line, message: `migration.sql line ${String(s.line)}: yodel:allow ${s.rule} silences nothing: step ${String(s.step)} breaks no ${s.rule} rule` });

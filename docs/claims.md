@@ -16,10 +16,10 @@ Each docs page names the claims that prove it, and `npm run check` fails when a 
 
 | Claim | Dialect | What it says | Plain | Broken | Commit | Date | Pages |
 |---|---|---|---|---|---|---|---|
-| adopt | ClickHouse | yodel init --from adopts a live database without touching it, and yodel plan then shows no change | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md) |
-| adopt | Postgres | yodel init --from adopts a live database without touching it, and yodel plan then shows no change | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md) |
-| new | ClickHouse | yodel new writes the next migration offline, with no dev database, and it applies | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md), [getting-started](getting-started.md), [migrations](migrations.md), [workflows](workflows.md) |
-| new | Postgres | yodel new writes the next migration offline, with no dev database, and it applies | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md), [getting-started](getting-started.md), [migrations](migrations.md), [workflows](workflows.md) |
+| adopt | ClickHouse | yodel init --from adopts a live database without touching it, and yodel plan then shows no change | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md), [workflows](workflows.md) |
+| adopt | Postgres | yodel init --from adopts a live database without touching it, and yodel plan then shows no change | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md), [workflows](workflows.md) |
+| new | ClickHouse | yodel new writes the next migration offline, with no dev database, and it applies | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md), [getting-started](getting-started.md), [lint](lint.md), [migrations](migrations.md), [workflows](workflows.md) |
+| new | Postgres | yodel new writes the next migration offline, with no dev database, and it applies | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [adoption](adoption.md), [getting-started](getting-started.md), [lint](lint.md), [migrations](migrations.md), [workflows](workflows.md) |
 | lint-ci | ClickHouse | yodel lint, offline, fails a migrations directory with a fork (exit 3), naming both migrations | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [getting-started](getting-started.md), [lint](lint.md) |
 | lint-ci | Postgres | yodel lint, offline, fails a migrations directory with a fork (exit 3), naming both migrations | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [getting-started](getting-started.md), [lint](lint.md) |
 | pr-comment | ClickHouse | the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md) |

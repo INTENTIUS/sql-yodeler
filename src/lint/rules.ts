@@ -9,13 +9,15 @@
  *   config lowers them and nothing silences them, because a migration that
  *   breaks one cannot be applied safely or cannot be checked at all.
  * - Statement rules, from the classes chant's classifier gives each step:
- *   `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation`, `ch-rebuild`.
+ *   `destructive`, `pg-rewrite`, `pg-lock`, `pg-signature`, `ch-mutation`,
+ *   `ch-rebuild`.
  *   Errors by default; a line `-- yodel:allow <rule> <reason>` above the
  *   statement in `migration.sql` silences one for that statement, and the
  *   reason is recorded in the history when the migration applies.
  *
- * The rest (`refused-step`, `migration-sql`, `silence`) say a migration
- * will not apply as written or a silence is wrong. Their level can be
+ * The rest (`refused-step`, `pg-routine-in-use`, `migration-sql`,
+ * `silence`) say a migration will not apply as written or a silence is
+ * wrong. Their level can be
  * changed in `yodel.config.ts`, but they cannot be silenced.
  */
 
@@ -47,6 +49,8 @@ export const LINT_RULES = {
   destructive: statement("destructive", "a statement or Op step removes data that cannot be recovered (a table or column drop)"),
   "pg-rewrite": statement("pg-rewrite", "Postgres: rewrites or scans the whole table under ACCESS EXCLUSIVE, blocking reads and writes while it runs", "postgres"),
   "pg-lock": statement("pg-lock", "Postgres: holds a lock that blocks writes for a whole scan or index build (an index without CONCURRENTLY, a constraint validated in place)", "postgres"),
+  "pg-signature": statement("pg-signature", "Postgres: a function or procedure dropped and created with another signature or result; a caller written for the old one fails", "postgres"),
+  "pg-routine-in-use": { id: "pg-routine-in-use", summary: "Postgres: a function dropped while a trigger the migration's schema declares still executes it; the DROP fails", level: "error", silenceable: false, configurable: true, dialect: "postgres" },
   "ch-mutation": statement("ch-mutation", "ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback", "clickhouse"),
   "ch-rebuild": statement("ch-rebuild", "ClickHouse: a rebuild, every row copied into a new table and swapped in (ClickHouseRebuildOp)", "clickhouse"),
   "refused-step": shape("refused-step", "a step yodel apply refuses to run: a manual step, or an Op step it does not run"),

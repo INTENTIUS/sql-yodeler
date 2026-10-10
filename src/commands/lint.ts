@@ -25,10 +25,14 @@ Rules (yodel lint --rules lists them with their levels):
   destructive        a drop that removes data for good
   pg-rewrite         Postgres: a rewrite or full scan under ACCESS EXCLUSIVE
   pg-lock            Postgres: writes blocked for a whole index build or scan
+  pg-signature       Postgres: a function or procedure dropped and created
+                     with another signature or result
   ch-mutation        ClickHouse: a mutation rewriting parts, no rollback
   ch-rebuild         ClickHouse: a rebuild (ClickHouseRebuildOp)
   refused-step       a step yodel apply refuses (a manual step, an Op it
                      does not run)
+  pg-routine-in-use  Postgres: a function dropped while a declared trigger
+                     still executes it
   migration-sql      migration.sql does not hold a statement migration.json
                      records (apply runs migration.json's)
   silence            a yodel:allow line that is wrong or silences nothing
@@ -39,7 +43,7 @@ Rules (yodel lint --rules lists them with their levels):
 Silencing: a line above a statement in its migration.sql,
   -- yodel:allow <rule> <reason>
 silences that statement rule (destructive, pg-rewrite, pg-lock,
-ch-mutation, ch-rebuild) for that one statement. The reason is required,
+pg-signature, ch-mutation, ch-rebuild) for that one statement. The reason is required,
 and yodel apply records the rule, the statement and the reason in every
 history row the migration writes (the silences column). Adding the line
 changes the migration's checksum: for a migration not yet applied anywhere,
