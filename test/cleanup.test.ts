@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stampedComment } from "@intentius/chant-lexicon-sql/core/ownership";
-import { cleanupDigest, describeRetained, dropRetained, dropStatements, findRetained, type Retained } from "../src/cleanup/index.js";
+import { cleanupDigest, cleanupGate, describeRetained, dropRetained, dropStatements, findRetained, type Retained } from "../src/cleanup/index.js";
 
 const NOW = Date.parse("2026-10-20T00:00:00.000Z");
 const old = (of: string, until: string | undefined, key = "rebuild") => stampedComment(`the old table, kept until ${until ?? "?"}`, undefined, { [key]: of, role: "old", ...(until ? { "retain-until": until } : {}) });
@@ -18,6 +18,12 @@ function clickhouse(tables: Array<{ database: string; name: string; uuid: string
     },
   };
 }
+
+describe("yodel cleanup's gate (#119)", () => {
+  it("is the migrations Op's gate name with -cleanup, apart from the apply's", () => {
+    expect(cleanupGate("approve-migrate-prod")).toBe("approve-migrate-prod-cleanup");
+  });
+});
 
 describe("yodel cleanup's list", () => {
   it("finds a rebuild's old tables, due once their date has passed by the server's clock, and only those", async () => {
