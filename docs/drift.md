@@ -24,6 +24,8 @@ ALTER TABLE shop.events MODIFY COLUMN source LowCardinality(String) DEFAULT 'app
 $ npx yodel drift dev
 Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
 
+Compared with the schema 20261010T1723-add-source records, the newest migration the history records as applied.
+
 Changed out of band:
   events (ClickHouse::Table)
     column source default.expr: declared 'web', live 'app'
@@ -36,6 +38,8 @@ Put back, there is none:
 ```console
 $ npx yodel drift dev
 Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
+
+Compared with the schema 20261010T1723-add-source records, the newest migration the history records as applied.
 
 No drift: every declared object matches the server.
 ```
@@ -75,9 +79,9 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
   - events (ClickHouse::Table)
       columns[4].default.expr: 'web' → 'app' [from: authored]
 [phase] Snapshot
-  ✓ lifecycleSnapshot(env=dev)   908ms
+  ✓ lifecycleSnapshot(env=dev)   923ms
 [phase] Diff
-  ✓ lifecycleDiff(env=dev, live=true)   742ms
+  ✓ lifecycleDiff(env=dev, live=true)   781ms
     [outcome] Drift=true
 Op "watch-dev" completed in 1.8s
 ```

@@ -36,14 +36,16 @@ The run below is the ClickHouse example's first apply. The Op stops at its gate 
 $ npx yodel apply dev
 Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, sql.profiles.dev)
 
-shop (shop)
+shop
   [create] object: shop
-      SQLCH200 Create an object. A new database, table or view is created; nothing existing changes. https://clickhouse.com/docs/sql-reference/statements/create
+      SQLCH200 Create an object. A new database, table, view, dictionary, function, user, role or row policy is created, or a grantee gets its first grants; nothing existing changes. https://clickhouse.com/docs/sql-reference/statements/create
 events (shop.events)
   [create] object: shop.events
-      SQLCH200 Create an object. A new database, table or view is created; nothing existing changes. https://clickhouse.com/docs/sql-reference/statements/create
+      SQLCH200 Create an object. A new database, table, view, dictionary, function, user, role or row policy is created, or a grantee gets its first grants; nothing existing changes. https://clickhouse.com/docs/sql-reference/statements/create
 
 2 create
+
+Access control: not managed in dev (off by default); policies, grants, roles and users are not planned.
 
 Running apply-dev (<tmp>/clickhouse/ops/apply-dev.op.ts)
 
@@ -61,19 +63,19 @@ MISSING (declared, provider reports not in cloud):
   - events [queried http://127.0.0.1:8123 shop.events] [definition 9f20bfc4d4ef488a683af5646837a026beea36f8affb953ecfb1e118c3f4a21a]
   - shop [queried http://127.0.0.1:8123 shop] [definition aecfb2aa109301003bbc1a7ee057c2bb2610d824e610588317907171ed70c610]
 [phase] Build
-  ✓ chantBuild(path=.)   734ms
+  ✓ chantBuild(path=.)   728ms
 [phase] Plan
-  ✓ lifecycleDiff(env=dev, live=true)   706ms
+  ✓ lifecycleDiff(env=dev, live=true)   747ms
     [outcome] Drift=true
 [phase] Approve
   • gate:approve-apply-dev()   skipped
 [phase] Apply
   • nativeApply(target=clickhouse, env=dev, output=dist/schema.json, deleteMode=never)   skipped
-Op "apply-dev" is gated on "approve-apply-dev" after 1.9s
+Op "apply-dev" is gated on "approve-apply-dev" after 2.0s
   Approve apply to dev (delete mode: never)
   plan    : jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
   approve : chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
-  expires : 2026-10-12T05:28:27.820Z
+  expires : 2026-10-12T17:21:58.086Z
 
 apply-dev is waiting at gate "approve-apply-dev" for approval of this plan.
 Approve it with:
@@ -85,7 +87,7 @@ then run npx yodel apply dev again.
 <!-- quote: clickhouse#declarative-approve -->
 ```console
 $ npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
-Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-10T05:28:29.503Z
+Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-10T17:21:59.886Z
 This approves the plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run apply-dev` and it walks through gate "approve-apply-dev".
 ```
