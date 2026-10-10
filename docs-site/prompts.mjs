@@ -9,7 +9,7 @@ export const SITE = 'https://intentius.io/sql-yodeler';
 
 /** In every prompt, word for word. */
 export const neverLine =
-	'Never run `yodel apply` against a shared environment, never run `chant approve` or `yodel approve`, never edit the `chant/lifecycle` branch, never merge; approvals and applies belong to people.';
+	'Never run `yodel apply` against a shared environment, never run `chant approve`, `yodel approve` or `yodel override`, never edit the `chant/lifecycle` branch or `.chant/allowed_signers`, never merge; approvals and applies belong to people.';
 
 /** The site address of a docs page, by slug. */
 export const pageUrl = (slug) => (slug === 'index' ? `${SITE}/` : `${SITE}/${slug}/`);
