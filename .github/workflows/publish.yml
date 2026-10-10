@@ -1,5 +1,5 @@
-name: publish
-
+# Rendered from .github/src/publish.ts by `npm run workflows`. Edit that file, not this one.
+#
 # Publishes @intentius/sql-yodeler to npm when a v<version> tag is pushed.
 # `npm run release -- <version>` (scripts/release.sh) pushes the tag, and only
 # on a main commit whose ci and claims runs are both green; AGENTS.md,
@@ -13,9 +13,12 @@ name: publish
 # Renaming this file breaks publishing until the trusted publisher is changed
 # on npmjs.com to the new name.
 
+name: publish
+
 on:
   push:
-    tags: ['v*']
+    tags:
+      - v*
 
 permissions:
   contents: read
@@ -32,15 +35,12 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: '${{ steps.version.outputs.version }}'
     steps:
       - uses: actions/checkout@v4
-      # No registry-url: with it, setup-node writes an .npmrc whose
-      # _authToken is NODE_AUTH_TOKEN, and npm publish sends that instead of
-      # using the OIDC exchange.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24'
           cache: npm
       - name: npm 11.5.1 or later, for trusted publishing
         run: npm install -g npm@^11.5.1 && npm --version
@@ -59,12 +59,8 @@ jobs:
       - run: npm run check
       - name: npm publish
         env:
-          # npm generates provenance by default under trusted publishing, but
-          # only for a public source repository: this one is private, so there
-          # is none. Saying so keeps npm from trying. Drop this once the
-          # repository is public.
           NPM_CONFIG_PROVENANCE: 'false'
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: '${{ steps.version.outputs.version }}'
         run: |
           # A rerun after a publish that went through publishes nothing.
           if [ "$(npm view "@intentius/sql-yodeler@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
@@ -72,20 +68,18 @@ jobs:
             exit 0
           fi
           npm publish --access public
-
-  # The release as a user gets it: installed from the registry into an empty
-  # directory, with no checkout, and run.
   smoke:
-    needs: publish
+    needs:
+      - publish
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
       - name: npm install @intentius/sql-yodeler@${{ needs.publish.outputs.version }}, then yodel --version
         env:
-          VERSION: ${{ needs.publish.outputs.version }}
+          VERSION: '${{ needs.publish.outputs.version }}'
         run: |
           dir=$(mktemp -d)
           cd "$dir"

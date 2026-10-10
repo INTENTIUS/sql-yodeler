@@ -1,15 +1,18 @@
-name: claims
-
+# Rendered from .github/src/claims.ts by `npm run workflows`. Edit that file, not this one.
+#
 # The scenario claims (scenarios/run.ts): every claim against the sql
 # emulator, plain and under BREAK=1. The template claim needs a Forgejo with
 # a runner, which this job has not, so it is skipped here. The record and
 # every run's log are kept as the run's artifacts.
 
+name: claims
+
 on:
-  pull_request:
+  pull_request: null
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
+  workflow_dispatch: null
 
 permissions:
   contents: read
@@ -21,19 +24,14 @@ jobs:
     env:
       YODEL_CLAIMS_CLICKHOUSE_URL: http://localhost:8123
       YODEL_CLAIMS_POSTGRES_URL: postgres://localhost:5432/postgres
-      YODEL_CLAIMS_LOG_DIR: ${{ github.workspace }}/claims-logs
+      YODEL_CLAIMS_LOG_DIR: '${{ github.workspace }}/claims-logs'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
           cache: npm
       - run: npm ci
-      # Docker Hub's anonymous pull limit, shared by the runners' addresses,
-      # refuses pulls often. The pinned images come from Google's mirror of
-      # Docker Hub instead: copied, digests and all, into a registry on the
-      # runner that the Docker daemon uses as its Docker Hub mirror, so chant
-      # and the Keeper cluster pull them by their usual names and digests.
       - name: Serve the emulator's images from a local mirror
         run: |
           echo '{ "registry-mirrors": ["http://localhost:5000"] }' | sudo tee /etc/docker/daemon.json
@@ -43,16 +41,14 @@ jobs:
           for ref in $(npx tsx scenarios/images.ts); do
             repo="${ref%%:*}"; rest="${ref#*:}"; tag="${rest%%@*}"; digest="${ref#*@}"
             case "$repo" in */*) path="$repo" ;; *) path="library/$repo" ;; esac
-            for i in 1 2 3; do
+            for _ in 1 2 3; do
               skopeo copy -q --all --preserve-digests --dest-tls-verify=false "docker://mirror.gcr.io/$path@$digest" "docker://localhost:5000/$path:$tag" && break
               sleep 20
             done
             docker pull -q "$ref"
           done
-      # chant emulator up reads the lexicons from a project's chant.config.ts.
       - name: Start the emulator
         working-directory: scenarios/fixtures/clickhouse
-        # Retried: Docker Hub's anonymous pull limit refuses a pull now and then.
         run: |
           for i in 1 2 3; do
             timeout 600 npx chant emulator up --lexicon sql && exit 0
@@ -61,7 +57,7 @@ jobs:
           exit 1
       - name: Wait for ClickHouse and Postgres
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             curl -fsS http://localhost:8123/ping >/dev/null && docker exec chant-postgres pg_isready -U postgres >/dev/null && exit 0
             sleep 2
           done

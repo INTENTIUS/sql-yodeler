@@ -5,6 +5,12 @@
  * `yodel` and `chant` are on PATH from node_modules/.bin as after
  * `npm install`. The yodel bin is the built one (dist/bin.js): run
  * `npm run build` first, which `npm run claims` does.
+ *
+ * YODEL_CLAIMS_NODE_MODULES names another node_modules to link instead, one
+ * holding @intentius/sql-yodeler as installed from npm
+ * (`npm i @intentius/sql-yodeler`): the claims then run the published
+ * package and the chant it brings, not this checkout. The weekly claims
+ * workflow sets it.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -226,10 +232,12 @@ function parseOr<T>(ran: Ran, fallback: T): T {
 /**
  * node_modules for a scratch project: every package this checkout has,
  * linked, with @intentius/sql-yodeler being the checkout itself, and a .bin
- * holding chant and yodel.
+ * holding chant and yodel. With YODEL_CLAIMS_NODE_MODULES, every package of
+ * that node_modules instead, @intentius/sql-yodeler included.
  */
 function linkModules(dir: string): void {
-  const from = join(repoRoot, "node_modules");
+  const installed = process.env.YODEL_CLAIMS_NODE_MODULES;
+  const from = installed ?? join(repoRoot, "node_modules");
   const to = join(dir, "node_modules");
   mkdirSync(join(to, "@intentius"), { recursive: true });
   mkdirSync(join(to, ".bin"));
@@ -238,9 +246,11 @@ function linkModules(dir: string): void {
     symlinkSync(join(from, entry), join(to, entry));
   }
   for (const entry of readdirSync(join(from, "@intentius"))) symlinkSync(join(from, "@intentius", entry), join(to, "@intentius", entry));
-  symlinkSync(repoRoot, join(to, "@intentius", "sql-yodeler"));
+  if (!installed) symlinkSync(repoRoot, join(to, "@intentius", "sql-yodeler"));
   symlinkSync("../@intentius/chant/bin/chant", join(to, ".bin", "chant"));
   symlinkSync("../@intentius/sql-yodeler/dist/bin.js", join(to, ".bin", "yodel"));
-  if (!existsSync(join(repoRoot, "dist", "bin.js"))) throw new Error("dist/bin.js is missing: run npm run build first");
+  if (!existsSync(join(to, "@intentius", "sql-yodeler", "dist", "bin.js"))) {
+    throw new Error(installed ? `${installed} has no @intentius/sql-yodeler/dist/bin.js` : "dist/bin.js is missing: run npm run build first");
+  }
 }
 

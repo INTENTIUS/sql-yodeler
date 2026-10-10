@@ -34,7 +34,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm run test",
     "claims": "npm run build && tsx scenarios/run.ts",
-    "release": "bash scripts/release.sh"
+    "release": "bash scripts/release.sh",
+    "workflows": "tsx .github/src/render.ts"
   },
   "dependencies": {
     "@intentius/chant": "^0.114.1",
@@ -44,6 +45,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@intentius/chant-lexicon-docker": "^0.114.1",
+    "@intentius/chant-lexicon-github": "^0.114.1",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "eslint": "^10.12.0",

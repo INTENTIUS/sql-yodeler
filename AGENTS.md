@@ -16,6 +16,8 @@ Rules for anyone, person or agent, who changes this repo.
 
 `npm ci && npm run build && npm run check` must pass before a PR is opened. `check` runs `typecheck`, `lint` and `test`. CI (`.github/workflows/ci.yml`) runs the same on every pull request and on `main`.
 
+The workflows in `.github/workflows/` are rendered, not written by hand: each is declared in TypeScript in `.github/src/<name>.ts` with `@intentius/chant-lexicon-github`. Edit the declaration, run `npm run workflows`, and commit both; `npm run check` fails when a rendered file differs from its declaration (`test/workflows.test.ts`).
+
 The scenario claims (`npm run claims`, `scenarios/`) run on every pull request in `.github/workflows/claims.yml`. GitHub cannot mark a check required on this private repo, so the rule is written here instead: a pull request is merged only when both `check` and `claims` are green.
 
 ## chant
