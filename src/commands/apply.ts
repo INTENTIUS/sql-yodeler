@@ -14,7 +14,7 @@ import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "..
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_REFUSED } from "../exit.js";
-import { planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan } from "../waves/index.js";
+import { planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile } from "../waves/index.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -89,13 +89,15 @@ export type DeclarativeOutcome = { plan: Record<string, unknown> } & (
 /** The parts of a `yodel apply --json` document, by path. */
 export type ApplyDoc =
   | { mode: "versioned"; report: StatusReport; outcome: VersionedOutcome }
-  | { mode: "execute"; environment: string; planDigest: string; result: ExecuteResult }
+  | { mode: "execute"; environment: string; planDigest: string; result: ExecuteResult; wavePlanDigest?: string }
+  | { mode: "wave-plan"; plan: WavePlanFile }
   | { mode: "declarative"; environment: string; dialect: SqlDialect; server?: ServerInfo | undefined; op: string; outcome: DeclarativeOutcome };
 
 /** The document `yodel apply --json` prints (schemas/apply.schema.json). */
 export function applyJson(doc: ApplyDoc): Record<string, unknown> {
   if (doc.mode === "versioned") return { ...statusJson(doc.report), mode: "versioned", ...doc.outcome };
-  if (doc.mode === "execute") return { environment: doc.environment, status: doc.result.stoodDown ? "stood-down" : "applied", planDigest: doc.planDigest, ...doc.result };
+  if (doc.mode === "execute") return { environment: doc.environment, status: doc.result.stoodDown ? "stood-down" : "applied", planDigest: doc.planDigest, ...(doc.wavePlanDigest ? { wavePlanDigest: doc.wavePlanDigest } : {}), ...doc.result };
+  if (doc.mode === "wave-plan") return { ...doc.plan };
   return { environment: doc.environment, dialect: doc.dialect, ...(doc.server ? { server: doc.server } : {}), op: doc.op, ...doc.outcome };
 }
 
@@ -324,7 +326,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       `${env.name}: ${plan.empty ? "nothing to apply" : `${String(plan.pending.length)} pending (${plan.pending.join(", ")})`}; gate ${plan.gate} at ${plan.base.slice(0, 12)}` +
         `${plan.destructive ? `; destructive: ${plan.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : ""}; plan ${plan.planDigest}\n`,
     );
-    if (a.json) io.out(`${JSON.stringify(plan, null, 2)}\n`);
+    if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "wave-plan", plan }), null, 2)}\n`);
     return 0;
   }
 
@@ -366,7 +368,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
     });
-    if (a.json) io.out(`${JSON.stringify({ environment: env.name, status: result.stoodDown ? "stood-down" : "applied", planDigest: planned.migrations, wavePlanDigest: planned.planDigest, ...result }, null, 2)}\n`);
+    if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "execute", environment: env.name, planDigest: planned.migrations, wavePlanDigest: planned.planDigest, result }), null, 2)}\n`);
     else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
     return 0;
   }

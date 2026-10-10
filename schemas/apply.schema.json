@@ -2,13 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://intentius.io/sql-yodeler/schemas/v1/apply.schema.json",
   "title": "yodel apply <env> --json",
-  "description": "Version 1. On a project with migrations, the status (status.schema.json) with mode \"versioned\" and what apply did; with --execute (the migrations Op's Apply step), what the step applied; on a project without migrations, the declarative outcome with chant's plan. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "description": "Version 1. On a project with migrations, the status (status.schema.json) with mode \"versioned\" and what apply did; with --execute (the migrations Op's Apply step) or --wave-apply (a wave job's apply), what the step applied; with --wave-plan, the wave plan it wrote; on a project without migrations, the declarative outcome with chant's plan. Within a version, fields are only added; a reader ignores fields it does not know.",
   "oneOf": [
     {
       "$ref": "#/$defs/versioned"
     },
     {
       "$ref": "#/$defs/execute"
+    },
+    {
+      "$ref": "#/$defs/wavePlan"
     },
     {
       "$ref": "#/$defs/declarative"
@@ -238,6 +241,10 @@
         },
         "lock": {
           "$ref": "#/$defs/lock"
+        },
+        "wavePlanDigest": {
+          "description": "--wave-apply: the wave plan digest chant's wave decision named.",
+          "type": "string"
         }
       }
     },
@@ -296,6 +303,87 @@
         "remaining": {
           "description": "incomplete: the plan after the Op completed.",
           "$ref": "plan.schema.json#/$defs/declarative"
+        }
+      }
+    },
+    "wavePlan": {
+      "description": "--wave-plan: the plan file chant run wave reads, as written.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planDigest",
+        "destructive",
+        "empty",
+        "environment",
+        "migrations",
+        "gate",
+        "base",
+        "pending",
+        "destructiveSteps"
+      ],
+      "properties": {
+        "planDigest": {
+          "description": "The wave plan digest: over the migrations' digest, the gate policy at the base commit and whether a pending step is destructive.",
+          "type": "string"
+        },
+        "destructive": {
+          "type": "boolean"
+        },
+        "empty": {
+          "description": "Nothing is pending.",
+          "type": "boolean"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "migrations": {
+          "description": "The migrations' plan digest, as yodel apply --digest prints it.",
+          "type": "string"
+        },
+        "gate": {
+          "enum": [
+            "always",
+            "on-destructive",
+            "never"
+          ]
+        },
+        "base": {
+          "description": "The base commit the gate was read at.",
+          "type": "string"
+        },
+        "pending": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "destructiveSteps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/destructiveStep"
+          }
+        }
+      }
+    },
+    "destructiveStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "migration",
+        "step",
+        "what",
+        "why"
+      ],
+      "properties": {
+        "migration": {
+          "type": "string"
+        },
+        "step": {
+          "type": "integer"
+        },
+        "what": {
+          "type": "string"
+        },
+        "why": {
+          "description": "The lint rules that class it (destructive, pg-rewrite, pg-lock, ch-mutation, ch-rebuild), or op-step, manual-step.",
+          "type": "string"
         }
       }
     }

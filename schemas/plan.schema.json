@@ -341,6 +341,65 @@
           "description": "The project declares no migrations Op for the environment: the first line of how to declare one.",
           "type": "string"
         },
+        "wave": {
+          "description": "The environment's wave of the apply pipeline, when yodel.config.ts declares waves and names it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "wave",
+            "gate",
+            "base",
+            "baseSource",
+            "destructiveSteps",
+            "waits",
+            "planDigest",
+            "digest",
+            "approve"
+          ],
+          "properties": {
+            "wave": {
+              "description": "1-based, in yodel.config.ts waves.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "gate": {
+              "description": "The gate policy at the base commit.",
+              "enum": [
+                "always",
+                "on-destructive",
+                "never"
+              ]
+            },
+            "base": {
+              "type": "string"
+            },
+            "baseSource": {
+              "type": "string"
+            },
+            "destructiveSteps": {
+              "type": "array",
+              "items": {
+                "$ref": "apply.schema.json#/$defs/destructiveStep"
+              }
+            },
+            "waits": {
+              "description": "Under that gate, the wave waits for an approval of this plan.",
+              "type": "boolean"
+            },
+            "planDigest": {
+              "description": "The wave plan digest.",
+              "type": "string"
+            },
+            "digest": {
+              "description": "The set digest the wave's gate binds.",
+              "type": "string"
+            },
+            "approve": {
+              "description": "The chant approve command for the wave, for a person to run.",
+              "type": "string"
+            }
+          }
+        },
         "sinceLast": {
           "description": "The pull request comment this plan replaces showed another digest: what moved since.",
           "type": "object",
