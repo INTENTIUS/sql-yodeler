@@ -70,8 +70,8 @@ Op "apply-dev" is gated on "approve-apply-dev" after 2.1s
 
 apply-dev is waiting at gate "approve-apply-dev" for approval of this plan.
 Approve it with:
-  chant approve apply-dev approve-apply-dev --plan jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263
-then run yodel apply dev again.
+  npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263
+then run npx yodel apply dev again.
 [exit 3]
 ```
 

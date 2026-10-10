@@ -66,7 +66,8 @@ function approvalLines(a: ApprovalView | undefined, digest: string | undefined, 
 }
 
 /** `yodel plan <env>` for a project with migrations. */
-export function renderPlanText(plan: VersionedPlan): string {
+export function renderPlanText(plan: VersionedPlan, options: { runnable?: (command: string) => string } = {}): string {
+  const run = options.runnable ?? ((c: string) => c);
   const lines = [`Plan for ${plan.environment} (${plan.server ? describeServer(plan.server) : plan.dialect}${plan.history ? `, history ${plan.history}` : ""}): ${String(plan.appliedCount)} applied, ${String(plan.pending.length)} pending`];
   for (const n of plan.notes) lines.push("", n);
   for (const p of plan.pending) {
@@ -86,7 +87,7 @@ export function renderPlanText(plan: VersionedPlan): string {
   if (plan.sinceLast) lines.push("", `Since the last comment's plan (${plan.sinceLast.approved}): ${describeMove(plan.sinceLast)}`);
   if (plan.digest) {
     lines.push("", `Plan digest: ${plan.digest}`);
-    if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it with:`, `  ${plan.approval.command}`);
+    if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it with:`, `  ${run(plan.approval.command)}`, `or, at a terminal, with ${run(`yodel approve ${plan.environment}`)}, which shows the plan and asks you first.`);
   }
   const a = approvalLines(plan.approval, plan.digest, false);
   if (a.length > 0) lines.push("", ...a);

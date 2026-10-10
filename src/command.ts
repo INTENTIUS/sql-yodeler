@@ -2,6 +2,12 @@
 export interface Io {
   out: (text: string) => void;
   err: (text: string) => void;
+  /**
+   * Asks the person at the terminal and resolves to their answer. Present
+   * only when stdin and stderr are a terminal: a script, CI or an agent has
+   * no one to ask, and a command that needs a person's consent refuses.
+   */
+  ask?: (question: string) => Promise<string>;
 }
 
 /** One `yodel` verb. Each lives in its own module under src/commands/. */

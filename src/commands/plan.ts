@@ -7,6 +7,7 @@ import { buildSchema } from "../chant/build.js";
 import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
 import { hasMigrations } from "../versioned/index.js";
 import { describeServer, probeServer } from "../server.js";
+import { runnable } from "../chant/runnable.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
@@ -184,6 +185,6 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   }
   if (a.format === "json") io.out(`${JSON.stringify(planJsonVersioned(result), null, 2)}\n`);
   else if (a.format === "markdown") io.out(renderPlanMarkdown(result));
-  else io.out(renderPlanText(result));
+  else io.out(renderPlanText(result, { runnable: (c) => runnable(c, project.dir) }));
   return code;
 }
