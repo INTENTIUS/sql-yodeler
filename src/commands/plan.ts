@@ -6,6 +6,7 @@ import { declarativeTopologyRefusal, describeSettingsTopology, environmentSettin
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
 import { hasMigrations } from "../versioned/index.js";
+import { describeServer, probeServer } from "../server.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
@@ -147,8 +148,9 @@ async function declarativePlan(project: Project, env: Environment, json: boolean
   const build = await buildSchema(project);
   try {
     const result = await planEnvironment(project, env, build);
-    if (json) io.out(`${JSON.stringify(planJson(result), null, 2)}\n`);
-    else io.out(`${await renderPlan(result, `Plan for ${env.name} (${project.dialect}, sql.profiles.${env.name}${topology})`)}\n`);
+    const server = await probeServer(project, env);
+    if (json) io.out(`${JSON.stringify({ ...planJson(result), ...(server ? { server } : {}) }, null, 2)}\n`);
+    else io.out(`${await renderPlan(result, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name}${topology})`)}\n`);
     return planExitCode(result);
   } finally {
     build.dispose();

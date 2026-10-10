@@ -11,7 +11,7 @@
  *
  * and from `sql.profiles.<env>`, as chant's applier reads them:
  *
- *   lockTimeoutMs       lock_timeout for every statement (default 5000)
+ *   lockTimeoutMs       lock_timeout for every statement, and for the live-schema read (default 5000)
  *   statementTimeoutMs  statement_timeout for a catalog change (default 60000)
  *   scanTimeoutMs       statement_timeout for a statement that reads or rewrites rows (default none)
  *   schemas             the schemas the plan digest's fingerprint covers (default every schema but the server's own)
@@ -28,6 +28,7 @@ import { DEFAULT_HISTORY_DATABASE } from "../../history/index.js";
 import { acquireAdvisoryLock, PostgresHistoryStore, type PgLockConnection } from "../../history/postgres/index.js";
 import type { VersionedDriver } from "../driver.js";
 import { pgCatalogFingerprint, readPgCatalog } from "./catalog.js";
+import { readUnderLockTimeout } from "./waits.js";
 import { DEFAULT_LOCK_RETRIES, DEFAULT_PG_TIMEOUTS, PgStatementError, runPgStatement, type PgTimeouts } from "./executor.js";
 
 /** Opens a connection to the server: chant's `connectPostgres`, or a fake in the tests. */
@@ -111,6 +112,8 @@ export interface PostgresDriverInput {
   store: PostgresHistoryStore;
   sleep?: (ms: number) => Promise<void>;
   retryBaseMs?: number;
+  /** Where a read held up by another session's lock says so; default stderr. */
+  log?: (line: string) => void;
 }
 
 export function postgresDriver(input: PostgresDriverInput): VersionedDriver {
@@ -121,7 +124,17 @@ export function postgresDriver(input: PostgresDriverInput): VersionedDriver {
       return acquireAdvisoryLock(await input.connect(), { schema: settings.historySchema, holder });
     },
     async liveFingerprint() {
-      return pgCatalogFingerprint(await readPgCatalog(client, { schemas: input.schemas, historySchema: settings.historySchema }));
+      const read = () => readPgCatalog(client, { schemas: input.schemas, historySchema: settings.historySchema });
+      const entries = await readUnderLockTimeout(client, read, {
+        lockTimeoutMs: settings.timeouts.lockTimeoutMs,
+        retries: settings.lockRetries,
+        schemas: input.schemas,
+        what: "the live schema",
+        log: input.log ?? ((line) => process.stderr.write(`yodel: ${line}\n`)),
+        ...(input.sleep ? { sleep: input.sleep } : {}),
+        ...(input.retryBaseMs !== undefined ? { retryBaseMs: input.retryBaseMs } : {}),
+      });
+      return pgCatalogFingerprint(entries);
     },
     async runStatement(step: StatementStep, run) {
       try {

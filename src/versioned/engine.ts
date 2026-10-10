@@ -62,6 +62,7 @@ import {
   type MigrationRecord,
 } from "../history/index.js";
 import type { SqlDialect } from "../project.js";
+import { clickhouseVersion, postgresVersion, serverAddress, softly, type ServerInfo } from "../server.js";
 import { clickhouseDriver } from "./clickhouse.js";
 import type { VersionedDriver } from "./driver.js";
 import { openPostgres, type PgConnect } from "./postgres/driver.js";
@@ -95,6 +96,8 @@ export interface VersionedEnv {
   topology?: Topology;
   /** Where {@link topology} came from: `yodel.config.ts`, `sql.profiles.<env>.topology`, `YODEL_TOPOLOGY` or `default`. */
   topologySource?: string;
+  /** Which server this is, with its version (#11), for the header of status, plan and apply. */
+  server?: () => Promise<ServerInfo>;
 }
 
 /**
@@ -117,6 +120,7 @@ export async function openVersioned(project: Project, env: Environment, processE
       serverKey: pg.endpoint.url,
       lockTtlMs: settings.lockTtlMs,
       projectDir: project.dir,
+      server: async () => ({ dialect: "postgres", address: serverAddress("postgres", pg.endpoint.url), version: await softly(() => postgresVersion(pg.client)) }),
     };
   }
   const { resolveClickHouseTarget, isUnresolvedTarget } = await import("@intentius/chant-lexicon-sql/clickhouse/live/bind");
@@ -140,6 +144,7 @@ export async function openVersioned(project: Project, env: Environment, processE
     endpoint,
     topology: settings.topology,
     topologySource: settings.topologySource,
+    server: async () => ({ dialect: "clickhouse", address: serverAddress("clickhouse", endpoint.url), version: await softly(() => clickhouseVersion(p)) }),
   };
 }
 

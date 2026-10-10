@@ -33,6 +33,7 @@ import {
 } from "../versioned/index.js";
 import { currentSubject, explainAgainst, explainMove, latestApproval, type LatestApproval, type MoveExplanation } from "../versioned/explain.js";
 import type { DigestSubject } from "../versioned/digest.js";
+import type { ServerInfo } from "../server.js";
 
 export interface StepView {
   index: number;
@@ -70,6 +71,8 @@ export type ApprovalView =
 export interface VersionedPlan {
   environment: string;
   dialect: SqlDialect;
+  /** The server the plan was read from (#11). */
+  server?: ServerInfo | undefined;
   /** `<database>.history (<topology> (<where it came from>))`; Postgres has no topology, so only `<database>.history`. */
   history?: string | undefined;
   appliedCount: number;
@@ -157,6 +160,7 @@ async function collectWith(
 
   const plan: VersionedPlan = {
     ...base,
+    ...(report.server ? { server: report.server } : {}),
     history: venv.dialect === "postgres" ? `${venv.location.database}.history` : `${venv.location.database}.history (${report.topology ?? describeTopology(venv.location.topology)})`,
     appliedCount: status.applied.length,
     pending: status.pending.map((p) => viewOf(p.migration, p.partWay?.done ?? [], p.outOfOrder, p.partWay?.resumeAt, p.refusedSteps)),

@@ -17,7 +17,7 @@ Per environment, first one set wins: `environments.<env>.topology` in `yodel.con
 
 ```console
 $ npx yodel status dev
-Migrations in dev (history yodel_18_history.history, topology single (default))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history, topology single (default))
 ```
 
 The declarative path (no `migrations/`) plans and applies through chant, which reads only `sql.profiles.<env>.topology`. A topology set only in `yodel.config.ts` is refused there; set it in `chant.config.ts` too. `yodel drift` reads through chant as well and refuses the same way, on either path: chant compares the server against the declaration rendered for the profile's topology, so a cluster's `ReplicatedMergeTree` would otherwise show as drift from the declared `MergeTree`. A rebuild step (`ClickHouseRebuildOp`) runs through chant as well, and yodel hands it the environment's topology, so it renders for the same topology as the statements around it.

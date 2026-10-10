@@ -18,6 +18,7 @@ import type { LiveDiffResult, UnobservedResource } from "@intentius/chant/lifecy
 import type { DeepDiffResult, DeepEntityDrift } from "@intentius/chant/lifecycle/deep-diff";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { lastJsonLine, runChant } from "./process.js";
+import { describeServer, type ServerInfo } from "../server.js";
 
 /** The `lexicons.sql` section of `chant lifecycle diff --live --json`. */
 export interface SqlLiveDiff {
@@ -33,6 +34,8 @@ export interface Drift {
   missing: string[];
   /** Declared objects chant could not read. */
   unobserved: UnobservedResource[];
+  /** Postgres: a read gave up at the lock timeout, and what it waited on (#18). */
+  lockWait?: string | undefined;
 }
 
 /** Exit code: an owned object changed or is gone. */
@@ -85,10 +88,10 @@ export async function readDrift(project: Project, env: Environment, options: { e
 const show = (v: unknown) => (v === undefined ? "(none)" : typeof v === "string" ? v : JSON.stringify(v));
 
 /** The drift as text. */
-export function renderDrift(drift: Drift): string {
-  const lines: string[] = [`Drift in ${drift.environment}`, ""];
+export function renderDrift(drift: Drift, server?: ServerInfo): string {
+  const lines: string[] = [`Drift in ${drift.environment}${server ? ` (${describeServer(server)})` : ""}`, ""];
   if (drift.changed.length === 0 && drift.missing.length === 0) {
-    lines.push("No drift: every declared object matches the server.");
+    lines.push(drift.unobserved.length > 0 ? "No drift in the declared objects that could be read." : "No drift: every declared object matches the server.");
   }
   if (drift.changed.length > 0) {
     lines.push("Changed out of band:");
@@ -107,6 +110,7 @@ export function renderDrift(drift: Drift): string {
   if (drift.unobserved.length > 0) {
     lines.push("", "Could not be read, so their state is unknown:");
     for (const u of drift.unobserved) lines.push(`  ${u.name}: ${u.reason}${u.detail ? ` (${u.detail})` : ""}`);
+    if (drift.lockWait) lines.push("", `The read ${drift.lockWait}.`);
   }
   return `${lines.join("\n")}\n`;
 }

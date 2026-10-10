@@ -128,7 +128,8 @@ describe.skipIf(!clickhouseReachable)("one migrations directory on a single node
 
   it("applies as written, with a MergeTree history, and a second apply sends nothing", async () => {
     const status = await yodel(at("status", "single"));
-    expect(status.out).toContain(`Migrations in single (history ${HISTORY}.history, topology single (yodel.config.ts))`);
+    expect(status.out).toMatch(/Migrations in single \(clickhouse [0-9.]+ at [^,]+, history /);
+    expect(status.out).toContain(`, history ${HISTORY}.history, topology single (yodel.config.ts))`);
     const doc = await approvedApply("single");
     expect(doc.topology).toBe("single (yodel.config.ts)");
 

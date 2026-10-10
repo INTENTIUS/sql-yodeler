@@ -12,7 +12,7 @@ ALTER TABLE yodel_18_shop.events MODIFY COLUMN source LowCardinality(String) DEF
 
 ```console
 $ npx yodel drift dev
-Drift in dev
+Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
 
 Changed out of band:
   events (ClickHouse::Table)
@@ -24,7 +24,7 @@ Put back, there is none:
 
 ```console
 $ npx yodel drift dev
-Drift in dev
+Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
 
 No drift: every declared object matches the server.
 ```

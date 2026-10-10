@@ -121,7 +121,7 @@ and the history:
 
 ```console
 $ npx yodel status dev
-Migrations in dev (history yodel_18_history.history, topology single (default))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history, topology single (default))
 
 Applied (1):
   20261009T2305-baseline  2026-10-09 23:05:28.654129 by yodel@example
