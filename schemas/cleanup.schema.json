@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/cleanup.schema.json",
+  "title": "yodel cleanup <env> --json",
+  "description": "Version 1. What steps kept in the environment (a rebuild's old table, a column migration's old column), each with its retention date and whether it is due, the digest an approval of the drop binds when something is due, and what was dropped. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["environment", "now", "retained", "due", "dropped"],
+  "properties": {
+    "environment": { "type": "string" },
+    "now": { "description": "The server's clock when it was read (ISO 8601).", "type": "string" },
+    "retained": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "of", "due", "identity"],
+        "properties": {
+          "kind": { "enum": ["table", "column"] },
+          "name": { "description": "db.table__chant_old, or schema.table.column.", "type": "string" },
+          "of": { "description": "The rebuild (db.table) or column migration (schema.table.column) that kept it.", "type": "string" },
+          "retainUntil": { "description": "Its retention date (ISO 8601), from its comment; absent when its comment has none, and then it is never due.", "type": "string" },
+          "due": { "type": "boolean" },
+          "identity": { "description": "The table's UUID, or the column's table oid and attribute number.", "type": "string" },
+          "trigger": {
+            "description": "Postgres: the dual-write trigger and function dropped with the column.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "fn"],
+            "properties": { "name": { "type": "string" }, "fn": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "due": { "type": "integer", "minimum": 0 },
+    "planDigest": { "description": "When something is due: the digest an approval of the drop binds.", "type": "string" },
+    "approve": { "description": "When something is due and not approved: the command that approves it.", "type": "string" },
+    "dropped": { "$ref": "common.schema.json#/$defs/stringList" }
+  }
+}

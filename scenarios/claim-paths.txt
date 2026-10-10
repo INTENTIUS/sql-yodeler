@@ -126,6 +126,10 @@ src/commands/checkpoint.ts             lint
 # yodel revert (#55): the lint claim reverts a migration through the gate.
 src/commands/revert.ts                 lint
 
+# yodel cleanup (#16): the rebuild claim drops the old table it kept; every plan names what is kept.
+src/commands/cleanup.ts                rebuild
+src/cleanup/                           rebuild pr-comment drift template template-github template-gitlab
+
 # yodel test (#54): the lint claim runs tests on the replayed database.
 src/commands/test.ts                   lint
 src/testing/                           lint

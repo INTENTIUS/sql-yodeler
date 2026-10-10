@@ -49,7 +49,7 @@ The step is chant's `ClickHouseRebuildOp`, run by chant's local executor inside 
 2. creates a materialized view, `<table>__chant_dual`, that writes every row inserted at or after a cut-over time (now plus a minute, by the table's time column, `cutoverColumn`) into the new table;
 3. waits for the cut-over, then copies the table partition by partition, writing a receipt for each partition: the rows from before the cut-over, then the rows at or after it (future timestamps) that the view has not written, so every row the table held is copied once;
 4. verifies that counts and checksums of every row, per partition, match in both tables, and fails the step with nothing swapped if they do not;
-5. compares the two tables again just before the swap, and fails with nothing swapped if a row reached only the old table since the verification; otherwise swaps the tables (`EXCHANGE TABLES`), drops the view, and keeps the old table as `<table>__chant_old` until a retention date 7 days on.
+5. compares the two tables again just before the swap, and fails with nothing swapped if a row reached only the old table since the verification; otherwise swaps the tables (`EXCHANGE TABLES`), drops the view, and keeps the old table as `<table>__chant_old` until a retention date 7 days on. [`yodel cleanup`](#cleaning-up-what-steps-kept) drops it after that date.
 
 yodel builds the Op with `gates: "outer"`, so it has no gate and no Drop phase of its own: its approval is the migration's. The replay check runs the same step in an empty database, which shows the statements it sends:
 
@@ -386,13 +386,36 @@ npx yodel new rename-email --replace --retain 7d   # a migration written without
 
 1. The apply expands, dual-writes, backfills, verifies and switches. Readers of `email` see the new column; the old column is still there under its old name, kept written by the dual-write trigger for a rename, and its comment says until when (`retain-until`). The step succeeds with `"dropped":false` and `retainUntil` in its note.
 2. During those seven days, move the remaining readers and writers of `customer_email` over.
-3. After the date, the Op's contract drops the old column, and for a rename its trigger and function: `chant run` of the declaration in `migration.json`, whose contract drops it only once the date has passed.
+3. After the date, [`yodel cleanup <env>`](#cleaning-up-what-steps-kept) drops the old column, and for a rename its trigger and function, behind an approval. Before the date it drops nothing.
 
 `--retain` sets the retention of a ClickHouse rebuild too: how long `<table>__chant_old` is kept after the swap, 7 days when the step sets none.
 
 A `PostgresMigrationOp` step that failed or was stopped keeps the new column, its trigger and the receipts of the batches it filled, and resumes on the next apply: each phase reads the server again and does what is left, and the backfill skips every batch with a receipt (the note's `skipped`). To start over instead, drop the new column, its trigger and function (named in their comments).
 
 The expand adds the new column at the end of the table, and no `ALTER` moves it, so the live column order differs from the declared one. `yodel drift` compares Postgres columns by name, so the order is not drift: declare the renamed column where the old one was.
+
+## Cleaning up what steps kept
+
+Two steps keep something on purpose after they succeed, until a retention date written in its own comment (`retain-until` in chant's trailer):
+
+- a ClickHouse rebuild keeps the old table, `<table>__chant_old`, 7 days after the swap, or the step's `retain`;
+- a Postgres rename or type change keeps the old column after the switch when the step sets `retain`, and for a rename the trigger and function that keep it written.
+
+`yodel plan <env>` names them with their dates in a note, and so does the pull request comment. `yodel cleanup <env>` lists them, with the server's clock, and drops the ones whose date has passed. Nothing is dropped before its date.
+
+```text
+$ npx yodel cleanup prod
+Kept by steps in prod (server time 2026-10-20T00:00:00.000Z):
+  shop.events__chant_old (the old table of the rebuild of shop.events): kept until 2026-10-17T05:30:05.216Z, due
+  shop.daily__chant_old (the old table of the rebuild of shop.daily): kept until 2026-10-27T00:00:00.000Z
+
+Plan digest: jcs1-sha256:...
+1 due; nothing dropped without an approval. Approve it with:
+  chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:...
+then run yodel cleanup prod again.
+```
+
+The drop is approved the way an apply is: the digest covers each due object by its identity on the server (a table by its UUID, a column by its table and attribute number) and its date, and the approval is of the environment's migrations Op gate for that digest. With it, `yodel cleanup prod` takes the apply lock, reads the objects again, checks the approval against what it reads, and drops them: a ClickHouse table with `DROP TABLE ... SYNC` (rendered for the environment's topology), a Postgres column with its trigger and function in one transaction under the lock timeout, and the column migration's receipts after it. If anything due changed since the approval (another table came due, a table was rebuilt again), the digest differs and nothing is dropped. `--list` lists and never drops; `--json` prints the list, the digest and what was dropped. It exits 3 while something due waits for its approval, so a scheduled job can run it and fail visibly.
 
 ## Manual steps
 
