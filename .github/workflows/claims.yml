@@ -1,9 +1,10 @@
 # Rendered from .github/src/claims.ts by `npm run workflows`. Edit that file, not this one.
 #
 # The scenario claims (scenarios/run.ts): every claim against the sql
-# emulator, plain and under BREAK=1. The template claim needs a Forgejo with
-# a runner, which this job has not, so it is skipped here. The record and
-# every run's log are kept as the run's artifacts.
+# emulator, plain and under BREAK=1. The template claims need a forge with a
+# runner (template a Forgejo, template-github act and a mock GitHub,
+# template-gitlab a GitLab), which this job has not, so they are skipped
+# here. The record and every run's log are kept as the run's artifacts.
 
 name: claims
 
@@ -64,7 +65,7 @@ jobs:
           docker ps -a
           exit 1
       - name: Claims
-        run: timeout 3000 npm run claims -- --record claims-record.json --skip template
+        run: timeout 3000 npm run claims -- --record claims-record.json --skip template,template-github,template-gitlab
       - if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -14,6 +14,8 @@ import { prComment } from "./pr-comment.js";
 import { rebuildAsStep, rebuildRefused } from "./rebuild.js";
 import { resume } from "./resume.js";
 import { templateClaim } from "./template.js";
+import { templateGithub } from "./template-github.js";
+import { templateGitlab } from "./template-gitlab.js";
 import { topology } from "./topology.js";
 
 /** Every claim, in the order the summary and the record list them: #34's list, then the Postgres-only ones. */
@@ -34,6 +36,8 @@ export const claims: readonly Claim[] = [
   replayClaim,
   topology,
   templateClaim,
+  templateGithub,
+  templateGitlab,
   lockRetry,
   columnChange,
 ];

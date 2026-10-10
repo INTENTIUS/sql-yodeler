@@ -8,7 +8,7 @@ scenarios/lib/project.ts). The run rewrites the committed record,
 scenarios/claims-record.json, and the status page made from it (npm run
 claims:page, docs/claims.md), and when either changed, opens a pull
 request from branch claims-weekly, or updates the one already open.
-The template claim is skipped here, as in claims.yml.`;
+The template claims are skipped here, as in claims.yml.`;
 
 const record = "scenarios/claims-record.json";
 const page = "docs/claims.md";
@@ -52,7 +52,7 @@ echo "YODEL_CLAIMS_NODE_MODULES=$dir/node_modules" >> "$GITHUB_ENV"
           name: "Claims",
           id: "claims",
           "continue-on-error": true,
-          run: `timeout 3000 npm run claims -- --record ${record} --skip template`,
+          run: `timeout 3000 npm run claims -- --record ${record} --skip template,template-github,template-gitlab`,
         }),
         new Step({ name: "The status page", run: "npm run claims:page" }),
         new Step({
@@ -70,7 +70,7 @@ title="chore: weekly claims record for @intentius/sql-yodeler@$VERSION"
 git commit -q -m "$title"
 git push -f origin ${branch}
 if [ -z "$(gh pr list --head ${branch} --state open --json number --jq '.[].number')" ]; then
-  gh pr create --head ${branch} --title "$title" --body "Every claim but template, run weekly by claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+  gh pr create --head ${branch} --title "$title" --body "Every claim but the template claims, run weekly by claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 fi
 `,
         }),

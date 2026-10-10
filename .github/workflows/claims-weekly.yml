@@ -7,7 +7,7 @@
 # scenarios/claims-record.json, and the status page made from it (npm run
 # claims:page, docs/claims.md), and when either changed, opens a pull
 # request from branch claims-weekly, or updates the one already open.
-# The template claim is skipped here, as in claims.yml.
+# The template claims are skipped here, as in claims.yml.
 
 name: claims-weekly
 
@@ -83,7 +83,7 @@ jobs:
       - name: Claims
         id: claims
         continue-on-error: true
-        run: timeout 3000 npm run claims -- --record scenarios/claims-record.json --skip template
+        run: timeout 3000 npm run claims -- --record scenarios/claims-record.json --skip template,template-github,template-gitlab
       - name: The status page
         run: npm run claims:page
       - name: A pull request when the record changed
@@ -103,7 +103,7 @@ jobs:
           git commit -q -m "$title"
           git push -f origin claims-weekly
           if [ -z "$(gh pr list --head claims-weekly --state open --json number --jq '.[].number')" ]; then
-            gh pr create --head claims-weekly --title "$title" --body "Every claim but template, run weekly by claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            gh pr create --head claims-weekly --title "$title" --body "Every claim but the template claims, run weekly by claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           fi
       - if: always()
         uses: actions/upload-artifact@v4

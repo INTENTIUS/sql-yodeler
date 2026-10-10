@@ -2,9 +2,10 @@ import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { checkout, claimsEnv, emulatorSteps, setupNode } from "./shared.js";
 
 export const comment = `The scenario claims (scenarios/run.ts): every claim against the sql
-emulator, plain and under BREAK=1. The template claim needs a Forgejo with
-a runner, which this job has not, so it is skipped here. The record and
-every run's log are kept as the run's artifacts.`;
+emulator, plain and under BREAK=1. The template claims need a forge with a
+runner (template a Forgejo, template-github act and a mock GitHub,
+template-gitlab a GitLab), which this job has not, so they are skipped
+here. The record and every run's log are kept as the run's artifacts.`;
 
 export const workflow = new Workflow({
   name: "claims",
@@ -20,7 +21,7 @@ export const workflow = new Workflow({
         setupNode(22),
         new Step({ run: "npm ci" }),
         ...emulatorSteps(),
-        new Step({ name: "Claims", run: "timeout 3000 npm run claims -- --record claims-record.json --skip template" }),
+        new Step({ name: "Claims", run: "timeout 3000 npm run claims -- --record claims-record.json --skip template,template-github,template-gitlab" }),
         new Step({
           if: "always()",
           uses: "actions/upload-artifact@v4",

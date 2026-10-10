@@ -62,27 +62,38 @@ scenarios/claims/drift.ts              drift
 scenarios/claims/declarative.ts        declarative
 scenarios/claims/topology.ts           topology
 scenarios/claims/template.ts           template
+scenarios/claims/template-github.ts    template-github
+scenarios/claims/template-gitlab.ts    template-gitlab
 scenarios/claims/lock-retry.ts         lock-retry
 scenarios/claims/column-change.ts      column-change
 
-# The starter templates: only the template claim makes a project from them.
-templates/                             template
+# The forges the template claims run on, and the body they share.
+scenarios/forges/forgejo.ts            template
+scenarios/forges/github.ts             template-github
+scenarios/forges/github.compose.ts     template-github
+scenarios/forges/mock-github.ts        template-github
+scenarios/forges/gitlab.ts             template-gitlab
+scenarios/forges/gitlab.compose.ts     template-gitlab
+scenarios/forges/                      template template-github template-gitlab
+
+# The starter templates: only the template claims make a project from them.
+templates/                             template template-github template-gitlab
 
 # yodel init, and what --from adopts with.
-src/commands/init.ts                   adopt template
-src/init/                              adopt template
+src/commands/init.ts                   adopt template template-github template-gitlab
+src/init/                              adopt template template-github template-gitlab
 
 # yodel lint. apply and rebase read a migration's yodel:allow lines through
 # lint/index.ts and lint/silences.ts, so those two reach every claim.
 src/lint/index.ts                      ALL
 src/lint/silences.ts                   ALL
-src/commands/lint.ts                   lint-ci replay template
-src/lint/                              lint-ci replay template
-src/replay/                            replay template
+src/commands/lint.ts                   lint-ci replay template template-github template-gitlab
+src/lint/                              lint-ci replay template template-github template-gitlab
+src/replay/                            replay template template-github template-gitlab
 
 # yodel plan and the pull request comment it posts.
-src/commands/plan.ts                   adopt declarative pr-comment template
-src/pr/                                pr-comment template
+src/commands/plan.ts                   adopt declarative pr-comment template template-github template-gitlab
+src/pr/                                pr-comment template template-github template-gitlab
 
 # yodel drift.
 src/commands/drift.ts                  drift
