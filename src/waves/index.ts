@@ -36,14 +36,14 @@ import { EXIT_REFUSED } from "../exit.js";
 import { currentDigest, inspect, selectToApply, type VersionedEnv } from "../versioned/engine.js";
 import { gitLedger, NOT_APPROVED, verifyApproval } from "../versioned/approval.js";
 import type { PendingMigration } from "../versioned/state.js";
+import { WAVES_PIPELINE, type WaveRecord } from "./record.js";
 import { enforcePromotion, promotionEvidence, readPromotions, type Promotion } from "./promotion.js";
 
 export * from "./promotion.js";
+export * from "./record.js";
 
 /** The waves spec the CI script writes and every wave job reads. */
 export const WAVES_SPEC_FILE = "yodel-waves.json";
-/** The pipeline's name, and the op chant records the wave gates under. */
-export const WAVES_PIPELINE = "yodel-apply";
 export const WAVE_PLAN_KIND = "yodel-wave";
 
 /** The gate policy an environment no wave names gets. */
@@ -193,7 +193,7 @@ function waveOf(spec: WavesSpec, env: string, specFile: string): { k: number; na
  * an approval of the wave's set digest, or the wave's policy at the base
  * commit needs no approval for these plans.
  */
-export async function verifyWaveDecision(cwd: string, specFile: string, env: string, planDigest: string): Promise<string> {
+export async function verifyWaveDecision(cwd: string, specFile: string, env: string, planDigest: string): Promise<{ line: string; wave: WaveRecord }> {
   const specPath = resolve(cwd, specFile);
   const spec = readJson<WavesSpec>(specPath, "the waves spec");
   const { k, name } = waveOf(spec, env, specFile);
@@ -209,7 +209,10 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
   if (waveSetDigest(decision.members) !== decision.digest) throw new YodelError(`refused: chant's decision for wave ${String(k)} does not hold the digest of its own members; nothing was applied`, NOT_APPROVED);
   if (decision.status === "approved") {
     const by = await verifyApproval(await gitLedger(cwd), { name: spec.name, filePath: specFile, gate: decision.gate, quorum: false }, decision.digest);
-    return `wave ${String(k)} (${name}): approved by ${by.resolvedBy} at ${by.timestamp}`;
+    return {
+      line: `wave ${String(k)} (${name}): approved by ${by.resolvedBy} at ${by.timestamp}`,
+      wave: { wave: k, op: spec.name, gate: decision.gate, digest: decision.digest, status: "approved" },
+    };
   }
   // Not required: ask chant's rule again rather than trust the record, at yodel's base
   // (../config/base.ts), never at a base the spec in the change names.
@@ -221,7 +224,51 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
       NOT_APPROVED,
     );
   }
-  return `wave ${String(k)} (${name}): gate ${policy.policy} at ${policy.base.slice(0, 12)} needs no approval for this plan`;
+  return {
+    line: `wave ${String(k)} (${name}): gate ${policy.policy} at ${policy.base.slice(0, 12)} needs no approval for this plan`,
+    wave: { wave: k, op: spec.name, gate: decision.gate, digest: decision.digest, status: "not-required", policy: policy.policy, base: policy.base },
+  };
+}
+
+/** chant's decision for a wave, as `chant run wave` will make it once this plan is written. */
+export interface WaveForecast {
+  wave: number;
+  name: string;
+  gate: string;
+  digest: string;
+  policy: string;
+  base: string;
+  /** No approval of `digest` stands and the policy asks for one: chant exits 3. */
+  waits: boolean;
+  /** `chant approve <op> <gate> --plan <digest>`. */
+  approve: string;
+}
+
+/**
+ * The decision chant makes for `plan`'s wave right after `--wave-plan`,
+ * made the same way and from the same sources: the policy from the spec at
+ * yodel's base, chant's own rule, and the gate ledger for an approval of
+ * the wave's set digest. yodel's waves have one environment each.
+ */
+export async function forecastWave(cwd: string, specFile: string, plan: WavePlanFile): Promise<WaveForecast> {
+  const spec = readJson<WavesSpec & { gate?: string }>(resolve(cwd, specFile), "the waves spec");
+  const { k, name } = waveOf(spec, plan.environment, specFile);
+  const { waveSetDigest, waveGateName } = await import("@intentius/chant/gated-waves");
+  const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
+  const members = [{ member: plan.environment, planDigest: plan.planDigest, op: "", ...(plan.destructive ? { destructive: true } : {}), ...(plan.empty ? { empty: true } : {}) }];
+  const digest = waveSetDigest(members);
+  const gate = waveGateName(spec.gate ?? spec.name, k);
+  const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
+  let waits = opWaveNeedsApproval(policy.policy, members);
+  if (waits) {
+    try {
+      await verifyApproval(await gitLedger(cwd), { name: spec.name, filePath: specFile, gate, quorum: false }, digest);
+      waits = false;
+    } catch {
+      // No approval of this digest: chant waits.
+    }
+  }
+  return { wave: k, name, gate, digest, policy: policy.policy, base: policy.base, waits, approve: `chant approve ${spec.name} ${gate} --plan ${digest}` };
 }
 
 /** Reads a plan file `--wave-plan` wrote. */

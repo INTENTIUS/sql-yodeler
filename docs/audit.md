@@ -31,8 +31,8 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 
 | Entry | From |
 |---|---|
-| `approval-requested` | a pending fact on the ledger: a run stopped at the migrations Op's gate |
-| `approved` | a resolution of the gate (`chant approve`, `yodel approve`) |
+| `approval-requested` | a pending fact on the ledger: a run stopped at the migrations Op's gate, or the environment's wave stopped at its wave gate |
+| `approved` | a resolution of the gate or the wave gate (`chant approve`, `yodel approve`) |
 | `override` | a resolution of an `override-<rule>` gate (`yodel override`), with the rule and the reason |
 | `silenced` | a `-- yodel:allow` silence, on the migration's first started row |
 | `applied` | the history row that first recorded the migration succeeded |
@@ -48,6 +48,8 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 
 - A history row missing. Each environment's history numbers its rows from 1 with no hole, because every run appends at the highest `seq` plus one, under the lock. A hole is a row someone deleted.
 - An applied migration whose plan digest has no approval of the environment's gate on the ledger: the approval was removed, or the migration was applied without one. A baseline recorded by `yodel init --from` has no digest and needs no approval.
+
+  A migration a wave of the apply pipeline applied ([waves](workflows.md)) was let through on the wave's gate, `yodel-apply-wave-<k>` on the `yodel-apply` ledger, for the wave's set digest, not on the migrations Op's gate. The wave's apply records that gate and digest in the migration's `started` history row (`note.wave`), and the report looks for the approval there. A wave whose gate policy at the base commit needed no approval (`never`, or `on-destructive` with nothing destructive) records that instead, checked under the lock when it applied, and is not a gap.
 - With `--audit --check`, an entry of the file the sources no longer give.
 
 An environment that cannot be read (its server does not answer) is reported with its error, and the exit is 1 when there is no gap.
@@ -91,6 +93,10 @@ An environment that cannot be read (its server does not answer) is reported with
 | `audit[].migration` | the migration, for history entries |
 | `audit[].digest` | the plan digest |
 | `audit[].detail` | the silence, the override's rule and reason, the error, the repair's reason |
+| `audit[].wave` | on an `applied` entry a wave applied: the wave's gate, its set digest, and `approved` or `not-required` |
+| `audit[].wave.gate` | the wave's gate, `yodel-apply-wave-<k>` |
+| `audit[].wave.digest` | the wave's set digest, the one its approval is bound to |
+| `audit[].wave.status` | `approved`, or `not-required` when the wave's policy at the base needed no approval |
 | `audit[].source` | the ledger file, Op and gate; or the history table, the row's `seq` and its run |
 | `gaps` | each gap |
 | `gaps[].environment` | the environment |

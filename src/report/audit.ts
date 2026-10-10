@@ -29,11 +29,16 @@
  *   that was deleted.
  * - `approval`: a migration applied under a plan digest that the ledger
  *   holds no approval of the environment's gate for. A baseline (`yodel init
- *   --from`, no digest) needs none.
+ *   --from`, no digest) needs none. A migration a wave of the apply pipeline
+ *   applied (#87) was approved on the wave's gate (`<op>-wave-<k>`), for the
+ *   wave's set digest its `started` row records (`note.wave`); a wave whose
+ *   policy at the base needed no approval records that instead, and needs
+ *   none.
  */
 
 import { createHash } from "node:crypto";
 import type { HistoryRow } from "../history/index.js";
+import { waveRecordOf } from "../waves/record.js";
 
 export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
@@ -54,6 +59,8 @@ export interface AuditEntry {
   digest?: string;
   /** The silence, the override's rule and reason, the error, the repair's reason. */
   detail?: string;
+  /** `applied` by a wave of the apply pipeline: the wave's gate, its set digest, and whether it was approved or needed no approval. */
+  wave?: { gate: string; digest: string; status: "approved" | "not-required" };
   source: AuditSource;
 }
 
@@ -73,6 +80,16 @@ export interface LedgerInput {
   resolutions: ReadonlyArray<{ gate: string; timestamp: string; resolvedBy: string; planDigest?: string | undefined; note?: string | undefined }>;
 }
 
+/** The apply pipeline's wave gates on the ledger (`_gates/<op>.jsonl` of the waves' op): their pending lines and resolutions. */
+export interface WaveLedgerInput {
+  op: string;
+  path: string;
+  /** The wave gate yodel.config.ts gives the environment now, if any; the gates its history's waves recorded are read too. */
+  gate?: string | undefined;
+  pending: LedgerInput["pending"];
+  resolutions: LedgerInput["resolutions"];
+}
+
 export interface AuditInput {
   environment: string;
   /** `<database>.history`, for the entries' source. */
@@ -80,6 +97,8 @@ export interface AuditInput {
   rows: readonly HistoryRow[];
   /** Absent when the environment has no migrations Op to read the ledger of. */
   ledger?: LedgerInput | undefined;
+  /** The waves' gate ledger, when the project's apply pipeline runs waves. */
+  waves?: WaveLedgerInput | undefined;
   /** Whether two digests are the same plan (chant's samePlanDigest). Default: equal strings. */
   sameDigest?: (a: string | undefined, b: string | undefined) => boolean;
 }
@@ -105,7 +124,8 @@ export const byTime = (a: { at: string }, b: { at: string }): number => {
 };
 
 function entry(fields: Omit<AuditEntry, "id">): AuditEntry {
-  const key = JSON.stringify([fields.environment, fields.kind, fields.at, fields.by ?? "", fields.migration ?? "", fields.digest ?? "", fields.detail ?? "", fields.source]);
+  // An entry with no wave hashes as it did before waves were recorded, so audit files written then still match.
+  const key = JSON.stringify([fields.environment, fields.kind, fields.at, fields.by ?? "", fields.migration ?? "", fields.digest ?? "", fields.detail ?? "", fields.source, ...(fields.wave ? [fields.wave] : [])]);
   return { id: `sha256:${createHash("sha256").update(key).digest("hex").slice(0, 24)}`, ...fields };
 }
 
@@ -116,11 +136,16 @@ function fromHistory(input: AuditInput): AuditEntry[] {
   const out: AuditEntry[] = [];
   const applied = new Set<string>();
   const silenced = new Set<string>();
+  /** Each migration's wave, from its latest started row. */
+  const waveOf = new Map<string, AuditEntry["wave"]>();
   for (const r of [...input.rows].sort((a, b) => a.seq - b.seq)) {
     if (r.kind !== "migration") continue;
     const source: AuditSource = { history, seq: r.seq, run: r.run_id };
     const base = { at: isoTime(r.recorded_at ?? ""), environment, by: r.applied_by, migration: r.migration_id, ...(r.plan_digest ? { digest: r.plan_digest } : {}), source };
     if (r.status === "started") {
+      const w = waveRecordOf(r.note);
+      if (w) waveOf.set(r.migration_id, { gate: w.gate, digest: w.digest, status: w.status });
+      else waveOf.delete(r.migration_id);
       let list: Array<{ step?: number; rule?: string; reason?: string }> = [];
       try {
         list = JSON.parse(r.silences || "[]") as typeof list;
@@ -137,7 +162,8 @@ function fromHistory(input: AuditInput): AuditEntry[] {
       if (applied.has(r.migration_id)) out.push(entry({ ...base, kind: "repaired", detail: r.note || `checksum ${r.checksum}` }));
       else {
         applied.add(r.migration_id);
-        out.push(entry({ ...base, kind: "applied", ...(r.note ? { detail: r.note } : {}) }));
+        const wave = waveOf.get(r.migration_id);
+        out.push(entry({ ...base, kind: "applied", ...(r.note ? { detail: r.note } : {}), ...(wave ? { wave } : {}) }));
       }
     } else {
       out.push(entry({ ...base, kind: CHECK_FAILED.test(r.error) ? "refused" : "failed", detail: r.error }));
@@ -171,10 +197,31 @@ function fromLedger(environment: string, l: LedgerInput): AuditEntry[] {
   return out;
 }
 
+/** The wave gates' lines that are this environment's: its configured wave gate, and every gate its history's waves recorded. */
+function fromWaves(environment: string, w: WaveLedgerInput, history: readonly AuditEntry[]): AuditEntry[] {
+  const gates = new Set([...(w.gate ? [w.gate] : []), ...history.flatMap((e) => (e.wave ? [e.wave.gate] : []))]);
+  const out: AuditEntry[] = [];
+  for (const gate of gates) out.push(...fromLedger(environment, { op: w.op, gate, path: w.path, pending: w.pending, resolutions: w.resolutions.filter((r) => !r.gate.startsWith("override-")) }));
+  return out;
+}
+
+/**
+ * The approval an `applied` entry was let through by, among `entries`: on
+ * the wave's gate for the wave's set digest when a wave applied it, else
+ * on the migrations gate for its plan digest. Undefined when none is there.
+ */
+export function approvalOf(applied: AuditEntry, entries: readonly AuditEntry[], same: (a: string | undefined, b: string | undefined) => boolean = (a, b) => a === b): AuditEntry | undefined {
+  const approvals = entries.filter((e) => e.kind === "approved" && e.environment === applied.environment);
+  const wave = applied.wave;
+  if (wave) return approvals.filter((x) => "ledger" in x.source && x.source.gate === wave.gate && same(x.digest, wave.digest)).at(-1);
+  return approvals.filter((x) => same(x.digest, applied.digest)).at(-1);
+}
+
 /** The entries one environment's history and ledger add up to, oldest first, and the gaps they show. */
 export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: AuditGap[] } {
   const same = input.sameDigest ?? ((a, b) => a === b);
-  const entries = [...fromHistory(input), ...(input.ledger ? fromLedger(input.environment, input.ledger) : [])].sort(byTime);
+  const history = fromHistory(input);
+  const entries = [...history, ...(input.ledger ? fromLedger(input.environment, input.ledger) : []), ...(input.waves ? fromWaves(input.environment, input.waves, history) : [])].sort(byTime);
   const gaps: AuditGap[] = [];
 
   const seqs = new Set(input.rows.map((r) => r.seq));
@@ -185,17 +232,25 @@ export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: A
     gaps.push({ environment: input.environment, kind: "history-row", detail: `${input.history} has no row with seq ${missing.join(", ")} of 1..${String(max)}: rows are only ever appended, so ${missing.length === 1 ? "that row was" : "those rows were"} deleted` });
   }
 
-  if (input.ledger) {
-    const approvals = entries.filter((e) => e.kind === "approved");
-    for (const a of entries.filter((e) => e.kind === "applied" && e.digest)) {
-      if (approvals.some((x) => same(x.digest, a.digest))) continue;
-      const seq = "history" in a.source ? a.source.seq : 0;
+  for (const a of entries.filter((e) => e.kind === "applied" && e.digest)) {
+    const seq = "history" in a.source ? a.source.seq : 0;
+    const wave = a.wave;
+    if (wave) {
+      // A wave's policy at the base let it through with no approval; the run checked that under the lock.
+      if (wave.status === "not-required" || !input.waves || approvalOf(a, entries, same)) continue;
       gaps.push({
         environment: input.environment,
         kind: "approval",
-        detail: `${String(a.migration)} was applied under ${String(a.digest)} (${input.history} seq ${String(seq)}), but ${input.ledger.path} holds no approval of ${input.ledger.op} / ${input.ledger.gate} for that digest`,
+        detail: `${String(a.migration)} was applied by a wave under ${wave.digest} (${input.history} seq ${String(seq)}), but ${input.waves.path} holds no approval of ${input.waves.op} / ${wave.gate} for that digest`,
       });
+      continue;
     }
+    if (!input.ledger || approvalOf(a, entries, same)) continue;
+    gaps.push({
+      environment: input.environment,
+      kind: "approval",
+      detail: `${String(a.migration)} was applied under ${String(a.digest)} (${input.history} seq ${String(seq)}), but ${input.ledger.path} holds no approval of ${input.ledger.op} / ${input.ledger.gate} for that digest`,
+    });
   }
   return { entries, gaps };
 }

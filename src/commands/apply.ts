@@ -14,8 +14,8 @@ import { policyAtBase } from "../config/base.js";
 import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
-import { EXIT_REFUSED } from "../exit.js";
-import { enforcePromotion, planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile } from "../waves/index.js";
+import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
+import { enforcePromotion, forecastWave, planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -302,12 +302,24 @@ async function versionedApply(project: Project, env: Environment, a: ApplyArgs, 
   let code: number;
   try {
     code = await versionedApplyWith(project, env, a, io, ordered, venv, outcome);
-  } finally {
+  } catch (e) {
+    // The wave modes run inside chant run wave, which keeps no outcome of its own: a refusal or failure there is told here (#87).
+    if (a.wavePlan !== undefined || a.waveApply !== undefined) outcome.doc = waveFailure(env.name, e);
     await closeVersioned(venv);
+    if (outcome.doc) await sendEvent(project.yodel?.config.notify, eventFromRun("apply", outcome.doc), { io, verb: "apply" });
+    throw e;
   }
+  await closeVersioned(venv);
   // Waiting, refused or failed: the webhook in yodel.config.ts notify hears of it (#61).
   if (outcome.doc) await sendEvent(project.yodel?.config.notify, eventFromRun("apply", outcome.doc), { io, verb: "apply" });
   return code;
+}
+
+/** The outcome a wave mode's error is: refused (exit 4, or 3 for a wave with no decision that lets it through; nothing applied) or failed. */
+export function waveFailure(environment: string, e: unknown): Record<string, unknown> {
+  const message = e instanceof Error ? e.message : String(e);
+  const exitCode = e instanceof YodelError ? e.exitCode : 1;
+  return exitCode === EXIT_REFUSED || exitCode === EXIT_OUTSTANDING ? { environment, status: "refused", refusal: { message } } : { environment, status: "failed", exitCode, reason: message };
 }
 
 /** The document a run printed (or would have, with --json), for the event it sends. */
@@ -330,6 +342,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       `${env.name}: ${plan.empty ? "nothing to apply" : `${String(plan.pending.length)} pending (${plan.pending.join(", ")})`}; gate ${plan.gate} at ${plan.base.slice(0, 12)}` +
         `${plan.destructive ? `; destructive: ${plan.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : ""}; plan ${plan.planDigest}\n`,
     );
+    // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
+    const forecast = await forecastWave(process.cwd(), a.spec, plan);
+    if (forecast.waits) {
+      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}). Approve it with yodel approve ${env.name}, or: ${forecast.approve}\n`);
+      outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve: forecast.approve };
+    }
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "wave-plan", plan }), null, 2)}\n`);
     return 0;
   }
@@ -340,7 +358,9 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (policyNote) io.err(`${policyNote}\n`);
     if (planned.environment !== env.name) throw new YodelError(`refused: ${a.waveApply} is ${planned.environment}'s plan, not ${env.name}'s; nothing was applied`, EXIT_REFUSED);
     const cwd = process.cwd();
+    let wave: WaveRecord | undefined;
     const result = await executeApply(venv, ordered, {
+      runNote: () => (wave ? { wave } : undefined),
       approvedDigest: planned.migrations,
       allowOutOfOrder: a.allowOutOfOrder,
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
@@ -369,7 +389,9 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         if (now.planDigest !== planned.planDigest) {
           throw new YodelError(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`, 1);
         }
-        io.err(`${await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest)}\n`);
+        const verified = await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest);
+        wave = verified.wave;
+        io.err(`${verified.line}\n`);
       },
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,

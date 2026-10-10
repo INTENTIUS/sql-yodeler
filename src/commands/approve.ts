@@ -5,6 +5,7 @@ import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { readMigrations } from "../migrations/index.js";
 import { runChant } from "../chant/process.js";
 import { runnable } from "../chant/runnable.js";
+import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
 import { closeVersioned, findMigrateOp, hasMigrations, migrationsDir, openVersioned, renderStatus, statusReport, ALLOW_OUT_OF_ORDER_ENV } from "../versioned/index.js";
 
 /** Exit code: nothing was approved (no one to ask, a wrong answer, a plan apply would refuse, a plan that moved). */
@@ -26,6 +27,13 @@ It never approves on its own. With no terminal to ask (a script, CI, an
 agent) it approves nothing and exits 4, and no flag skips the question.
 Versioned projects only (a migrations/ directory); for a declarative
 project, yodel apply prints the chant approve command.
+
+When yodel.config.ts waves names <env>, the apply pipeline's wave waits on
+its own gate, so that is what is approved: chant approve ${WAVES_PIPELINE}
+${WAVES_PIPELINE}-wave-<k> --plan <digest>, bound to the wave's set digest
+(the plan, the gate policy at the base commit, and what the environments
+before it applied). Then push chant/lifecycle and run the wave's job again.
+A wave whose policy needs no approval for this plan has nothing to approve.
 
 Options:
   --op <name>           the migrations Op, when more than one applies <env>
@@ -89,6 +97,36 @@ export const approve: Command = {
         if (report.status.pending.length === 0 || !report.digest) {
           io.out(`${env.name} is up to date: there is nothing to approve.\n`);
           return 0;
+        }
+        // A waves project (#87): the apply pipeline's wave waits on its own gate, bound to the wave's set digest.
+        if ((project.yodel?.config.waves ?? []).some((w) => w.env === env.name)) {
+          const view = await waveView(project, env.name, ordered, report.status.pending, report.digest);
+          if (view) {
+            if (view.blocked) {
+              io.err(`yodel approve: ${describeWave(view)}\nNothing was approved.\n`);
+              return NOT_APPROVED;
+            }
+            io.out(renderStatus(report));
+            io.out(`${describeWave(view)}\n`);
+            if (!view.waits) return 0;
+            const answer = (await ask(`\nApprove wave ${String(view.wave)} for ${env.name}, ${view.digest}? Type ${env.name} to approve: `)).trim();
+            if (answer !== env.name) {
+              io.err(`Not approved: the answer was not ${env.name}.\n`);
+              return NOT_APPROVED;
+            }
+            const again = await statusReport(venv, ordered, { allowOutOfOrder });
+            const now = again.digest ? await waveView(project, env.name, ordered, again.status.pending, again.digest) : undefined;
+            if (now?.digest !== view.digest) {
+              io.err(`Not approved: the plan moved while you were asked (now ${now?.digest ?? "nothing to apply"}); run yodel approve ${env.name} again.\n`);
+              return NOT_APPROVED;
+            }
+            const { waveGateName } = await import("@intentius/chant/gated-waves");
+            const gate = waveGateName(WAVES_PIPELINE, view.wave);
+            const ran = await runChant(["approve", WAVES_PIPELINE, gate, "--plan", view.digest], { cwd: project.dir, onStdout: io.err, onStderr: io.err });
+            if (ran.code !== 0) throw new YodelError(`chant approve ${WAVES_PIPELINE} ${gate} failed (exit ${String(ran.code)}); nothing was approved`);
+            io.out(`\nApproved ${view.digest} for ${WAVES_PIPELINE} / ${gate}. Push chant/lifecycle, then run wave ${String(view.wave)}'s job again.\n`);
+            return 0;
+          }
         }
         const op = await findMigrateOp(project, env, typeof values.op === "string" ? values.op : undefined);
         io.out(renderStatus(report));

@@ -131,6 +131,53 @@ describe("the audit log", () => {
   });
 });
 
+describe("the audit log of a waves project (#87)", () => {
+  const WAVE = "jcs1-sha256:wave";
+  const waveNote = (status: "approved" | "not-required") => JSON.stringify({ wave: { wave: 2, op: "yodel-apply", gate: "yodel-apply-wave-2", digest: WAVE, status } });
+  const waveRows = (status: "approved" | "not-required") => {
+    seq = 0;
+    return [row({ migration_id: "m1", status: "started", note: waveNote(status) }), row({ migration_id: "m1", status: "succeeded" })];
+  };
+  const waves = (resolutions: Array<{ gate: string; planDigest: string }>) => ({
+    op: "yodel-apply",
+    path: "_gates/yodel-apply.jsonl",
+    gate: "yodel-apply-wave-2",
+    pending: [{ gate: "yodel-apply-wave-2", timestamp: "2026-10-10T08:59:00.000Z", planDigest: WAVE }],
+    resolutions: resolutions.map((r) => ({ ...r, timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice" })),
+  });
+  const migrationsGateOnly: LedgerInput = { op: "migrate-dev", gate: "approve-migrate-dev", path: "_gates/migrate-dev.jsonl", pending: [], resolutions: [] };
+
+  it("finds a wave's approval on the wave's gate, for the set digest its started row records", () => {
+    const { entries, gaps } = deriveAudit({ environment: "dev", history: "h", rows: waveRows("approved"), ledger: migrationsGateOnly, waves: waves([{ gate: "yodel-apply-wave-2", planDigest: WAVE }]) });
+    expect(gaps).toEqual([]);
+    expect(kinds(entries)).toEqual(["approval-requested", "approved", "applied m1"]);
+    expect(entries.find((e) => e.kind === "applied")?.wave).toEqual({ gate: "yodel-apply-wave-2", digest: WAVE, status: "approved" });
+    expect(entries.find((e) => e.kind === "approved")?.source).toEqual({ ledger: "_gates/yodel-apply.jsonl", op: "yodel-apply", gate: "yodel-apply-wave-2" });
+  });
+
+  it("names a wave applied with no approval of its digest on its gate as a gap; the migrations gate alone does not count", () => {
+    const other = deriveAudit({ environment: "dev", history: "h", rows: waveRows("approved"), ledger: migrationsGateOnly, waves: waves([{ gate: "yodel-apply-wave-1", planDigest: WAVE }]) });
+    expect(other.gaps.map((g) => g.detail)).toEqual([`m1 was applied by a wave under ${WAVE} (h seq 2), but _gates/yodel-apply.jsonl holds no approval of yodel-apply / yodel-apply-wave-2 for that digest`]);
+    const onMigrations = deriveAudit({
+      environment: "dev",
+      history: "h",
+      rows: waveRows("approved"),
+      ledger: { ...migrationsGateOnly, resolutions: [{ gate: "approve-migrate-dev", timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice", planDigest: D1 }] },
+      waves: waves([]),
+    });
+    expect(onMigrations.gaps).toHaveLength(1);
+  });
+
+  it("needs no approval for a wave whose policy at the base needed none", () => {
+    expect(deriveAudit({ environment: "dev", history: "h", rows: waveRows("not-required"), ledger: migrationsGateOnly, waves: waves([]) }).gaps).toEqual([]);
+  });
+
+  it("keeps the ids of entries with no wave", () => {
+    const plain = derive().entries.map((e) => e.id);
+    expect(deriveAudit({ environment: "dev", history: "yodeler.history", rows: rows(), ledger: ledger(), waves: waves([]) }).entries.filter((e) => !("gate" in e.source && e.source.gate === "yodel-apply-wave-2")).map((e) => e.id)).toEqual(plain);
+  });
+});
+
 describe("audit.jsonl", () => {
   const dir = mkdtempSync(join(tmpdir(), "yodel-audit-"));
   afterAll(() => {
