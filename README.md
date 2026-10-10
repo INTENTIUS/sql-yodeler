@@ -2,17 +2,17 @@
 
 Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.
 
-SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for three things only: `chant init` to make a project from a template, `chant approve` to approve a plan, and `chant emulator up` for a local database. Run it as `npx @intentius/chant` before the project exists, and as `npx chant` inside it.
+SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for three things only: `chant init` to make a project from a template, `chant approve` to approve a plan, and `chant emulator up` for a local database. Run it as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it.
 
 ## Getting started
 
 [Your first migration](docs/getting-started.md) goes from an empty directory to two applied migrations on a local ClickHouse, with every command and its output. In short:
 
 ```sh
-npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
 cd my-schema && npm install && git init -b main && git add -A && git commit -m "chore: a new yodel project"
 npx chant emulator up --lexicon sql            # ClickHouse and Postgres in Docker
-export DEV_CLICKHOUSE_READER_USER=default DEV_CLICKHOUSE_READER_PASSWORD=
+export DEV_CLICKHOUSE_READER_USER=default DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
 npx yodel new init && npx yodel lint
 git add -A && git commit -m "feat: the first migration"
 npx yodel apply dev                            # stops at the approval

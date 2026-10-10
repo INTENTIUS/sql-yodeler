@@ -9,8 +9,8 @@ There are two ways in: a new project from a starter template, whose first migrat
 From GitHub, with chant's CLI from npm (`@intentius/chant`; plain `npx chant` outside a project runs an unrelated package):
 
 ```sh
-npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
-npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
+npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
 ```
 
 or from a clone, by path, shown here as `<clone>`. Inside the clone, `npx chant` is the clone's own chant:

@@ -36,6 +36,8 @@ export const walkthrough: Walkthrough = {
     DEV_CLICKHOUSE_URL: url(),
     DEV_CLICKHOUSE_READER_USER: "default",
     DEV_CLICKHOUSE_READER_PASSWORD: "",
+    DEV_CLICKHOUSE_WRITER_USER: "default",
+    DEV_CLICKHOUSE_WRITER_PASSWORD: "",
     GIT_AUTHOR_NAME: "example",
     GIT_AUTHOR_EMAIL: "example@example.invalid",
     GIT_COMMITTER_NAME: "example",

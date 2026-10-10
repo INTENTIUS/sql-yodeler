@@ -10,12 +10,12 @@ SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant),
 - `chant emulator up --lexicon sql` starts a local ClickHouse and Postgres in Docker.
 - `chant approve ...` approves a plan before `yodel apply` runs it.
 
-The chant CLI is the npm package `@intentius/chant`. Before your project exists, run it as `npx @intentius/chant`. Inside the project, `npm install` puts it in `node_modules`, so `npx chant` works there. (Plain `npx chant` outside a project runs an unrelated package with the same name.)
+The chant CLI is the npm package `@intentius/chant`. Before your project exists, run it as `npx @intentius/chant@latest` (with `@latest`, npx does not reuse an older copy it cached). Inside the project, `npm install` puts the version the project pins in `node_modules`, so `npx chant` works there. (Plain `npx chant` outside a project runs an unrelated package with the same name.)
 
 ## 1. Make the project
 
 ```sh
-npx @intentius/chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
 cd my-schema
 npm install
 ```
@@ -61,13 +61,13 @@ This starts ClickHouse on `http://127.0.0.1:8123` (user `default`, no password) 
 `chant.config.ts` names the `dev` environment's server and credentials by environment variable, and never holds a value. `dev` defaults to `http://127.0.0.1:8123`, so only the user and password are needed:
 
 ```sh
-export DEV_CLICKHOUSE_READER_USER=default
-export DEV_CLICKHOUSE_READER_PASSWORD=
+export DEV_CLICKHOUSE_READER_USER=default DEV_CLICKHOUSE_READER_PASSWORD=
+export DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
 ```
 
 Without them, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set`.
 
-The template gives each environment two users: a reader (the default, used by plans, pull request comments and drift checks) and a writer, picked with `YODEL_CREDENTIALS=writer` (only CI's apply job sets it). The emulator's `default` user can do both, so on your machine the reader's variables are enough. Against a real server whose reader is read-only, also export `DEV_CLICKHOUSE_WRITER_USER` and `DEV_CLICKHOUSE_WRITER_PASSWORD` and run `yodel apply` with `YODEL_CREDENTIALS=writer`. The variables for every environment:
+The template gives each environment two users: a reader (the default, used by plans, pull request comments and drift checks) and a writer, picked with `YODEL_CREDENTIALS=writer` (only CI's apply job sets it). On the emulator both are its `default` user, which can do everything, so the commands below work with either. Against a real server whose reader is read-only, run `yodel apply` with `YODEL_CREDENTIALS=writer`, as `just apply` does. The variables for every environment:
 
 | Variable | Meaning |
 |---|---|
@@ -288,15 +288,19 @@ Each template has a `justfile` for these steps. [just](https://github.com/casey/
 
 | just | Runs |
 |---|---|
-| `just up` | `npx chant emulator up --lexicon sql` |
+| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator and prints the credentials for a `.env` file |
+| `just down` | `npx @intentius/chant emulator down --lexicon sql` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |
+| `just replay` | `npm run replay`: every migration replayed into a throwaway server and compared with its recorded schema |
 | `just plan [env]` | `npx yodel plan <env>` (`dev` when left out) |
-| `just apply [env]` | `npx yodel apply <env>` |
-| `just approve [env]` | prints the `npx chant approve ...` command for the environment's current plan; it does not run it |
-| `just status` | `npx yodel status dev` |
-| `just drift` | `npx yodel drift dev` |
+| `just approve [env]` | prints the command that approves the environment's plan, for you to run; it never runs it |
+| `just apply [env]` | `YODEL_CREDENTIALS=writer npx yodel apply <env>` |
+| `just status [env]` | `npx yodel status <env>` |
+| `just drift [env]` | `npx yodel drift <env>` |
 | `just ci` | `npm run ci`, which renders the CI pipelines again |
+
+The justfile reads a `.env` file in the project when there is one, so the variables from step 3 can go there in place of `export`; `.gitignore` keeps it out of git.
 
 ## Postgres
 
