@@ -12,7 +12,7 @@ import { historyDdl, statementSha } from "../src/history/index.js";
 import { renderForEnvironment, topologyNote } from "../src/topology/render.js";
 import { currentDigest, digestSubject, executeApply, inspect, openVersioned, planDigest, selectToApply, statusReport, type VersionedEnv } from "../src/versioned/index.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
-import { projectFrom, yodel } from "./helpers/run.js";
+import { projectFrom, repoRoot, yodel } from "./helpers/run.js";
 
 const PROFILES = { dev: { url: "http://dev:8123" }, prod: { url: "http://prod:8123" } };
 
@@ -255,5 +255,19 @@ describe("what moved", () => {
     const b = digestSubject({ environment: "prod", historyDatabase: "h", topology: { kind: "cluster", cluster: "main" }, applied: [], toApply: [], live: "L" });
     expect(diffSubjects(a, b)).toEqual([{ part: "environment", message: "the topology changed: single -> cluster:main" }]);
     expect(diffSubjects(a, a)).toEqual([]);
+  });
+});
+
+describe("the ClickHouse template's own config pair (#25)", () => {
+  it("is not refused: topology single in yodel.config.ts agrees with chant's unset profile topology", async () => {
+    const project = await loadProject(join(repoRoot, "templates", "clickhouse"));
+    for (const env of ["dev", "prod"]) {
+      expect(project.yodel?.config.environments?.[env]?.topology).toBe("single");
+      expect((project.config.sql?.profiles?.[env] as { topology?: unknown } | undefined)?.topology).toBeUndefined();
+      expect(declarativeTopologyRefusal(project, env)).toBeUndefined();
+    }
+    // A cluster in yodel.config.ts still disagrees with an unset (single-node) profile.
+    const cluster = { ...project, yodel: { path: "yodel.config.ts", config: { environments: { dev: { topology: "cluster:main" } } } } } as typeof project;
+    expect(declarativeTopologyRefusal(cluster, "dev")?.message).toContain("(unset, so a single node)");
   });
 });

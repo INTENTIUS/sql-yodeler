@@ -89,18 +89,20 @@ export const describeSettingsTopology = (s: Pick<EnvironmentSettings, "topology"
  * The declarative path (`yodel plan`, `yodel apply` without migrations) runs
  * chant's planner and applier, which render for `sql.profiles.<env>.topology`
  * and do not read `yodel.config.ts`. A topology set only in yodel.config.ts
- * would be ignored there, so it is refused unless chant's profile says the same.
+ * would be ignored there, so it is refused unless chant's profile says the same
+ * (an unset profile topology is a single node, as chant renders it).
  */
 export function declarativeTopologyRefusal(project: Pick<Project, "config" | "yodel">, name: string): YodelError | undefined {
   const own = project.yodel?.config.environments?.[name]?.topology;
   if (own === undefined) return undefined;
   const profile = (project.config.sql?.profiles?.[name] as { topology?: string | Topology } | undefined)?.topology;
   const ours = parse(own, `${CONFIG_FILE}: environments.${name}.topology`);
-  const chants = profile === undefined ? undefined : parse(profile, `sql.profiles.${name}.topology`);
-  if (chants && JSON.stringify(sorted(chants)) === JSON.stringify(sorted(ours))) return undefined;
+  // An unset profile topology is a single node to chant, so "single" in yodel.config.ts agrees with it (#25).
+  const chants = parse(profile ?? "single", `sql.profiles.${name}.topology`);
+  if (JSON.stringify(sorted(chants)) === JSON.stringify(sorted(ours))) return undefined;
   return new YodelError(
     `${CONFIG_FILE} sets environments.${name}.topology to ${topologyLabel(ours)}, but the declarative path plans and applies through chant, which reads sql.profiles.${name}.topology ` +
-      `(${chants ? topologyLabel(chants) : "unset"}). Set sql.profiles.${name}.topology to the same in chant.config.ts, or leave the topology to chant.config.ts.`,
+      `(${profile === undefined ? "unset, so a single node" : topologyLabel(chants)}). Set sql.profiles.${name}.topology to the same in chant.config.ts, or leave the topology to chant.config.ts.`,
   );
 }
 
