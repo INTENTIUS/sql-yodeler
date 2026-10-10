@@ -51,6 +51,19 @@ export async function postgres<T = Record<string, unknown>>(sql: string): Promis
   }
 }
 
+/**
+ * Deletes the receipts on the ClickHouse emulator whose address starts with
+ * any of `prefixes`, from chant's shared chant_receipts.receipts (every
+ * environment's receipts are in that one table, so a suite deletes only its
+ * own). Does nothing when the table is not there yet.
+ */
+export async function deleteClickhouseReceipts(...prefixes: string[]): Promise<void> {
+  if (prefixes.length === 0) return;
+  if ((await clickhouse("EXISTS TABLE chant_receipts.receipts")).trim() !== "1") return;
+  const where = prefixes.map((p) => `startsWith(address, '${p.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}')`).join(" OR ");
+  await clickhouse(`ALTER TABLE chant_receipts.receipts DELETE WHERE ${where} SETTINGS mutations_sync = 2`);
+}
+
 async function answers(probe: () => Promise<unknown>, what: string): Promise<boolean> {
   try {
     await probe();

@@ -6,9 +6,11 @@
  * receipts without redoing the batches that finished.
  *
  * Objects in database <prefix>_steps, the history in <prefix>_steps_history
- * (./names.ts); receipts in chant's chant_receipts.receipts, under this
- * test's environment (also <prefix>_steps) and migration ids, deleted first
- * so the suite reruns from scratch. Gated like the other e2e suites:
+ * (./names.ts); receipts in chant's chant_receipts.receipts: the backfill's
+ * under this test's environment (also <prefix>_steps), the rebuild's under
+ * its table (-/-/rebuild/<prefix>_steps.events/...). The suite deletes them
+ * before it runs, so it reruns from scratch, and after, pass or fail, so the
+ * shared table keeps nothing of it. Gated like the other e2e suites:
  *
  *   YODEL_E2E_CLICKHOUSE_URL=http://$(ipconfig getifaddr en0):8123 npx vitest run test/e2e/steps.test.ts
  */
@@ -19,7 +21,7 @@ import { runChant } from "../../src/chant/process.js";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration, type CreatedMigration } from "../../src/migrations/index.js";
 import { json, projectFrom, yodel } from "../helpers/run.js";
-import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { clickhouse, clickhouseReachable, deleteClickhouseReceipts } from "./emulator.js";
 import { FIXTURE_NAME, suiteName } from "./names.js";
 
 const DB = suiteName("steps");
@@ -28,6 +30,8 @@ const HISTORY = `${DB}_history`;
 // chant_receipts.receipts, are addressed yodel/<env>/<migration id>/<effect>.
 const ENV = DB;
 const FAIL_ENV = "YODEL_E2E_STEPS_FAIL_AT";
+/** Every receipt the suite writes: the backfill's, by environment, and the rebuild's, keyed by the table. */
+const RECEIPTS = [`yodel/${ENV}/`, `-/-/rebuild/${DB}.`];
 
 const events = (orderBy: string, extraColumns = ""): BuiltObject => ({
   export: "events",
@@ -114,9 +118,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
     Reflect.deleteProperty(process.env, FAIL_ENV);
     await clickhouse(`DROP DATABASE IF EXISTS ${DB} SYNC`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY} SYNC`);
-    if ((await count(`EXISTS TABLE chant_receipts.receipts`)) === 1) {
-      await clickhouse(`ALTER TABLE chant_receipts.receipts DELETE WHERE startsWith(address, 'yodel/${ENV}/20261009T16') SETTINGS mutations_sync = 2`);
-    }
+    await deleteClickhouseReceipts(...RECEIPTS);
     // The fixture names its environment e2e (test/rebuild-topology.test.ts uses it too); this copy names it ENV, in the profile and the Op.
     ({ dir, dispose } = projectFrom("clickhouse-steps", (text) => text.replaceAll(FIXTURE_NAME, DB).replace(/\be2e\b/g, ENV)));
   });
@@ -127,6 +129,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
     else process.env.YODEL_HISTORY_DATABASE = saved;
     await clickhouse(`DROP DATABASE IF EXISTS ${DB} SYNC`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY} SYNC`);
+    await deleteClickhouseReceipts(...RECEIPTS);
   });
 
   it("refuses a rebuild without approval and makes nothing, then rebuilds the sort key as a ClickHouseRebuildOp step behind the gate", async () => {

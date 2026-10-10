@@ -13,13 +13,15 @@
  *
  * ClickHouse database yodel_18_shop and yodel_18_history, Postgres schemas of
  * the same names; each run drops them first. The replay check at the end of
- * each walkthrough empties them. These names are fixed, not taken from
+ * each walkthrough empties them, and the suite drops them again after, with
+ * the walkthrough's receipts in chant's shared chant_receipts.receipts on
+ * ClickHouse (the walkthrough's own reset), so a run leaves nothing behind. These names are fixed, not taken from
  * YODEL_E2E_PREFIX: the committed example migrations carry them.
  */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it } from "vitest";
+import { afterAll, describe, it } from "vitest";
 import { load, repoRoot, runCommitted, runWalkthrough } from "../../examples/walkthrough/run.js";
 import { clickhouseReachable, postgresReachable } from "./emulator.js";
 
@@ -27,6 +29,10 @@ const built = existsSync(join(repoRoot, "dist", "bin.js"));
 const reachable = { clickhouse: clickhouseReachable, postgres: postgresReachable };
 
 describe.each(["clickhouse", "postgres"] as const)("examples/%s", (dialect) => {
+  afterAll(async () => {
+    if (reachable[dialect]) await (await load(dialect)).reset();
+  });
+
   it.skipIf(!reachable[dialect])("runs the walkthrough as the README shows it", async () => {
     if (!built) throw new Error("run npm run build first: the examples run dist/bin.js");
     const { dispose } = await runWalkthrough(await load(dialect));
