@@ -126,6 +126,11 @@ src/steps/postgres-migration.ts        column-change
 src/steps/run.ts                       rebuild-refused rebuild-as-step backfill-resumed column-change topology
 src/steps/                             ALL
 
+# DDL sources (#67): every build syncs them, but only the declarative
+# claim's project declares one, so only it reads DDL.
+src/sources/ddl.ts                     declarative
+src/sources/                           ALL
+
 # The core every claim runs: yodel new, apply and status, the migrations
 # directory, the history, the versioned engine and its gate, the topology
 # rendering (every ClickHouse statement goes through it), chant, config.

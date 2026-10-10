@@ -19,6 +19,7 @@
 import type { Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 
 import type { LevelSetting, LintRuleId } from "../lint/rules.js";
+import type { DdlSource } from "../sources/index.js";
 import type { NotifyConfig } from "../notify/index.js";
 
 export type { NotifyConfig };
@@ -69,6 +70,13 @@ export interface YodelConfig {
    * URL. `{ webhook: "YODEL_WEBHOOK_URL", key: "YODEL_WEBHOOK_KEY" }`.
    */
   notify?: NotifyConfig;
+  /**
+   * DDL sources (#67): schema an ORM defines, read from the DDL it prints,
+   * keyed by a name. Each is written out as declarations in
+   * `<sourceDir>/<name>.generated.ts` before every build. See
+   * {@link DdlSource}.
+   */
+  sources?: Record<string, DdlSource>;
 }
 
 /**

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { YodelError, type Project, type SqlDialect } from "../project.js";
 import { runChant } from "./process.js";
+import { checkOwnership, duplicateExport, syncSources } from "../sources/index.js";
 
 /** One declared object as the sql lexicon's build output holds it. */
 export interface BuiltObject {
@@ -44,12 +45,16 @@ export async function buildSchema(project: Project, options: { out?: string; env
     if (tmp) rmSync(tmp, { recursive: true, force: true });
   };
   try {
+    // The DDL sources (#67) first: their declarations are part of the build.
+    const synced = await syncSources(project, options.env ? { env: options.env } : {});
     const result = await runChant(["build", project.sourceDir, "--lexicon", "sql", "-o", path], {
       cwd: project.dir,
       ...(options.env ? { env: options.env } : {}),
     });
     if (result.code !== 0) {
       const detail = (result.stderr || result.stdout).trim();
+      const duplicate = duplicateExport(detail, synced);
+      if (duplicate) throw duplicate;
       throw new YodelError(`chant build failed in ${project.dir}${detail ? `:\n${detail}` : ""}`);
     }
     let output: BuildOutput;
@@ -61,6 +66,7 @@ export async function buildSchema(project: Project, options: { out?: string; env
     if (output.dialect !== project.dialect) {
       throw new YodelError(`the build holds ${output.dialect} objects, but the project's dialect is ${project.dialect}`);
     }
+    await checkOwnership(output, synced);
     return { path, output, dispose };
   } catch (e) {
     dispose();
