@@ -49,9 +49,11 @@ To run it yourself, from a clone of this repository:
 npm ci && npm run build          # in the repository root
 chant emulator up --lexicon sql  # or any ClickHouse you can drop yodel_18_shop on
 cd examples/clickhouse
-npm install                      # takes @intentius/sql-yodeler from ../..
+npm install                      # @intentius/sql-yodeler from file:../.., this clone
 export DEV_CLICKHOUSE_URL=http://127.0.0.1:8123
 \`\`\`
+
+The example's \`package.json\` takes \`@intentius/sql-yodeler\` from \`file:../..\`, the clone it sits in, so it runs the yodel you just built rather than the release on npm. A project of your own installs it from npm instead (\`npm install @intentius/sql-yodeler\`; [Installing](../../docs/configuration.md#installing) has the other routes).
 
 The run happened in a temporary copy of this directory, a git repository with a local \`origin\`; its path is shown as \`<tmp>\`. A command that exited with a code other than 0 ends with \`[exit <code>]\`.
 `,

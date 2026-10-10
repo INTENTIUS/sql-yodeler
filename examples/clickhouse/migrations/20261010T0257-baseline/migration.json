@@ -1,0 +1,87 @@
+{
+  "format": 1,
+  "id": "20261010T0257-baseline",
+  "parent": null,
+  "checksum": "sha256:6b713090359bcc6a3b33eaf55f0fec6a0d56346eff452d091a56a78f4f816c72",
+  "createdAt": "2026-10-10T02:57:25Z",
+  "dialect": "clickhouse",
+  "defaultDatabase": "default",
+  "refused": false,
+  "hints": [],
+  "steps": [
+    {
+      "kind": "statement",
+      "object": "yodel18ShopDb",
+      "type": "ClickHouse::Database",
+      "name": "yodel_18_shop",
+      "class": "create",
+      "rule": "SQLCH200",
+      "sql": "CREATE DATABASE yodel_18_shop\n  ENGINE = Atomic\n  COMMENT 'The SQL Yodeler ClickHouse example [chant managed-by=chant]'",
+      "transactional": false
+    },
+    {
+      "kind": "statement",
+      "object": "events",
+      "type": "ClickHouse::Table",
+      "name": "yodel_18_shop.events",
+      "class": "create",
+      "rule": "SQLCH200",
+      "sql": "CREATE TABLE yodel_18_shop.events\n  (\n      id UInt64,\n      kind LowCardinality(String),\n      at DateTime\n  )\n  ENGINE = MergeTree\n  PARTITION BY toYYYYMM(at)\n  ORDER BY (kind, at) COMMENT '[chant managed-by=chant]'",
+      "transactional": false
+    }
+  ],
+  "schema": {
+    "applyOrder": [
+      "yodel18ShopDb",
+      "events"
+    ],
+    "dialect": "clickhouse",
+    "objects": [
+      {
+        "comment": "The SQL Yodeler ClickHouse example",
+        "ddl": "CREATE DATABASE yodel_18_shop\n  ENGINE = Atomic\n  COMMENT 'The SQL Yodeler ClickHouse example'",
+        "dependsOn": [],
+        "engine": {
+          "name": "Atomic"
+        },
+        "export": "yodel18ShopDb",
+        "name": "yodel_18_shop",
+        "sqlName": "yodel_18_shop",
+        "type": "ClickHouse::Database"
+      },
+      {
+        "columns": [
+          {
+            "name": "id",
+            "type": "UInt64"
+          },
+          {
+            "name": "kind",
+            "type": "LowCardinality(String)"
+          },
+          {
+            "name": "at",
+            "type": "DateTime"
+          }
+        ],
+        "constraints": [],
+        "database": "yodel_18_shop",
+        "ddl": "CREATE TABLE yodel_18_shop.events\n  (\n      id UInt64,\n      kind LowCardinality(String),\n      at DateTime\n  )\n  ENGINE = MergeTree\n  PARTITION BY toYYYYMM(at)\n  ORDER BY (kind, at)",
+        "dependsOn": [
+          "yodel18ShopDb"
+        ],
+        "engine": {
+          "name": "MergeTree"
+        },
+        "export": "events",
+        "indexes": [],
+        "name": "events",
+        "orderBy": "(kind, at)",
+        "partitionBy": "toYYYYMM(at)",
+        "projections": [],
+        "sqlName": "yodel_18_shop.events",
+        "type": "ClickHouse::Table"
+      }
+    ]
+  }
+}

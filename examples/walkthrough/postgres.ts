@@ -70,9 +70,11 @@ To run it yourself, from a clone of this repository:
 npm ci && npm run build          # in the repository root
 chant emulator up --lexicon sql  # or any Postgres you can drop schema yodel_18_shop on
 cd examples/postgres
-npm install                      # takes @intentius/sql-yodeler from ../..
+npm install                      # @intentius/sql-yodeler from file:../.., this clone
 export DEV_POSTGRES_URL=postgres://127.0.0.1:5432/postgres DEV_POSTGRES_USER=postgres DEV_POSTGRES_PASSWORD=...
 \`\`\`
+
+The example's \`package.json\` takes \`@intentius/sql-yodeler\` from \`file:../..\`, the clone it sits in, so it runs the yodel you just built rather than the release on npm. A project of your own installs it from npm instead (\`npm install @intentius/sql-yodeler\`; [Installing](../../docs/configuration.md#installing) has the other routes).
 
 The run happened in a temporary copy of this directory, a git repository with a local \`origin\`; its path is shown as \`<tmp>\`. A command that exited with a code other than 0 ends with \`[exit <code>]\`.
 `,
@@ -172,6 +174,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { edit: "src/schema.ts", from: "      customer_email text NOT NULL,\n", to: "      email text NOT NULL, -- previously: customer_email\n" },
     { run: "npx yodel new rename-email", code: 0, expect: ["PostgresMigrationOp"] },
     { cat: "migrations/{id:rename-email}/migration.sql" },
+    { say: "`src/schema.ts` and the newest migration now agree, so a second `yodel new` writes nothing:" },
+    { run: "npx yodel new check", code: 0, expect: ["No changes"], quote: "migrations.md" },
     { run: "npx yodel plan dev", code: 0, expect: ["yodel apply runs it as this step"] },
     { run: "git add -A && git commit -q -m 'feat: orders.email' && git push -q origin main", code: 0, hide: true },
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },

@@ -34,10 +34,10 @@ A migration's checksum covers its own files and nothing else: `migration.sql` wi
 
 ```console
 $ npx yodel new check
-No changes: the declared schema matches the newest migration's recorded schema (20261009T1955-rename-email). Nothing written.
+No changes: the declared schema matches the newest migration's recorded schema (20261010T0258-rename-email). Nothing written.
 ```
 
-(From a run of the Postgres walkthrough while it was being written. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
+(From the Postgres example's run, just after it writes `rename-email`; `run.ts postgres --write` rewrites this quote with the README. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
 
 It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --backfill <file>` ends the migration with a backfill step ([Steps](steps.md#backfills)).
 

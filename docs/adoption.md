@@ -13,10 +13,10 @@ chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=e
 chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
 ```
 
-or from a clone, by path. This run used a clone, whose path is shown as `<clone>`:
+or from a clone, by path. The run quoted here is `examples/walkthrough/template.ts` (`npx tsx examples/walkthrough/run.ts template --write` runs it again and rewrites these quotes), from a clone whose path is shown as `<clone>`:
 
 ```console
-$ chant init --from <clone>/templates/clickhouse --param name=events-schema --param database=yodel_18_tpl --param history_database=yodel_18_tpl_history my-schema
+$ npx chant init --from <clone>/templates/clickhouse --param name=events-schema --param database=yodel_18_tpl --param history_database=yodel_18_tpl_history my-schema
 Created:
   .forgejo/workflows/watch-dev.yml
   .forgejo/workflows/watch-prod.yml
@@ -48,13 +48,13 @@ Lineage: dir:<clone>/templates/clickhouse (a directory, recorded by digest only)
 Parameters: database="yodel_18_tpl", history_database="yodel_18_tpl_history", name="events-schema"
 ```
 
-The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.1.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. This run predates the npm package ([issue #59](https://github.com/INTENTIUS/sql-yodeler/issues/59)) and installed a packed copy of a clone instead (`npm install ./vendor/intentius-sql-yodeler-0.0.0.tgz` in `my-schema`, which also rewrites the dependency in `package.json` to that file).
+The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.1.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. The run skips `npm install` and links the clone's `node_modules` into `my-schema`, so it runs the yodel built in the clone.
 
 The first migration creates what `src/schema.ts` declares. `yodel new` needs no server:
 
 ```console
 $ npx yodel new init
-Wrote migrations/20261009T2005-init/ (2 statements; the first migration)
+Wrote migrations/20261010T0301-init/ (2 statements; the first migration)
 $ npx yodel lint
 1 migration: 0 errors, 0 warnings, 0 silenced.
 ```

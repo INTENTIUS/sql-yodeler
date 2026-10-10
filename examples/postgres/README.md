@@ -10,9 +10,11 @@ To run it yourself, from a clone of this repository:
 npm ci && npm run build          # in the repository root
 chant emulator up --lexicon sql  # or any Postgres you can drop schema yodel_18_shop on
 cd examples/postgres
-npm install                      # takes @intentius/sql-yodeler from ../..
+npm install                      # @intentius/sql-yodeler from file:../.., this clone
 export DEV_POSTGRES_URL=postgres://127.0.0.1:5432/postgres DEV_POSTGRES_USER=postgres DEV_POSTGRES_PASSWORD=...
 ```
+
+The example's `package.json` takes `@intentius/sql-yodeler` from `file:../..`, the clone it sits in, so it runs the yodel you just built rather than the release on npm. A project of your own installs it from npm instead (`npm install @intentius/sql-yodeler`; [Installing](../../docs/configuration.md#installing) has the other routes).
 
 The run happened in a temporary copy of this directory, a git repository with a local `origin`; its path is shown as `<tmp>`. A command that exited with a code other than 0 ends with `[exit <code>]`.
 
@@ -105,19 +107,19 @@ MISSING (declared, provider reports not in cloud):
   - ordersStatus [queried postgres://192.168.14.189:5432/postgres yodel_18_shop.orders_status_idx] [definition 4fae1924c6032f650edb0601866fcce4a474afa33d5974a37bc3022fe01257e3]
   - shop [queried postgres://192.168.14.189:5432/postgres yodel_18_shop] [definition 071741bed2db2a5cdbaba83354aacb249b2d2f7d4bb56724a229cd927a05f727]
 [phase] Build
-  ✓ chantBuild(path=.)   735ms
+  ✓ chantBuild(path=.)   889ms
 [phase] Plan
-  ✓ lifecycleDiff(env=dev, live=true)   726ms
+  ✓ lifecycleDiff(env=dev, live=true)   818ms
     [outcome] Drift=true
 [phase] Approve
   • gate:approve-apply-dev()   skipped
 [phase] Apply
   • nativeApply(target=postgres, env=dev, output=dist/schema.json, deleteMode=never)   skipped
-Op "apply-dev" is gated on "approve-apply-dev" after 2.0s
+Op "apply-dev" is gated on "approve-apply-dev" after 2.3s
   Approve apply to dev (delete mode: never)
   plan    : jcs1-sha256:eed25cb37c4ed9d484949d21b1db67ff39ce60d74038c77efa9c3f6e9d5b772c
   approve : chant approve apply-dev approve-apply-dev --plan jcs1-sha256:eed25cb37c4ed9d484949d21b1db67ff39ce60d74038c77efa9c3f6e9d5b772c
-  expires : 2026-10-11T23:08:48.482Z
+  expires : 2026-10-12T02:57:16.319Z
 
 apply-dev is waiting at gate "approve-apply-dev" for approval of this plan.
 Approve it with:
@@ -128,7 +130,7 @@ then run yodel apply dev again.
 
 ```console
 $ npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:eed25cb37c4ed9d484949d21b1db67ff39ce60d74038c77efa9c3f6e9d5b772c
-Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-09T23:08:50.327Z
+Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-10T02:57:18.336Z
 This approves the plan jcs1-sha256:eed25cb37c4ed9d484949d21b1db67ff39ce60d74038c77efa9c3f6e9d5b772c, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run apply-dev` and it walks through gate "approve-apply-dev".
 ```
@@ -197,15 +199,15 @@ created: Postgres::Table/yodel_18_shop.orders
 created: Postgres::Index/yodel_18_shop.orders_status_idx
 [dev] applied 3 resource(s)
 [phase] Build
-  ✓ chantBuild(path=.)   753ms
+  ✓ chantBuild(path=.)   752ms
 [phase] Plan
-  ✓ lifecycleDiff(env=dev, live=true)   792ms
+  ✓ lifecycleDiff(env=dev, live=true)   811ms
     [outcome] Drift=true
 [phase] Approve
-  ✓ gate:approve-apply-dev()   268ms
-    [approved] yodel at 2026-10-09T23:08:50.327Z
+  ✓ gate:approve-apply-dev()   221ms
+    [approved] yodel at 2026-10-10T02:57:18.336Z
 [phase] Apply
-  ✓ nativeApply(target=postgres, env=dev, output=dist/schema.json, deleteMode=never)   42ms
+  ✓ nativeApply(target=postgres, env=dev, output=dist/schema.json, deleteMode=never)   38ms
 Op "apply-dev" completed in 2.0s
 
 Applied: dev matches the declared schema.
@@ -229,15 +231,15 @@ $ npx yodel init --from dev --force
 read 3 object(s) from dev
 wrote src/schema.ts
 planned against dev: no change
-wrote migrations/20261009T2308-baseline (6 statements)
-recorded 20261009T2308-baseline applied in yodel_18_history.history as a baseline; none of its statements was run
+wrote migrations/20261010T0257-baseline (6 statements)
+recorded 20261010T0257-baseline applied in yodel_18_history.history as a baseline; none of its statements was run
 Adopted dev (postgres): 3 objects
   Schema yodel_18_shop
   Table yodel_18_shop.orders
   Index yodel_18_shop.orders_status_idx
 
 Declarations: src/schema.ts
-Baseline:     migrations/20261009T2308-baseline/ (6 statements, sha256:399cb166ad6c457aab2dbd59463baeb3dad02d7f451c9475bb0fb648cb106075)
+Baseline:     migrations/20261010T0257-baseline/ (6 statements, sha256:a4dcc0c796a3005cbc7b46056f566789631d9fe17573f4958626975520d40b4b)
 Recorded:     applied in yodel_18_history.history as a baseline; none of its statements was run
 
 yodel plan dev shows no change, and yodel status dev lists the baseline applied.
@@ -271,7 +273,7 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (1):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
 
 Pending: none
 ```
@@ -336,12 +338,12 @@ export const ordersStatusIdx = index`
 
 ```console
 $ npx yodel new coupons
-Wrote migrations/20261009T2308-coupons/ (2 statements; follows 20261009T2308-baseline)
+Wrote migrations/20261010T0257-coupons/ (2 statements; follows 20261010T0257-baseline)
 ```
 
 ```console
 $ npx yodel lint
-20261009T2308-coupons
+20261010T0257-coupons
   error    pg-rewrite: step 1: SQLPG218 Add a CHECK constraint on yodel_18_shop.orders: blocks reads and writes on the table while it runs (ADD CONSTRAINT ... CHECK reads every row under ACCESS EXCLUSIVE. Declare it NOT VALID, then remove NOT VALID to validate it under SHARE UPDATE EXCLUSIVE (SQLPG220).)
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -354,19 +356,19 @@ A statement rule can be silenced for one statement, with a reason the history re
 Do as the finding says: delete the migration, declare the constraint `NOT VALID`, and write it again:
 
 ```console
-$ rm -r migrations/20261009T2308-coupons
+$ rm -r migrations/20261010T0257-coupons
 ```
 
 ```console
 $ npx yodel new coupons
-Wrote migrations/20261009T2309-coupons/ (2 statements; follows 20261009T2308-baseline)
+Wrote migrations/20261010T0257-coupons/ (2 statements; follows 20261010T0257-baseline)
 ```
 
-`migrations/20261009T2309-coupons/migration.sql`:
+`migrations/20261010T0257-coupons/migration.sql`:
 
 ```sql
--- yodel migration 20261009T2309-coupons
--- parent: 20261009T2308-baseline
+-- yodel migration 20261010T0257-coupons
+-- parent: 20261010T0257-baseline
 
 -- orders (yodel_18_shop.orders): SQLPG201 metadata
 ALTER TABLE yodel_18_shop.orders ADD COLUMN coupon text;
@@ -384,15 +386,15 @@ $ npx yodel lint
 $ npx yodel plan dev
 Plan for dev (postgres, history yodel_18_history.history): 1 applied, 1 pending
 
-20261009T2309-coupons
+20261010T0257-coupons
   0  statement  SQLPG201 metadata  yodel_18_shop.orders
        ALTER TABLE yodel_18_shop.orders ADD COLUMN coupon text
   1  statement  SQLPG217 metadata  yodel_18_shop.orders
        ALTER TABLE yodel_18_shop.orders ADD CONSTRAINT orders_amount_positive CHECK (amount > 0) NOT VALID
 
-Plan digest: jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
+Plan digest: jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
 
 Not approved yet. Approving binds exactly this digest; if anything it covers changes before the apply runs, the gate asks again and nothing is applied.
 ```
@@ -402,36 +404,36 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (1):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
 
 Pending (1):
-  20261009T2309-coupons
+  20261010T0257-coupons
 
-Plan digest: jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
+Plan digest: jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   1.5s
+  ✓ shellCmd(cmd=yodel apply dev --digest)   7.8s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 2.1s
-  plan    : jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
-  expires : 2026-10-11T23:09:05.850Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 9.0s
+  plan    : jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
+  expires : 2026-10-12T02:57:41.928Z
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:09:07.739Z
-This approves the plan jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:57:45.465Z
+This approves the plan jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -442,31 +444,31 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (1):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
 
 Pending (1):
-  20261009T2309-coupons
+  20261010T0257-coupons
 
-Plan digest: jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771
+Plan digest: jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771, by yodel at 2026-10-09T23:09:07.739Z
-20261009T2309-coupons: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4, by yodel at 2026-10-10T02:57:45.465Z
+20261010T0257-coupons: applying
   statement 0: ok (SQLPG201 metadata, yodel_18_shop.orders)
   statement 1: ok (SQLPG217 metadata, yodel_18_shop.orders)
-20261009T2309-coupons: applied
+20261010T0257-coupons: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   854ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.1s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   195ms
-    [approved] yodel at 2026-10-09T23:09:07.739Z
+  ✓ gate:approve-migrate-dev()   267ms
+    [approved] yodel at 2026-10-10T02:57:45.465Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771"})   1.5s
-Op "migrate-dev" completed in 2.7s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4"})   2.2s
+Op "migrate-dev" completed in 3.7s
 
-Applied: 20261009T2309-coupons.
+Applied: 20261010T0257-coupons.
 ```
 
 ## 4. A migration that fails part way, and resumes
@@ -501,14 +503,14 @@ export const ordersStatusIdx = index`
 
 ```console
 $ npx yodel new validate-amount
-Wrote migrations/20261009T2309-validate-amount/ (2 statements; follows 20261009T2309-coupons)
+Wrote migrations/20261010T0257-validate-amount/ (2 statements; follows 20261010T0257-coupons)
 ```
 
-`migrations/20261009T2309-validate-amount/migration.sql`:
+`migrations/20261010T0257-validate-amount/migration.sql`:
 
 ```sql
--- yodel migration 20261009T2309-validate-amount
--- parent: 20261009T2309-coupons
+-- yodel migration 20261010T0257-validate-amount
+-- parent: 20261010T0257-coupons
 
 -- orders (yodel_18_shop.orders): SQLPG201 metadata
 ALTER TABLE yodel_18_shop.orders ADD COLUMN refunded_at timestamp with time zone;
@@ -522,40 +524,40 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount
+  20261010T0257-validate-amount
 
-Plan digest: jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92
+Plan digest: jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   847ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   922ms
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771 (by yodel at 2026-10-09T23:09:07.739Z); planned: jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4 (by yodel at 2026-10-10T02:57:45.465Z); planned: jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.6s
-  plan    : jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92
-  expires : 2026-10-11T23:09:15.441Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 1.8s
+  plan    : jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552
+  expires : 2026-10-12T02:57:55.804Z
 
-Nothing was applied. The approval of jcs1-sha256:9d0c0e45ed0e309faaa9c3a47ddf63408e3fd9bbc49f54b9bc7eb45cb650a771 (by yodel at 2026-10-09T23:09:07.739Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261009T2309-coupons (by yodel@example at 2026-10-09 23:09:11.288942); pending migrations changed: committed to since approval: 20261009T2309-validate-amount (e3701d9 at 2026-10-09T17:09:13-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:ca49df1833723970b41084943f83533cac39f052d2c6b05d6e63288f6b4641c4 (by yodel at 2026-10-10T02:57:45.465Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261010T0257-coupons (by yodel@example at 2026-10-10 02:57:50.579263); pending migrations changed: committed to since approval: 20261010T0257-validate-amount (e73e808 at 2026-10-09T20:57:53-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:09:17.685Z
-This approves the plan jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:57:58.408Z
+This approves the plan jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -566,45 +568,45 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount
+  20261010T0257-validate-amount
 
-Plan digest: jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92
+Plan digest: jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   862ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   2.2s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   211ms
-    [approved] yodel at 2026-10-09T23:09:17.685Z
+  ✓ gate:approve-migrate-dev()   1.0s
+    [approved] yodel at 2026-10-10T02:57:58.408Z
 [phase] Apply
-  ✗ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92"})   972ms
+  ✗ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552"})   4.2s
     command exited 1 (expected 0): Command failed: yodel apply dev --execute
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92, by yodel at 2026-10-09T23:09:17.685Z
-20261009T2309-validate-amount: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552, by yodel at 2026-10-10T02:57:58.408Z
+20261010T0257-validate-amount: applying
   statement 0: ok (SQLPG201 metadata, yodel_18_shop.orders)
   statement 1: failed: check constraint "orders_amount_positive" of relation "orders" is violated by some row
-yodel apply: 20261009T2309-validate-amount failed at statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
+yodel apply: 20261010T0257-validate-amount failed at statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 Fix the cause (on the server, or that statement in the migration's files), then run yodel apply again: it resumes at statement 1 and never sends again the statements that succeeded.
 
-Op "migrate-dev" failed after 2.2s
+Op "migrate-dev" failed after 8.0s
 yodel apply: chant run migrate-dev failed (exit 1)
 
 Migrations in dev (history yodel_18_history.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount  (failed part way at statement 1; resumes at statement 1)
+  20261010T0257-validate-amount  (failed part way at statement 1; resumes at statement 1)
       error: statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 
-Plan digest: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
+Plan digest: jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
 [exit 1]
 ```
 
@@ -613,14 +615,14 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount  (failed part way at statement 1; resumes at statement 1)
+  20261010T0257-validate-amount  (failed part way at statement 1; resumes at statement 1)
       error: statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 
-Plan digest: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
+Plan digest: jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
 [exit 3]
 ```
 
@@ -635,41 +637,41 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount  (failed part way at statement 1; resumes at statement 1)
+  20261010T0257-validate-amount  (failed part way at statement 1; resumes at statement 1)
       error: statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 
-Plan digest: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
+Plan digest: jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   866ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   4.6s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92 (by yodel at 2026-10-09T23:09:17.685Z); planned: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552 (by yodel at 2026-10-10T02:57:58.408Z); planned: jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.6s
-  plan    : jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
-  expires : 2026-10-11T23:09:24.389Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 8.3s
+  plan    : jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
+  expires : 2026-10-12T02:58:22.230Z
 
-Nothing was applied. The approval of jcs1-sha256:30b5ff53a84c7f8888e1744cad9e849453dc636c8cedf154e04d9aa37b82bf92 (by yodel at 2026-10-09T23:09:17.685Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: 20261009T2309-validate-amount ran part way since: statements 0 done now; live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:7a0bb98005e6653945b78b0d179a466dc831662b2798125eba0f1c169544d552 (by yodel at 2026-10-10T02:57:58.408Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: 20261010T0257-validate-amount ran part way since: statements 0 done now; live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:09:26.530Z
-This approves the plan jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:58:34.262Z
+This approves the plan jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -678,33 +680,33 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (2):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
 
 Pending (1):
-  20261009T2309-validate-amount  (failed part way at statement 1; resumes at statement 1)
+  20261010T0257-validate-amount  (failed part way at statement 1; resumes at statement 1)
       error: statement 1: check constraint "orders_amount_positive" of relation "orders" is violated by some row
 
-Plan digest: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea
+Plan digest: jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea, by yodel at 2026-10-09T23:09:26.530Z
-20261009T2309-validate-amount: resuming at statement 1
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1, by yodel at 2026-10-10T02:58:34.262Z
+20261010T0257-validate-amount: resuming at statement 1
   statement 0: succeeded in an earlier run; not sent
   statement 1: ok (SQLPG220 validate, yodel_18_shop.orders)
-20261009T2309-validate-amount: applied
+20261010T0257-validate-amount: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   890ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.5s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   212ms
-    [approved] yodel at 2026-10-09T23:09:26.530Z
+  ✓ gate:approve-migrate-dev()   435ms
+    [approved] yodel at 2026-10-10T02:58:34.262Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea"})   1.0s
-Op "migrate-dev" completed in 2.3s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1"})   1.9s
+Op "migrate-dev" completed in 4.1s
 
-Applied: 20261009T2309-validate-amount.
+Applied: 20261010T0257-validate-amount.
 ```
 
 ## 5. A column rename: a PostgresMigrationOp step
@@ -739,17 +741,17 @@ export const ordersStatusIdx = index`
 
 ```console
 $ npx yodel new rename-email
-Wrote migrations/20261009T2309-rename-email/ (0 statements; follows 20261009T2309-validate-amount)
+Wrote migrations/20261010T0258-rename-email/ (0 statements; follows 20261010T0257-validate-amount)
   This migration contains an Op step: PostgresMigrationOp for orders (yodel_18_shop.orders), SQLPG205.
     It is not SQL. migration.json holds the Op's declaration:
     export const { op } = PostgresMigrationOp({ name: "migrate-yodel-18-shop-orders-email", env: "<env>", table: "yodel_18_shop.orders", column: "email" });
 ```
 
-`migrations/20261009T2309-rename-email/migration.sql`:
+`migrations/20261010T0258-rename-email/migration.sql`:
 
 ```sql
--- yodel migration 20261009T2309-rename-email
--- parent: 20261009T2309-validate-amount
+-- yodel migration 20261010T0258-rename-email
+-- parent: 20261010T0257-validate-amount
 -- This migration contains an Op step, not only SQL:
 --   PostgresMigrationOp for orders (yodel_18_shop.orders), SQLPG205: not SQL; migration.json holds its declaration
 
@@ -757,21 +759,28 @@ Wrote migrations/20261009T2309-rename-email/ (0 statements; follows 20261009T230
 --   export const { op } = PostgresMigrationOp({ name: "migrate-yodel-18-shop-orders-email", env: "<env>", table: "yodel_18_shop.orders", column: "email" });
 ```
 
+`src/schema.ts` and the newest migration now agree, so a second `yodel new` writes nothing:
+
+```console
+$ npx yodel new check
+No changes: the declared schema matches the newest migration's recorded schema (20261010T0258-rename-email). Nothing written.
+```
+
 ```console
 $ npx yodel plan dev
 Plan for dev (postgres, history yodel_18_history.history): 3 applied, 1 pending
 
-20261009T2309-rename-email
+20261010T0258-rename-email
   0  Op PostgresMigrationOp  SQLPG205 expand  yodel_18_shop.orders
        yodel_18_shop.orders needs expand and contract, which no in-place statement makes, so nothing was sent for it. SQLPG205 Rename a column (columns.email customer_email -> email): RENAME COLUMN is a catalog change, but every reader still using the old name fails the moment it runs: add the new column, write both, move readers, drop the old. https://www.postgresql.org/docs/18/sql-altertable.html Run it as the expand-and-contract migration Op: PostgresMigrationOp({ table: "yodel_18_shop.orders", column: "email", ... }) from @intentius/chant-lexicon-sql/postgres (add the new column, write both, backfill, switch readers, then drop the old).
        yodel apply runs it as this step
 
-Plan digest: jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
+Plan digest: jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
 
-The newest approval of approve-migrate-dev, by yodel at 2026-10-09T23:09:26.530Z, is for jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea, not this plan; it does not hold.
-What moved (as far as yodel can tell): history changed: applied since: 20261009T2309-validate-amount (by yodel@example at 2026-10-09 23:09:30.226826); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+The newest approval of approve-migrate-dev, by yodel at 2026-10-10T02:58:34.262Z, is for jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1, not this plan; it does not hold.
+What moved (as far as yodel can tell): history changed: applied since: 20261010T0257-validate-amount (by yodel@example at 2026-10-10 02:58:45.596677); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 ```
 
 ```console
@@ -779,41 +788,41 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (3):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
 
 Pending (1):
-  20261009T2309-rename-email  (step 0: PostgresMigrationOp for orders (yodel_18_shop.orders))
+  20261010T0258-rename-email  (step 0: PostgresMigrationOp for orders (yodel_18_shop.orders))
 
-Plan digest: jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
+Plan digest: jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   865ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.2s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea (by yodel at 2026-10-09T23:09:26.530Z); planned: jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1 (by yodel at 2026-10-10T02:58:34.262Z); planned: jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.6s
-  plan    : jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
-  expires : 2026-10-11T23:09:35.012Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 2.3s
+  plan    : jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
+  expires : 2026-10-12T02:58:55.019Z
 
-Nothing was applied. The approval of jcs1-sha256:a86038e389aa7bdc40ca3fe0cfc09deb4b700e51f3ed01198ece092e1c6b61ea (by yodel at 2026-10-09T23:09:26.530Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261009T2309-validate-amount (by yodel@example at 2026-10-09 23:09:30.226826); pending migrations changed: committed to since approval: 20261009T2309-rename-email (5e99115 at 2026-10-09T17:09:32-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:ddd179f02d4fe50ac17edf082183c1d11ec7d4b99d008cf2c2c4fb9ea08eded1 (by yodel at 2026-10-10T02:58:34.262Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261010T0257-validate-amount (by yodel@example at 2026-10-10 02:58:45.596677); pending migrations changed: committed to since approval: 20261010T0258-rename-email (06f5c24 at 2026-10-09T20:58:51-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:09:37.180Z
-This approves the plan jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:58:58.441Z
+This approves the plan jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -822,33 +831,33 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (3):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
 
 Pending (1):
-  20261009T2309-rename-email  (step 0: PostgresMigrationOp for orders (yodel_18_shop.orders))
+  20261010T0258-rename-email  (step 0: PostgresMigrationOp for orders (yodel_18_shop.orders))
 
-Plan digest: jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7
+Plan digest: jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7, by yodel at 2026-10-09T23:09:37.180Z
-20261009T2309-rename-email: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4, by yodel at 2026-10-10T02:58:58.441Z
+20261010T0258-rename-email: applying
   step 0: PostgresMigrationOp for orders (yodel_18_shop.orders)
-  step 0: ok {"op":"PostgresMigrationOp","table":"yodel_18_shop.orders","column":"email","state":"migrate","change":"rename","filled":1,"skipped":0,"backfilledRows":301,"carried":0,"verifiedRows":301,"switched":true,"oldColumn":"yodel_18_shop.orders.customer_email","retainUntil":"2026-10-09T23:09:40.905Z","dropped":true}
-20261009T2309-rename-email: applied
+  step 0: ok {"op":"PostgresMigrationOp","table":"yodel_18_shop.orders","column":"email","state":"migrate","change":"rename","filled":1,"skipped":0,"backfilledRows":301,"carried":0,"verifiedRows":301,"switched":true,"oldColumn":"yodel_18_shop.orders.customer_email","retainUntil":"2026-10-10T02:59:03.753Z","dropped":true}
+20261010T0258-rename-email: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   862ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.1s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   198ms
-    [approved] yodel at 2026-10-09T23:09:37.180Z
+  ✓ gate:approve-migrate-dev()   299ms
+    [approved] yodel at 2026-10-10T02:58:58.441Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7"})   1.6s
-Op "migrate-dev" completed in 2.8s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4"})   2.6s
+Op "migrate-dev" completed in 4.2s
 
-Applied: 20261009T2309-rename-email.
+Applied: 20261010T0258-rename-email.
 ```
 
 The expand added `email` at the end of the table, and Postgres has no `ALTER` that moves a column, so the live order is not the declared one. Drift compares the columns by name, so that is not drift:
@@ -873,12 +882,12 @@ No drift: every declared object matches the server.
 
 ```console
 $ npx yodel new drop-coupon
-Wrote migrations/20261009T2309-drop-coupon/ (1 statement; follows 20261009T2309-rename-email)
+Wrote migrations/20261010T0259-drop-coupon/ (1 statement; follows 20261010T0258-rename-email)
 ```
 
 ```console
 $ npx yodel lint
-20261009T2309-drop-coupon
+20261010T0259-drop-coupon
   error    destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -890,11 +899,11 @@ A statement rule can be silenced for one statement, with a reason the history re
 
 Nothing ever wrote a coupon. Say so above the statement:
 
-`migrations/20261009T2309-drop-coupon/migration.sql` now:
+`migrations/20261010T0259-drop-coupon/migration.sql` now:
 
 ```sql
--- yodel migration 20261009T2309-drop-coupon
--- parent: 20261009T2309-rename-email
+-- yodel migration 20261010T0259-drop-coupon
+-- parent: 20261010T0258-rename-email
 
 -- orders (yodel_18_shop.orders): SQLPG204 metadata, destructive
 -- yodel:allow destructive no order ever had a coupon; checked on dev
@@ -902,9 +911,9 @@ ALTER TABLE yodel_18_shop.orders DROP COLUMN coupon;
 ```
 
 ```console
-$ npx yodel lint --update-checksum 20261009T2309-drop-coupon
-20261009T2309-drop-coupon: checksum sha256:b7008a8e51316135db56b86b4d89e3413f3a3f0b3a3248800463b63d56bcd222 is now sha256:038b4a7c927f0e279cbf839044f8a948bd821b4c02ba5c0e028f2a5959c613ee
-20261009T2309-drop-coupon
+$ npx yodel lint --update-checksum 20261010T0259-drop-coupon
+20261010T0259-drop-coupon: checksum sha256:2209d1c3a780750ef2350163797898e4dc0485a3f428624dcd7f274318eedc21 is now sha256:fb1b3293f9ce0719f34ab9a96f3d92c15fe9d9e09f7e5e82f140f965477d06f6
+20261010T0259-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
@@ -920,7 +929,7 @@ $ npx yodel plan dev --format markdown
 
 Postgres, history `yodel_18_history.history`: 4 applied, **1 pending**.
 
-#### `20261009T2309-drop-coupon`
+#### `20261010T0259-drop-coupon`
 
 | # | Step | Rule | Class | Object |
 |---|---|---|---|---|
@@ -937,18 +946,18 @@ ALTER TABLE yodel_18_shop.orders DROP COLUMN coupon;
 
 #### Approval
 
-Plan digest the apply gate binds: `jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7`
+Plan digest the apply gate binds: `jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1`
 
 Approve it with:
 
 ```sh
-chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
+chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
 ```
 
-The newest approval of `approve-migrate-dev`, by yodel at 2026-10-09T23:09:37.180Z, is for `jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7`, not this plan; it does not hold.
-What moved (as far as yodel can tell): history changed: applied since: 20261009T2309-rename-email (by yodel@example at 2026-10-09 23:09:40.954458); pending migrations changed: committed to since approval: 20261009T2309-drop-coupon (cdcee99 at 2026-10-09T17:09:45-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+The newest approval of `approve-migrate-dev`, by yodel at 2026-10-10T02:58:58.441Z, is for `jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4`, not this plan; it does not hold.
+What moved (as far as yodel can tell): history changed: applied since: 20261010T0258-rename-email (by yodel@example at 2026-10-10 02:59:03.837169); pending migrations changed: committed to since approval: 20261010T0259-drop-coupon (1973e37 at 2026-10-09T20:59:10-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-<!-- yodel:subject eyJlbnZpcm9ubWVudCI6ImRldiIsImhpc3RvcnlEYXRhYmFzZSI6InlvZGVsXzE4X2hpc3RvcnkiLCJ0b3BvbG9neSI6eyJraW5kIjoic2luZ2xlIn0sImFwcGxpZWQiOlt7ImlkIjoiMjAyNjEwMDlUMjMwOC1iYXNlbGluZSIsImNoZWNrc3VtIjoic2hhMjU2OjM5OWNiMTY2YWQ2YzQ1N2FhYjJkYmQ1OTQ2M2JhZWIzZGFkMDJkN2Y0NTFjOTQ3NWJiMGZiNjQ4Y2IxMDYwNzUifSx7ImlkIjoiMjAyNjEwMDlUMjMwOS1jb3Vwb25zIiwiY2hlY2tzdW0iOiJzaGEyNTY6ZTk1NTk4YWM1MzI3MmZiNjVlZGY0ZTkwNDY0ODlhMjZhMGI0MjJlOWViZTYyYzlkMTY1OWQ0YzI3OWExNmQ3MyJ9LHsiaWQiOiIyMDI2MTAwOVQyMzA5LXZhbGlkYXRlLWFtb3VudCIsImNoZWNrc3VtIjoic2hhMjU2OjdiZTcxZmIzNDQyYzEwMGRkNGIzMDY2NDU5ZWRhODk0ZjU0ZjFkMGRkYmQ1MTFlODY2MWRhODNlNzY0ZjRjMjcifSx7ImlkIjoiMjAyNjEwMDlUMjMwOS1yZW5hbWUtZW1haWwiLCJjaGVja3N1bSI6InNoYTI1Njo2NjQ1MWE3YmI4MmY0YjVhMWE5ODBlZjY0MzMzZTYwOGZiM2YwNDcxYTMyNmE1YTBhZjc5NTI2NWE4MDEyNjViIn1dLCJwZW5kaW5nIjpbeyJpZCI6IjIwMjYxMDA5VDIzMDktZHJvcC1jb3Vwb24iLCJjaGVja3N1bSI6InNoYTI1NjowMzhiNGE3YzkyN2YwZTI3OWNiZjgzOTA0NGY4YTk0OGJkODIxYjRjMDJiYTVjMGUwMjhmMmE1OTU5YzYxM2VlIiwiZG9uZSI6W119XSwibGl2ZSI6InNoYTI1Njo0ZDI4NGI5MDQ0NTJkYmFkYjc1NTgzZWZlOWZkMDRjNDQ4YTFmMzE2MDFhOTNkZTk5MWY4N2M2Y2JmZTZmYzY1In0 -->
+<!-- yodel:subject eyJlbnZpcm9ubWVudCI6ImRldiIsImhpc3RvcnlEYXRhYmFzZSI6InlvZGVsXzE4X2hpc3RvcnkiLCJ0b3BvbG9neSI6eyJraW5kIjoic2luZ2xlIn0sImFwcGxpZWQiOlt7ImlkIjoiMjAyNjEwMTBUMDI1Ny1iYXNlbGluZSIsImNoZWNrc3VtIjoic2hhMjU2OmE0ZGNjMGM3OTZhMzAwNWNiYzdiNDYwNTZmNTY2Nzg5NjMxZDlmZTE3NTczZjQ5NTg2MjY5NzU1MjBkNDBiNGIifSx7ImlkIjoiMjAyNjEwMTBUMDI1Ny1jb3Vwb25zIiwiY2hlY2tzdW0iOiJzaGEyNTY6ZjIyODU4NGI5ZjIxNmUxNDc4NTIyN2Q2ODYxMzcwYWJlNWJlZTJiMzc3YjA0M2UxYzFiNzk5ZTc3ZjYyMGY4MCJ9LHsiaWQiOiIyMDI2MTAxMFQwMjU3LXZhbGlkYXRlLWFtb3VudCIsImNoZWNrc3VtIjoic2hhMjU2OmNiMmUyNWMzNWJkN2UxMDQ1YmZlMDBmNjNhMDFkMmFjYzhhZTg2MDQwNzEyZDA5OTA1ZDBiMGQ4ZWU1ZWY0YTgifSx7ImlkIjoiMjAyNjEwMTBUMDI1OC1yZW5hbWUtZW1haWwiLCJjaGVja3N1bSI6InNoYTI1NjpiNmY2NWUwZDUxNDIwZGNkMTkzMzFiYmVlYWE2MmQ1NDkxNjMzMDA3Y2NiZmY3ODIxNTQ0MDE2YTczMjA4MTI3In1dLCJwZW5kaW5nIjpbeyJpZCI6IjIwMjYxMDEwVDAyNTktZHJvcC1jb3Vwb24iLCJjaGVja3N1bSI6InNoYTI1NjpmYjFiMzI5M2Y5Y2UwNzE5ZjM0YWI5YTk2ZjNkOTJjMTVmZTlkOWUwOWY3ZTVlODJmMTQwZjk2NTQ3N2QwNmY2IiwiZG9uZSI6W119XSwibGl2ZSI6InNoYTI1Njo0ZDI4NGI5MDQ0NTJkYmFkYjc1NTgzZWZlOWZkMDRjNDQ4YTFmMzE2MDFhOTNkZTk5MWY4N2M2Y2JmZTZmYzY1In0 -->
 ````
 
 ```console
@@ -956,42 +965,42 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (4):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
 
 Pending (1):
-  20261009T2309-drop-coupon
+  20261010T0259-drop-coupon
 
-Plan digest: jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
+Plan digest: jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   854ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.1s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7 (by yodel at 2026-10-09T23:09:37.180Z); planned: jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4 (by yodel at 2026-10-10T02:58:58.441Z); planned: jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.5s
-  plan    : jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
-  expires : 2026-10-11T23:09:48.897Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 2.2s
+  plan    : jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
+  expires : 2026-10-12T02:59:14.893Z
 
-Nothing was applied. The approval of jcs1-sha256:88d8f8aebeb39ad8933a28c51c8209554b72a634998f483dc8d0fb546e25ebb7 (by yodel at 2026-10-09T23:09:37.180Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261009T2309-rename-email (by yodel@example at 2026-10-09 23:09:40.954458); pending migrations changed: committed to since approval: 20261009T2309-drop-coupon (cdcee99 at 2026-10-09T17:09:45-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:c120ed3640305a0c12ba3ca236317cb4e40a0e737ef5488f7620103b6001a1c4 (by yodel at 2026-10-10T02:58:58.441Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261010T0258-rename-email (by yodel@example at 2026-10-10 02:59:03.837169); pending migrations changed: committed to since approval: 20261010T0259-drop-coupon (1973e37 at 2026-10-09T20:59:10-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:09:51.086Z
-This approves the plan jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:59:17.715Z
+This approves the plan jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -1000,33 +1009,33 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (4):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
 
 Pending (1):
-  20261009T2309-drop-coupon
+  20261010T0259-drop-coupon
 
-Plan digest: jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7
+Plan digest: jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7, by yodel at 2026-10-09T23:09:51.086Z
-20261009T2309-drop-coupon: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1, by yodel at 2026-10-10T02:59:17.715Z
+20261010T0259-drop-coupon: applying
   statement 0: ok (SQLPG204 metadata, yodel_18_shop.orders)
-20261009T2309-drop-coupon: applied
+20261010T0259-drop-coupon: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   861ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.1s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   195ms
-    [approved] yodel at 2026-10-09T23:09:51.086Z
+  ✓ gate:approve-migrate-dev()   295ms
+    [approved] yodel at 2026-10-10T02:59:17.715Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7"})   951ms
-Op "migrate-dev" completed in 2.1s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1"})   1.3s
+Op "migrate-dev" completed in 2.9s
 
-Applied: 20261009T2309-drop-coupon.
+Applied: 20261010T0259-drop-coupon.
 ```
 
 Every history row the migration wrote records the silence:
@@ -1053,7 +1062,7 @@ $ git switch -q -c gift
 
 ```console
 $ npx yodel new add-gift
-Wrote migrations/20261009T2309-add-gift/ (1 statement; follows 20261009T2309-drop-coupon)
+Wrote migrations/20261010T0259-add-gift/ (1 statement; follows 20261010T0259-drop-coupon)
 ```
 
 ```console
@@ -1068,16 +1077,16 @@ $ git switch -q -c placed-at-index
 
 ```console
 $ npx yodel new index-placed-at
-Wrote migrations/20261009T2309-index-placed-at/ (2 statements; follows 20261009T2309-drop-coupon)
+Wrote migrations/20261010T0259-index-placed-at/ (2 statements; follows 20261010T0259-drop-coupon)
 ```
 
 ```console
 $ npx yodel lint
-20261009T2309-drop-coupon
+20261010T0259-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
-20261009T2309-index-placed-at
+20261010T0259-index-placed-at
   error    pg-lock: step 0: SQLPG241 Create an index without CONCURRENTLY on yodel_18_shop.orders_placed_at_idx: builds an index without CONCURRENTLY: SHARE on the table, blocking every write until the build ends; declare the index CONCURRENTLY
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -1088,7 +1097,7 @@ A statement rule can be silenced for one statement, with a reason the history re
 ```
 
 ```console
-$ rm -r migrations/20261009T2309-index-placed-at
+$ rm -r migrations/20261010T0259-index-placed-at
 ```
 
 `src/schema.ts` now:
@@ -1121,14 +1130,14 @@ export const ordersPlacedAt = index`
 
 ```console
 $ npx yodel new index-placed-at
-Wrote migrations/20261009T2309-index-placed-at/ (2 statements; follows 20261009T2309-drop-coupon)
+Wrote migrations/20261010T0259-index-placed-at/ (2 statements; follows 20261010T0259-drop-coupon)
 ```
 
-`migrations/20261009T2309-index-placed-at/migration.sql`:
+`migrations/20261010T0259-index-placed-at/migration.sql`:
 
 ```sql
--- yodel migration 20261009T2309-index-placed-at
--- parent: 20261009T2309-drop-coupon
+-- yodel migration 20261010T0259-index-placed-at
+-- parent: 20261010T0259-drop-coupon
 
 -- ordersPlacedAt (yodel_18_shop.orders_placed_at_idx): SQLPG240 concurrently, outside a transaction
 CREATE INDEX CONCURRENTLY orders_placed_at_idx ON yodel_18_shop.orders (placed_at);
@@ -1139,7 +1148,7 @@ COMMENT ON INDEX yodel_18_shop.orders_placed_at_idx IS '[chant managed-by=chant]
 
 ```console
 $ npx yodel lint
-20261009T2309-drop-coupon
+20261010T0259-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
@@ -1157,43 +1166,43 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (5):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
 
 Pending (1):
-  20261009T2309-index-placed-at
+  20261010T0259-index-placed-at
 
-Plan digest: jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb
+Plan digest: jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   866ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.2s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7 (by yodel at 2026-10-09T23:09:51.086Z); planned: jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1 (by yodel at 2026-10-10T02:59:17.715Z); planned: jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.6s
-  plan    : jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb
-  expires : 2026-10-11T23:10:02.190Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 2.3s
+  plan    : jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1
+  expires : 2026-10-12T02:59:35.648Z
 
-Nothing was applied. The approval of jcs1-sha256:1fb59430e222f7403a613e19169e68efacb5f171e6984b4bd8528c25fb2cc1c7 (by yodel at 2026-10-09T23:09:51.086Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261009T2309-drop-coupon (by yodel@example at 2026-10-09 23:09:54.618919); pending migrations changed: committed to since approval: 20261009T2309-index-placed-at (edf8c21 at 2026-10-09T17:10:00-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:f2c2d36474a4f93de1e780ed32a2d9d7bbd81c80f8ae0a2a53838267458463b1 (by yodel at 2026-10-10T02:59:17.715Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261010T0259-drop-coupon (by yodel@example at 2026-10-10 02:59:22.386688); pending migrations changed: committed to since approval: 20261010T0259-index-placed-at (1d5abcc at 2026-10-09T20:59:32-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:10:04.365Z
-This approves the plan jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:59:38.855Z
+This approves the plan jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -1202,35 +1211,35 @@ $ npx yodel apply dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (5):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
 
 Pending (1):
-  20261009T2309-index-placed-at
+  20261010T0259-index-placed-at
 
-Plan digest: jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb
+Plan digest: jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb, by yodel at 2026-10-09T23:10:04.365Z
-20261009T2309-index-placed-at: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1, by yodel at 2026-10-10T02:59:38.855Z
+20261010T0259-index-placed-at: applying
   statement 0: ok (SQLPG240 concurrently, yodel_18_shop.orders_placed_at_idx)
   statement 1: ok (SQLPG240 concurrently, yodel_18_shop.orders_placed_at_idx)
-20261009T2309-index-placed-at: applied
+20261010T0259-index-placed-at: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   869ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.0s
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   212ms
-    [approved] yodel at 2026-10-09T23:10:04.365Z
+  ✓ gate:approve-migrate-dev()   278ms
+    [approved] yodel at 2026-10-10T02:59:38.855Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb"})   1.2s
-Op "migrate-dev" completed in 2.4s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1"})   1.4s
+Op "migrate-dev" completed in 3.0s
 
-Applied: 20261009T2309-index-placed-at.
+Applied: 20261010T0259-index-placed-at.
 ```
 
 Both branches merge. Each migration follows `drop-coupon`, so the history forks, and lint says so:
@@ -1243,9 +1252,9 @@ Auto-merging src/schema.ts
 ```console
 $ npx yodel lint
 migrations/
-  error    fork: fork: 20261009T2309-add-gift and 20261009T2309-index-placed-at both follow 20261009T2309-drop-coupon; rebase one onto the other
+  error    fork: fork: 20261010T0259-add-gift and 20261010T0259-index-placed-at both follow 20261010T0259-drop-coupon; rebase one onto the other
 
-20261009T2309-drop-coupon
+20261010T0259-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
@@ -1256,17 +1265,17 @@ migrations/
 `yodel rebase` moves one migration onto the other and writes its statements and recorded schema again. With `--env dev` it reads dev's history first, and refuses to move a migration that ran there:
 
 ```console
-$ npx yodel rebase 20261009T2309-index-placed-at --onto 20261009T2309-add-gift --env dev
-yodel rebase: refused: dev's history records 20261009T2309-index-placed-at (applied). Nothing was written. A migration that ran is never rebased: its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).
+$ npx yodel rebase 20261010T0259-index-placed-at --onto 20261010T0259-add-gift --env dev
+yodel rebase: refused: dev's history records 20261010T0259-index-placed-at (applied). Nothing was written. A migration that ran is never rebased: its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).
 [exit 4]
 ```
 
 The clean fix is the one it names: move `add-gift` after `index-placed-at`. To show what yodel does when a migration that ran is moved anyway (a rebase run without `--env`), this walkthrough moves `index-placed-at`:
 
 ```console
-$ npx yodel rebase 20261009T2309-index-placed-at --onto 20261009T2309-add-gift
-Rebased 20261009T2309-index-placed-at onto 20261009T2309-add-gift (it followed 20261009T2309-drop-coupon).
-  20261009T2309-index-placed-at: follows 20261009T2309-add-gift; 2 statements; checksum sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01 -> sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3
+$ npx yodel rebase 20261010T0259-index-placed-at --onto 20261010T0259-add-gift
+Rebased 20261010T0259-index-placed-at onto 20261010T0259-add-gift (it followed 20261010T0259-drop-coupon).
+  20261010T0259-index-placed-at: follows 20261010T0259-add-gift; 2 statements; checksum sha256:5919033e0b39c7e0350a695d21cf367b4984ebd8a0f7c2977624259ea99683fb -> sha256:82ebda9949a81e1b2c8219345097253cc8517ce346a45c6d08278cfbb28958a8
 No history was checked (--env): make sure none of these ran anywhere before merging.
 ```
 
@@ -1277,37 +1286,37 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (6):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
-  20261009T2309-index-placed-at  2026-10-09 23:10:08.233569 by yodel@example
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
+  20261010T0259-index-placed-at  2026-10-10 02:59:43.542137 by yodel@example
 
 Pending (1):
-  20261009T2309-add-gift  (out of order)
+  20261010T0259-add-gift  (out of order)
 
-Out of order (1): 20261009T2309-add-gift; apply with --allow-out-of-order
+Out of order (1): 20261010T0259-add-gift; apply with --allow-out-of-order
 
 Checksum mismatches (1):
-  20261009T2309-index-placed-at was applied with checksum sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01, but its files now hash to sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3; if the edit is intended, record it with yodel repair 20261009T2309-index-placed-at --reason ... <env>
+  20261010T0259-index-placed-at was applied with checksum sha256:5919033e0b39c7e0350a695d21cf367b4984ebd8a0f7c2977624259ea99683fb, but its files now hash to sha256:82ebda9949a81e1b2c8219345097253cc8517ce346a45c6d08278cfbb28958a8; if the edit is intended, record it with yodel repair 20261010T0259-index-placed-at --reason ... <env>
 [exit 4]
 ```
 
 ```console
 $ npx yodel apply dev
 yodel apply: refused: the history does not match the migrations directory; nothing was applied:
-  20261009T2309-index-placed-at was applied with checksum sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01, but its files now hash to sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3; if the edit is intended, record it with yodel repair 20261009T2309-index-placed-at --reason ... <env>
+  20261010T0259-index-placed-at was applied with checksum sha256:5919033e0b39c7e0350a695d21cf367b4984ebd8a0f7c2977624259ea99683fb, but its files now hash to sha256:82ebda9949a81e1b2c8219345097253cc8517ce346a45c6d08278cfbb28958a8; if the edit is intended, record it with yodel repair 20261010T0259-index-placed-at --reason ... <env>
 [exit 4]
 ```
 
 The edit is intended: its statements are the same, only its parent changed. `yodel repair` records the new checksum, with the reason, in dev's history. Nothing runs on the server:
 
 ```console
-$ npx yodel repair 20261009T2309-index-placed-at --reason 'rebased onto add-gift after it ran on dev' dev
-Repaired 20261009T2309-index-placed-at in dev's history (yodel_18_history).
-  old checksum: sha256:848635ab8293d2613931ad4252e9e78dffe4429fb882f5c26e83bf39ddef2c01
-  new checksum: sha256:8329ec9ecab22ab2ffac82b61d2166e827c40c9b47b61fefbcf04133d85811e3
+$ npx yodel repair 20261010T0259-index-placed-at --reason 'rebased onto add-gift after it ran on dev' dev
+Repaired 20261010T0259-index-placed-at in dev's history (yodel_18_history).
+  old checksum: sha256:5919033e0b39c7e0350a695d21cf367b4984ebd8a0f7c2977624259ea99683fb
+  new checksum: sha256:82ebda9949a81e1b2c8219345097253cc8517ce346a45c6d08278cfbb28958a8
   reason: rebased onto add-gift after it ran on dev
 ```
 
@@ -1318,24 +1327,24 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (6):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
-  20261009T2309-index-placed-at  2026-10-09 23:10:08.233569 by yodel@example
-      repaired 2026-10-09 23:10:13.083734 by yodel@example: rebased onto add-gift after it ran on dev
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
+  20261010T0259-index-placed-at  2026-10-10 02:59:43.542137 by yodel@example
+      repaired 2026-10-10 02:59:49.806515 by yodel@example: rebased onto add-gift after it ran on dev
 
 Pending (1):
-  20261009T2309-add-gift  (out of order)
+  20261010T0259-add-gift  (out of order)
 
-Out of order (1): 20261009T2309-add-gift; apply with --allow-out-of-order
+Out of order (1): 20261010T0259-add-gift; apply with --allow-out-of-order
 [exit 4]
 ```
 
 ```console
 $ npx yodel apply dev
-yodel apply: refused: 20261009T2309-add-gift is out of order: the chain puts it before 20261009T2309-index-placed-at, which is already applied. Nothing was applied. Pass --allow-out-of-order to apply it now (in chain order); it is never skipped.
+yodel apply: refused: 20261010T0259-add-gift is out of order: the chain puts it before 20261010T0259-index-placed-at, which is already applied. Nothing was applied. Pass --allow-out-of-order to apply it now (in chain order); it is never skipped.
 [exit 4]
 ```
 
@@ -1346,47 +1355,47 @@ $ npx yodel apply dev --allow-out-of-order
 Migrations in dev (history yodel_18_history.history)
 
 Applied (6):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
-  20261009T2309-index-placed-at  2026-10-09 23:10:08.233569 by yodel@example
-      repaired 2026-10-09 23:10:13.083734 by yodel@example: rebased onto add-gift after it ran on dev
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
+  20261010T0259-index-placed-at  2026-10-10 02:59:43.542137 by yodel@example
+      repaired 2026-10-10 02:59:49.806515 by yodel@example: rebased onto add-gift after it ran on dev
 
 Pending (1):
-  20261009T2309-add-gift  (out of order)
+  20261010T0259-add-gift  (out of order)
 
-Out of order (1): 20261009T2309-add-gift; apply with --allow-out-of-order
+Out of order (1): 20261010T0259-add-gift; apply with --allow-out-of-order
 
-Plan digest: jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b
+Plan digest: jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   872ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.2s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
-    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb (by yodel at 2026-10-09T23:10:04.365Z); planned: jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
+    [refused] Gate "approve-migrate-dev" is approved, but not for this plan. approved: jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1 (by yodel at 2026-10-10T02:59:38.855Z); planned: jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627. The configuration or the live system changed between that approval and this plan, so it needs a fresh one: chant approve migrate-dev approve-migrate-dev
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 1.6s
-  plan    : jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b
-  expires : 2026-10-11T23:10:16.602Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 2.1s
+  plan    : jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627
+  expires : 2026-10-12T02:59:54.860Z
 
-Nothing was applied. The approval of jcs1-sha256:364ed1a04cb374246645a4eb05f50cdbf69f790d80fd2dc8ae4b9adb481075cb (by yodel at 2026-10-09T23:10:04.365Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261009T2309-index-placed-at (by yodel@example at 2026-10-09 23:10:08.233569); pending migrations changed: committed to since approval: 20261009T2309-index-placed-at (8313642 at 2026-10-09T17:10:10-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+Nothing was applied. The approval of jcs1-sha256:01977ad94b97cddedb2e940d793d6d960cc8cde83e7c1cfcb8678af006cbd8b1 (by yodel at 2026-10-10T02:59:38.855Z) does not hold: the plan moved since. What moved, as far as yodel can tell: history changed: applied since: 20261010T0259-index-placed-at (by yodel@example at 2026-10-10 02:59:43.542137); pending migrations changed: committed to since approval: 20261010T0259-index-placed-at (98ab3a6 at 2026-10-09T20:59:46-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627
 then run yodel apply dev again.
 [exit 3]
 ```
 
 ```console
-$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-09T23:10:18.861Z
-This approves the plan jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T02:59:57.614Z
+This approves the plan jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
@@ -1395,38 +1404,38 @@ $ npx yodel apply dev --allow-out-of-order
 Migrations in dev (history yodel_18_history.history)
 
 Applied (6):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
-  20261009T2309-index-placed-at  2026-10-09 23:10:08.233569 by yodel@example
-      repaired 2026-10-09 23:10:13.083734 by yodel@example: rebased onto add-gift after it ran on dev
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
+  20261010T0259-index-placed-at  2026-10-10 02:59:43.542137 by yodel@example
+      repaired 2026-10-10 02:59:49.806515 by yodel@example: rebased onto add-gift after it ran on dev
 
 Pending (1):
-  20261009T2309-add-gift  (out of order)
+  20261010T0259-add-gift  (out of order)
 
-Out of order (1): 20261009T2309-add-gift; apply with --allow-out-of-order
+Out of order (1): 20261010T0259-add-gift; apply with --allow-out-of-order
 
-Plan digest: jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b
+Plan digest: jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627
 
 Running migrate-dev (<tmp>/postgres/ops/migrate-dev.op.ts)
 lock: held in Postgres advisory lock (1498367052, 1669956748) for history schema yodel_18_history
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b, by yodel at 2026-10-09T23:10:18.861Z
-20261009T2309-add-gift: applying (out of order, allowed)
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627, by yodel at 2026-10-10T02:59:57.614Z
+20261010T0259-add-gift: applying (out of order, allowed)
   statement 0: ok (SQLPG201 metadata, yodel_18_shop.orders)
-20261009T2309-add-gift: applied
+20261010T0259-add-gift: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   859ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   951ms
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   195ms
-    [approved] yodel at 2026-10-09T23:10:18.861Z
+  ✓ gate:approve-migrate-dev()   270ms
+    [approved] yodel at 2026-10-10T02:59:57.614Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:7db9aa24351d076d967789e74daa49ee00f0618641855f29a250206b26f9185b"})   960ms
-Op "migrate-dev" completed in 2.1s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:04604f9d6ef33b70cf496bcf713ffefcb934f0279efd19afd05ba6e85996b627"})   1.2s
+Op "migrate-dev" completed in 2.6s
 
-Applied: 20261009T2309-add-gift.
+Applied: 20261010T0259-add-gift.
 ```
 
 `yodel status` lists `index-placed-at` as applied when it ran, and the repair under it:
@@ -1436,14 +1445,14 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history)
 
 Applied (7):
-  20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
-  20261009T2309-coupons  2026-10-09 23:09:11.288942 by yodel@example
-  20261009T2309-validate-amount  2026-10-09 23:09:30.226826 by yodel@example
-  20261009T2309-rename-email  2026-10-09 23:09:40.954458 by yodel@example
-  20261009T2309-drop-coupon  2026-10-09 23:09:54.618919 by yodel@example
-  20261009T2309-add-gift  2026-10-09 23:10:22.374780 by yodel@example
-  20261009T2309-index-placed-at  2026-10-09 23:10:08.233569 by yodel@example
-      repaired 2026-10-09 23:10:13.083734 by yodel@example: rebased onto add-gift after it ran on dev
+  20261010T0257-baseline  2026-10-10 02:57:24.346332 by yodel@example
+  20261010T0257-coupons  2026-10-10 02:57:50.579263 by yodel@example
+  20261010T0257-validate-amount  2026-10-10 02:58:45.596677 by yodel@example
+  20261010T0258-rename-email  2026-10-10 02:59:03.837169 by yodel@example
+  20261010T0259-drop-coupon  2026-10-10 02:59:22.386688 by yodel@example
+  20261010T0259-add-gift  2026-10-10 03:00:01.699402 by yodel@example
+  20261010T0259-index-placed-at  2026-10-10 02:59:43.542137 by yodel@example
+      repaired 2026-10-10 02:59:49.806515 by yodel@example: rebased onto add-gift after it ran on dev
 
 Pending: none
 ```
@@ -1484,11 +1493,11 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
   - orders (Postgres::Table)
       columns[2].default: 'placed'::text → 'new'::text [from: authored]
 [phase] Snapshot
-  ✓ lifecycleSnapshot(env=dev)   866ms
+  ✓ lifecycleSnapshot(env=dev)   1.0s
 [phase] Diff
-  ✓ lifecycleDiff(env=dev, live=true)   747ms
+  ✓ lifecycleDiff(env=dev, live=true)   913ms
     [outcome] Drift=true
-Op "watch-dev" completed in 1.7s
+Op "watch-dev" completed in 2.1s
 ```
 
 `chant run` exits 0 when the watch completes, drift or not; the drift is the run's `Drift` outcome. Put the default back:
@@ -1511,13 +1520,13 @@ No drift: every declared object matches the server.
 ```console
 $ npx yodel lint --replay replay --reset
 replay: emptying yodel_18_shop on postgres://192.168.14.189:5432/postgres (sql.profiles.replay)
-replay: 20261009T2308-baseline: replaying
-replay: 20261009T2308-baseline: matches its recorded schema
-replay: 20261009T2309-coupons: replaying
-replay: 20261009T2309-coupons: matches its recorded schema
-replay: 20261009T2309-validate-amount: replaying
-replay: 20261009T2309-validate-amount: matches its recorded schema
-replay: 20261009T2309-rename-email: replaying
+replay: 20261010T0257-baseline: replaying
+replay: 20261010T0257-baseline: matches its recorded schema
+replay: 20261010T0257-coupons: replaying
+replay: 20261010T0257-coupons: matches its recorded schema
+replay: 20261010T0257-validate-amount: replaying
+replay: 20261010T0257-validate-amount: matches its recorded schema
+replay: 20261010T0258-rename-email: replaying
 -- yodel_18_shop.orders.email needs expand and contract (SQLPG205 Rename a column): customer_email renamed to email, batched by id
 --   SQLPG205 columns.email: customer_email -> email
 ALTER TABLE yodel_18_shop.orders ADD COLUMN email text
@@ -1551,29 +1560,29 @@ ALTER TABLE yodel_18_shop.orders VALIDATE CONSTRAINT email__chant_nn
 ALTER TABLE yodel_18_shop.orders ALTER COLUMN email SET NOT NULL
 ALTER TABLE yodel_18_shop.orders DROP CONSTRAINT email__chant_nn
 COMMENT ON COLUMN yodel_18_shop.orders.email IS NULL
-COMMENT ON COLUMN yodel_18_shop.orders.customer_email IS 'chant migration of yodel_18_shop.orders.email: the old name, kept until 2026-10-09T23:10:29.419Z [chant managed-by=chant migration=yodel_18_shop.orders.email role=old retain-until=2026-10-09T23%3A10%3A29.419Z]'
+COMMENT ON COLUMN yodel_18_shop.orders.customer_email IS 'chant migration of yodel_18_shop.orders.email: the old name, kept until 2026-10-10T03:00:10.249Z [chant managed-by=chant migration=yodel_18_shop.orders.email role=old retain-until=2026-10-10T03%3A00%3A10.249Z]'
 DROP TRIGGER email__chant_sync ON yodel_18_shop.orders
 DROP FUNCTION yodel_18_shop.orders__email__chant_sync()
 ALTER TABLE yodel_18_shop.orders DROP COLUMN customer_email
-replay: 20261009T2309-rename-email: matches its recorded schema
-replay: 20261009T2309-drop-coupon: replaying
-replay: 20261009T2309-drop-coupon: matches its recorded schema
-replay: 20261009T2309-add-gift: replaying
-replay: 20261009T2309-add-gift: matches its recorded schema
-replay: 20261009T2309-index-placed-at: replaying
-replay: 20261009T2309-index-placed-at: matches its recorded schema
+replay: 20261010T0258-rename-email: matches its recorded schema
+replay: 20261010T0259-drop-coupon: replaying
+replay: 20261010T0259-drop-coupon: matches its recorded schema
+replay: 20261010T0259-add-gift: replaying
+replay: 20261010T0259-add-gift: matches its recorded schema
+replay: 20261010T0259-index-placed-at: replaying
+replay: 20261010T0259-index-placed-at: matches its recorded schema
 Replay of 7 migrations (postgres) into postgres://192.168.14.189:5432/postgres (sql.profiles.replay)
   schemas: yodel_18_shop (emptied first)
-  ok      20261009T2308-baseline (6 statements)
-  ok      20261009T2309-coupons (2 statements)
-  ok      20261009T2309-validate-amount (2 statements)
-  ok      20261009T2309-rename-email (0 statements; ran step 0: PostgresMigrationOp for orders (yodel_18_shop.orders) (switched, old column dropped))
-  ok      20261009T2309-drop-coupon (1 statement)
-  ok      20261009T2309-add-gift (1 statement)
-  ok      20261009T2309-index-placed-at (2 statements)
+  ok      20261010T0257-baseline (6 statements)
+  ok      20261010T0257-coupons (2 statements)
+  ok      20261010T0257-validate-amount (2 statements)
+  ok      20261010T0258-rename-email (0 statements; ran step 0: PostgresMigrationOp for orders (yodel_18_shop.orders) (switched, old column dropped))
+  ok      20261010T0259-drop-coupon (1 statement)
+  ok      20261010T0259-add-gift (1 statement)
+  ok      20261010T0259-index-placed-at (2 statements)
 Every migration replays to its recorded schema.
 
-20261009T2309-drop-coupon
+20261010T0259-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 

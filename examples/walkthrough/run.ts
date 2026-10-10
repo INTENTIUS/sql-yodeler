@@ -19,6 +19,19 @@
  * `npx yodel` and `npx chant` resolve as they do after `npm install` in the
  * example. It is a git repository with a bare `origin`, since chant keeps
  * approvals on the `chant/lifecycle` branch.
+ *
+ * The commands run as user `yodel` on host `example` (USER, and os.hostname()
+ * through a preload), so the names in approvals and in the history's
+ * applied_by are the same on every machine and never the local user's.
+ *
+ * A run step with `quote` is also quoted in docs/<quote>: --write rewrites
+ * that console block from the run, and test/docs.test.ts checks it against
+ * the README (or, for a walkthrough with no README, against a fresh run).
+ *
+ *   npx tsx examples/walkthrough/run.ts template [--write]
+ *
+ * runs examples/walkthrough/template.ts, a project made from
+ * templates/clickhouse, which needs no server and only refreshes docs quotes.
  */
 
 import { spawn } from "node:child_process";
@@ -41,16 +54,20 @@ export type Step =
   /** Shows a file the walkthrough made, e.g. a migration's migration.sql. `{id:<name>}` names a migration. */
   | { cat: string; lang?: string }
   /**
-   * Runs a shell command in the project. `{id:<name>}` is the id of the
-   * migration named <name>; `{approve}` is the `chant approve` command the
-   * last run printed, run with npx.
+   * Runs a shell command in the project (in `cwd` under it, when given).
+   * `{id:<name>}` is the id of the migration named <name>; `{approve}` is the
+   * `chant approve` command the last run printed, run with npx; `{clone}` is
+   * this repository, shown as `<clone>`. `quote` names the docs/ page that
+   * quotes the command and its output.
    */
-  | { run: string; code: number; expect?: Array<string | RegExp>; hide?: boolean }
+  | { run: string; code: number; expect?: Array<string | RegExp>; hide?: boolean; cwd?: string; quote?: string }
   /** Runs SQL on the server, as someone working out of band would. */
   | { sql: string; hide?: boolean; showResult?: boolean };
 
 export interface Walkthrough {
   dialect: "clickhouse" | "postgres";
+  /** False when the walkthrough writes no README and keeps nothing: it only feeds docs quotes. */
+  readme?: boolean;
   /** The README's text above the steps. */
   intro: string;
   /** Files copied from the committed example before the first step. */
@@ -74,6 +91,10 @@ export interface Ran {
 }
 
 const exampleDir = (w: Walkthrough) => join(repoRoot, "examples", w.dialect);
+const clone = repoRoot.replace(/\/$/, "");
+
+/** Who the commands run as. Never the local user or host: the transcripts are published. */
+export const RUN_AS = { user: "yodel", host: "example" };
 
 /** A node_modules whose entries link to this repo's, with this repo as @intentius/sql-yodeler and its bin as yodel. */
 function nodeModules(dir: string): void {
@@ -137,15 +158,31 @@ export async function runWalkthrough(
     const r = await git(dir, args);
     if (r.code !== 0) throw new Error(`git ${args}: ${r.output}`);
   }
-  const env: NodeJS.ProcessEnv = { ...process.env, ...w.env(), FORCE_COLOR: "0", NO_COLOR: "1" };
+  const preload = join(root, "run-as.cjs");
+  writeFileSync(
+    preload,
+    `const os = require("node:os");\nos.hostname = () => ${JSON.stringify(RUN_AS.host)};\nrequire("node:module").syncBuiltinESMExports();\n`,
+  );
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...w.env(),
+    FORCE_COLOR: "0",
+    NO_COLOR: "1",
+    USER: RUN_AS.user,
+    LOGNAME: RUN_AS.user,
+    NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require ${preload}`.trim(),
+  };
   delete env.YODEL_HISTORY_DATABASE;
   delete env.YODEL_TOPOLOGY;
+  delete env.GITHUB_ACTOR;
+  delete env.GITLAB_USER_LOGIN;
 
   await w.reset();
   const ran: Ran[] = [];
   let lastApprove: string | undefined;
   const fill = (text: string) =>
     text
+      .replace(/\{clone\}/g, clone)
       .replace(/\{id:([a-z0-9_-]+)\}/g, (_, name: string) => migrationId(dir, name))
       .replace(/\{approve\}/g, () => {
         if (!lastApprove) throw new Error("no chant approve command printed yet");
@@ -180,11 +217,12 @@ export async function runWalkthrough(
       ran.push({ step, output });
     } else {
       const command = fill(step.run);
-      log(`$ ${command}`);
-      const { code, output } = await sh(command, dir, env);
-      const shown = output.split(root).join("<tmp>");
+      const shownCommand = command.split(clone).join("<clone>");
+      log(`$ ${shownCommand}`);
+      const { code, output } = await sh(command, step.cwd ? join(dir, step.cwd) : dir, env);
+      const shown = output.split(root).join("<tmp>").split(clone).join("<clone>");
       log(shown.trimEnd());
-      ran.push({ step, command, output: shown, code });
+      ran.push({ step, command: shownCommand, output: shown, code });
       const approve = /chant approve \S+ \S+ --plan jcs1-sha256:[0-9a-f]{64}/.exec(output);
       if (approve) lastApprove = approve[0];
       if (code !== step.code) throw new Error(`${command}: exit ${String(code)}, expected ${String(step.code)}\n${output}`);
@@ -203,6 +241,62 @@ const fence = (text: string, lang = "") => {
 };
 const langOf = (path: string) => (path.endsWith(".ts") ? "ts" : path.endsWith(".sql") ? "sql" : path.endsWith(".json") ? "json" : "");
 
+const consoleBlock = (r: Ran) => {
+  const exit = r.code === 0 ? "" : `\n[exit ${String(r.code)}]`;
+  return `$ ${r.command ?? ""}\n${(r.output ?? "").trimEnd()}${exit}`;
+};
+
+export interface Quote {
+  /** The docs/ page. */
+  page: string;
+  /** The block's first command, as its `$ ` line shows it. */
+  command: string;
+  /** The block, without its fence. */
+  text: string;
+}
+
+/**
+ * The docs quotes a run makes: each run of consecutive steps quoted on the
+ * same page is one console block.
+ */
+export function quotes(ran: Ran[]): Quote[] {
+  const out: Array<{ page: string; ran: Ran[] }> = [];
+  let open: { page: string; ran: Ran[] } | undefined;
+  for (const r of ran) {
+    const s = r.step;
+    if ("run" in s && s.quote) {
+      if (open?.page !== s.quote) out.push((open = { page: s.quote, ran: [] }));
+      open.ran.push(r);
+    } else {
+      open = undefined;
+    }
+  }
+  return out.map((q) => ({ page: q.page, command: q.ran[0]?.command ?? "", text: q.ran.map(consoleBlock).join("\n") }));
+}
+
+/** The console block in `text` whose first line is `$ <command>`: where its body starts and ends. */
+export function findBlock(text: string, command: string): { start: number; end: number } | undefined {
+  const at = text.indexOf("```console\n$ " + command + "\n");
+  if (at === -1) return undefined;
+  const start = at + "```console\n".length;
+  const end = text.indexOf("\n```", start);
+  return end === -1 ? undefined : { start, end };
+}
+
+/** Rewrites each quoted block in docs/ from the run. */
+export function writeQuotes(ran: Ran[]): string[] {
+  const pages: string[] = [];
+  for (const q of quotes(ran)) {
+    const path = join(repoRoot, "docs", q.page);
+    const text = readFileSync(path, "utf8");
+    const b = findBlock(text, q.command);
+    if (!b) throw new Error(`docs/${q.page} has no console block starting with "$ ${q.command}"`);
+    writeFileSync(path, text.slice(0, b.start) + q.text + text.slice(b.end));
+    pages.push(`docs/${q.page}`);
+  }
+  return pages;
+}
+
 /** The README: the intro, then each step as Markdown. */
 export function renderReadme(w: Walkthrough, ran: Ran[]): string {
   const parts = [w.intro.trim()];
@@ -213,10 +307,7 @@ export function renderReadme(w: Walkthrough, ran: Ran[]): string {
     else if ("edit" in s && s.show !== false) parts.push(`\`${r.command ?? s.edit}\` now:\n\n${fence(r.output ?? "", langOf(s.edit))}`);
     else if ("cat" in s) parts.push(`\`${r.command ?? ""}\`:\n\n${fence(r.output ?? "", s.lang ?? langOf(s.cat))}`);
     else if ("sql" in s && !s.hide) parts.push(fence(s.sql.trim(), "sql") + (s.showResult ? `\n\n${fence(r.output ?? "")}` : ""));
-    else if ("run" in s && !s.hide) {
-      const exit = r.code === 0 ? "" : `\n[exit ${String(r.code)}]`;
-      parts.push(fence(`$ ${r.command ?? ""}\n${(r.output ?? "").trimEnd()}${exit}`, "console"));
-    }
+    else if ("run" in s && !s.hide) parts.push(fence(consoleBlock(r), "console"));
   }
   return `${parts.join("\n\n")}\n`;
 }
@@ -251,21 +342,24 @@ export function keep(w: Walkthrough, dir: string): void {
   }
 }
 
-export async function load(dialect: string): Promise<Walkthrough> {
-  const mod = (await import(pathToFileURL(join(repoRoot, "examples", "walkthrough", `${dialect}.ts`)).href)) as { walkthrough: Walkthrough };
+export async function load(name: string): Promise<Walkthrough> {
+  const mod = (await import(pathToFileURL(join(repoRoot, "examples", "walkthrough", `${name}.ts`)).href)) as { walkthrough: Walkthrough };
   return mod.walkthrough;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const dialect = process.argv[2] ?? "";
+  const name = process.argv[2] ?? "";
   const write = process.argv.includes("--write");
-  const w = await load(dialect);
+  const w = await load(name);
   const { ran, dir, dispose } = await runWalkthrough(w, (l) => { console.log(l); });
   try {
     if (write) {
-      keep(w, dir);
-      writeFileSync(join(exampleDir(w), "README.md"), renderReadme(w, ran));
-      console.log(`wrote ${relative(process.cwd(), join(exampleDir(w), "README.md"))}`);
+      if (w.readme !== false) {
+        keep(w, dir);
+        writeFileSync(join(exampleDir(w), "README.md"), renderReadme(w, ran));
+        console.log(`wrote ${relative(process.cwd(), join(exampleDir(w), "README.md"))}`);
+      }
+      for (const page of writeQuotes(ran)) console.log(`wrote ${page}`);
     }
   } finally {
     dispose();
