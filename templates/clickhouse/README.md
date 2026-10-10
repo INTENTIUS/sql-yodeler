@@ -10,7 +10,7 @@ The ClickHouse schema of database `{{chant:database}}`, managed with SQL Yodeler
 | `migrations/` | the versioned migrations, written by `yodel new` |
 | `ops/migrate-<env>.op.ts` | the Op `yodel apply <env>` runs: plan, a gate bound to the plan digest, apply |
 | `ops/watch-<env>.op.ts` | the drift watch, a chant `WatchOp` on a schedule |
-| `scripts/local.ts` | after `just up`: says whether dev's server is the emulator, and what `.env` needs for dev on it |
+| `scripts/local.ts` | after `just up`: says whether dev's server is the emulator, makes the read-only user `reader` on it, and prints what `.env` needs for dev on it (`reader` as dev's reader, the emulator's admin user as its writer) |
 | `justfile` | the routine commands as `just` targets (below) |
 | `.github/workflows/`, `.forgejo/workflows/`, `.gitlab-ci.yml`, `.gitlab/` | the pipelines for GitHub Actions, Forgejo Actions and GitLab CI, rendered by `yodel ci` (`npm run ci`) from the files above; `yodel ci --check` (`npm run ci:check`) fails when one is stale |
 
@@ -47,7 +47,7 @@ YODEL_CREDENTIALS=writer npx yodel init --from <env> --force
 | Target | Runs |
 |---|---|
 | `just` | `just --list`: the targets, one line each |
-| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which warns when dev's address (`127.0.0.1`) reaches another server on this machine instead of the emulator |
+| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which warns when dev's address (`127.0.0.1`) reaches another server on this machine instead of the emulator, and on the emulator makes the read-only user `reader` that dev reads with (yodel refuses one user as both reader and writer) |
 | `just down` | `npx @intentius/chant emulator down --lexicon sql` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |
