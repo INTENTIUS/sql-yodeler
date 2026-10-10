@@ -348,6 +348,8 @@ A rule applies to the environments it lists, or to every one. It denies the plan
 - `silences.reason` denies a `-- yodel:allow` silence (of `silences.rules`, default any) whose reason does not match the pattern.
 - `check` is a TypeScript predicate over the plan: the environment, the dialect, the time (`now`), and each pending migration with its id, checksum, steps (classes, destructive, rules, SQL, Op) and silences. A message, a list of messages or `false` denies; `undefined`, `true` or `[]` allows.
 
+The policy is read from `yodel.config.ts` at the base commit, the commit a change merges onto (the merge base with the target branch on a pull request, `HEAD^1` on main, or `YODEL_BASE`), as a wave's gate is, never from the working tree. A pull request that weakens or deletes a rule is judged by the rule the branch had, and its own policy applies once it is merged. A rule the base does not have applies to nothing yet. When the working tree's policy differs from the base's, `yodel plan` and `yodel apply` say which one applies.
+
 `yodel plan` shows each rule's outcome, and the pull request comment shows them in a table with the command that overrides a denial. `yodel apply` judges the policy before the gate and the Apply step judges it again under the lock: a rule that denies the plan refuses the apply with exit 4, naming the rule and why, and nothing is applied.
 
 An override is a person's decision, with a reason, to apply a plan a rule denies:

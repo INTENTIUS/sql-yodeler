@@ -22,7 +22,7 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { YodelError } from "../project.js";
-import type { YodelConfig } from "./define.js";
+import type { PolicyConfig, YodelConfig } from "./define.js";
 import { checkYodelConfig, CONFIG_FILE } from "./load.js";
 
 export const BASE_ENV = "YODEL_BASE";
@@ -102,4 +102,48 @@ export async function loadYodelConfigAtBase(dir: string, env: NodeJS.ProcessEnv 
   } finally {
     if (existsSync(copy)) unlinkSync(copy);
   }
+}
+
+/** The plan policy (#53) as the base commit has it (#73). */
+export interface PolicyAtBase {
+  policy: PolicyConfig | undefined;
+  /** The base commit read, when one could be. */
+  sha?: string;
+  /** Why the working tree's policy is not the one that applies, when it differs; for the plan and apply to say. */
+  note?: string;
+}
+
+/**
+ * `policy` from yodel.config.ts at the base commit, never the working
+ * tree's: a pull request that weakens or deletes a rule is judged by the
+ * rule the branch had. A base with no policy (or no yodel.config.ts) applies
+ * none, whatever the working tree adds, and the note says so. A checkout
+ * with no base to read (no git, a repository's first commit) applies none
+ * either.
+ */
+export async function policyAtBase(project: { dir: string; yodel?: { config: YodelConfig } | undefined }, env: NodeJS.ProcessEnv = process.env): Promise<PolicyAtBase> {
+  const tree = project.yodel?.config.policy;
+  let at: ConfigAtBase;
+  try {
+    at = await loadYodelConfigAtBase(project.dir, env);
+  } catch (e) {
+    const why = e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e);
+    return { policy: undefined, ...(tree ? { note: `The policy is read at the base commit, and there is none to read (${why}), so no policy applies.` } : {}) };
+  }
+  const policy = at.config?.policy;
+  const short = at.sha.slice(0, 12);
+  if (tree && !policy) {
+    return { policy: undefined, sha: at.sha, note: `yodel.config.ts at ${short} (${at.base.source}) declares no policy, so none applies; the working tree's applies once it is on the branch.` };
+  }
+  if (policy && !samePolicy(tree, policy)) {
+    return { policy, sha: at.sha, note: `The policy applied is yodel.config.ts's at ${short} (${at.base.source}), not the working tree's, which applies once it is on the branch.` };
+  }
+  return { policy, sha: at.sha };
+}
+
+/** Whether two policies say the same: their rules by id and what each declares (a check by its source), and their overriders. */
+function samePolicy(a: PolicyConfig | undefined, b: PolicyConfig | undefined): boolean {
+  const canon = (p: PolicyConfig | undefined) =>
+    JSON.stringify(p, (_k, v: unknown) => (v instanceof RegExp ? v.toString() : typeof v === "function" ? v.toString() : v));
+  return canon(a) === canon(b);
 }

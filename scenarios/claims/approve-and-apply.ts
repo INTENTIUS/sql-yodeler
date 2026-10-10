@@ -83,8 +83,11 @@ async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
  * (exit 4) naming the rule. An override recorded with yodel override counts
  * for exactly the plan digest it was recorded for: once the plan moves (a
  * table made by hand) the rule denies again; back on that digest the plan
- * applies, and the history records the override and its reason.
- * BREAK: the policy is removed from yodel.config.ts, so the drop is not refused.
+ * applies, and the history records the override and its reason. The
+ * policy is read at the base commit (#73): the change that adds the drop
+ * also deletes the rule, and the drop is still denied.
+ * BREAK: the policy is read from the change itself (YODEL_BASE=HEAD), where
+ * the rule is gone, so the drop is not refused.
  */
 async function policyPart(ctx: Ctx, p: Project): Promise<void> {
   // A table to drop, applied first. Under BREAK an earlier part may have left migrations pending too.
@@ -92,30 +95,34 @@ async function policyPart(ctx: Ctx, p: Project): Promise<void> {
   if ((await p.newMigration("add-scratch")) === undefined) throw new Error("yodel new wrote no migration for the scratch table");
   await p.commit("a scratch table");
   if ((await p.approvedApply()).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+  // The branch's policy refuses drops here.
+  p.write(
+    "yodel.config.ts",
+    `export default {\n  policy: {\n    overriders: ["alice"],\n    rules: [{ id: "no-drops", environments: [${JSON.stringify(p.env)}], refuse: { classes: ["drop"] } }],\n  },\n};\n`,
+  );
+  await p.commit("a policy that refuses drops");
+  // The change: the drop, and the rule deleted with it.
   rmSync(p.path("src", "scratch.ts"));
-  if (!ctx.broken) {
-    p.write(
-      "yodel.config.ts",
-      `export default {\n  policy: {\n    overriders: ["alice"],\n    rules: [{ id: "no-drops", environments: [${JSON.stringify(p.env)}], refuse: { classes: ["drop"] } }],\n  },\n};\n`,
-    );
-  }
+  p.write("yodel.config.ts", "export default {};\n");
   const id = await p.newMigration("drop-scratch");
   if (id === undefined) throw new Error("yodel new wrote no migration for the drop");
-  await p.commit("drop the scratch table, under a policy that refuses drops");
+  await p.commit("drop the scratch table, and delete the rule that refuses it");
   const gone = async () => !(await ctx.db.tableExists("scratch"));
+  // Under BREAK, every apply reads the policy from the change.
+  const base = ctx.broken ? { YODEL_BASE: "HEAD" } : {};
 
-  const denied = await p.apply();
+  const denied = await p.apply([], base);
   hold(denied.ran.code === 4 && denied.doc.status === "denied", `yodel apply of a drop under the no-drops rule exited ${String(denied.ran.code)}, status ${String(denied.doc.status)}, not denied`);
   hold(!(await gone()), "the dropped object is gone though the policy denied the plan");
 
-  const over = await p.yodel(["override", p.env, "--rule", "no-drops", "--reason", "nothing reads it since TICKET-7", "--by", "alice"]);
+  const over = await p.yodel(["override", p.env, "--rule", "no-drops", "--reason", "nothing reads it since TICKET-7", "--by", "alice"], { env: base });
   if (over.code !== 0) throw new Error(`yodel override exited ${String(over.code)}: ${over.err.slice(-400)}`);
   await createTableByHand(ctx, "extra");
-  const moved = await p.apply();
+  const moved = await p.apply([], base);
   hold(moved.ran.code === 4 && moved.doc.status === "denied", `yodel apply after the plan moved exited ${String(moved.ran.code)}, status ${String(moved.doc.status)}: an override counted for another digest`);
   await ctx.db.exec(`DROP TABLE ${ctx.db.name}.extra`);
 
-  const applied = await p.approvedApply();
+  const applied = await p.approvedApply([], base);
   hold(applied.ran.code === 0, `yodel apply with the override for this digest exited ${String(applied.ran.code)}, status ${String(applied.doc.status)}`);
   hold(await gone(), "the dropped object is still there after the overridden apply");
   const recorded = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}' AND status = 'started' AND note LIKE '%no-drops%TICKET-7%'`);
@@ -158,8 +165,8 @@ async function removeApprovals(ctx: Ctx, p: Project, file: string, gate: string,
  * migration applied with no approval.
  */
 async function auditPart(ctx: Ctx, p: Project): Promise<void> {
-  // Under BREAK the earlier parts may have left migrations pending.
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+  // Under BREAK the earlier parts may have left migrations pending: the policy part's drop, which the base's policy still denies.
+  if ((await p.approvedApply([], ctx.broken ? { YODEL_BASE: "HEAD" } : {})).ran.code !== 0) throw new Error("the earlier migrations did not apply");
   // Before the break: a failure here is not the break being caught.
   const must: (cond: boolean, what: string) => asserts cond = ctx.broken ? (cond, what) => { if (!cond) throw new Error(what); } : hold;
   const file = join(ctx.work, "audit.jsonl");
@@ -214,6 +221,6 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const approveAndApply: Claim = {
   name: "approve-and-apply",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
   dialects: { ch: body, pg: body },
 };
