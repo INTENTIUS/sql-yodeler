@@ -29,8 +29,15 @@ export interface ForgeRepo {
   pushed(sha: string): Promise<ForgeRun>;
   /** The apply again, started by hand on main at `sha`. */
   applyAgain(sha: string): Promise<ForgeRun>;
-  /** Opens a pull request from the pushed branch `head` (at `sha`) into main, and waits for its checks. */
+  /** Opens a pull request from the pushed branch `head` (at `sha`) into main, and waits for its checks: every pull request workflow the project has. */
   openPr(head: string, sha: string, title: string): Promise<{ id: number; checks: ForgeRun }>;
+  /**
+   * Approves pull request `id`'s head `sha` in a review (#48): as its author,
+   * or as `reviewer`, another user with write access to the repository. A
+   * forge that refuses the author's own approval says so, and the caller
+   * goes on with no review. Without it, the claim skips the pr-review part.
+   */
+  review?(id: number, sha: string, as: "author" | "reviewer"): Promise<void>;
   /** The bodies of the pull request's comments. */
   comments(id: number): Promise<string[]>;
   /** Merges the pull request; main's sha after the merge. */

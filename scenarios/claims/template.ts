@@ -12,7 +12,7 @@ const body = templateBody(forgejoForge);
 
 export const templateClaim: Claim = {
   name: "template",
-  says: "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge",
+  says: "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author",
   dialects: { ch: body, pg: body },
   shares: ["forgejo"],
   stallMinutes: 12,

@@ -21,6 +21,12 @@ export interface WaveRecord {
   /** For `not-required`: the policy and the commit it was read at. */
   policy?: string;
   base?: string;
+  /** Which approvals counted (#48), when not `ledger`. */
+  approval?: string;
+  /** Under `pr-review`, the review that approved the wave: the pull request, the head it approved and its approvers. */
+  review?: { pr: number; head: string; approvers: string[] };
+  /** Under `sealed`, the signer whose seal verified. */
+  signer?: string;
 }
 
 /** Reads `note.wave` from a history row's note, or undefined. */

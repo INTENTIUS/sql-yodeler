@@ -72,7 +72,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, type ApprovalMode, type YodelConfig } from "../config/define.js";
+import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
 import { testFiles } from "../testing/files.js";
@@ -500,6 +501,9 @@ export const GITLAB_APPLY_FILE = ".gitlab/yodel-apply.gitlab-ci.yml";
 /** The stage of the scheduled resume job in GITLAB_APPLY_FILE, as chant names it. */
 const RESUME_STAGE = "resume";
 
+/** The stage of the merge request job that records the plans a pr-review wave's review approves (#48), as chant names it. */
+const PLANS_STAGE = "plans";
+
 /** The stage of each wave's job in GITLAB_APPLY_FILE, as chant names it. */
 const waveStages = (waves: readonly Wave[]): string[] => waves.map((w, i) => `wave-${String(i + 1)}-${w.env}`);
 
@@ -566,7 +570,9 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   if (!jobsYaml.startsWith("stages:\n") || !Array.isArray(derivedStages) || derivedStages[0] !== "review") throw new Error("gitlab: expected the jobs' YAML to start with their stages, review first");
   const derived = jobsYaml.slice(0, end + 2);
   // The stages this file's jobs use (review, then any the project's own jobs add), then the apply file's waves and the watch file's ops.
-  const stages = [...new Set([...derivedStages.map(String), ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : []), "ops"])];
+  // A pr-review wave (#48) adds the merge request job that records the plans, in chant's stage "plans".
+  const plans = waves.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
+  const stages = [...new Set([...derivedStages.map(String), ...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : []), "ops"])];
   const topLevel = [
     emitYAMLEntry("include", [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }]),
     emitYAMLEntry("stages", stages),
@@ -639,6 +645,8 @@ export interface Wave {
   targets?: readonly string[];
   /** Split the wave into a deciding job and this many share jobs (yodel.config.ts `waves[].shares`). */
   shares?: number;
+  /** Which approvals of the wave's digest count (yodel.config.ts `waves[].approval`, #48); absent, `ledger`. */
+  approval?: ApprovalMode;
 }
 
 /** The environment `env`'s wave requires, as a list. */
@@ -662,6 +670,7 @@ interface WavesSpec {
     runs: Array<{ target: string; op: string }>;
     gate: WaveGate;
     shares?: number;
+    approval?: ApprovalMode;
     environment?: { name: string };
     variables?: Record<string, string>;
   }>;
@@ -687,6 +696,7 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
       runs: (w.targets ?? [w.env]).map((target) => ({ target, op: `migrate-${w.env}` })),
       gate: w.gate,
       ...(w.shares !== undefined && w.shares > 1 ? { shares: w.shares } : {}),
+      ...(w.approval !== undefined && w.approval !== "ledger" ? { approval: w.approval } : {}),
       ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
     })),
     ...(resume ? { resume } : {}),
@@ -709,7 +719,8 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
   const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(wavesSpec(waves), null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const variables = (forge: Forge) => (env: string) => {
-    const required = waves.find((w) => w.env === env)?.requires;
+    const wave = waves.find((w) => w.env === env);
+    const required = wave?.requires;
     return {
       YODEL_CREDENTIALS: `writer:${env}`,
       ...APPLY_LOCK,
@@ -718,6 +729,8 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
         : {
             ...secrets([...writerVariables(env, dialect, envs.credentials?.[env]), ...WEBHOOK_VARIABLES]),
             ...(required ? secrets(readerVariables(required, dialect, envs.credentials?.[required])) : {}),
+            // A pr-review wave (#48) reads the merged pull request's reviews with the job's token.
+            ...(wave?.approval === "pr-review" ? { GITHUB_TOKEN: "${{ github.token }}" } : {}),
           }),
     };
   };
@@ -746,6 +759,16 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
       : ["# Forgejo has no re-run: it dispatches yodel-apply.yml again on main, with the", "# CHANT_FORGE_TOKEN secret, a token with the write:repository scope."]),
   ];
   const waveClouds = cloudsOf(envs, waves.flatMap((w) => waveRoles(waves, w.env)));
+  const plansHeader = [
+    ...HEADER,
+    "#",
+    "# A pull request into main, when a wave's approval is pr-review (yodel.config.ts",
+    "# waves[].approval): chant run wave --record-plans plans every wave at the pull",
+    "# request's head, as it will be after the merge, and records the digests on",
+    "# chant/lifecycle. After the merge, an approving review of that head by a writer",
+    "# other than its author approves the digest it recorded, and only that one. It",
+    "# holds no writer's credentials: it plans with each environment's reader.",
+  ];
   for (const forge of FORGES) {
     const result = await generateOpWavesPipeline(
       wavesSpec(waves, variables(forge), envs.resume),
@@ -764,6 +787,8 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
       // The resume workflow (GitHub, Forgejo) has no wave job to report on.
       if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), yaml) });
+      // The pull request workflow that records the plans a review approves (#48).
+      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, withPlansReaders(forge, yaml, waves, dialect, envs)) });
       else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveReports(forge, yaml, waves, tc, envs)) });
     }
   }
@@ -787,6 +812,13 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
   if (forge === "gitlab") {
     const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
     if (emit(doc) !== yaml) throw new Error("gitlab: the apply waves do not emit back to chant's text");
+    // The merge request job that records the plans a review approves (#48): the waves as after the merge.
+    const record = doc[`${APPLY_PIPELINE}-record-plans`] as { variables?: Record<string, string>; id_tokens?: unknown } | undefined;
+    if (record) {
+      record.variables = { ...(record.variables ?? {}), [RECORD_PLANS_ENV]: "1" };
+      const readers = cloudsOf(envs, [...new Set(waves.map((w) => w.env))].map((e): [string, Role] => [e, "reader"]));
+      if (readers.length > 0) record.id_tokens = idTokens(readers);
+    }
     for (const [name, job] of Object.entries(doc)) {
       const env = envOf(name);
       if (!env || typeof job !== "object" || job === null) continue;
@@ -813,19 +845,45 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
   return `${withIdToken(forge, top, cloudsOf(envs, waves.flatMap((w) => waveRoles(waves, w.env))))}${emitJobs()}`;
 }
 
+/**
+ * The plans workflow (GitHub, Forgejo) for a pr-review wave (#48): chant's,
+ * with each environment's reader (the waves are planned on every one, and a
+ * wave reads the history of the one it requires) and {@link RECORD_PLANS_ENV}
+ * on its job. The output is parsed and emitted again, checked first to give
+ * back chant's text unchanged.
+ */
+function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], dialect: Dialect, creds: Pick<Environments, "credentials"> = {}): string {
+  const at = yaml.indexOf("\njobs:\n");
+  if (at < 0) throw new Error(`${forge}: the plans workflow has no jobs`);
+  const doc = parseYAMLDocument(yaml) as { jobs: Record<string, Record<string, unknown>> };
+  const top = yaml.slice(0, at + 1);
+  const emitJobs = () => `${emitYAMLEntry("jobs", doc.jobs)}\n`;
+  if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the plans workflow does not emit back to chant's text`);
+  const job = doc.jobs["record-plans"];
+  if (!job) throw new Error(`${forge}: the plans workflow has no record-plans job`);
+  const envs = [...new Set(waves.map((w) => w.env))];
+  const steps = job.steps;
+  delete job.steps;
+  Object.assign(job, { env: { [RECORD_PLANS_ENV]: "1", ...secrets(envs.flatMap((e) => readerVariables(e, dialect, creds.credentials?.[e]))) }, steps });
+  // A reader whose password is a cloud token (#50) is minted from the job's identity.
+  return `${withIdToken(forge, top, cloudsOf(creds, envs.map((e): [string, Role] => [e, "reader"])))}${emitJobs()}`;
+}
+
 /** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
 export async function readWaves(dir: string, envs: readonly string[]): Promise<Wave[]> {
   const declared = (await readConfig(dir))?.waves as unknown;
   if (declared === undefined) return envs.map((env, i) => ({ env, gate: "always", ...(i > 0 ? { requires: envs[i - 1] } : {}) }));
   if (!Array.isArray(declared) || declared.length === 0) throw new Error("yodel.config.ts: waves must list at least one { env, gate }");
-  return declared.map((w: { env?: unknown; gate?: unknown; requires?: unknown; shares?: unknown }, i, all: Array<{ env?: unknown }>) => {
+  return declared.map((w: { env?: unknown; gate?: unknown; requires?: unknown; shares?: unknown; approval?: unknown }, i, all: Array<{ env?: unknown }>) => {
     const env = String(w.env);
     if (!envs.includes(env)) throw new Error(`yodel.config.ts: waves[${String(i)}].env ${env} is not an environment (${envs.join(", ")})`);
     const gate = (w.gate ?? "always") as WaveGate;
     if (!WAVE_GATES.includes(gate)) throw new Error(`yodel.config.ts: waves[${String(i)}].gate ${String(w.gate)} is not ${WAVE_GATES.join(", ")}`);
     const requires = w.requires === false ? undefined : w.requires === undefined ? (i > 0 ? String(all[i - 1]?.env) : undefined) : typeof w.requires === "string" ? w.requires : JSON.stringify(w.requires);
     if (requires !== undefined && !envs.includes(requires)) throw new Error(`yodel.config.ts: waves[${String(i)}].requires ${requires} is not an environment (${envs.join(", ")})`);
-    return { env, gate, ...(requires ? { requires } : {}), ...(typeof w.shares === "number" && w.shares > 1 ? { shares: w.shares } : {}) };
+    const approval = w.approval as ApprovalMode | undefined;
+    if (approval !== undefined && !APPROVAL_MODES.includes(approval)) throw new Error(`yodel.config.ts: waves[${String(i)}].approval ${String(w.approval)} is not ${APPROVAL_MODES.join(", ")}`);
+    return { env, gate, ...(requires ? { requires } : {}), ...(typeof w.shares === "number" && w.shares > 1 ? { shares: w.shares } : {}), ...(approval && approval !== "ledger" ? { approval } : {}) };
   });
 }
 

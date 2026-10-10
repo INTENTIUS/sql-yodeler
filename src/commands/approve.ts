@@ -8,6 +8,7 @@ import { runnable } from "../chant/runnable.js";
 import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
 import { EXIT_OUTSTANDING } from "../exit.js";
 import { gitLedger } from "../versioned/approval.js";
+import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { closeVersioned, findMigrateOp, hasMigrations, migrationsDir, openVersioned, renderStatus, statusReport, ALLOW_OUT_OF_ORDER_ENV } from "../versioned/index.js";
 import { tenantSetOf } from "../tenants/index.js";
 import { describeTenantSetWave, groupTenants, someNames, viewTenantSetWave, viewTenants } from "../tenants/wave.js";
@@ -17,7 +18,7 @@ import type { Project } from "../project.js";
 /** Exit code: nothing was approved (no one to ask, a wrong answer, a plan apply would refuse, a plan that moved). */
 export const NOT_APPROVED = 4;
 
-const usage = "usage: yodel approve <env> [--plan <digest>] [--no-resume] [--dir <project>] [--op <name>] [--allow-out-of-order]";
+const usage = "usage: yodel approve <env> [--plan <digest>] [--sign [--key <file>]] [--actor <name>] [--no-resume] [--dir <project>] [--op <name>] [--allow-out-of-order]";
 
 const help = `${usage}
 
@@ -51,6 +52,17 @@ ${WAVES_PIPELINE}-wave-<k> --plan <digest>, bound to the wave's set digest
 before it applied), and the wave's job is the one resumed. A wave whose
 policy needs no approval for this plan has nothing to approve.
 
+A gate whose approval mode is sealed (yodel.config.ts waves[].approval, or
+environments.<env>.approval for the migrations Op, read at the base commit)
+counts only an approval sealed with an ssh key that the signers file,
+.chant/allowed_signers at the repository's root, lists at the base commit
+for the approver: --sign seals it (chant approve --sign), with git's
+user.signingkey or --key <file>, and is added on its own under sealed. The
+approver is --actor, else the user chant names (GITHUB_ACTOR,
+GITLAB_USER_LOGIN or USER); it must be the principal the signers file gives
+the key. A key the change being applied adds to that file does not count
+for it.
+
 An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
 is approved once for every tenant: yodel approve <env> plans each tenant as
 the wave's deciding job does, shows what is pending on each, and approves
@@ -61,6 +73,12 @@ Options:
   --plan <digest>       the digest you mean to approve (from the pull request
                         comment or the waiting job); refused, naming the one
                         that waits, when it is not the plan's
+  --sign                seal the approval with an ssh key (on its own when the
+                        gate's approval mode is sealed)
+  --key <file>          the private key --sign seals with (default: git's
+                        user.signingkey, with gpg.format ssh)
+  --actor <name>        the approver chant records, the principal the signers
+                        file names for the key
   --no-resume           record the approval only; start no job
   --op <name>           the migrations Op, when more than one applies <env>
   --allow-out-of-order  approve the plan yodel apply --allow-out-of-order runs
@@ -86,8 +104,20 @@ Exit codes:
  * again. Which forge API that calls, and with which token, chant reads from
  * the job's pending fact on chant/lifecycle (#47).
  */
-export function chantApproveArgs(op: string, gate: string, digest: string, resume: boolean): string[] {
-  return ["approve", op, gate, "--plan", digest, ...(resume ? ["--resume"] : [])];
+export function chantApproveArgs(op: string, gate: string, digest: string, resume: boolean, signing: Signing = {}): string[] {
+  return [
+    "approve", op, gate, "--plan", digest,
+    ...(signing.actor !== undefined ? ["--actor", signing.actor] : []),
+    ...(signing.sign === true ? ["--sign", ...(signing.key !== undefined ? [signing.key] : [])] : []),
+    ...(resume ? ["--resume"] : []),
+  ];
+}
+
+/** How the approval is sealed (#48): `--sign` with git's signing key or `key`, as `actor`. */
+export interface Signing {
+  sign?: boolean;
+  key?: string;
+  actor?: string;
 }
 
 /** Whether the project's git repository has a remote: without one there is nothing to push to and no CI job to resume. */
@@ -122,9 +152,10 @@ async function record(
   resume: boolean,
   next: string,
   afterResume = "",
+  signing: Signing = {},
 ): Promise<number> {
   const since = new Date(Date.now() - 1000).toISOString();
-  const ran = await runChant(chantApproveArgs(op, gate, digest, resume), { cwd: dir, onStdout: io.err, onStderr: io.err });
+  const ran = await runChant(chantApproveArgs(op, gate, digest, resume, signing), { cwd: dir, onStdout: io.err, onStderr: io.err });
   if (ran.code !== 0) {
     if (resume && (await approvalRecorded(dir, op, gate, digest, since).catch(() => false))) {
       io.err(
@@ -157,6 +188,9 @@ export const approve: Command = {
             op: { type: "string" },
             plan: { type: "string" },
             "no-resume": { type: "boolean" },
+            sign: { type: "boolean" },
+            key: { type: "string" },
+            actor: { type: "string" },
             "allow-out-of-order": { type: "boolean" },
           },
         });
@@ -168,6 +202,13 @@ export const approve: Command = {
       if (name === undefined || rest.length > 0) throw new YodelError(usage);
       const allowOutOfOrder = values["allow-out-of-order"] === true || process.env[ALLOW_OUT_OF_ORDER_ENV] === "1";
       const expected = typeof values.plan === "string" ? values.plan : undefined;
+      if (values.key !== undefined && values.sign !== true) throw new YodelError(`--key is the key --sign seals with; add --sign\n${usage}`);
+      /** --sign, or a sealed gate (#48), seals the approval. */
+      const signing = (mode: string | undefined): Signing => {
+        const sign = values.sign === true || mode === "sealed";
+        if (sign && values.sign !== true) io.err(`The gate's approval mode is sealed: the approval is sealed (chant approve --sign)${typeof values.key === "string" ? "" : " with git's user.signingkey"}.\n`);
+        return { ...(sign ? { sign } : {}), ...(typeof values.key === "string" ? { key: values.key } : {}), ...(typeof values.actor === "string" ? { actor: values.actor } : {}) };
+      };
       /** --no-resume, or a repository with no remote, records the approval only. */
       const resuming = async (dir: string): Promise<boolean> => {
         if (values["no-resume"] === true) return false;
@@ -192,7 +233,7 @@ export const approve: Command = {
         throw new YodelError(`${project.dir} has no migrations/ directory with a migration; yodel approve is for versioned migrations. For a declarative project, run yodel apply ${env.name}: it prints the chant approve command`);
       }
       const ordered = readMigrations(migrationsDir(project));
-      if (set !== undefined) return await approveTenantSet(project, set, ordered, { allowOutOfOrder, expected, ask, io, resuming });
+      if (set !== undefined) return await approveTenantSet(project, set, ordered, { allowOutOfOrder, expected, ask, io, resuming, signing });
       const venv = await openVersioned(project, env);
       try {
         const report = await statusReport(venv, ordered, { allowOutOfOrder });
@@ -233,7 +274,7 @@ export const approve: Command = {
             const { waveGateName } = await import("@intentius/chant/gated-waves");
             const gate = waveGateName(WAVES_PIPELINE, view.wave);
             const resume = await resuming(project.dir);
-            return await record(io, project.dir, WAVES_PIPELINE, gate, view.digest, resume, `Run wave ${String(view.wave)}'s job again (push chant/lifecycle first if chant did not).`);
+            return await record(io, project.dir, WAVES_PIPELINE, gate, view.digest, resume, `Run wave ${String(view.wave)}'s job again (push chant/lifecycle first if chant did not).`, "", signing(view.approval));
           }
         }
         const op = await findMigrateOp(project, env, typeof values.op === "string" ? values.op : undefined);
@@ -253,7 +294,9 @@ export const approve: Command = {
           io.err(`Not approved: the plan moved while you were asked (now ${again.digest ?? "nothing to apply"}); run yodel approve ${env.name} again.\n`);
           return NOT_APPROVED;
         }
-        return await record(io, project.dir, op.name, op.gate, report.digest, await resuming(project.dir), `Apply it with:\n  ${runnable(`yodel apply ${env.name}`, project.dir)}`, ` Where none waits, apply it with:\n  ${runnable(`yodel apply ${env.name}`, project.dir)}`);
+        const mode = await migrationsApprovalAtBase(project, env.name);
+        if (mode.note) io.err(`${mode.note}\n`);
+        return await record(io, project.dir, op.name, op.gate, report.digest, await resuming(project.dir), `Apply it with:\n  ${runnable(`yodel apply ${env.name}`, project.dir)}`, ` Where none waits, apply it with:\n  ${runnable(`yodel apply ${env.name}`, project.dir)}`, signing(mode.mode));
       } finally {
         await closeVersioned(venv);
       }
@@ -265,7 +308,7 @@ async function approveTenantSet(
   project: Project,
   set: string,
   ordered: readonly Migration[],
-  o: { allowOutOfOrder: boolean; expected: string | undefined; ask: (q: string) => Promise<string>; io: Parameters<Command["run"]>[1]; resuming: (dir: string) => Promise<boolean> },
+  o: { allowOutOfOrder: boolean; expected: string | undefined; ask: (q: string) => Promise<string>; io: Parameters<Command["run"]>[1]; resuming: (dir: string) => Promise<boolean>; signing: (mode: string | undefined) => Signing },
 ): Promise<number> {
   const { io } = o;
   const read = async () => {
@@ -315,5 +358,5 @@ async function approveTenantSet(
   }
   const { waveGateName } = await import("@intentius/chant/gated-waves");
   const gate = waveGateName(WAVES_PIPELINE, view.wave);
-  return record(io, project.dir, WAVES_PIPELINE, gate, view.digest, await o.resuming(project.dir), `Run wave ${String(view.wave)}'s deciding job again (push chant/lifecycle first if chant did not).`);
+  return record(io, project.dir, WAVES_PIPELINE, gate, view.digest, await o.resuming(project.dir), `Run wave ${String(view.wave)}'s deciding job again (push chant/lifecycle first if chant did not).`, "", o.signing(view.approval));
 }

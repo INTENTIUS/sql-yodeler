@@ -26,9 +26,10 @@ import { resolveEnvironment, YodelError, type Project } from "../project.js";
 import { EXIT_REFUSED } from "../exit.js";
 import { closeVersioned, openVersioned } from "../versioned/engine.js";
 import { statusReport, type StatusReport } from "../versioned/index.js";
-import { gateAtBase, planWave, viewWavePlan, WAVES_PIPELINE, WavePlanMoved, type WavePlanFile } from "../waves/index.js";
+import { gateAtBase, planWave, viewWavePlan, WAVES_PIPELINE, WavePlanMoved, type PlanWaveOptions, type WavePlanFile } from "../waves/index.js";
 import { listTenants, tenantSetOf } from "./index.js";
 import { splitTarget, tenantTarget } from "./target.js";
+import { describeApprovalMode, signFlag, waveApproval, type ApprovalMode } from "../approval-mode/index.js";
 
 /** A slot's tenant part: `@<i>of<n>`. */
 const SLOT = /^@([1-9][0-9]*)of([1-9][0-9]*)$/;
@@ -94,7 +95,7 @@ export interface SlotPlanFile {
 }
 
 /** `yodel apply <env>/@<i>of<n> --wave-plan <file>`: plans every tenant of the slot, as the query lists them now. */
-export async function writeSlotPlan(project: Project, target: string, ordered: readonly Migration[], file: string, options: { allowOutOfOrder: boolean }, log: (line: string) => void): Promise<SlotPlanFile> {
+export async function writeSlotPlan(project: Project, target: string, ordered: readonly Migration[], file: string, options: PlanWaveOptions, log: (line: string) => void): Promise<SlotPlanFile> {
   const slot = splitSlot(target);
   if (!slot) throw new YodelError(`${target} is not a slot of a tenant set's wave`);
   const path = resolve(file);
@@ -226,8 +227,10 @@ export interface TenantSetWaveView {
   blocked: string[];
   /** Under the gate at the base, the wave waits for an approval of `digest`. */
   waits: boolean;
-  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`. */
+  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, with `--sign` when the wave is sealed. */
   approve?: string | undefined;
+  /** Which approvals count (#48), as the base commit has the wave; absent, `ledger`. */
+  approval?: ApprovalMode | undefined;
 }
 
 /**
@@ -267,7 +270,9 @@ export async function viewTenantSetWave(project: Project, set: string, tenants: 
   const members = runs.map((r) => ({ member: r.target, planDigest: r.planDigest, op: "", ...(r.destructive ? { destructive: true } : {}), ...(r.empty ? { empty: true } : {}) }));
   view.digest = waveSetDigest(members);
   view.waits = blocked.length === 0 && opWaveNeedsApproval(gate, members);
-  view.approve = `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${view.digest}`;
+  const approval = waveApproval(at.config, set);
+  view.approve = `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${view.digest}${signFlag(approval)}`;
+  if (approval !== "ledger") view.approval = approval;
   return view;
 }
 
@@ -291,5 +296,5 @@ export function describeTenantSetWave(w: TenantSetWaveView, count: number, code:
   if (w.refused.length > 0) return `The apply pipeline fails wave ${String(w.wave)} until yodel apply stops refusing ${someNames(w.refused, code)} (${at}).`;
   if (w.blocked.length > 0) return `The apply pipeline refuses wave ${String(w.wave)} until what is pending on ${someNames(w.blocked, code)} has run where ${w.blocked.length === 1 ? "it requires" : "they require"} first; approve it then (${at}).`;
   if (!w.waits) return `The apply pipeline applies this to ${tenants} in wave ${String(w.wave)} with no approval (${at}).`;
-  return `The apply pipeline waits in wave ${String(w.wave)} for one approval of ${code(w.digest ?? "")}, for all ${tenants} (${at}).`;
+  return `The apply pipeline waits in wave ${String(w.wave)} for one approval of ${code(w.digest ?? "")}, for all ${tenants} (${at}).${w.approval && w.approval !== "ledger" ? ` ${describeApprovalMode(w.approval, code)}` : ""}`;
 }

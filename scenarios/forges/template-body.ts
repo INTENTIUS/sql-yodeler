@@ -80,6 +80,17 @@ async function users(ctx: Ctx): Promise<void> {
  * no new push. A forge without resume (GitLab here) is approved with chant
  * approve and run again by hand.
  * Every pull request job tries a write first and must be refused (#50).
+ * On a forge with reviews (Forgejo, GitHub), approval modes (#48), each
+ * judged on its own like the resume part: with dev's wave `approval:
+ * "sealed"` and `.chant/allowed_signers` listing alice at the base, a merged
+ * change that also adds mallory's key waits; an unsigned approval by alice
+ * and one sealed by mallory apply nothing, and one sealed by alice applies.
+ * Then with dev's wave `approval: "pr-review"`, a pull request whose head a
+ * second writer approved applies on merge with no chant approve (the
+ * author's own approval, refused by Forgejo, counts for nothing), the plans
+ * recorded by the pull request's yodel-apply-plans workflow. BREAK: the
+ * sealed wave is rendered as ledger, so the unsigned approval applies; the
+ * pull request is approved by its author alone, so the apply waits.
  * BREAK: `yodel approve dev --no-resume`, so no job starts again and nothing
  * applies within the wait (this part is judged on its own: the claim then
  * runs the job by hand and goes on); the pull request is merged without
@@ -153,15 +164,15 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
   const approveJs = join(installed, "dist", "commands", "approve.js");
-  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js"))) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47) or no credentials() (#50) yet: this checkout's, packed and committed with the project.
+  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js"))) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50) or no approval modes (#48) yet: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
     const file = packed.out.trim().split("\n").at(-1) ?? "";
     if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
     await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
-    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47) or no credentials() (#50): the project takes this checkout's yodel, vendor/${file}`);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50) or no approval modes (#48): the project takes this checkout's yodel, vendor/${file}`);
   }
   // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
   mkdirSync(join(dir, "ci"), { recursive: true });
@@ -246,6 +257,13 @@ export const gitlab = {
   const applied = second ?? (await repo.applyAgain(await head()));
   hold(applied.ok, `the apply after the approval ended ${applied.status}`);
   hold(await ctx.db.tableExists(table), `${ctx.db.name}.${table} is not on the server after the approved apply`);
+
+  // Approval modes (#48), on a forge with reviews.
+  if (repo.review) {
+    const modes = { ctx, dir, repo, sh, head, approve, table, dialect: d };
+    await sealedPart(modes);
+    await prReviewPart(modes);
+  } else ctx.log(`${forge.name}: no reviews here, so no approval-mode parts (they run on Forgejo and GitHub)`);
 
   // 2. A pull request: lint with the replay, and the plan comment.
   await sh("git", ["checkout", "-q", "-b", "add-note"]);
@@ -415,4 +433,154 @@ async function upgraded(dir: string, sh: (cmd: string, args: string[], timeoutMs
   }
   await sh("npx", ["yodel", "ci"]);
   hold((await sh("git", ["status", "--porcelain"])).out.trim() === "", "rendering again with the installed yodel did not give back the committed pipelines");
+}
+
+// ── Approval modes (#48) ──────────────────────────────────────────────────────
+
+interface Modes {
+  ctx: Ctx;
+  dir: string;
+  repo: ForgeRepo;
+  sh: (cmd: string, args: string[], timeoutMs?: number) => Promise<Ran>;
+  head: () => Promise<string>;
+  /** Runs a printed chant approve command and pushes chant/lifecycle. */
+  approve: (cmd: string) => Promise<void>;
+  table: string;
+  dialect: Ctx["dialect"];
+}
+
+/** dev's wave in yodel.config.ts with this approval mode (none: ledger), rendered again with yodel ci. */
+async function setDevApproval(m: Modes, mode: "sealed" | "pr-review" | undefined): Promise<void> {
+  const path = join(m.dir, "yodel.config.ts");
+  const text = readFileSync(path, "utf8");
+  const next = text.replace(/^( {4}\{ env: "dev", gate: "always")(, approval: "[^"]*")?( \},)$/m, `$1${mode ? `, approval: "${mode}"` : ""}$3`);
+  if (!/^ {4}\{ env: "dev", gate: "always"/m.test(text)) throw new Error("yodel.config.ts has no dev wave to set the approval of");
+  writeFileSync(path, next);
+  await m.sh("npm", ["run", "ci"]);
+}
+
+/** A column added to the template's table and its migration, committed on a new branch, pushed, and a pull request opened. */
+async function columnPr(m: Modes, column: string, extra: () => void = () => undefined): Promise<{ id: number; checks: ForgeRun }> {
+  await m.sh("git", ["checkout", "-q", "-b", `add-${column}`]);
+  const schemaPath = join(m.dir, "src", "schema.ts");
+  const schema = readFileSync(schemaPath, "utf8");
+  const next = schema.replace(/\n {2}\)(\n|`)/, `,\n    ${column} ${m.dialect === "ch" ? "String DEFAULT ''" : "text"}\n  )$1`);
+  if (next === schema) throw new Error("could not add a column to the template's schema");
+  writeFileSync(schemaPath, next);
+  extra();
+  await m.sh("npx", ["yodel", "new", `add-${column.replaceAll("_", "-")}`]);
+  await m.sh("git", ["add", "-A"]);
+  await m.sh("git", ["commit", "-qm", `feat: a ${column} column`]);
+  await m.sh("git", ["push", "-q", "origin", `add-${column}`]);
+  return m.repo.openPr(`add-${column}`, await m.head(), `feat: a ${column} column`);
+}
+
+/** Commits what changed on main, pushes it, and waits for its apply, which has nothing pending. */
+async function onMain(m: Modes, message: string): Promise<void> {
+  await m.sh("git", ["add", "-A"]);
+  await m.sh("git", ["commit", "-qm", message]);
+  await m.sh("git", ["push", "-q", "origin", "main"]);
+  const ran = await m.repo.pushed(await m.head());
+  hold(ran.ok, `the push of "${message}" ended ${ran.status}, with nothing pending`);
+}
+
+/** An ssh key for sealing approvals, outside the project. */
+async function sshKey(m: Modes, name: string): Promise<{ file: string; pub: string }> {
+  const file = join(m.ctx.work, `key-${name}`);
+  if (!existsSync(file)) {
+    const made = await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", name, "-f", file], { cwd: m.ctx.work });
+    if (made.code !== 0) throw new Error(`ssh-keygen could not make ${name}'s key`);
+  }
+  return { file, pub: readFileSync(`${file}.pub`, "utf8").trim().split(" ").slice(0, 2).join(" ") };
+}
+
+const WAVE_CMD = /chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64}/;
+
+/**
+ * Sealed (#48): dev's wave counts only an approval sealed by a key
+ * `.chant/allowed_signers` lists at the base. BREAK: the wave stays ledger,
+ * so the unsigned approval applies: caught here, and the part ends.
+ */
+async function sealedPart(m: Modes): Promise<void> {
+  const { ctx } = m;
+  const alice = await sshKey(m, "alice");
+  const mallory = await sshKey(m, "mallory");
+  if (ctx.broken) ctx.log("BREAK (sealed): dev's wave is left ledger, so any approval counts");
+  await setDevApproval(m, ctx.broken ? undefined : "sealed");
+  mkdirSync(join(m.dir, ".chant"), { recursive: true });
+  writeFileSync(join(m.dir, ".chant", "allowed_signers"), `alice ${alice.pub}\n`);
+  await onMain(m, "chore: dev's wave sealed; alice signs");
+
+  // The change: a column, and mallory's key added to the signers file.
+  const pr = await columnPr(m, "sealed_note", () => {
+    writeFileSync(join(m.dir, ".chant", "allowed_signers"), `alice ${alice.pub}\nmallory ${mallory.pub}\n`);
+  });
+  hold(pr.checks.ok, `the sealed part's pull request checks ended ${pr.checks.status}`);
+  await m.sh("git", ["checkout", "-q", "main"]);
+  const merged = await m.repo.merge(pr.id);
+  await m.sh("git", ["pull", "-q", "--ff-only", "origin", "main"]);
+  const waited = await m.repo.pushed(merged);
+  hold(!waited.ok, `the merged change applied with nothing approved (${waited.status})`);
+  const printed = WAVE_CMD.exec(waited.log)?.[0];
+  hold(printed !== undefined, "the waiting sealed wave did not print its chant approve command");
+  if (!ctx.broken) hold(new RegExp(`${printed.replace(/[^\w]/g, "\\$&")} --sign`).test(waited.log), "the sealed wave's approve command does not end in --sign");
+
+  // An unsigned approval by alice, and one sealed by mallory with the key the change added.
+  const chantApprove = async (args: string[]) => {
+    await m.sh("npx", ["chant", ...printed.split(" ").slice(1), ...args]);
+  };
+  await chantApprove(["--actor", "alice"]);
+  await chantApprove(["--actor", "mallory", "--sign", mallory.file]);
+  await m.sh("git", ["push", "-q", "origin", "chant/lifecycle"]);
+  const unsealed = await m.repo.applyAgain(merged);
+  const applied = unsealed.ok || (await ctx.db.columnExists(m.table, "sealed_note"));
+  if (ctx.broken) {
+    if (!applied) throw new Error("BREAK (sealed): the wave was ledger, and the unsigned approval did not apply; the sealed part did not catch its break");
+    ctx.log("BREAK caught (sealed): under ledger the unsigned approval applied the column");
+    return;
+  }
+  hold(!applied, "an unsigned approval, or one sealed by a key the change itself added, let the sealed wave apply");
+
+  // Sealed by alice, listed at base: it applies.
+  await chantApprove(["--actor", "alice", "--sign", alice.file]);
+  await m.sh("git", ["push", "-q", "origin", "chant/lifecycle"]);
+  const sealed = await m.repo.applyAgain(merged);
+  hold(sealed.ok && (await ctx.db.columnExists(m.table, "sealed_note")), `alice's sealed approval did not apply the sealed wave (${sealed.status})`);
+  hold(/approval sealed/.test(sealed.log), "the wave job did not say it was approved under sealed");
+}
+
+/**
+ * Pull request review (#48): dev's wave is pr-review. A pull request whose
+ * head another writer approved applies on merge, with no chant approve.
+ * BREAK: the author alone approves (Forgejo refuses it), so the apply waits:
+ * caught here, and the wave is approved by hand so the claim goes on.
+ */
+async function prReviewPart(m: Modes): Promise<void> {
+  const { ctx } = m;
+  await setDevApproval(m, "pr-review");
+  await onMain(m, "chore: dev's wave approved by the pull request's review");
+  const pr = await columnPr(m, "reviewed_note");
+  hold(pr.checks.ok, `the pr-review part's pull request checks ended ${pr.checks.status}`);
+  hold(pr.checks.log.includes("--record-plans"), "the pull request did not run chant run wave --record-plans");
+  const sha = await m.head();
+  await m.repo.review?.(pr.id, sha, "author");
+  if (ctx.broken) ctx.log("BREAK (pr-review): the pull request is approved by its author alone");
+  else await m.repo.review?.(pr.id, sha, "reviewer");
+  await m.sh("git", ["checkout", "-q", "main"]);
+  const merged = await m.repo.merge(pr.id);
+  await m.sh("git", ["pull", "-q", "--ff-only", "origin", "main"]);
+  const ran = await m.repo.pushed(merged);
+  const applied = ran.ok && (await ctx.db.columnExists(m.table, "reviewed_note"));
+  if (ctx.broken) {
+    if (applied) throw new Error("BREAK (pr-review): the author's own approval applied the wave; the pr-review part did not catch its break");
+    ctx.log("BREAK caught (pr-review): with the author's approval alone, the wave waits");
+    const cmd = WAVE_CMD.exec(ran.log)?.[0];
+    if (!cmd) throw new Error("the waiting pr-review wave printed no chant approve command");
+    await m.approve(cmd);
+    const levelled = await m.repo.applyAgain(merged);
+    if (!levelled.ok) throw new Error(`levelling after the pr-review break: the apply ended ${levelled.status}`);
+    return;
+  }
+  hold(applied, `the pull request approved by another writer did not apply on merge (${ran.status})`);
+  hold(/review of #\d+/.test(ran.log), "the wave job did not name the review that approved it");
 }

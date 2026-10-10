@@ -11,6 +11,7 @@
  */
 
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
+import { migrationsApprovalAtBase, portFor, signFlag, type EnvironmentApprovalMode } from "../approval-mode/index.js";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { migrationChecks, scanMigrations, type Migration, type MigrationCheck } from "../migrations/index.js";
@@ -76,6 +77,8 @@ export type ApprovalView =
       latest?: (LatestApproval & { moved?: MoveExplanation | undefined }) | undefined;
       /** Why the ledger was not read. */
       ledgerNote?: string | undefined;
+      /** Which approvals of the gate count (#48), as yodel.config.ts at the base commit has it; absent, `ledger`. */
+      mode?: EnvironmentApprovalMode | undefined;
     };
 
 export interface VersionedPlan {
@@ -232,15 +235,17 @@ async function approvalView(project: Project, env: Environment, venv: VersionedE
     if (!(e instanceof YodelError)) throw e;
     return { kind: "no-op", message: e.message.includes("no Op applies") ? `no Op applies the migrations to ${env.name}; declare one, for example:\n\n${migrateOpExample(env.name)}` : e.message };
   }
+  const mode = await migrationsApprovalAtBase(project, env.name);
   const view: Extract<ApprovalView, { kind: "op" }> = {
     kind: "op",
     op: op.name,
     gate: op.gate,
-    command: plan.digest ? `chant approve ${op.name} ${op.gate} --plan ${plan.digest}` : undefined,
+    command: plan.digest ? `chant approve ${op.name} ${op.gate} --plan ${plan.digest}${signFlag(mode.mode)}` : undefined,
+    ...(mode.mode !== "ledger" ? { mode: mode.mode } : {}),
   };
   if (options.ledger === null) return view;
   try {
-    const ledger = options.ledger ?? (await gitLedger(project.dir));
+    const ledger = await portFor(options.ledger ?? (await gitLedger(project.dir)), mode.mode, project.dir, mode.base);
     const latest = await latestApproval(ledger, op, plan.digest);
     if (!latest) return view;
     view.latest = latest;
