@@ -275,7 +275,7 @@ The job verifies the seal with `ssh-keygen`, which the CI image and `node:22-boo
 
 ### Pull request review
 
-Under `pr-review`, the pull request's own review approves the wave, with no `chant approve`. `yodel ci` renders a pull request job that runs `chant run wave --spec yodel-waves.json --record-plans`: it plans every wave at the pull request's head, as the wave will plan after the merge (each environment a wave requires taken as having applied what is pending, which the wave checks when it runs; no `before` step is run), and records the digests on `chant/lifecycle` (`_wave-plans/yodel-apply/<head>.json`). It holds no writer: it plans with each environment's reader.
+Under `pr-review`, the pull request's own review approves the wave, with no `chant approve`. `yodel ci` renders a pull request job that runs `chant run wave --spec yodel-waves.json --record-plans`: it plans every wave at the pull request's head, as the wave will plan after the merge (each environment a wave requires taken as having applied what is pending, which the wave checks when it runs; no `before` step is run), and records the digests on `chant/lifecycle` (`_wave-plans/yodel-apply/<head>.json`). It holds no writer: it plans with each environment's reader, and runs the write probe first ([Configuration](configuration.md)), as every pull request job does.
 
 | Forge | The job | What counts as an approving review |
 |---|---|---|

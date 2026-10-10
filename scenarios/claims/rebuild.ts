@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { stampedComment } from "@intentius/chant-lexicon-sql/core/ownership";
 import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
+import { run } from "../lib/exec.js";
 import { Project } from "../lib/project.js";
 import { insertEvents } from "../lib/schema.js";
 
@@ -116,6 +120,59 @@ export async function cleanupGatePart(ctx: Ctx, p: Project): Promise<void> {
 }
 
 /**
+ * Under a sealed environment (environments.<env>.approval, read at the base
+ * commit), yodel cleanup counts an approval of the drop only when it is
+ * sealed by a key the signers file at base lists for its approver, as an
+ * apply does (#130). An old table past its date, as a rebuild leaves it:
+ * the command yodel cleanup prints ends in --sign; an unsigned approval
+ * drops nothing; one sealed by alice, whom .chant/allowed_signers lists,
+ * drops it. The environment goes back to ledger after.
+ * BREAK: the environment is left ledger, as a yodel that checks cleanup's
+ * approval as plain ledger would treat it, so the unsigned approval drops
+ * the table.
+ */
+export async function cleanupSealedPart(ctx: Ctx, p: Project): Promise<void> {
+  const name = `${ctx.db.name}.events__chant_old`;
+  await ctx.db.exec(`DROP TABLE IF EXISTS ${name} SYNC`);
+  await ctx.db.exec(`CREATE TABLE ${name} AS ${ctx.db.name}.events`);
+  const comment = stampedComment("the old table of a rebuild", undefined, { rebuild: `${ctx.db.name}.events`, role: "old", "retain-until": "2000-01-01T00:00:00.000Z" });
+  await ctx.db.exec(`ALTER TABLE ${name} MODIFY COMMENT '${comment.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`);
+
+  const key = join(ctx.work, "key-alice");
+  const made = await run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "alice", "-f", key], { cwd: ctx.work });
+  if (made.code !== 0) throw new Error("ssh-keygen could not make alice's key");
+  p.write(".chant/allowed_signers", `alice ${readFileSync(`${key}.pub`, "utf8").trim().split(" ").slice(0, 2).join(" ")}\n`);
+  if (ctx.broken) ctx.log("BREAK: the environment is left ledger, so an unsigned approval of the cleanup counts");
+  p.write("yodel.config.ts", ctx.broken ? "export default {};\n" : `export default { environments: { ${JSON.stringify(p.env)}: { approval: "sealed" } } };\n`);
+  await p.commit("the environment sealed; alice signs");
+  // The base is the commit just made: what a change merged onto it reads.
+  const base = { YODEL_BASE: "HEAD" };
+  const cleanup = async () => {
+    const ran = await p.yodel(["cleanup", p.env, "--json"], { env: base });
+    try {
+      return { code: ran.code, doc: JSON.parse(ran.out) as CleanupDoc };
+    } catch {
+      throw new Error(`yodel cleanup printed no JSON (exit ${String(ran.code)}): ${ran.err}`);
+    }
+  };
+  try {
+    const gated = await cleanup();
+    if (gated.code !== 3 || !gated.doc.approve) throw new Error(`yodel cleanup did not stop at the gate with ${name} due (exit ${String(gated.code)})`);
+    if (!ctx.broken) hold(gated.doc.approve.endsWith(" --sign"), `under sealed, yodel cleanup's approve command does not end in --sign: ${gated.doc.approve}`);
+    const unsigned = gated.doc.approve.replace(/ --sign$/, "");
+    await p.approve(`${unsigned} --actor alice`);
+    const after = await cleanup();
+    hold(after.code === 3 && (await ctx.db.tableExists("events__chant_old")), `under sealed, an unsigned approval of the cleanup dropped ${name} (exit ${String(after.code)}, dropped ${JSON.stringify(after.doc.dropped)})`);
+    await p.approve(`${unsigned} --actor alice --sign ${key}`);
+    const signed = await cleanup();
+    hold(signed.code === 0 && signed.doc.dropped?.includes(name) === true, `under sealed, alice's sealed approval did not drop ${name} (exit ${String(signed.code)})`);
+  } finally {
+    p.write("yodel.config.ts", "export default {};\n");
+    await p.commit("the environment back to ledger");
+  }
+}
+
+/**
  * A sort-key change is never an ALTER or a DROP and CREATE, and without an
  * approval of its plan nothing runs, neither through yodel apply nor
  * through the Op's Apply step handed the digest. The table keeps its sort
@@ -145,6 +202,7 @@ const parts = [
   ["as-step", asStepPart],
   ["cleanup", cleanupPart],
   ["cleanup-gate", cleanupGatePart],
+  ["cleanup-sealed", cleanupSealedPart],
   ["refused", refusedPart],
 ] as const;
 
@@ -154,7 +212,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const rebuild: Claim = {
   name: "rebuild",
-  says: "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own",
+  says: "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own, sealed under a sealed environment",
   dialects: { ch: body },
   parts: parts.map(([name]) => name),
 };

@@ -813,10 +813,15 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
     const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
     if (emit(doc) !== yaml) throw new Error("gitlab: the apply waves do not emit back to chant's text");
     // The merge request job that records the plans a review approves (#48): the waves as after the merge.
-    const record = doc[`${APPLY_PIPELINE}-record-plans`] as { variables?: Record<string, string>; id_tokens?: unknown } | undefined;
+    const record = doc[`${APPLY_PIPELINE}-record-plans`] as { variables?: Record<string, string>; id_tokens?: unknown; script?: string[] } | undefined;
     if (record) {
       record.variables = { ...(record.variables ?? {}), [RECORD_PLANS_ENV]: "1" };
-      const readers = cloudsOf(envs, [...new Set(waves.map((w) => w.env))].map((e): [string, Role] => [e, "reader"]));
+      // It holds readers only, and shows it first, as every merge request job does (#50, #130).
+      const waveEnvs = [...new Set(waves.map((w) => w.env))];
+      const at = record.script?.findIndex((l) => l.includes("--record-plans")) ?? -1;
+      if (!record.script || at < 0) throw new Error("gitlab: the record-plans job has no chant run wave --record-plans line");
+      record.script.splice(at, 0, writeProbe(waveEnvs));
+      const readers = cloudsOf(envs, waveEnvs.map((e): [string, Role] => [e, "reader"]));
       if (readers.length > 0) record.id_tokens = idTokens(readers);
     }
     for (const [name, job] of Object.entries(doc)) {
@@ -862,7 +867,11 @@ function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], di
   const job = doc.jobs["record-plans"];
   if (!job) throw new Error(`${forge}: the plans workflow has no record-plans job`);
   const envs = [...new Set(waves.map((w) => w.env))];
-  const steps = job.steps;
+  const steps = job.steps as Array<Record<string, unknown>>;
+  // It holds readers only, and shows it before it plans, as every pull request job does (#50, #130).
+  const recordAt = steps.findIndex((st) => typeof st.run === "string" && st.run.includes("--record-plans"));
+  if (recordAt < 0) throw new Error(`${forge}: the record-plans job has no chant run wave --record-plans step`);
+  steps.splice(recordAt, 0, { name: "This job cannot write", run: writeProbe(envs) });
   delete job.steps;
   Object.assign(job, { env: { [RECORD_PLANS_ENV]: "1", ...secrets(envs.flatMap((e) => readerVariables(e, dialect, creds.credentials?.[e]))) }, steps });
   // A reader whose password is a cloud token (#50) is minted from the job's identity.

@@ -169,6 +169,10 @@ describe("yodel ci, for approval modes", () => {
       expect(Object.keys(doc.on)).toEqual(["pull_request"]);
       const job = doc.jobs["record-plans"];
       expect(job?.steps.some((s) => s.run === "chant run wave --spec yodel-waves.json --record-plans")).toBe(true);
+      // It shows it holds no writer before it plans (#130).
+      const runs = job?.steps.map((s) => s.run) ?? [];
+      expect(runs.indexOf("yodel config check dev prod --write-probe")).toBeGreaterThanOrEqual(0);
+      expect(runs.indexOf("yodel config check dev prod --write-probe")).toBeLessThan(runs.indexOf("chant run wave --spec yodel-waves.json --record-plans"));
       expect(job?.env[RECORD_PLANS_ENV]).toBe("1");
       expect(Object.keys(job?.env ?? {})).toEqual(expect.arrayContaining(["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "PROD_POSTGRES_READER_PASSWORD"]));
       expect(Object.keys(job?.env ?? {}).filter((k) => k.includes("WRITER"))).toEqual([]);
@@ -190,7 +194,7 @@ describe("yodel ci, for approval modes", () => {
     expect(job?.stage).toBe("plans");
     expect(job?.variables?.[RECORD_PLANS_ENV]).toBe("1");
     expect(job?.rules?.[0]?.if).toBe('$CI_PIPELINE_SOURCE == "merge_request_event"');
-    expect(job?.script?.at(-1)).toBe("chant run wave --spec yodel-waves.json --record-plans");
+    expect(job?.script?.slice(-2)).toEqual(["yodel config check dev prod --write-probe", "chant run wave --spec yodel-waves.json --record-plans"]);
     const main = parseYAMLDocument(gitlabPipeline(envs).content) as { stages: string[] };
     expect(main.stages.slice(0, 3)).toEqual(["review", "plans", "wave-1-dev"]);
   });

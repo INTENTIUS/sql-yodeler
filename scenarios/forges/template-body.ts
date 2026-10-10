@@ -88,7 +88,8 @@ async function users(ctx: Ctx): Promise<void> {
  * Then with dev's wave `approval: "pr-review"`, a pull request whose head a
  * second writer approved applies on merge with no chant approve (the
  * author's own approval, refused by Forgejo, counts for nothing), the plans
- * recorded by the pull request's yodel-apply-plans workflow. BREAK: the
+ * recorded by the pull request's yodel-apply-plans workflow, whose job
+ * runs the write probe before it plans, as the plan job does. BREAK: the
  * sealed wave is rendered as ledger, so the unsigned approval applies; the
  * pull request is approved by its author alone, so the apply waits.
  * BREAK: `yodel approve dev --no-resume`, so no job starts again and nothing
@@ -164,15 +165,15 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
   const approveJs = join(installed, "dist", "commands", "approve.js");
-  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js"))) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50) or no approval modes (#48) yet: this checkout's, packed and committed with the project.
+  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !readFileSync(join(installed, "dist", "ci", "render.js"), "utf8").includes("the record-plans job has no chant run wave --record-plans")) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48) or no write probe in the plans job (#130) yet: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
     const file = packed.out.trim().split("\n").at(-1) ?? "";
     if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
     await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
-    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50) or no approval modes (#48): the project takes this checkout's yodel, vendor/${file}`);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65), no resuming yodel approve (#47), no credentials() (#50), no approval modes (#48) or no write probe in the plans job (#130): the project takes this checkout's yodel, vendor/${file}`);
   }
   // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
   mkdirSync(join(dir, "ci"), { recursive: true });
@@ -562,6 +563,8 @@ async function prReviewPart(m: Modes): Promise<void> {
   const pr = await columnPr(m, "reviewed_note");
   hold(pr.checks.ok, `the pr-review part's pull request checks ended ${pr.checks.status}`);
   hold(pr.checks.log.includes("--record-plans"), "the pull request did not run chant run wave --record-plans");
+  // The plans job holds readers only, and shows it with the write probe, as the plan job does (#50, #130).
+  hold(pr.checks.log.split("write probe   cannot write").length - 1 >= 2, "the pull request's plans job (yodel-apply-plans) did not show that it cannot write (yodel config check --write-probe), as the plan job does");
   const sha = await m.head();
   await m.repo.review?.(pr.id, sha, "author");
   if (ctx.broken) ctx.log("BREAK (pr-review): the pull request is approved by its author alone");

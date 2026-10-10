@@ -4,6 +4,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
 import { appliedBy, withLock } from "../history/index.js";
 import { closeVersioned, findMigrateOp, gitLedger, NOT_APPROVED, openVersioned, verifyApproval, type VersionedEnv } from "../versioned/index.js";
+import { migrationsApprovalAtBase, portFor, signFlag } from "../approval-mode/index.js";
 import { cleanupDigest, cleanupGate, describeRetained, dropRetained, findRetained, retainedServer, type Retained } from "../cleanup/index.js";
 
 const usage = "usage: yodel cleanup <env> [--list] [--op <name>] [--json] [--dir <project>]";
@@ -30,7 +31,10 @@ approve-migrate-prod-cleanup, apart from the apply's approvals), yodel
 cleanup lists what it would drop, prints the digest and the chant approve
 command, and drops nothing (exit 3). Approve it, run yodel cleanup <env> again, and it drops them under the
 apply lock, after reading them again: if anything due changed, the digest
-differs and the approval does not count.
+differs and the approval does not count. The environment's approval mode
+counts as it does for yodel apply: under sealed (environments.<env>.approval,
+read at the base commit), only an approval sealed with chant approve --sign
+by a key .chant/allowed_signers lists for its approver.
 
 Options:
   --list           list only; never drop, even with an approval
@@ -119,13 +123,25 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
   const migrate = await findMigrateOp(project, env, a.op);
   // Its own gate on the migrations Op, so an apply's approval is never confused with it.
   const op = { ...migrate, gate: cleanupGate(migrate.gate) };
-  const ledger = await gitLedger(project.dir);
-  const approve = `chant approve ${op.name} ${op.gate} --plan ${digest}`;
+  // The environment's approval mode, as an apply's (#48, #130): under sealed, only a sealed approval counts.
+  const mode = await migrationsApprovalAtBase(project, env.name);
+  if (mode.note && !a.json) io.err(`${mode.note}\n`);
+  const ledger = await portFor(await gitLedger(project.dir), mode.mode, project.dir, mode.base);
+  const approve = `chant approve ${op.name} ${op.gate} --plan ${digest}${signFlag(mode.mode)}`;
   try {
     await verifyApproval(ledger, op, digest);
   } catch (e) {
     if (!(e instanceof YodelError) || e.exitCode !== NOT_APPROVED) throw e;
-    report({ planDigest: digest, approve }, ["", `Plan digest: ${digest}`, `${String(dueCount)} due; nothing dropped without an approval. Approve it with:`, `  ${approve}`, `then run yodel cleanup ${env.name} again.`]);
+    // An approval of this digest the mode does not count (an unsigned one under sealed), and why.
+    const uncounted = /\((the approval by .* does not count: .*)\)\. Nothing was applied\./s.exec(e.message)?.[1];
+    report({ planDigest: digest, approve }, [
+      "",
+      `Plan digest: ${digest}`,
+      ...(uncounted ? [`${uncounted[0]?.toUpperCase() ?? ""}${uncounted.slice(1)}.`] : []),
+      `${String(dueCount)} due; nothing dropped without an approval${mode.mode === "sealed" ? " sealed by a signer (approval sealed)" : ""}. Approve it with:`,
+      `  ${approve}`,
+      `then run yodel cleanup ${env.name} again.`,
+    ]);
     return NOT_APPROVED;
   }
 
@@ -136,7 +152,7 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
     const again = await findRetained(server);
     const now = await cleanupDigest(env.name, again.retained);
     const by = await verifyApproval(ledger, op, now);
-    if (!a.json) io.err(`approval: ${op.name} / ${op.gate} for ${now}, by ${by.resolvedBy} at ${by.timestamp}\n`);
+    if (!a.json) io.err(`approval: ${op.name} / ${op.gate} for ${now}, by ${by.resolvedBy} at ${by.timestamp}${by.signer ? `, sealed by ${by.signer}` : ""}\n`);
     return dropRetained(server, again.retained, (l) => {
       if (!a.json) io.err(`${l}\n`);
     });
