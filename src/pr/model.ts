@@ -13,7 +13,7 @@
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
-import { scanMigrations, type Migration } from "../migrations/index.js";
+import { scanMigrations, type Migration, type MigrationCheck } from "../migrations/index.js";
 import { describeTopology } from "../history/index.js";
 import { asBackfill } from "../steps/kinds.js";
 import { EXIT_REFUSED } from "../exit.js";
@@ -54,6 +54,8 @@ export interface PendingView {
   outOfOrder: boolean;
   /** Where a migration that ran part way resumes. */
   resumeAt?: number | undefined;
+  /** Its pre-migration checks (#52), run before its first statement. */
+  checks?: MigrationCheck[] | undefined;
   steps: StepView[];
 }
 
@@ -112,6 +114,7 @@ const viewOf = (m: Migration, done: readonly number[] = [], outOfOrder = false, 
   id: m.id,
   outOfOrder,
   resumeAt,
+  checks: m.document.checks ?? [],
   steps: m.document.steps.map((step, index) => {
     const file = asBackfill(step)?.options.file;
     const text = file === undefined ? undefined : m.files.extra?.[file];

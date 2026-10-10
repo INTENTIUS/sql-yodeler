@@ -1,6 +1,6 @@
-import { hold, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
 import { Project } from "../lib/project.js";
-import { mainTable, needsVersioned } from "../lib/schema.js";
+import { addColumn, mainTable, needsVersioned } from "../lib/schema.js";
 
 /**
  * A pending migration applies only behind the migrations Op's gate: yodel
@@ -9,8 +9,7 @@ import { mainTable, needsVersioned } from "../lib/schema.js";
  * row carries the digest that was approved.
  * BREAK: the approval is skipped, so the second apply stops at the gate too.
  */
-async function body(ctx: Ctx): Promise<void> {
-  const p = await Project.create(ctx);
+async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
   const id = await p.newMigration("create");
   hold(id !== undefined, "yodel new wrote no migration for the fixture's schema");
   await p.commit("the first migration");
@@ -31,8 +30,70 @@ async function body(ctx: Ctx): Promise<void> {
   hold(rows > 0 && other === 0, `the history holds ${String(rows)} rows, ${String(other)} not under the approved digest ${digest}`);
 }
 
+/**
+ * Pre-migration checks (#52): a migration written with `yodel new --check`
+ * that may run only while the main table is empty. The table is empty when
+ * the plan is approved; a row arrives after. The Op's Apply step, handed the
+ * approval, refuses under the lock (exit 4) naming the check, and the
+ * history records the refusal; yodel apply then refuses before the gate.
+ * The column never reaches the server.
+ * BREAK: the check is removed and the checksum updated, so the migration
+ * runs on data it should have refused.
+ */
+async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
+  // Under BREAK the approval part left the first migration pending.
+  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the first migration did not apply");
+  const table = `${ctx.db.name}.${mainTable(ctx)}`;
+  addColumn(p, "note");
+  const id = await p.newMigration("add-note", ["--check", `table-empty: SELECT 1 FROM ${table} LIMIT 1`]);
+  if (id === undefined) throw new Error("yodel new wrote no migration");
+  const json = `migrations/${id}/migration.json`;
+  if (!(p.read(json).includes('"table-empty"'))) throw new Error(`yodel new --check wrote no check into ${json}`);
+  if (ctx.broken) {
+    const doc = JSON.parse(p.read(json)) as Record<string, unknown>;
+    delete doc.checks;
+    p.write(json, `${JSON.stringify(doc, null, 2)}\n`);
+    await p.yodel(["lint", "--update-checksum", id]);
+  }
+  await p.commit("add note, only while the table is empty");
+
+  const gated = await p.apply();
+  if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate with the table empty (exit ${String(gated.ran.code)})`);
+  await p.approve(gated.doc.approve);
+  await ctx.db.exec(ctx.dialect === "ch" ? `INSERT INTO ${table} (id, kind, ts) VALUES (1, 'k', now())` : `INSERT INTO ${table} (amount) VALUES (1)`);
+
+  const step = await p.yodel(["apply", p.env, "--execute"], { env: { YODEL_APPROVED_PLAN: gated.doc.planDigest } });
+  hold(step.code === 4 && step.err.includes("check table-empty failed"), `the approved Apply step with a row in ${table} exited ${String(step.code)}, not 4 naming check table-empty: ${step.err.slice(-400)}`);
+  const recorded = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}' AND status = 'failed' AND error LIKE '%check table-empty failed%'`);
+  hold(recorded === 1, `the history records ${String(recorded)} refusals of ${id} by check table-empty`);
+  const before = await p.apply();
+  hold(before.ran.code === 4 && before.doc.status === "refused", `yodel apply with a row in ${table} exited ${String(before.ran.code)}, status ${String(before.doc.status)}, not refused before the gate`);
+  hold(!(await ctx.db.columnExists(mainTable(ctx), "note")), `${table}.note is on the server: the migration ran on a table that was not empty`);
+}
+
+/**
+ * Both parts on one project. Under BREAK each part breaks its own property,
+ * and the run is caught only when every part catches it.
+ */
+async function body(ctx: Ctx): Promise<void> {
+  const p = await Project.create(ctx);
+  const parts = [approvalPart, preCheckPart];
+  const caught: string[] = [];
+  for (const part of parts) {
+    try {
+      await part(ctx, p);
+    } catch (e) {
+      if (!(ctx.broken && e instanceof Violation)) throw e;
+      ctx.log(`${part.name} caught: ${e.message}`);
+      caught.push(e.message);
+    }
+  }
+  if (ctx.broken && caught.length === parts.length) throw new Violation(caught.join("; "));
+  if (ctx.broken) ctx.log(`only ${String(caught.length)} of the ${String(parts.length)} parts caught the break`);
+}
+
 export const approveAndApply: Claim = {
   name: "approve-and-apply",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it",
   dialects: { ch: body, pg: body },
 };

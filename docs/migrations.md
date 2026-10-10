@@ -1,5 +1,5 @@
 ---
-claims: [new, resume, out-of-order, lock-retry]
+claims: [new, resume, out-of-order, lock-retry, approve-and-apply]
 ---
 
 # Migrations
@@ -202,6 +202,36 @@ On ClickHouse each statement is rendered for the environment's topology as it is
 - A statement that can run in a transaction runs in one of its own, with its `succeeded` row, so the two commit together or not at all.
 - `CREATE INDEX CONCURRENTLY` and the other statements that cannot run in a transaction run alone, with their row written right after. Before each attempt at a `CONCURRENTLY` build, an INVALID index of that name left by an earlier failed attempt is dropped; a valid one is never touched.
 - Every statement runs under `lock_timeout` (the profile's `lockTimeoutMs`, default 5 s) and a `statement_timeout` (`statementTimeoutMs`, default 60 s, for a catalog change; `scanTimeoutMs`, default none, for one that reads or rewrites rows). A statement that times out waiting for a lock is tried again after a pause that doubles from 250 ms, up to `YODEL_LOCK_RETRIES` more times (default 5); any other error fails it at once.
+
+## Pre-migration checks
+
+Some migrations are only safe when the data looks a certain way: a table is empty before it is dropped, a column has no NULLs before it becomes NOT NULL. A migration says so with `checks` in its `migration.json`, read-only queries that run against the environment before its first statement. Write one with `yodel new`:
+
+```sh
+npx yodel new drop-legacy --check "legacy-empty: SELECT 1 FROM shop.legacy LIMIT 1"
+```
+
+`--check` is repeatable. Written `<name>: <sql>` the check takes that name; otherwise it is `check-1`, `check-2` and so on. In `migration.json` it looks like this:
+
+```json
+"checks": [
+  { "name": "legacy-empty", "sql": "SELECT 1 FROM shop.legacy LIMIT 1" }
+]
+```
+
+What a check must return is its `expect`:
+
+| `expect` | passes when the query returns |
+|---|---|
+| `"empty"` (the default, and what `--check` writes) | no rows |
+| `"true"` | one row whose first column is true or 1 |
+| `{ "min": 1, "max": 1000000 }` (either bound may be left out) | one row whose first column is a number within the bounds, inclusive |
+
+A bare table name means the migration's default database (ClickHouse) or schema (Postgres). A check runs read-only: on ClickHouse with `readonly = 2`, on Postgres in a `READ ONLY` transaction that is rolled back, under the profile's `lockTimeoutMs` and `scanTimeoutMs`.
+
+`yodel apply <env>` runs the first pending migration's checks before it runs the migrations Op, so a run that would be refused stops before anyone is asked to approve it. The Op's Apply step runs every pending migration's checks again under the lock, just before that migration's first statement, when earlier migrations in the same run have already applied. A check that fails, or whose query the server refuses, refuses the apply with exit 4 and names the check; nothing of that migration is sent. Under the lock the history records the outcome: the migration's `started` row carries the checks' results in `note`, and a refusal is a `failed` migration row whose `error` names the check. A migration resuming part way does not run its checks again, since they held before its first statement.
+
+The checks are part of `migration.json`, so of the checksum and the plan digest: adding, editing or removing one moves the digest, and the plan is approved again. To change a check of a migration not yet applied anywhere, edit it and run `yodel lint --update-checksum <id>`. `yodel plan` lists each pending migration's checks, and the pull request comment shows them in a table under the migration's steps.
 
 ## Resuming a migration that failed part way
 

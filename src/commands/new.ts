@@ -9,7 +9,10 @@ import { closeVersioned, inspect, openVersioned } from "../versioned/index.js";
 import type { Migration } from "../migrations/index.js";
 import { buildSchema } from "../chant/build.js";
 import {
+  checksProblem,
   createMigration,
+  describeExpect,
+  parseCheckArg,
   migrationId,
   MIGRATIONS_DIR,
   newestMigration,
@@ -18,10 +21,11 @@ import {
   verifyChecksum,
   writeMigration,
   type CreatedMigration,
+  type MigrationCheck,
 } from "../migrations/index.js";
 import { asBackfill, BACKFILL_FILE, backfillTemplate, loadBackfill, TEMPLATE_MARK } from "../steps/index.js";
 
-const usage = "usage: yodel new <name> [--backfill <file>] [--replace [--env <env>]...] [--json] [--dir <project>]";
+const usage = "usage: yodel new <name> [--backfill <file>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
 
 const help = `${usage}
 
@@ -49,6 +53,15 @@ is stopped part way resumes at the first batch without a receipt. When
 write the batches, then run the same command again. With --backfill a
 migration is written even when the declared schema has not changed.
 
+--check <sql> adds a pre-migration check to migration.json: a read-only
+query that must return no rows. yodel apply runs it against the environment
+before the gate and again under the lock just before the migration's first
+statement; a check that fails refuses the run (exit 4) and names it.
+Written "<name>: <sql>" it is named <name>, else check-1, check-2 and so on.
+For "returns true" or a count within bounds, edit its "expect" in
+migration.json (docs/migrations.md); the checks count in the checksum and
+the plan digest.
+
 --replace redoes the newest migration when it is named <name>: it is written
 again from its parent's recorded schema and the current build, under a new
 id, and the old one is removed. It is for a migration you just wrote and
@@ -57,6 +70,8 @@ have not applied: refused when the migration is applied in an environment
 
 Options:
   --backfill <file>  end the migration with a backfill step running <file>
+  --check <sql>      a pre-migration check that must return no rows
+                     (repeatable; "<name>: <sql>" names it)
   --replace          redo the newest migration, named <name>
   --env <env>        with --replace: refuse if it is applied in <env>
                      (repeatable)
@@ -80,6 +95,7 @@ interface NewArgs {
   backfill: string | undefined;
   replace: boolean;
   envs: string[];
+  checks: MigrationCheck[];
 }
 
 function parseNewArgs(args: string[]): NewArgs {
@@ -89,7 +105,7 @@ function parseNewArgs(args: string[]): NewArgs {
       args,
       allowPositionals: true,
       strict: true,
-      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, backfill: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true } },
+      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, backfill: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
     });
   } catch (e) {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
@@ -105,7 +121,16 @@ function parseNewArgs(args: string[]): NewArgs {
     backfill: typeof parsed.values.backfill === "string" ? parsed.values.backfill : undefined,
     replace: parsed.values.replace === true,
     envs: Array.isArray(parsed.values.env) ? parsed.values.env.filter((e): e is string => typeof e === "string") : [],
+    checks: parseChecks(parsed.values.check),
   };
+}
+
+function parseChecks(value: unknown): MigrationCheck[] {
+  const args = Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+  const checks = args.map((a, i) => parseCheckArg(a, i + 1));
+  const problem = checksProblem(checks);
+  if (problem) throw new YodelError(`--check: ${problem}\n${usage}`);
+  return checks;
 }
 
 function report(io: Io, json: boolean, made: CreatedMigration, path: string, projectDir: string): void {
@@ -126,6 +151,7 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
           ops: refused.filter((s) => s.kind === "op").map((s) => ({ op: s.op, object: s.object, name: s.name, rules: s.changes.map((c) => c.rule) })),
           manual: refused.filter((s) => s.kind === "manual").map((s) => ({ object: s.object, name: s.name, rules: s.changes.map((c) => c.rule), detail: s.detail })),
           hints: made.document.hints,
+          checks: made.document.checks ?? [],
         },
         null,
         2,
@@ -151,6 +177,7 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
       lines.push(`    ${s.detail}`);
     }
   }
+  for (const c of made.document.checks ?? []) lines.push(`  check ${c.name}: ${c.sql} (${describeExpect(c)}, before the first statement)`);
   for (const h of made.document.hints) lines.push(`  hint: ${h}`);
   io.out(`${lines.join("\n")}\n`);
 }
@@ -162,7 +189,7 @@ export const newCommand: Command = {
   implemented: true,
   run: (args, io) =>
     guarded("new", io, args, help, async () => {
-      const { name, json, dir, backfill: backfillArg, replace, envs } = parseNewArgs(args);
+      const { name, json, dir, backfill: backfillArg, replace, envs, checks } = parseNewArgs(args);
       const project = await loadProject(dir);
       let backfill: { text: string } | undefined;
       if (backfillArg !== undefined) {
@@ -190,7 +217,7 @@ export const newCommand: Command = {
       const build = await buildSchema(project);
       let made: ReturnType<typeof createMigration>;
       try {
-        made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}) });
+        made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}), ...(checks.length > 0 ? { checks } : {}) });
       } finally {
         build.dispose();
       }
@@ -234,9 +261,27 @@ export const REPLACE_REFUSED = 4;
 /** The newest migration, when --replace may redo it: named `name`, and applied in none of `envs`. */
 async function replaceable(project: Project, ordered: readonly Migration[], name: string, envs: readonly string[], io: Io): Promise<Migration> {
   const newest = newestMigration(ordered);
-  if (!newest) throw new YodelError(`--replace redoes the newest migration, and there is none yet; run yodel new ${name}`, REPLACE_REFUSED);
+  if (!newest) throw new YodelError(`--check <sql> adds a pre-migration check to migration.json: a read-only
+query that must return no rows. yodel apply runs it against the environment
+before the gate and again under the lock just before the migration's first
+statement; a check that fails refuses the run (exit 4) and names it.
+Written "<name>: <sql>" it is named <name>, else check-1, check-2 and so on.
+For "returns true" or a count within bounds, edit its "expect" in
+migration.json (docs/migrations.md); the checks count in the checksum and
+the plan digest.
+
+--replace redoes the newest migration, and there is none yet; run yodel new ${name}`, REPLACE_REFUSED);
   if (newest.id.slice(newest.id.indexOf("-") + 1) !== name) {
-    throw new YodelError(`--replace redoes the newest migration, ${newest.id}, which is not named ${name}; nothing written`, REPLACE_REFUSED);
+    throw new YodelError(`--check <sql> adds a pre-migration check to migration.json: a read-only
+query that must return no rows. yodel apply runs it against the environment
+before the gate and again under the lock just before the migration's first
+statement; a check that fails refuses the run (exit 4) and names it.
+Written "<name>: <sql>" it is named <name>, else check-1, check-2 and so on.
+For "returns true" or a count within bounds, edit its "expect" in
+migration.json (docs/migrations.md); the checks count in the checksum and
+the plan digest.
+
+--replace redoes the newest migration, ${newest.id}, which is not named ${name}; nothing written`, REPLACE_REFUSED);
   }
   for (const envName of envs) {
     const env = resolveEnvironment(project, envName);

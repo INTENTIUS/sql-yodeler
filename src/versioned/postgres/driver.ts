@@ -25,7 +25,7 @@ import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/liv
 import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { YodelError, type Environment, type Project } from "../../project.js";
 import { DEFAULT_HISTORY_DATABASE } from "../../history/index.js";
-import { acquireAdvisoryLock, PostgresHistoryStore, type PgLockConnection } from "../../history/postgres/index.js";
+import { acquireAdvisoryLock, pgIdent, PostgresHistoryStore, type PgLockConnection } from "../../history/postgres/index.js";
 import type { VersionedDriver } from "../driver.js";
 import { pgCatalogFingerprint, readPgCatalog } from "./catalog.js";
 import { readUnderLockTimeout } from "./waits.js";
@@ -135,6 +135,20 @@ export function postgresDriver(input: PostgresDriverInput): VersionedDriver {
         ...(input.retryBaseMs !== undefined ? { retryBaseMs: input.retryBaseMs } : {}),
       });
       return pgCatalogFingerprint(entries);
+    },
+    async readCheck(sql, where) {
+      await client.query("BEGIN READ ONLY");
+      try {
+        if (where.defaultSchema) await client.query(`SELECT pg_catalog.set_config('search_path', $1, true)`, [pgIdent(where.defaultSchema)]);
+        // A check reads rows: the scan timeout (default none), and the lock timeout every statement gets.
+        await client.query(`SELECT pg_catalog.set_config('statement_timeout', $1, true), pg_catalog.set_config('lock_timeout', $2, true)`, [
+          String(settings.timeouts.scanTimeoutMs),
+          String(settings.timeouts.lockTimeoutMs),
+        ]);
+        return await client.query(sql);
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
     },
     async runStatement(step: StatementStep, run) {
       try {

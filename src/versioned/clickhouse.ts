@@ -33,6 +33,13 @@ export function clickhouseDriver(input: ClickHouseDriverInput): VersionedDriver 
     acquireLock: (holder) =>
       acquireLock(port, { database: input.location.database, topology: input.location.topology, holder, ttlMs: input.lockTtlMs, serverKey: input.serverKey }),
     liveFingerprint: async () => catalogFingerprint(await readLiveCatalog(port, input.scope)),
+    async readCheck(sql, where) {
+      try {
+        return await port.query(sql.trim().replace(/;+$/, ""), { settings: { readonly: "2", ...(where.defaultDatabase ? { database: where.defaultDatabase } : {}) } });
+      } catch (e) {
+        throw new Error(serverMessage(e), { cause: e });
+      }
+    },
     async runStatement(step, run) {
       try {
         await port.query(renderForEnvironment(step.sql, topology), step.waitsForMutation ? { settings: { mutations_sync: "2" } } : {});

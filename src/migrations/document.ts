@@ -21,6 +21,20 @@ import type { BuildOutput } from "../chant/build.js";
 
 export type { MigrationStep, SchemaStatements };
 
+/**
+ * One pre-migration check: a read-only query and what its result must be.
+ *
+ *   expect "empty" (the default)  the query returns no rows
+ *   expect "true"                 one row, whose first column is true (or 1)
+ *   expect { min?, max? }         one row, whose first column is a number within the bounds (inclusive)
+ */
+export interface MigrationCheck {
+  /** Names the check in output, in a refusal and in the history. Unique within the migration. */
+  name: string;
+  sql: string;
+  expect?: "empty" | "true" | { min?: number; max?: number };
+}
+
 export const MIGRATION_SQL = "migration.sql";
 export const MIGRATION_JSON = "migration.json";
 
@@ -56,6 +70,13 @@ export interface MigrationDocument {
   refused: boolean;
   /** What the diff pointed out besides the changes, e.g. a likely rename written as a drop and an add. */
   hints: string[];
+  /**
+   * Pre-migration checks (#52): read-only queries `yodel apply` runs against
+   * the environment before the migration's first statement; one that fails
+   * refuses the run (exit 4). Absent when there are none. In the checksum,
+   * so in the plan digest. See `./checks.ts`.
+   */
+  checks?: MigrationCheck[];
   /** In the order they run. An Op step carries the Op's declaration; it has no SQL. */
   steps: MigrationStep[];
   /** The recorded schema: the `chant build` output after this migration. The next `yodel new` diffs from it. */
@@ -91,6 +112,7 @@ const DOCUMENT_ORDER: readonly (keyof MigrationDocument)[] = [
   "topology",
   "refused",
   "hints",
+  "checks",
   "steps",
   "schema",
 ];

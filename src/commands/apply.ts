@@ -6,7 +6,7 @@ import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
 import { runnable } from "../chant/runnable.js";
-import type { Migration } from "../migrations/index.js";
+import type { CheckOutcome, Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
@@ -14,6 +14,9 @@ import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
+  checksDue,
+  checksRefusal,
+  runChecks,
   currentDigest,
   executeApply,
   findMigrateOp,
@@ -86,6 +89,12 @@ Two paths, chosen by the project:
   pending migration the chain puts before an applied one is out of order
   and is refused unless --allow-out-of-order; it is never skipped.
 
+  A migration's pre-migration checks (checks in its migration.json, read-only
+  queries) run against the environment: the first pending migration's before
+  the gate, and every migration's under the lock just before its first
+  statement. One that fails refuses (exit 4), naming it, and nothing of that
+  migration is applied.
+
 - Declarative: no migrations. Plans the declared schema against the live
   database, then runs the project's ApplyOp for the environment behind its
   plan-bound gate.
@@ -113,8 +122,8 @@ Exit codes:
      nothing was applied
   3  stopped at the gate, waiting for approval of this plan
   4  versioned: refused, nothing applied: a checksum mismatch, an applied
-     migration gone from the directory, or an out-of-order migration
-     without --allow-out-of-order
+     migration gone from the directory, an out-of-order migration
+     without --allow-out-of-order, or a pre-migration check that failed
   5  versioned: another apply holds the lock
   1  anything else failed: a statement (the history records where; rerun to
      resume), a plan that moved since approval, a bad config
@@ -250,7 +259,21 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     return emit({ status: "unchanged" }, 0);
   }
 
+  // The first pending migration's checks (#52) read the data as it is now: one that fails refuses before anyone is asked to approve. The Apply step runs every migration's again under the lock.
+  const first = report.status.pending[0];
+  let checked: { migration: string; checks: CheckOutcome[] } | undefined;
+  if (first && checksDue(first)) {
+    const outcomes = await runChecks(venv.driver, first.migration);
+    checked = { migration: first.id, checks: outcomes };
+    const refusal = checksRefusal(first.migration, outcomes, "before the gate");
+    if (refusal) {
+      if (!a.json) io.err(`yodel apply: ${refusal.message}\n`);
+      return emit({ status: "refused", preChecks: checked }, refusal.exitCode);
+    }
+  }
+
   if (!a.json) io.out(renderStatus(report));
+  if (!a.json && checked) for (const o of checked.checks) io.out(`check ${o.name} of ${checked.migration} passed (${o.detail}); it runs again under the lock before the first statement\n`);
   const op = await findMigrateOp(project, env, a.op);
   if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
   const run = await runMigrateOp(project, op, { allowOutOfOrder: a.allowOutOfOrder, onOutput: (t) => { io.err(t); } });
