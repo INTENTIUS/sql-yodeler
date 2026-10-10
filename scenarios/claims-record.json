@@ -337,7 +337,7 @@
     {
       "claim": "column-change",
       "dialect": "pg",
-      "says": "Postgres: a column rename runs as a PostgresMigrationOp step (expand, backfill, switch, contract) and keeps every value",
+      "says": "Postgres: a column rename runs as a PostgresMigrationOp step (expand, backfill, switch, contract) and keeps every value; a step that fails part way keeps its work and resumes from its receipts",
       "needs": null,
       "plain": "pass",
       "break": "caught",

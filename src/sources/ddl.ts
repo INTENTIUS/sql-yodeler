@@ -245,6 +245,10 @@ async function postgresIR(ddl: string, options: DdlOptions): Promise<TemplateIR>
       owner.statements.push(rewrite(tokens, inserts, options.schema));
       continue;
     }
+    if (node.statement === "policy" || node.statement === "role" || node.statement === "grant" || node.statement === "rowSecurity") {
+      problems.push(`access control (a policy, role, grant or row security) is not read from a DDL source: ${firstLine(text(tokens))}`);
+      continue;
+    }
     if (node.statement === "index") {
       if (!node.name) {
         problems.push(`an index with no name (the declaration needs one): ${firstLine(text(tokens))}`);
