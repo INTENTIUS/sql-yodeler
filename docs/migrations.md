@@ -401,6 +401,16 @@ The checkpoint is a migration like any other, so its checksum covers its stateme
 
 With both, a fresh environment that starts from the checkpoint ends at the schema an environment that ran the chain has. Write another checkpoint later the same way; a fresh environment starts at the newest. `yodel checkpoint` refuses (exit 4) when the newest migration is a checkpoint already.
 
+## Reverting: yodel revert
+
+`yodel revert <env> <id>` undoes migration `<id>` in `<env>`. Each migration records the schema after it, and its parent records the schema before it, so the reverse is planned offline: the statements that take `<id>`'s recorded schema back to its parent's (an empty schema for the first migration), diffed by chant as `yodel new` diffs. Only the newest migration applied in the environment can be reverted, since a later one was written against it; anything else refuses (exit 4). So does a checkpoint the environment started from (it created the whole schema, and nothing before it ran there), and a migration a checkpoint left out there ([Checkpoints](#checkpoints-yodel-checkpoint)); both refusals name the checkpoint. `--dry-run` prints the statements, each with its rule and class (a drop is marked destructive), and the digest, and runs nothing.
+
+It goes through the environment's migrations Op, as `yodel apply` does. The Op's Plan step prints the revert's digest (its statements, the history and the live schema), the gate binds the approval to that digest, and the Apply step plans the revert again under the lock, refuses if the digest moved, checks the approval in chant's gate ledger, and runs it. A run that stops at the gate prints the `chant approve` command (exit 3); approve, then run `yodel revert` again.
+
+Statements carry the schema back, never data. A migration with a data step (a backfill) is refused (exit 2) unless `--step <file>` names a hand-written revert step: SQL statements, each ending with `;` at the end of a line, that undo what the data step did. They run before the reverse statements, and their text is in the digest. A reverse that would need an Op or a manual step (a ClickHouse sort key changed back, a Postgres column renamed back) is refused (exit 2): write it as a new migration with `yodel new`.
+
+The history gets a `revert` row for each statement as it starts, succeeds or fails, then a migration row whose status is `reverted`. A revert that fails part way resumes at the statement that failed, and the migration stays applied until the `reverted` row is written. After it, the migration is pending again, and `yodel status` marks it `reverted <when> by <who>` (`reverted` in `--json`); the audit log of `yodel report` lists the revert. The next `yodel apply` would apply it again, every statement of it, so delete it or rewrite it (`yodel new <name> --replace`) first. On Postgres, a history table made before `yodel revert` existed has its `kind` and `status` checks widened the first time a revert writes to it.
+
 ## yodel repair
 
 An applied migration whose files changed no longer matches the checksum its history recorded, and `yodel status` and `yodel apply` refuse:

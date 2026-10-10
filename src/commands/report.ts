@@ -21,8 +21,8 @@ Every environment's migrations side by side (default: every environment in
 chant.config.ts's sql.profiles, in that order), and the audit log derived
 from each environment's history table and chant's gate ledger (the
 chant/lifecycle branch): approval requested, approved, override, silenced,
-applied, refused, failed, repaired. Nothing in the log is written by hand,
-so it cannot disagree with what ran. Reads only; takes no lock.
+applied, refused, failed, repaired, reverted. Nothing in the log is written
+by hand, so it cannot disagree with what ran. Reads only; takes no lock.
 
 It also names the gaps the sources show: a history row missing (seqs run
 from 1 with no hole), and a migration applied under a plan digest the ledger

@@ -21,13 +21,13 @@ export const pgLiteral = (value: string): string => `'${value.replace(/'/g, "''"
 export const PG_HISTORY_COLUMNS: readonly (readonly [name: string, type: string])[] = [
   ["seq", "bigint NOT NULL PRIMARY KEY"],
   ["run_id", "text NOT NULL"],
-  ["kind", "text NOT NULL CHECK (kind IN ('migration', 'statement', 'step'))"],
+  ["kind", "text NOT NULL CHECK (kind IN ('migration', 'statement', 'step', 'revert'))"],
   ["migration_id", "text NOT NULL"],
   ["parent", "text NOT NULL DEFAULT ''"],
   ["checksum", "text NOT NULL DEFAULT ''"],
   ["statement_index", "integer NOT NULL"],
   ["statement_sha", "text NOT NULL DEFAULT ''"],
-  ["status", "text NOT NULL CHECK (status IN ('started', 'succeeded', 'failed'))"],
+  ["status", "text NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'reverted'))"],
   ["error", "text NOT NULL DEFAULT ''"],
   ["applied_by", "text NOT NULL DEFAULT ''"],
   ["plan_digest", "text NOT NULL DEFAULT ''"],
@@ -35,6 +35,32 @@ export const PG_HISTORY_COLUMNS: readonly (readonly [name: string, type: string]
   ["note", "text NOT NULL DEFAULT ''"],
   ["recorded_at", "timestamptz NOT NULL DEFAULT pg_catalog.clock_timestamp()"],
 ];
+
+/**
+ * The CHECK constraints of {@link PG_HISTORY_COLUMNS} by column, as a table
+ * made before `yodel revert` (#55) lacks them: {@link pgWidenChecks} widens
+ * such a table's to these, in place.
+ */
+export const PG_CHECKS = {
+  kind: "kind IN ('migration', 'statement', 'step', 'revert')",
+  status: "status IN ('started', 'succeeded', 'failed', 'reverted')",
+} as const;
+
+/**
+ * The statements that widen an older history table's CHECK constraints to
+ * {@link PG_CHECKS}, given each CHECK constraint's name and definition
+ * (`pg_get_constraintdef`). None when they already allow every value.
+ */
+export function pgWidenChecks(schema: string, constraints: ReadonlyArray<{ name: string; def: string }>): string[] {
+  const out: string[] = [];
+  for (const [column, check] of Object.entries(PG_CHECKS)) {
+    const value = column === "kind" ? "'revert'" : "'reverted'";
+    const c = constraints.find((x) => new RegExp(`\\b${column}\\b`).test(x.def));
+    if (!c || c.def.includes(value)) continue;
+    out.push(`ALTER TABLE ${pgHistoryTable(schema)} DROP CONSTRAINT ${pgIdent(c.name)}, ADD CONSTRAINT ${pgIdent(c.name)} CHECK (${check})`);
+  }
+  return out;
+}
 
 /** The columns a row write names: all but `recorded_at`, which is the server's. */
 export const PG_WRITTEN_COLUMNS = PG_HISTORY_COLUMNS.map(([name]) => name).filter((n) => n !== "recorded_at");

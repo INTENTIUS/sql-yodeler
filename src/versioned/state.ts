@@ -35,7 +35,7 @@
 
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { computeChecksum, isCheckpoint, type Migration } from "../migrations/index.js";
-import { isApplied, statementDone, type HistoryState, type MigrationRecord, type Repair } from "../history/index.js";
+import { isApplied, isReverted, statementDone, type HistoryState, type MigrationRecord, type Repair } from "../history/index.js";
 import { planStep, stepSha } from "../steps/index.js";
 
 export interface AppliedMigration {
@@ -74,6 +74,8 @@ export interface PendingMigration {
   /** Before a migration the history records applied. */
   outOfOrder: boolean;
   partWay: PartWay | undefined;
+  /** It was applied, then `yodel revert` (#55) undid it: who reverted it and when. Applied again, every statement runs again. */
+  reverted?: { by: string; at: string };
   /** Its Op steps `apply` runs: a ClickHouse rebuild, a backfill (#12). */
   opSteps: Array<{ index: number; step: Exclude<MigrationStep, { kind: "statement" }> }>;
   /** Its steps `apply` does not run (a manual step, an Op it does not run), each with why. Any of them refuses the run. */
@@ -224,6 +226,10 @@ export function compareHistory(ordered: readonly Migration[], state: HistoryStat
     }
     const actual = computeChecksum(m.files);
     let pw: PartWay | undefined;
+    if (rec && isReverted(rec)) {
+      pending.push({ id: m.id, index: i, checksum: actual, outOfOrder: i < lastApplied, partWay: undefined, reverted: { by: rec.appliedBy, at: rec.recordedAt }, ...classifySteps(m), migration: m });
+      continue;
+    }
     if (rec) {
       const r = partWayOf(m, rec, actual);
       pw = r.partWay;

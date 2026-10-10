@@ -56,6 +56,7 @@ Commands:
   ci          render the project's CI pipelines (GitHub, GitLab, Forgejo)
   rebase      move a migration onto a new parent and recompute its schema
   repair      record a new checksum for an applied migration, with a reason
+  revert      undo the newest applied migration from its recorded schemas
   mcp         serve read-only tools to a coding agent (MCP, stdio)
 
 Options:

@@ -1,0 +1,201 @@
+import { resolve } from "node:path";
+import { parseArgs } from "node:util";
+import type { Command, Io } from "../command.js";
+import { guarded } from "../env-args.js";
+import { loadProject, resolveEnvironment, YodelError } from "../project.js";
+import { GATED } from "../chant/apply.js";
+import { runnable } from "../chant/runnable.js";
+import { LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
+import { MIGRATION_ID } from "../migrations/index.js";
+import { describeServer } from "../server.js";
+import {
+  closeVersioned,
+  currentRevert,
+  findMigrateOp,
+  openVersioned,
+  readChain,
+  readRevertStep,
+  renderStatus,
+  runMigrateOp,
+  statusReport,
+  type RevertPlan,
+} from "../versioned/index.js";
+
+const usage = "usage: yodel revert <env> <id> [--step <file>] [--dry-run] [--json] [--op <name>] [--lock-wait <duration>] [--dir <project>]";
+
+const help = `${usage}
+
+Undoes migration <id> in <env>: plans the statements that take the schema
+from <id>'s recorded schema back to its parent's (an empty schema for the
+first migration), offline, from migration.json alone. Only the newest
+migration applied in <env> can be reverted; a later one was written against
+it. <env> and <id> may come in either order.
+
+The revert runs through the environment's migrations Op, as yodel apply
+does: its Plan step prints the revert's digest (the statements, the history
+and the live schema), its gate binds the approval to that digest, and its
+Apply step plans the revert again under the lock, refuses if the digest
+moved, and runs it. A run that stops at the gate prints the chant approve
+command; approve, then run yodel revert again. The history gets a revert row
+for each statement and a migration row reverted: <id> is then pending
+again, and yodel status shows it reverted. Delete it, or rewrite it with
+yodel new --replace, before the next yodel apply, which would apply it
+again.
+
+Statements carry the schema back, never data. A migration with a data step
+(a backfill) is refused unless --step names a file of statements that undo
+it, each ending with ; at the end of a line; they run before the reverse
+statements, and are in the digest. A reverse that needs an Op or a manual
+step is refused: write it as a new migration.
+
+Options:
+  --step <file>    a hand-written revert step: SQL that undoes the
+                   migration's data step (relative to the project directory)
+  --dry-run        print the revert's statements and digest; run nothing
+  --json           print the outcome as JSON
+  --op <name>      the Op to run, when more than one applies <env>
+  --lock-wait <d>  when another apply holds the lock, wait up to <d> for it
+  -C, --dir <dir>  the project directory (default: the working directory)
+
+Exit codes:
+  0  reverted, or (--dry-run) planned
+  2  refused, nothing reverted: the migration has a data step and no --step,
+     or the reverse needs an Op or a manual step
+  3  stopped at the gate, waiting for approval of this revert
+  4  refused, nothing reverted: <id> is not applied in <env>, a migration
+     after it is, or the history does not match the migrations directory
+  5  another apply holds the lock
+  1  anything else failed: a statement (the history records where; rerun to
+     resume), a revert whose plan moved since approval, a bad config
+`;
+
+interface RevertArgs {
+  env: string;
+  id: string;
+  step: string | undefined;
+  dryRun: boolean;
+  json: boolean;
+  op: string | undefined;
+  lockWaitMs: number | undefined;
+  dir: string;
+}
+
+function parseRevertArgs(args: string[]): RevertArgs {
+  let parsed: ReturnType<typeof parseArgs>;
+  try {
+    parsed = parseArgs({
+      args,
+      allowPositionals: true,
+      strict: true,
+      options: {
+        step: { type: "string" },
+        "dry-run": { type: "boolean" },
+        json: { type: "boolean" },
+        op: { type: "string" },
+        "lock-wait": { type: "string" },
+        dir: { type: "string", short: "C" },
+      },
+    });
+  } catch (e) {
+    throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
+  }
+  const { values, positionals } = parsed;
+  if (positionals.length !== 2) throw new YodelError(usage);
+  const [first = "", second = ""] = positionals;
+  // The migration is the one named like an id; the other is the environment.
+  const [id, env] = MIGRATION_ID.test(first) && !MIGRATION_ID.test(second) ? [first, second] : [second, first];
+  const str = (k: string) => (typeof values[k] === "string" ? values[k] : undefined);
+  return {
+    env,
+    id,
+    step: str("step"),
+    dryRun: values["dry-run"] === true,
+    json: values.json === true,
+    op: str("op"),
+    lockWaitMs: typeof values["lock-wait"] === "string" ? parseDuration(values["lock-wait"], "--lock-wait") : undefined,
+    dir: str("dir") ?? process.cwd(),
+  };
+}
+
+/** The revert as JSON (schemas/revert.schema.json), with what happened. */
+export function revertJson(plan: RevertPlan, digest: string, outcome: Record<string, unknown>): Record<string, unknown> {
+  return {
+    environment: plan.environment,
+    migration: plan.migration.id,
+    to: plan.to,
+    planDigest: digest,
+    statements: plan.statements.map((s, i) => ({ index: i, source: s.source, sql: s.step.sql, rule: s.step.rule, class: s.step.class, ...(s.step.destructive ? { destructive: true } : {}), done: plan.done.includes(i) })),
+    dataSteps: plan.dataSteps,
+    ...(plan.step ? { step: { file: plan.step.file, sha: plan.step.sha, statements: plan.step.statements.length } } : {}),
+    ...outcome,
+  };
+}
+
+function renderPlan(plan: RevertPlan, digest: string): string {
+  const lines = [`Revert of ${plan.migration.id} in ${plan.environment}, back to ${plan.to ?? "an empty schema"}:`];
+  for (const [i, s] of plan.statements.entries()) {
+    const what = s.source === "step" ? `the revert step ${plan.step?.file ?? ""}` : `${s.step.rule} ${s.step.class}${s.step.destructive ? ", destructive" : ""}, ${s.step.name}`;
+    lines.push(`  ${String(i)}: ${what}${plan.done.includes(i) ? " (succeeded in an earlier run; not sent again)" : ""}`, `     ${s.step.sql.split("\n").join("\n     ")}`);
+  }
+  if (plan.statements.length === 0) lines.push("  (no statement: the recorded schemas are the same)");
+  for (const d of plan.dataSteps) lines.push(`  data step ${d}: undone by the revert step`);
+  lines.push(`Plan digest: ${digest}`);
+  return `${lines.join("\n")}\n`;
+}
+
+/** `yodel revert <env> <id>`; the exit codes are in `help`. */
+export const revert: Command = {
+  name: "revert",
+  summary: "undo the newest applied migration from its recorded schemas",
+  implemented: true,
+  run: (args, io) => guarded("revert", io, args, help, () => run(parseRevertArgs(args), io)),
+};
+
+async function run(a: RevertArgs, io: Io): Promise<number> {
+  const project = await loadProject(a.dir);
+  const env = resolveEnvironment(project, a.env);
+  const ordered = readChain(project);
+  const step = a.step !== undefined ? readRevertStep(a.step, project.dir) : undefined;
+  const venv = await openVersioned(project, env);
+  try {
+    const { plan, digest } = await currentRevert(venv, ordered, a.id, step);
+    const emit = (outcome: Record<string, unknown>, code: number) => {
+      if (a.json) io.out(`${JSON.stringify(revertJson(plan, digest, outcome), null, 2)}\n`);
+      return code;
+    };
+    if (!a.json) io.out(renderPlan(plan, digest));
+    if (a.dryRun) return emit({ status: "planned" }, 0);
+
+    const op = await findMigrateOp(project, env, a.op);
+    if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath}) to revert ${plan.migration.id}\n`);
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, ...(a.lockWaitMs !== undefined ? { [LOCK_WAIT_ENV]: `${String(a.lockWaitMs)}ms` } : {}) };
+    const ran = await runMigrateOp(project, op, {
+      allowOutOfOrder: false,
+      env: childEnv,
+      revert: { id: plan.migration.id, ...(a.step !== undefined ? { step: resolve(project.dir, a.step) } : {}) },
+      onOutput: (t) => { io.err(t); },
+    });
+    if (ran.status === "gated") {
+      if (!a.json) {
+        io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this revert${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
+        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnable(`yodel revert ${env.name} ${plan.migration.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir)} again.\n`);
+      }
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...(ran.approve ? { approve: ran.approve } : {}), ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+    }
+    if (ran.status === "failed") {
+      const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;
+      if (!a.json) io.err(`yodel revert: chant run ${op.name} failed (exit ${String(ran.code)})${ran.stepExit ? `: its Apply step exited ${String(ran.stepExit)}` : ""}\n`);
+      return emit({ status: "failed", op: op.name, exitCode: code }, code);
+    }
+    const after = await statusReport(venv, ordered);
+    const reverted = after.status.pending.find((p) => p.id === plan.migration.id)?.reverted !== undefined;
+    if (!reverted) {
+      if (!a.json) io.err(`yodel revert: ${op.name} completed, but ${env.name}'s history does not record ${plan.migration.id} reverted\n`);
+      return emit({ status: "failed", op: op.name, exitCode: 1 }, 1);
+    }
+    if (!a.json) io.out(`\nReverted ${plan.migration.id} in ${env.name}${after.server ? ` (${describeServer(after.server)})` : ""}, back to ${plan.to ?? "an empty schema"}.\n\n${renderStatus(after)}`);
+    return emit({ status: "reverted", op: op.name }, 0);
+  } finally {
+    await closeVersioned(venv);
+  }
+}

@@ -2,7 +2,7 @@ import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
-import { addColumn, addTable } from "../lib/schema.js";
+import { addColumn, addTable, mainTable } from "../lib/schema.js";
 
 interface Lint {
   p: Project;
@@ -125,11 +125,87 @@ export async function checkpointPart(ctx: Ctx, s: Lint): Promise<void> {
   hold(drift.code === 0, `yodel drift after starting from the checkpoint exited ${String(drift.code)}: the environment is not at the recorded schema`);
 }
 
-/** The parts, in order, on one project: two migrations replayed, a second branch forking them, then a checkpoint on one chain. */
+/** A backfill module (one batch) filling label, and the hand-written statements that undo it. */
+function labelData(ctx: Ctx): { module: string; undo: string } {
+  const db = ctx.db.name;
+  const [fill, undo] =
+    ctx.dialect === "ch"
+      ? [`ALTER TABLE ${db}.events UPDATE label = kind WHERE 1`, `-- the label backfill, undone\nALTER TABLE ${db}.events UPDATE label = '' WHERE 1;\n`]
+      : [`UPDATE ${db}.orders SET label = status`, `-- the label backfill, undone\nUPDATE ${db}.orders SET label = NULL;\n`];
+  const module = `import { EffectReceipt } from "@intentius/chant";
+import { Op, activity, effect, phase } from "@intentius/chant/op";
+
+export const op = Op({
+  name: "backfill-label",
+  overview: "label from the row",
+  phases: [phase("Backfill", [effect(EffectReceipt("label-all", { effect: "label/all", flavor: "existence" }), [activity("yodelSql", { sql: ${JSON.stringify(fill)}${ctx.dialect === "ch" ? `, settings: { mutations_sync: "2" }` : ""} }, "atMostOnce")])])],
+});
+`;
+  return { module, undo };
+}
+
+/**
+ * `yodel revert` (#55), compared through the recorded schemas, on a fresh
+ * environment that starts from a checkpoint: the chain is the first
+ * migration, one yodel new writes, a checkpoint, and a newest migration that
+ * adds a column and fills it with a backfill (a data step); applying it runs
+ * the checkpoint and that migration. yodel revert, with
+ * a hand-written revert step undoing the fill, stops at the migrations Op's
+ * gate (exit 3); after chant approve of the digest it printed, it runs:
+ * the column is gone, yodel status shows the migration pending and
+ * reverted, and yodel drift finds the environment at its parent's recorded
+ * schema, the checkpoint's. Reverting the checkpoint itself, or a migration
+ * before it (which this environment never ran), is refused (exit 4),
+ * naming the checkpoint.
+ * BREAK: the hand-written revert step is left out, so the data step cannot
+ * be undone and the revert refuses.
+ */
+export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
+  const { p } = s;
+  // The parts before leave two branches, an applied checkpoint, and under BREAK edited migrations: this part starts from the first migration, on an empty server.
+  for (const id of p.migrationIds()) if (p.migration(id).parent !== null) p.removeMigration(id);
+  await ctx.db.reset();
+  const before = await p.newMigration("note-and-audit");
+  if (before === undefined) throw new Error("yodel new wrote no migration");
+  const wrote = await p.yodel(["checkpoint", "base", "--json"]);
+  if (wrote.code !== 0) throw new Error(`yodel checkpoint exited ${String(wrote.code)}: ${wrote.err}`);
+  const cp = parse<{ id: string }>(wrote).id;
+  addColumn(p, "label");
+  const { module, undo } = labelData(ctx);
+  p.write("backfills/label.ts", module);
+  const id = await p.newMigration("label", ["--backfill", "backfills/label.ts"]);
+  if (id === undefined) throw new Error("yodel new wrote no migration");
+  await p.commit("a migration with a data step");
+  await p.setupApply();
+
+  const step = ctx.broken ? [] : ["--step", "revert-label.sql"];
+  if (!ctx.broken) p.write("revert-label.sql", undo);
+  await p.commit("its revert step");
+  const gated = await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 });
+  hold(gated.code === 3, `yodel revert ${p.env} ${id} exited ${String(gated.code)}, not 3 at the gate: ${gated.err.split("\n").filter((l) => l.startsWith("yodel revert")).join(" ").slice(0, 300)}`);
+  await p.approve(parse<{ approve?: string }>(gated).approve);
+  const ran = await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 });
+  hold(ran.code === 0, `yodel revert after approval exited ${String(ran.code)}`);
+
+  hold(!(await ctx.db.columnExists(mainTable(ctx), "label")), `the revert left the column label on ${mainTable(ctx)}`);
+  const status = parse<{ applied: Array<{ id: string }>; pending: Array<{ id: string; reverted?: unknown }> }>(await p.yodel(["status", p.env, "--json"]));
+  hold(!status.applied.some((a) => a.id === id) && status.pending.some((x) => x.id === id && x.reverted !== undefined), `yodel status does not show ${id} reverted`);
+  const drift = await p.yodel(["drift", p.env, "--json"]);
+  hold(drift.code === 0, `yodel drift after the revert exited ${String(drift.code)}: the environment is not at the parent's recorded schema`);
+
+  // The checkpoint is now the newest migration applied here, and the one before it never ran: neither can be reverted.
+  for (const target of [cp, before]) {
+    const refused = await p.yodel(["revert", p.env, target, "--dry-run"]);
+    hold(refused.code === 4 && refused.err.includes(cp), `yodel revert ${target} exited ${String(refused.code)}, not 4 naming the checkpoint ${cp}: ${refused.err.slice(0, 300)}`);
+  }
+}
+
+/** The parts, in order, on one project: two migrations replayed, a second branch forking them, a checkpoint on one chain, then a revert. */
 const parts = [
   ["replay", replayPart],
   ["fork", forkPart],
   ["checkpoint", checkpointPart],
+  ["revert", revertPart],
 ] as const;
 
 async function body(ctx: Ctx): Promise<void> {
@@ -138,7 +214,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const lintClaim: Claim = {
   name: "lint",
-  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it",
+  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one",
   dialects: { ch: body, pg: body },
   parts: parts.map(([name]) => name),
 };

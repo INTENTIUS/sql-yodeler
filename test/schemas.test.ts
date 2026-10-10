@@ -18,6 +18,7 @@ import { applyJson, type DeclarativeOutcome, type VersionedOutcome } from "../sr
 import { driftJson } from "../src/commands/drift.js";
 import { initJson } from "../src/commands/init.js";
 import { repairJson } from "../src/commands/repair.js";
+import { revertJson } from "../src/commands/revert.js";
 import type { Adopted } from "../src/init/adopt.js";
 import type { LintReport } from "../src/lint/check.js";
 import { lintJson } from "../src/lint/report.js";
@@ -390,6 +391,18 @@ describe("each command's --json output validates against its schema", () => {
       dispose();
     }
   }, 60_000);
+
+  it("revert: planned, gated, reverted", () => {
+    const db: BuiltObject = { export: "db", type: "ClickHouse::Database", ddl: "CREATE DATABASE yodel_55 ENGINE = Atomic", dependsOn: [] };
+    const made = createMigration({ name: "one", build: { dialect: "clickhouse", objects: [db] }, now: new Date(Date.UTC(2026, 9, 10, 10, 0)) });
+    if (made.id === undefined) throw new Error("no change");
+    const m: Migration = { id: made.id, dir: "/x", parent: null, checksum: made.document.checksum, document: made.document, files: made.files };
+    const fixed = { environment: "dev", migration: m, to: null, checksum: m.checksum, statements: [{ source: "reverse" as const, step: { ...statement, destructive: true } }], dataSteps: [], step: { file: "undo.sql", sha: "sha256:a", statements: ["DELETE FROM t"] }, done: [] };
+    expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "planned" }));
+    expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "gated", op: "migrate-dev", gate: "approve-migrate-dev", approve: "chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:d", gatePlanDigest: "jcs1-sha256:d" }));
+    expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "reverted", op: "migrate-dev" }));
+    expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "failed", op: "migrate-dev", exitCode: 5 }));
+  });
 
   it("repair", () => {
     expectValid("repair", repairJson({ id: "20261010T0900-init", environment: "prod", oldChecksum: "sha256:a", newChecksum: "sha256:b", reason: "a server upgrade reformatted it", seq: 12, runId: "r-1", migrationJsonUpdated: true }));

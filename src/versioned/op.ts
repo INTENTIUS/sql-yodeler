@@ -31,6 +31,7 @@ import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { chantInstall, runChant } from "../chant/process.js";
 import { discoveryError, GATED, readApplyRun, type ApplyRun } from "../chant/apply.js";
+import { REVERT_ENV, REVERT_STEP_ENV } from "./revert.js";
 
 /** The env var the Apply step reads the approved digest from. */
 export const APPROVED_PLAN_ENV = "YODEL_APPROVED_PLAN";
@@ -180,19 +181,27 @@ export function readStepExit(file: string): number | undefined {
 export async function runMigrateOp(
   project: Project,
   op: MigrateOpRef,
-  options: { allowOutOfOrder: boolean; env?: NodeJS.ProcessEnv; onOutput?: (text: string) => void },
+  options: {
+    allowOutOfOrder: boolean;
+    env?: NodeJS.ProcessEnv;
+    onOutput?: (text: string) => void;
+    /** `yodel revert` (#55): the Op's steps plan and run the revert of this migration, with this hand-written step (an absolute path), instead of applying. */
+    revert?: { id: string; step?: string | undefined };
+  },
 ): Promise<ApplyRun> {
   const shim = yodelShim();
   try {
     const base = options.env ?? process.env;
     // The approved digest only ever comes from the gate, never from the caller's environment.
-    const rest = Object.fromEntries(Object.entries(base).filter(([k]) => k !== APPROVED_PLAN_ENV && k !== ALLOW_OUT_OF_ORDER_ENV));
+    // Nor is a revert ever taken from it: only yodel revert sets one.
+    const rest = Object.fromEntries(Object.entries(base).filter(([k]) => k !== APPROVED_PLAN_ENV && k !== ALLOW_OUT_OF_ORDER_ENV && k !== REVERT_ENV && k !== REVERT_STEP_ENV));
     const exitFile = join(shim.dir, "step-exit");
     const env: NodeJS.ProcessEnv = {
       ...rest,
       [STEP_EXIT_ENV]: exitFile,
       PATH: [shim.dir, base.PATH ?? ""].filter(Boolean).join(delimiter),
       ...(options.allowOutOfOrder ? { [ALLOW_OUT_OF_ORDER_ENV]: "1" } : {}),
+      ...(options.revert ? { [REVERT_ENV]: options.revert.id, ...(options.revert.step ? { [REVERT_STEP_ENV]: options.revert.step } : {}) } : {}),
     };
     const result = await runChant(["run", op.name, "--gated-exit", String(GATED)], {
       cwd: project.dir,

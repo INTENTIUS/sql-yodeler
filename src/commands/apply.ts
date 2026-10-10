@@ -26,7 +26,10 @@ import {
   policyRefusal,
   runChecks,
   currentDigest,
+  currentRevert,
   executeApply,
+  executeRevert,
+  revertFromEnv,
   findMigrateOp,
   gitLedger,
   verifyApproval,
@@ -328,6 +331,32 @@ interface Outcome {
 }
 
 async function versionedApplyWith(project: Project, env: Environment, a: ApplyArgs, io: Io, ordered: readonly Migration[], venv: VersionedEnv, outcome: Outcome = {}): Promise<number> {
+
+  // yodel revert (#55) runs this Op with the migration to revert in the environment: its Plan and Apply steps plan and run that instead.
+  const revert = a.digest || a.execute ? revertFromEnv(process.env, project.dir) : undefined;
+  if (revert && a.digest) {
+    io.out(`${(await currentRevert(venv, ordered, revert.id, revert.step)).digest}\n`);
+    return 0;
+  }
+  if (revert && a.execute) {
+    const approved = process.env[APPROVED_PLAN_ENV];
+    if (!approved) throw new YodelError(`--execute reverts only the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel revert ${env.name} ${revert.id}`);
+    const op = await findMigrateOp(project, env, a.op);
+    const ledger = await gitLedger(project.dir);
+    const plan = await executeRevert(venv, ordered, {
+      id: revert.id,
+      step: revert.step,
+      approvedDigest: approved,
+      ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
+      approve: async (digest) => {
+        const by = await verifyApproval(ledger, op, digest);
+        io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
+      },
+      log: (l) => { io.err(`${l}\n`); },
+    });
+    io.out(`Reverted: ${plan.migration.id}, back to ${plan.to ?? "an empty schema"}\n`);
+    return 0;
+  }
 
   if (a.digest) {
     const { status } = await inspect(venv, ordered);

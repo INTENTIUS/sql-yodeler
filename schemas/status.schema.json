@@ -164,6 +164,13 @@
               "outOfOrder": {
                 "type": "boolean"
               },
+              "reverted": {
+                "description": "It was applied, then yodel revert undid it: who reverted it and when. Applied again, every statement runs again.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["by", "at"],
+                "properties": { "by": { "type": "string" }, "at": { "type": "string" } }
+              },
               "partWay": {
                 "oneOf": [
                   {

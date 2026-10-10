@@ -13,6 +13,7 @@ import { override } from "./override.js";
 import { plan } from "./plan.js";
 import { rebase } from "./rebase.js";
 import { repair } from "./repair.js";
+import { revert } from "./revert.js";
 import { report } from "./report.js";
 import { status } from "./status.js";
 
@@ -33,5 +34,6 @@ export const commands: readonly Command[] = [
   ci,
   rebase,
   repair,
+  revert,
   mcp,
 ];
