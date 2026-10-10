@@ -1,4 +1,4 @@
-import { renameSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
@@ -200,12 +200,97 @@ export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
   }
 }
 
-/** The parts, in order, on one project: two migrations replayed, a second branch forking them, a checkpoint on one chain, then a revert. */
+/**
+ * Under BREAK, yodel with its expectations taken out: the project's yodel
+ * copied, its expectationFailure made to find nothing, so every assertion
+ * holds.
+ */
+function withoutExpectations(ctx: Ctx, p: Project): string[] {
+  const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
+  const root = join(ctx.work, "yodel-without-expectations");
+  mkdirSync(root, { recursive: true });
+  cpSync(join(pkg, "dist"), join(root, "dist"), { recursive: true });
+  cpSync(join(pkg, "schemas"), join(root, "schemas"), { recursive: true });
+  copyFileSync(join(pkg, "package.json"), join(root, "package.json"));
+  symlinkSync(p.path("node_modules"), join(root, "node_modules"));
+  const file = join(root, "dist", "testing", "run.js");
+  const text = readFileSync(file, "utf8");
+  const patched = text.replace(/export function expectationFailure\(e, outcome\) \{/, "$& return undefined;");
+  if (patched === text) throw new Error(`expectationFailure is not in ${file}; the broken build cannot take it out`);
+  writeFileSync(file, patched);
+  ctx.log("BREAK: yodel built without its expectations");
+  return ["node", join(root, "dist", "bin.js")];
+}
+
+interface TestDoc {
+  summary?: { passed: number; failed: number; errors: number };
+  cases?: Array<{ name: string; status: string; failures: string[]; error?: string; after: string[] }>;
+}
+
+/**
+ * `yodel test` (#54) on the replayed database: tests/label.test.ts in the
+ * project, on the chain the revert part left (the first migration,
+ * note-and-audit, a checkpoint, then label with its backfill), on a server
+ * emptied of the claim's database and history. Three cases: rows seeded
+ * after note-and-audit have label filled by the backfill once label runs; a
+ * row the table cannot hold is refused (a schema-object case, on the
+ * newest schema); and a case that says label stays empty, which must fail.
+ * yodel test exits 3 with exactly that case failed, writes the JUnit file
+ * with one failure, and leaves no database behind. Then, with the
+ * migrations applied to the environment, yodel test refuses it (exit 4),
+ * since it has a history, and the table stays.
+ * BREAK: yodel is built with its expectations taken out, so the case that
+ * should fail holds.
+ */
+export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
+  const { p } = s;
+  await ctx.db.reset();
+  const ids = p.migrationIds();
+  const at = ids.find((id) => id.endsWith("-note-and-audit"));
+  const label = ids.find((id) => id.endsWith("-label"));
+  if (at === undefined || label === undefined) throw new Error(`the revert part left no note-and-audit and label migrations: ${ids.join(", ")}`);
+  const db = ctx.db.name;
+  const ch = ctx.dialect === "ch";
+  const seed = ch ? `INSERT INTO ${db}.events (id, kind, ts) VALUES (1, 'view', now()), (2, 'click', now())` : `INSERT INTO ${db}.orders (amount) VALUES (1), (2)`;
+  const cases = [
+    { name: "label is filled from the row", at, seed: [seed], expect: [{ kind: "value", sql: ch ? `SELECT count() FROM ${db}.events WHERE label = kind` : `SELECT count(*) FROM ${db}.orders WHERE label = status`, value: 2 }] },
+    {
+      name: "the table refuses a row it cannot hold",
+      expect: [ch ? { kind: "error", sql: `INSERT INTO ${db}.events (id, kind, ts) VALUES ('not a number', 'view', now())` } : { kind: "error", sql: `INSERT INTO ${db}.orders (status) VALUES ('placed')`, match: "amount" }],
+    },
+    { name: "label stays empty after the migration", at, seed: [seed], expect: [{ kind: "value", sql: ch ? `SELECT count() FROM ${db}.events WHERE label = ''` : `SELECT count(*) FROM ${db}.orders WHERE label IS NULL`, value: 2 }] },
+  ];
+  p.write("tests/label.test.ts", `export default ${JSON.stringify(cases, null, 2)};\n`);
+  await p.commit("tests of the label migration");
+  const junit = join(ctx.work, "yodel-test.xml");
+  const bin = ctx.broken ? { bin: withoutExpectations(ctx, p) } : {};
+
+  const ran = await p.yodel(["test", "--env", p.env, "--json", "--junit", junit], { timeoutMs: 600_000, ...bin });
+  const doc = parse<TestDoc>(ran);
+  const by = new Map((doc.cases ?? []).map((c) => [c.name, c]));
+  const filled = by.get("label is filled from the row");
+  if (filled?.status === "error" || by.get("the table refuses a row it cannot hold")?.status === "error") throw new Error(`a case could not run: ${JSON.stringify(doc.cases)}`);
+  hold(filled?.status === "passed" && filled.after.includes(label), `the label case did not pass after running ${label}: ${JSON.stringify(filled)}`);
+  hold(by.get("the table refuses a row it cannot hold")?.status === "passed", `the refused-row case did not pass: ${JSON.stringify(by.get("the table refuses a row it cannot hold"))}`);
+  const wrong = by.get("label stays empty after the migration");
+  hold(ran.code === 3 && wrong?.status === "failed" && doc.summary?.failed === 1, `yodel test exited ${String(ran.code)} and the case that says label stays empty ${String(wrong?.status)}: an assertion that should fail held`);
+  hold(readFileSync(junit, "utf8").includes('failures="1"'), `${junit} does not record the one failure`);
+  hold(!(await ctx.db.tableExists(mainTable(ctx))), `yodel test left ${db}.${mainTable(ctx)} on the server`);
+
+  // An environment yodel applies to is never a test target.
+  await p.setupApply();
+  const refused = await p.yodel(["test", "--env", p.env, "--reset"]);
+  hold(refused.code === 4 && /has a migration history/.test(refused.err), `yodel test on an environment with a history exited ${String(refused.code)}, not 4: ${refused.err.slice(-300)}`);
+  hold(await ctx.db.tableExists(mainTable(ctx)), `yodel test emptied ${p.env}, an environment yodel applied to`);
+}
+
+/** The parts, in order, on one project: two migrations replayed, a second branch forking them, a checkpoint on one chain, a revert, then tests on the replayed database. */
 const parts = [
   ["replay", replayPart],
   ["fork", forkPart],
   ["checkpoint", checkpointPart],
   ["revert", revertPart],
+  ["test", testPart],
 ] as const;
 
 async function body(ctx: Ctx): Promise<void> {
@@ -214,7 +299,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const lintClaim: Claim = {
   name: "lint",
-  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one",
+  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history",
   dialects: { ch: body, pg: body },
   parts: parts.map(([name]) => name),
 };

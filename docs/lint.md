@@ -220,3 +220,40 @@ Every migration replays to its recorded schema.
 
 5 migrations: 0 errors, 0 warnings, 1 silenced.
 ```
+
+## Tests on the replayed database: yodel test
+
+The replay check shows each migration gives the schema it recorded. It doesn't show that the data survives a migration, that a backfill fills what it should, or that a view returns the right rows: the replayed database has no data, and the replay skips backfills. `yodel test` runs tests for those, written in `tests/*.test.ts`:
+
+```ts
+import { defineTests, expectError, expectRows, expectValue } from "@intentius/sql-yodeler";
+
+export default defineTests([
+  {
+    name: "fill-country fills the country of each event in the months it covers",
+    at: "20261010T0528-events-by-id",
+    seed: ["INSERT INTO shop.events (id, kind, at) VALUES (1, 'view', '2026-06-03 10:00:00')"],
+    expect: [expectRows("SELECT id, country FROM shop.events ORDER BY id", [[1, "FR"]])],
+  },
+  {
+    name: "orders_amount_positive refuses an order of 0",
+    expect: [expectError("INSERT INTO shop.orders (email, amount) VALUES ('c@example.com', 0)", "orders_amount_positive")],
+  },
+]);
+```
+
+Each case runs on a database of its own, built on `--env`'s server (default the `test` profile, else `replay`):
+
+1. the databases (or schemas) the history names are emptied;
+2. the migrations up to `at` are replayed the way the replay check replays them: statements, rebuild and `PostgresMigrationOp` steps, no backfills. Without `at`, that is every migration, and the case tests the schema the newest one leaves: a view's rows, a function's result, a constraint;
+3. the `seed` statements run;
+4. the migrations after `at`, up to `through` (default: the newest), run with every step, backfills included. A backfill's receipts are kept in memory for that case only;
+5. each expectation is checked, all of them even after one fails. `expectRows(sql, rows)` wants exactly those rows in that order, `expectValue(sql, value)` the first column of the first row, and `expectError(sql, match?)` a statement that fails, with a message that contains `match` (or matches it, for a pattern). Values compare as text, so `1` and `"1"` are equal and a date compares as its ISO string. The helpers only build plain objects (`{ kind: "rows", sql, rows }`, and so on), so a test file can write those objects itself and import only the `TestCase` type.
+
+A checkpoint isn't part of the chain the cases build, as in the replay. Nothing is written to a history. At the end the databases are emptied again, unless you pass `--keep`.
+
+`yodel test` never runs on an environment yodel applies to. If the target's history table holds a row, it refuses (exit 4), `--reset` or not. As with the replay check, it also refuses a target that already holds what the history names (unless `--reset`), and a profile that shares its server with another profile naming the same databases (unless `--reset-shared <profile>`).
+
+The run prints each case as `pass`, `FAIL` (with each expectation that did not hold) or `ERROR` (a migration or seed statement that failed, or an unknown migration id), and exits 3 when any case did not pass. `--json` prints the outcome (`schemas/test.schema.json`), `--junit <file>` writes it as JUnit XML (one test suite per file), and `--run <regexp>` runs only the cases whose names match.
+
+The examples have tests: `examples/clickhouse/tests/events.test.ts` covers the backfill and the rebuild with rows in the table, and `examples/postgres/tests/orders.test.ts` covers the column rename with rows, plus a constraint and a default. In a project with test files, `yodel ci` adds `yodel test --env replay --reset --junit yodel-test.xml` to the pull request's lint job, after the replay check on the same throwaway server.

@@ -126,6 +126,10 @@ src/commands/checkpoint.ts             lint
 # yodel revert (#55): the lint claim reverts a migration through the gate.
 src/commands/revert.ts                 lint
 
+# yodel test (#54): the lint claim runs tests on the replayed database.
+src/commands/test.ts                   lint
+src/testing/                           lint
+
 # yodel rebase and yodel repair.
 src/commands/rebase.ts                 out-of-order
 src/commands/repair.ts                 out-of-order

@@ -19,6 +19,7 @@ import { driftJson } from "../src/commands/drift.js";
 import { initJson } from "../src/commands/init.js";
 import { repairJson } from "../src/commands/repair.js";
 import { revertJson } from "../src/commands/revert.js";
+import { testJson } from "../src/testing/report.js";
 import type { Adopted } from "../src/init/adopt.js";
 import type { LintReport } from "../src/lint/check.js";
 import { lintJson } from "../src/lint/report.js";
@@ -405,6 +406,21 @@ describe("each command's --json output validates against its schema", () => {
     const denied = [{ id: "no-drops", outcome: "denied" as const, reasons: ["20261010T1000-one step 0 (yodel_55.t) is drop"] }];
     const wave = { gate: "on-destructive" as const, base: "a".repeat(40), destructiveSteps: [{ migration: m.id, step: 0, what: "DROP TABLE", why: "destructive" }], policyWaits: true };
     expectValid("revert", revertJson(fixed, "jcs1-sha256:d", { status: "denied", policy: denied, wave }));
+  });
+
+  it("test", () => {
+    const base = { environment: "replay", dialect: "postgres" as const, where: "postgres://127.0.0.1:5432/postgres (sql.profiles.replay)", scope: ["shop"], reset: true, files: ["tests/orders.test.ts"] };
+    expectValid(
+      "test",
+      testJson({
+        ...base,
+        cases: [
+          { file: "tests/orders.test.ts", name: "keeps every email", status: "passed", ms: 812, failures: [], before: ["20261010T0531-baseline"], after: ["20261010T0532-rename-email"] },
+          { file: "tests/orders.test.ts", name: "refuses 0", status: "failed", ms: 20, failures: ["expected an error from INSERT ..., and it succeeded"], before: [], after: [] },
+          { file: "tests/orders.test.ts", name: "seed", status: "error", ms: 3, failures: [], error: "seed statement 0 failed", before: [], after: [] },
+        ],
+      }),
+    );
   });
 
   it("repair", () => {

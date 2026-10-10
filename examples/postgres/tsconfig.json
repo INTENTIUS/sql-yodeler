@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["chant.config.ts", "yodel.config.ts", "src", "ops", "backfills", "migrations"]
+  "include": ["chant.config.ts", "yodel.config.ts", "src", "ops", "backfills", "migrations", "tests"]
 }

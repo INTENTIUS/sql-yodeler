@@ -74,6 +74,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { YodelConfig } from "../config/define.js";
 import { loadYodelConfig } from "../config/load.js";
+import { testFiles } from "../testing/files.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
@@ -158,6 +159,8 @@ export interface Environments {
   waves: readonly Wave[];
   /** chant.config.ts declares the `replay` profile, so the lint job runs the replay check. */
   replay: boolean;
+  /** The project has tests/*.test.ts: with the replay profile, the lint job runs yodel test on its server too (#54). */
+  tests?: boolean;
 }
 
 /** DEV_CLICKHOUSE for dev on ClickHouse: what an environment's variables start with. */
@@ -254,6 +257,9 @@ export const waitFor = (host: string, port: number): string =>
 export const LINT = "yodel lint";
 export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 
+/** yodel test (#54), after the replay check on the same throwaway server, its outcome as JUnit XML. */
+export const TEST = `yodel test --env ${REPLAY_PROFILE} --reset --junit yodel-test.xml`;
+
 /** Fails a pull request whose pipelines differ from what yodel ci renders. */
 export const CI_CHECK = "yodel ci --check";
 
@@ -348,7 +354,7 @@ function commentToken(forge: Actions): Record<string, string> {
   return forge === "github" ? { GITHUB_TOKEN: "${{ github.token }}" } : { FORGEJO_TOKEN: "${{ github.token }}" };
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain): AJob {
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false): AJob {
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
@@ -376,6 +382,7 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
       ...steps,
       new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }),
       new Step({ name: "yodel lint --replay", run: REPLAY }),
+      ...(tests ? [new Step({ name: "yodel test", run: TEST })] : []),
     ],
   });
 }
@@ -383,7 +390,7 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
 export function actionsReview(forge: Actions, envs_: Environments): RenderedFile {
   const { dialect, names: envs, replay, waves, jobs: own } = envs_;
   const tc = toolchainOf(envs_);
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc) };
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true) };
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
       ...runner(inContainer(forge, tc), tc),
@@ -460,7 +467,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: [CI_CHECK, LINT, waitFor(svc.name, svc.port), REPLAY],
+            script: [CI_CHECK, LINT, waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : [])],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
@@ -825,6 +832,9 @@ export async function watchPipelines(dir: string, envs_: Environments): Promise<
 
 // ── The project ─────────────────────────────────────────────────────────────
 
+/** Whether the project has a test file for yodel test (tests/*.test.ts). */
+const hasTests = (dir: string): boolean => testFiles(dir).length > 0;
+
 /** The dialect and the environments chant.config.ts declares, in order. */
 export async function environments(dir: string): Promise<Environments> {
   const { loadChantConfig } = await import("@intentius/chant/config");
@@ -846,6 +856,7 @@ export async function environments(dir: string): Promise<Environments> {
     dialect,
     names: envs,
     replay,
+    ...(hasTests(dir) ? { tests: true } : {}),
     waves: await withTenants(dir, await readWaves(dir, envs)),
     forges: ci?.forges ?? FORGES,
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),

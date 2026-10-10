@@ -35,6 +35,7 @@ export const COMMAND_SCHEMAS = {
   rebase: "rebase",
   repair: "repair",
   revert: "revert",
+  test: "test",
 } as const;
 
 /** Every schema file: the commands', the definitions they share, the MCP tool results, and the webhook event (#61). */

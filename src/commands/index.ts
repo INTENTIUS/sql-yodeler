@@ -16,6 +16,7 @@ import { repair } from "./repair.js";
 import { revert } from "./revert.js";
 import { report } from "./report.js";
 import { status } from "./status.js";
+import { test } from "./test.js";
 
 /** Every verb, in the order `yodel --help` lists them. */
 export const commands: readonly Command[] = [
@@ -27,6 +28,7 @@ export const commands: readonly Command[] = [
   newCommand,
   checkpoint,
   lint,
+  test,
   status,
   report,
   drift,
