@@ -301,9 +301,10 @@ export const gitlab = {
 
   // 4. The drift watch's tracking issue: opened, updated, closed.
   const n = ctx.db.name;
+  // Each change is to a property the template declares: chant reports a property the declaration leaves out (a TTL, a default) as unclaimed, not as drift.
   const [byHand, byHandAgain, undo] =
     d === "ch"
-      ? [[`ALTER TABLE ${n}.events MODIFY TTL at + INTERVAL 30 DAY`], [`ALTER TABLE ${n}.events MODIFY COLUMN kind LowCardinality(String) DEFAULT 'by hand'`], [`ALTER TABLE ${n}.events REMOVE TTL`, `ALTER TABLE ${n}.events MODIFY COLUMN kind REMOVE DEFAULT`]]
+      ? [[`ALTER TABLE ${n}.events MODIFY COMMENT 'changed by hand'`], [`ALTER TABLE ${n}.events MODIFY COLUMN kind String`], [`ALTER TABLE ${n}.events MODIFY COMMENT 'One row per event'`, `ALTER TABLE ${n}.events MODIFY COLUMN kind LowCardinality(String)`]]
       : [[`ALTER TABLE ${n}.events ALTER COLUMN at SET DEFAULT '2000-01-01'`], [`ALTER TABLE ${n}.events ALTER COLUMN kind DROP NOT NULL`], [`ALTER TABLE ${n}.events ALTER COLUMN at SET DEFAULT now()`, `ALTER TABLE ${n}.events ALTER COLUMN kind SET NOT NULL`]];
   const secondObject = /column kind/;
   const tracking = async () => (await repo.issues()).filter((i) => i.body.includes("<!-- yodel:drift ") && i.body.includes("env=dev"));
