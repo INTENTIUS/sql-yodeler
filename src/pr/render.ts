@@ -15,6 +15,7 @@ import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explai
 import { asBackfill } from "../steps/kinds.js";
 import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
+import { describeResults, type RuleResult } from "../versioned/policy.js";
 
 /** The marker that identifies one environment's plan comment. */
 export const commentMarker = (env: string): string => `<!-- yodel:plan env=${env} -->`;
@@ -86,6 +87,7 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   if (plan.pending.length === 0 && !plan.refusal) lines.push("", "Nothing pending: every migration is applied.");
   if (plan.problems.length > 0) lines.push("", `Integrity problems (${String(plan.problems.length)}):`, ...plan.problems.map((p) => `  ${p}`));
   if (plan.refusal) lines.push("", `yodel apply would refuse (exit ${String(plan.refusal.exitCode)}): ${plan.refusal.message}`);
+  if (plan.policy && plan.policy.length > 0) lines.push("", "Policy:", ...describeResults(plan.policy).map((l) => `  ${l.replace(/^policy /, "")}`));
   if (plan.sinceLast) lines.push("", `Since the last comment's plan (${plan.sinceLast.approved}): ${describeMove(plan.sinceLast)}`);
   if (plan.digest) {
     lines.push("", `Plan digest: ${plan.digest}`);
@@ -161,6 +163,21 @@ function opStepMarkdown({ index, step, source }: PendingView["steps"][number], r
 
 const indent = (s: string) => s.split("\n").map((l) => (l ? `  ${l}` : l)).join("\n");
 
+/** The policy's outcome (#53): a table of the rules, then how to override a denial. */
+function policyMarkdown(results: readonly RuleResult[], environment: string): string[] {
+  const out = ["#### Policy", "", "| Rule | Outcome | Why |", "|---|---|---|"];
+  for (const r of results) {
+    const outcome = r.outcome === "allowed" ? "allowed" : r.outcome === "denied" ? "**denied**" : `overridden by ${cell(r.override?.by ?? "")}`;
+    const why = r.outcome === "overridden" ? `${cell(r.reasons.join("; "))}; override: ${cell(r.override?.reason ?? "")}` : cell(r.reasons.join("; "));
+    out.push(`| \`${cell(r.id)}\`${r.description ? ` ${cell(r.description)}` : ""} | ${outcome} | ${why} |`);
+  }
+  const denied = results.filter((r) => r.outcome === "denied");
+  if (denied.length > 0) {
+    out.push("", `\`yodel apply\` refuses this plan until someone \`policy.overriders\` lists records why, for exactly this digest:`, "", fence(denied.map((r) => `yodel override ${environment} --rule ${r.id} --reason "<why>"`).join("\n"), "sh"));
+  }
+  return out;
+}
+
 /** The pull request comment body. */
 export function renderPlanMarkdown(plan: VersionedPlan, options: { sql?: boolean } = {}): string {
   const withSql = options.sql !== false;
@@ -176,6 +193,7 @@ export function renderPlanMarkdown(plan: VersionedPlan, options: { sql?: boolean
   } else if (!plan.refusal) out.push("", "Nothing pending: every migration is applied.");
   if (plan.problems.length > 0) out.push("", `#### Integrity problems (${String(plan.problems.length)})`, "", ...plan.problems.map((p) => `- ${cell(p)}`));
   if (plan.refusal) out.push("", `**\`yodel apply\` would refuse (exit ${String(plan.refusal.exitCode)})**, and applies nothing:`, "", fence(plan.refusal.message, "text"));
+  if (plan.policy && plan.policy.length > 0) out.push("", ...policyMarkdown(plan.policy, plan.environment));
   if (plan.sinceLast) out.push("", `Since the previous version of this comment (\`${plan.sinceLast.approved}\`): ${describeMove(plan.sinceLast)}.`);
   if (plan.digest) {
     out.push("", "#### Approval", "", `Plan digest the apply gate binds: \`${plan.digest}\``);
@@ -233,6 +251,7 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
       : a
         ? { opMissing: a.message.split("\n")[0] }
         : {}),
+    ...(plan.policy ? { policy: plan.policy } : {}),
     ...(plan.sinceLast ? { sinceLast: { digest: plan.sinceLast.approved, confirmed: plan.sinceLast.confirmed, changes: plan.sinceLast.changes } } : {}),
     notes: plan.notes,
   };

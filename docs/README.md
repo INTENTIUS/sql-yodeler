@@ -37,16 +37,17 @@ Usage: yodel <command> [options]
 Schema management and migrations for ClickHouse and Postgres.
 
 Commands:
-  init     adopt a live database: declarations and a baseline recorded applied
-  plan     show what apply would change in an environment
-  apply    bring an environment to the declared schema or the pending migrations
-  approve  approve the plan yodel apply would run (a person at a terminal)
-  new      write the next migration from the declared schema
-  lint     check the migrations against the lint rules
-  status   list applied, pending and out-of-order migrations
-  drift    report declared objects changed out of band or gone
-  rebase   move a migration onto a new parent and recompute its schema
-  repair   record a new checksum for an applied migration, with a reason
+  init      adopt a live database: declarations and a baseline recorded applied
+  plan      show what apply would change in an environment
+  apply     bring an environment to its declared schema or pending migrations
+  approve   approve the plan yodel apply would run (a person at a terminal)
+  override  override a policy rule for the current plan, with a reason
+  new       write the next migration from the declared schema
+  lint      check the migrations against the lint rules
+  status    list applied, pending and out-of-order migrations
+  drift     report declared objects changed out of band or gone
+  rebase    move a migration onto a new parent and recompute its schema
+  repair    record a new checksum for an applied migration, with a reason
 
 Options:
   -h, --help     show this help

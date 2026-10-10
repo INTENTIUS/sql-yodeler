@@ -29,6 +29,7 @@ export * from "./checks.js";
 export * from "./digest.js";
 export * from "./engine.js";
 export * from "./op.js";
+export * from "./policy.js";
 export * from "./report.js";
 export * from "./state.js";
 

@@ -22,6 +22,7 @@ import {
   findMigrateOp,
   inspect,
   gitLedger,
+  judgePlan,
   migrateOpExample,
   migrationsDir,
   closeVersioned,
@@ -32,6 +33,7 @@ import {
   statusReport,
   type MigrateOpRef,
   type PendingMigration,
+  type RuleResult,
   type VersionedEnv,
 } from "../versioned/index.js";
 import { currentSubject, explainAgainst, explainMove, latestApproval, type LatestApproval, type MoveExplanation } from "../versioned/explain.js";
@@ -91,6 +93,8 @@ export interface VersionedPlan {
   /** What the digest is taken over, carried in the comment so a later one can say what moved. */
   subject?: DigestSubject | undefined;
   approval?: ApprovalView | undefined;
+  /** Each policy rule's outcome over the plan (#53), with any override recorded for its digest; absent when yodel.config.ts declares no policy. */
+  policy?: RuleResult[] | undefined;
   /** The comment this one replaces showed another digest: what moved since. */
   sinceLast?: MoveExplanation | undefined;
   notes: string[];
@@ -181,6 +185,24 @@ async function collectWith(
   }
 
   plan.approval = await approvalView(project, env, venv, ordered, plan, options);
+  if (project.yodel?.config.policy && !report.refusal) {
+    const approval = plan.approval;
+    plan.policy = await judgePlan({
+      policy: project.yodel.config.policy,
+      environment: env.name,
+      dialect: project.dialect,
+      toApply: status.pending,
+      digest: report.digest,
+      ledger: async () => {
+        if (approval.kind !== "op" || options.ledger === null) return undefined;
+        try {
+          return { port: options.ledger ?? (await gitLedger(project.dir)), op: options.op ?? (await findMigrateOp(project, env, options.opName)) };
+        } catch {
+          return undefined;
+        }
+      },
+    });
+  }
   return plan;
 }
 

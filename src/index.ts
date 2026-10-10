@@ -8,4 +8,4 @@
  */
 
 export { defineConfig } from "./config/define.js";
-export type { EnvironmentConfig, Topology, TopologySetting, YodelConfig } from "./config/define.js";
+export type { EnvironmentConfig, PolicyConfig, PolicyMigration, PolicyPlan, PolicyRule, PolicyStep, Topology, TopologySetting, YodelConfig } from "./config/define.js";

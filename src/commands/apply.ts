@@ -16,6 +16,9 @@ import {
   APPROVED_PLAN_ENV,
   checksDue,
   checksRefusal,
+  describeResults,
+  judgePlan,
+  policyRefusal,
   runChecks,
   currentDigest,
   executeApply,
@@ -89,6 +92,12 @@ Two paths, chosen by the project:
   pending migration the chain puts before an applied one is out of order
   and is refused unless --allow-out-of-order; it is never skipped.
 
+  The policy in yodel.config.ts (policy.rules) is judged over the plan
+  before the gate and again under the lock: a rule that denies it refuses
+  (exit 4) naming the rule, unless someone policy.overriders lists recorded
+  an override for exactly this plan digest (yodel override <env> --rule <id>
+  --reason <text>). The history records the overrides a run relied on.
+
   A migration's pre-migration checks (checks in its migration.json, read-only
   queries) run against the environment: the first pending migration's before
   the gate, and every migration's under the lock just before its first
@@ -123,7 +132,8 @@ Exit codes:
   3  stopped at the gate, waiting for approval of this plan
   4  versioned: refused, nothing applied: a checksum mismatch, an applied
      migration gone from the directory, an out-of-order migration
-     without --allow-out-of-order, or a pre-migration check that failed
+     without --allow-out-of-order, a pre-migration check that failed, or a
+     policy rule that denies the plan with no override
   5  versioned: another apply holds the lock
   1  anything else failed: a statement (the history records where; rerun to
      resume), a plan that moved since approval, a bad config
@@ -181,7 +191,7 @@ function parseApplyArgs(args: string[]): ApplyArgs {
 /** `yodel apply <env>`; the exit codes are in `help`. */
 export const apply: Command = {
   name: "apply",
-  summary: "bring an environment to the declared schema or the pending migrations",
+  summary: "bring an environment to its declared schema or pending migrations",
   implemented: true,
   run: async (args, io) => {
     const code = await guarded("apply", io, args, help, async () => {
@@ -235,6 +245,17 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       },
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
+      ...(project.yodel?.config.policy
+        ? {
+            policy: async (digest, toApply) => {
+              const results = await judgePlan({ policy: project.yodel?.config.policy, environment: env.name, dialect: project.dialect, toApply, digest, ledger: () => Promise.resolve({ port: ledger, op }) });
+              const refusal = policyRefusal(results, env.name, digest, "under the lock");
+              if (refusal) throw refusal;
+              for (const line of describeResults(results)) io.err(`${line}\n`);
+              return results.flatMap((r) => (r.override ? [r.override] : []));
+            },
+          }
+        : {}),
     });
     if (a.json) io.out(`${JSON.stringify({ environment: env.name, status: "applied", planDigest: approved, ...result }, null, 2)}\n`);
     else io.out(result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
@@ -272,9 +293,25 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     }
   }
 
+  const op = await findMigrateOp(project, env, a.op);
+  // The policy (#53): a rule that denies this plan, with no override recorded for its digest, refuses before the gate.
+  const policy = await judgePlan({
+    policy: project.yodel?.config.policy,
+    environment: env.name,
+    dialect: project.dialect,
+    toApply: report.status.pending,
+    digest: report.digest,
+    ledger: async () => ({ port: await gitLedger(project.dir), op }),
+  });
+  const denied = policyRefusal(policy, env.name, report.digest, "before the gate");
+  if (denied) {
+    if (!a.json) io.err(`yodel apply: ${denied.message}\n`);
+    return emit({ status: "denied", policy }, denied.exitCode);
+  }
+
   if (!a.json) io.out(renderStatus(report));
   if (!a.json && checked) for (const o of checked.checks) io.out(`check ${o.name} of ${checked.migration} passed (${o.detail}); it runs again under the lock before the first statement\n`);
-  const op = await findMigrateOp(project, env, a.op);
+  if (!a.json) for (const line of describeResults(policy)) io.out(`${line}\n`);
   if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
   const run = await runMigrateOp(project, op, { allowOutOfOrder: a.allowOutOfOrder, onOutput: (t) => { io.err(t); } });
   if (run.status === "gated") {

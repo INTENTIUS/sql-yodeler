@@ -271,3 +271,49 @@ then run npx yodel apply dev again.
 ```
 
 After a new `chant approve`, the apply goes through. A migration that failed part way moves the digest too, since the statements that succeeded are part of it; the [Postgres example](../examples/postgres/README.md#4-a-migration-that-fails-part-way-and-resumes) approves again before resuming.
+
+## Policy and overrides
+
+Some rules are not lint: no drops in production, no rebuilds during business hours, every silence cites a ticket. `yodel.config.ts` declares them as `policy`, rules over the plan `yodel apply` would run:
+
+```ts
+// yodel.config.ts
+import { defineConfig } from "@intentius/sql-yodeler";
+
+export default defineConfig({
+  policy: {
+    overriders: ["alice", "bob"],
+    rules: [
+      { id: "no-drops-in-prod", environments: ["prod"], description: "no drops in prod", refuse: { classes: ["drop"], destructive: true } },
+      { id: "silences-cite-a-ticket", silences: { reason: /\b[A-Z]+-\d+\b/ } },
+      {
+        id: "no-rebuilds-in-hours",
+        environments: ["prod"],
+        check: (plan) => {
+          const hour = new Date(plan.now).getUTCHours();
+          const rebuild = plan.pending.some((m) => m.steps.some((s) => s.classes.includes("rebuild")));
+          return rebuild && hour >= 8 && hour < 18 ? "a rebuild between 08:00 and 18:00 UTC" : undefined;
+        },
+      },
+    ],
+  },
+});
+```
+
+A rule applies to the environments it lists, or to every one. It denies the plan when any of its parts does:
+
+- `refuse.classes` denies a pending step of one of those classes (ClickHouse: `metadata`, `create`, `rewrite`, `rebuild`, `drop`; Postgres: `metadata`, `create`, `validate`, `concurrently`, `rewrite`, `expand`, `drop`), and `refuse.destructive` any destructive step.
+- `silences.reason` denies a `-- yodel:allow` silence (of `silences.rules`, default any) whose reason does not match the pattern.
+- `check` is a TypeScript predicate over the plan: the environment, the dialect, the time (`now`), and each pending migration with its id, checksum, steps (classes, destructive, rules, SQL, Op) and silences. A message, a list of messages or `false` denies; `undefined`, `true` or `[]` allows.
+
+`yodel plan` shows each rule's outcome, and the pull request comment shows them in a table with the command that overrides a denial. `yodel apply` judges the policy before the gate and the Apply step judges it again under the lock: a rule that denies the plan refuses the apply with exit 4, naming the rule and why, and nothing is applied.
+
+An override is a person's decision, with a reason, to apply a plan a rule denies:
+
+```sh
+npx yodel override prod --rule no-drops-in-prod --reason "the table has been empty since OPS-412" --by alice
+```
+
+It is recorded on chant's gate ledger (the `chant/lifecycle` branch) as an approval of the gate `override-<rule>` of the environment's migrations Op, for exactly the current plan digest, with the reason as its note (`chant approve <op> override-<rule> --plan <digest> --note <reason>`). It counts only for that digest: if the plan moves (a migration added or edited, the live schema changed), the rule denies again and needs a new override. It counts only when `policy.overriders` lists who recorded it (`--by`, else chant's actor: the CI user or your login). `yodel override` refuses a rule that does not deny the current plan, so an override always answers one denial. An override does not approve the plan: the migrations Op's gate still asks for approval as before.
+
+The Apply step writes the overrides it relied on into the history, in the `note` of each migration's `started` row, as `{"policy":{"overrides":[{"rule":...,"by":...,"at":...,"reason":...,"digest":...}]}}`.
