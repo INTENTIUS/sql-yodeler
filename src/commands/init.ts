@@ -1,11 +1,15 @@
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { migrationId } from "../migrations/index.js";
-import { adopt, BASELINE_NAME, type Adopted } from "../init/index.js";
+import { adopt, BASELINE_NAME, planBaseline, projectBaseline, type Adopted } from "../init/index.js";
+import { GATED } from "../chant/apply.js";
+import { runnable } from "../chant/runnable.js";
+import { isApplied } from "../history/index.js";
+import { closeVersioned, findMigrateOp, inspect, openVersioned, readChain, runMigrateOp } from "../versioned/index.js";
 
-const usage = "usage: yodel init --from <env> [--json] [--dir <project>] [--force] [--name <name>]";
+const usage = "usage: yodel init --from <env> [--json] [--dir <project>] [--force] [--name <name>]\n       yodel init --baseline <env> [--json] [--dir <project>] [--op <name>]";
 
 const help = `${usage}
 
@@ -44,26 +48,50 @@ hand (no marker) plan clean. init does not stamp the marker on them: they
 stay unmarked, so chant never prunes them, until a declarative apply
 restamps their comments.
 
+--baseline <env>: another environment that already holds the schema
+(staging, prod), in a project that has its baseline. Plans the schema the
+baseline (the project's first migration) records against <env>'s live
+database, offline from migration.json: every object must be there as the
+baseline declares it, and nothing else in the profile's databases or
+schemas. A difference refuses (exit 4), naming each object and what
+differs, and nothing is recorded. When they match, records the baseline
+applied in <env>'s history, without running it, through <env>'s migrations
+Op, as yodel apply does: its Plan step compares again and prints the
+record's digest (the baseline, the empty history and the live schema), its
+gate binds the approval to that digest, and its Apply step compares again
+under the lock, refuses if the digest moved, and appends the row. A run
+that stops at the gate prints the chant approve command; approve, then run
+yodel init --baseline <env> again. Then yodel plan <env> shows the
+migrations after the baseline pending, as in every other environment.
+
 Options:
-  --from <env>     the environment to adopt (required)
+  --from <env>     the environment to adopt
+  --baseline <env> record the project's baseline in <env>, which holds its schema
+  --op <name>      (--baseline) the Op to run, when more than one applies <env>
   --name <name>    the baseline migration's name (default ${BASELINE_NAME})
   --force          overwrite declaration files the source directory already has
   --json           print what was done as JSON
   -C, --dir <dir>  the project directory (default: the working directory)
 
 Exit codes:
-  0  adopted: declarations and the baseline written, the baseline recorded applied
+  0  adopted: declarations and the baseline written, the baseline recorded
+     applied (--baseline: the baseline recorded applied in <env>)
+  3  (--baseline) stopped at the gate, waiting for approval of the record
   4  refused, nothing written: the source directory already declares a
      schema (without --force), the project already has migrations, the
      history already records migrations, the environment holds nothing, or
-     a ClickHouse profile with no databases or with the history's database
+     a ClickHouse profile with no databases or with the history's database;
+     --baseline: the project has no migrations, <env>'s history records
+     any, or <env>'s live schema is not the baseline's
   5  another apply holds the lock; nothing recorded, nothing kept
   1  anything else failed, and nothing was kept: a bad config, a server it
      cannot read, a build or a plan that is not clean after the import
 `;
 
 interface InitArgs {
-  from: string;
+  from: string | undefined;
+  baseline: string | undefined;
+  op: string | undefined;
   json: boolean;
   dir: string;
   force: boolean;
@@ -79,6 +107,8 @@ function parseInitArgs(args: string[]): InitArgs {
       strict: true,
       options: {
         from: { type: "string" },
+        baseline: { type: "string" },
+        op: { type: "string" },
         json: { type: "boolean" },
         dir: { type: "string", short: "C" },
         force: { type: "boolean" },
@@ -89,11 +119,18 @@ function parseInitArgs(args: string[]): InitArgs {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
   }
   const { values } = parsed;
-  if (typeof values.from !== "string" || values.from === "") throw new YodelError(`--from <env> is required\n${usage}`);
+  const str = (k: string) => (typeof values[k] === "string" && values[k] !== "" ? values[k] : undefined);
+  const from = str("from");
+  const baseline = str("baseline");
+  if ((from === undefined) === (baseline === undefined)) throw new YodelError(`one of --from <env> and --baseline <env> is required\n${usage}`);
+  if (baseline !== undefined && (values.force === true || values.name !== undefined)) throw new YodelError(`--force and --name go with --from; --baseline records the baseline the project has\n${usage}`);
+  if (from !== undefined && values.op !== undefined) throw new YodelError(`--op goes with --baseline\n${usage}`);
   const name = typeof values.name === "string" ? values.name : BASELINE_NAME;
   migrationId(name, new Date()); // a bad name fails before anything is read
   return {
-    from: values.from,
+    from,
+    baseline,
+    op: str("op"),
     json: values.json === true,
     dir: typeof values.dir === "string" ? values.dir : process.cwd(),
     force: values.force === true,
@@ -134,16 +171,61 @@ function report(io: Io, json: boolean, a: Adopted): void {
   io.out(`${lines.join("\n")}\n`);
 }
 
+/** `yodel init --baseline <env> --json` (schemas/init.schema.json, its second form). */
+export function baselineJson(input: { environment: string; dialect: string; baseline: { id: string; checksum: string }; planDigest: string; outcome: Record<string, unknown> }): Record<string, unknown> {
+  return { environment: input.environment, dialect: input.dialect, migration: input.baseline, planDigest: input.planDigest, ...input.outcome };
+}
+
+/** `yodel init --baseline <env>` (#115): compares, then records the baseline through the migrations Op. */
+async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Promise<number> {
+  const env = resolveEnvironment(project, name);
+  const ordered = readChain(project);
+  const baseline = projectBaseline(ordered);
+  const venv = await openVersioned(project, env);
+  try {
+    const planDigest = await planBaseline(project, env, venv, baseline);
+    const emit = (outcome: Record<string, unknown>, code: number) => {
+      if (a.json) io.out(`${JSON.stringify(baselineJson({ environment: env.name, dialect: project.dialect, baseline: { id: baseline.id, checksum: baseline.checksum }, planDigest, outcome }), null, 2)}\n`);
+      return code;
+    };
+    const op = await findMigrateOp(project, env, a.op);
+    if (!a.json) io.out(`${env.name}'s live schema is the schema ${baseline.id} records, and its history records nothing.\nPlan digest: ${planDigest}\n\nRunning ${op.name} (${op.filePath}) to record ${baseline.id} applied in ${env.name}\n`);
+    const ran = await runMigrateOp(project, op, { allowOutOfOrder: false, baseline: baseline.id, onOutput: (t) => { io.err(t); } });
+    if (ran.status === "gated") {
+      if (!a.json) {
+        io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this record${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
+        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnable(`yodel init --baseline ${env.name}`, project.dir)} again.\n`);
+      }
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...(ran.approve ? { approve: ran.approve } : {}), ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+    }
+    if (ran.status === "failed") {
+      const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;
+      if (!a.json) io.err(`yodel init: chant run ${op.name} failed (exit ${String(ran.code)})${ran.stepExit ? `: its Apply step exited ${String(ran.stepExit)}` : ""}\n`);
+      return emit({ status: "failed", op: op.name, exitCode: code }, code);
+    }
+    const { state } = await inspect(venv, ordered);
+    if (!isApplied(state.byId.get(baseline.id))) {
+      if (!a.json) io.err(`yodel init: ${op.name} completed, but ${env.name}'s history does not record ${baseline.id} applied\n`);
+      return emit({ status: "failed", op: op.name, exitCode: 1 }, 1);
+    }
+    if (!a.json) io.out(`\nRecorded ${baseline.id} applied in ${env.name} (${venv.location.database}.history) as a baseline; none of its statements was run.\nyodel status ${env.name} lists it applied, and yodel plan ${env.name} the migrations after it.\n`);
+    return emit({ status: "recorded", op: op.name, history: venv.location.database }, 0);
+  } finally {
+    await closeVersioned(venv);
+  }
+}
+
 /** `yodel init --from <env>`; the exit codes are in `help`. */
 export const init: Command = {
   name: "init",
-  summary: "adopt a live database: declarations and an applied baseline",
+  summary: "adopt a live database, or record its baseline in another env",
   implemented: true,
   run: (args, io) =>
     guarded("init", io, args, help, async () => {
       const a = parseInitArgs(args);
       const project = await loadProject(a.dir);
-      const env = resolveEnvironment(project, a.from);
+      if (a.baseline !== undefined) return recordIn(project, a.baseline, a, io);
+      const env = resolveEnvironment(project, a.from ?? "");
       const adopted = await adopt(project, env, { force: a.force, name: a.name, log: (l) => { io.err(`${l}\n`); } });
       report(io, a.json, adopted);
       return 0;

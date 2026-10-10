@@ -37,6 +37,8 @@ import { REVERT_ENV, REVERT_STEP_ENV } from "./revert.js";
 export const APPROVED_PLAN_ENV = "YODEL_APPROVED_PLAN";
 /** Passes `--allow-out-of-order` through `chant run` to the Op's steps. */
 export const ALLOW_OUT_OF_ORDER_ENV = "YODEL_ALLOW_OUT_OF_ORDER";
+/** The baseline `yodel apply --digest` and `--execute` record instead of applying, set by `yodel init --baseline` (#115) for its Op run. */
+export const BASELINE_ENV = "YODEL_BASELINE";
 
 export interface MigrateOpRef {
   name: string;
@@ -189,14 +191,16 @@ export async function runMigrateOp(
     onOutput?: (text: string) => void;
     /** `yodel revert` (#55): the Op's steps plan and run the revert of this migration, with this hand-written step (an absolute path), instead of applying. */
     revert?: { id: string; step?: string | undefined };
+    /** `yodel init --baseline` (#115): the Op's steps compare and record this baseline in the environment, instead of applying. */
+    baseline?: string;
   },
 ): Promise<ApplyRun> {
   const shim = yodelShim();
   try {
     const base = options.env ?? process.env;
     // The approved digest only ever comes from the gate, never from the caller's environment.
-    // Nor is a revert ever taken from it: only yodel revert sets one.
-    const rest = Object.fromEntries(Object.entries(base).filter(([k]) => k !== APPROVED_PLAN_ENV && k !== ALLOW_OUT_OF_ORDER_ENV && k !== REVERT_ENV && k !== REVERT_STEP_ENV));
+    // Nor is a revert ever taken from it: only yodel revert sets one; nor a baseline, which only yodel init --baseline sets.
+    const rest = Object.fromEntries(Object.entries(base).filter(([k]) => k !== APPROVED_PLAN_ENV && k !== ALLOW_OUT_OF_ORDER_ENV && k !== REVERT_ENV && k !== REVERT_STEP_ENV && k !== BASELINE_ENV));
     const exitFile = join(shim.dir, "step-exit");
     const env: NodeJS.ProcessEnv = {
       ...rest,
@@ -204,6 +208,7 @@ export async function runMigrateOp(
       PATH: [shim.dir, base.PATH ?? ""].filter(Boolean).join(delimiter),
       ...(options.allowOutOfOrder ? { [ALLOW_OUT_OF_ORDER_ENV]: "1" } : {}),
       ...(options.revert ? { [REVERT_ENV]: options.revert.id, ...(options.revert.step ? { [REVERT_STEP_ENV]: options.revert.step } : {}) } : {}),
+      ...(options.baseline ? { [BASELINE_ENV]: options.baseline } : {}),
     };
     const result = await runChant(["run", op.name, "--gated-exit", String(GATED)], {
       cwd: project.dir,

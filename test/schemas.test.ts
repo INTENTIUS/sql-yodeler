@@ -16,7 +16,7 @@ import { driftFingerprint, driftFromLifecycle } from "../src/chant/drift.js";
 import { planJson, type Plan } from "../src/chant/plan.js";
 import { applyJson, type DeclarativeOutcome, type VersionedOutcome } from "../src/commands/apply.js";
 import { driftJson } from "../src/commands/drift.js";
-import { initJson } from "../src/commands/init.js";
+import { baselineJson, initJson } from "../src/commands/init.js";
 import { repairJson } from "../src/commands/repair.js";
 import { cleanupJson } from "../src/commands/cleanup.js";
 import { revertJson } from "../src/commands/revert.js";
@@ -330,6 +330,9 @@ describe("each command's --json output validates against its schema", () => {
       warnings: [],
     } as unknown as Adopted;
     expectValid("init", initJson(adopted));
+    const baseline = { environment: "prod", dialect: "postgres", baseline: { id: "20261010T0900-baseline", checksum: "sha256:a" }, planDigest: "jcs1-sha256:b" };
+    expectValid("init", baselineJson({ ...baseline, outcome: { status: "gated", op: "migrate-prod", gate: "approve-migrate-prod", approve: "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:b" } }));
+    expectValid("init", baselineJson({ ...baseline, outcome: { status: "recorded", op: "migrate-prod", history: "yodeler" } }));
   });
 
   it("new: written, unchanged, a backfill template and a kept --replace", async () => {

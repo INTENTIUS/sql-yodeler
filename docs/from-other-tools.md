@@ -37,7 +37,7 @@ Adoption keeps the database as it is. The migrations the old tool ran are not im
 ### Before you start
 
 1. Stop the old tool's migration jobs for the environment, and apply whatever the old tool still has pending, so the database holds the schema you mean to keep. A migration the old tool runs after the baseline is recorded changes the database behind yodel's back: `yodel drift` reports a declared object it changed or dropped, and a table it created stays undeclared.
-2. Decide which environment to adopt. `yodel init` adopts one environment per project (see [More than one environment](#more-than-one-environment)); pick the one you cannot rebuild, usually production.
+2. Decide which environment to adopt with `yodel init --from`, usually production. The others that hold the same schema take the baseline afterwards with `yodel init --baseline` (see [More than one environment](#more-than-one-environment)).
 3. Have the writer's credentials for it. `init` reads the database and then writes one row to the history (creating the history's database or schema and table first, when they are not there), so the user needs to create those: on ClickHouse, `CREATE DATABASE` (or an existing history database it can create tables in); on Postgres, `CREATE` on the database. A read-only user fails at that write. The plan check before it only reads.
 
 ### The project
@@ -83,7 +83,7 @@ An undeclared object in a listed database or schema (one created after `init`) i
 
 ### More than one environment
 
-Once `migrations/` holds the baseline, `init` refuses in that project, so it records the baseline in one environment. Each other environment starts with an empty history, and `yodel apply` runs the baseline there, which creates everything. That works for an environment that does not hold the schema yet, or one you can empty first (a dev or CI database). For an environment that already holds the schema and its data, yodel has no command yet that records the baseline without running it; adopt the one you cannot rebuild, and rebuild the others from the baseline.
+Once `migrations/` holds the baseline, `init --from` refuses in that project, so it records the baseline in one environment. An environment that does not hold the schema yet, or one you can empty first (a dev or CI database), starts with an empty history, and `yodel apply` runs the baseline there, which creates everything. An environment that already holds the schema and its data takes it with `yodel init --baseline <env>`: it compares that environment's live schema with the schema the baseline records, refuses and names each difference when they differ, and otherwise records the baseline applied there, without running it, behind the environment's gate ([Another environment that already holds the schema](adoption.md#another-environment-that-already-holds-the-schema-yodel-init-baseline)). Stop the old tool in that environment first too, and bring it to the same schema as the adopted one.
 
 ### Cutting CI over
 
