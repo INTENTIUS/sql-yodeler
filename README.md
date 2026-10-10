@@ -4,7 +4,7 @@
 
 Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.
 
-SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for two things only: `chant init` to make a project from a template, and `chant emulator up` for a local database. You approve a plan with `yodel approve`, which records chant's approval for you. Run it as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it.
+SQL Yodeler is built on [chant](https://intentius.io/chant/), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for two things only: `chant init` to make a project from a template, and `chant emulator up` for a local database. Run the CLI as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it. You approve a plan with `yodel approve`, which records chant's approval for you.
 
 ## Getting started
 
