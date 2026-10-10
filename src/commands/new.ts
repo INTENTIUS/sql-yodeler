@@ -238,7 +238,7 @@ function retention(op: string, options: Record<string, unknown>, name: string): 
   const retain = typeof options.retain === "string" ? options.retain : undefined;
   if (op === PG_MIGRATION_OP) {
     return retain !== undefined
-      ? [`The old column is kept for ${retain} after the switch (retain), so readers of it keep working until then.`]
+      ? [`The old column is kept for ${retain} after the switch (retain), so readers of it keep working until then; yodel cleanup <env> drops it after that date.`]
       : [
           `No retain: the old column is dropped in the same yodel apply, right after the switch, so anything still reading it breaks then.`,
           `To keep it while readers move over: yodel new ${name} --replace --retain 7d`,

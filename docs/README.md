@@ -14,7 +14,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Coming from another migration tool](from-other-tools.md) | for a database golang-migrate, goose, Flyway or dbmate manages: the concepts mapped, adopting it with `yodel init --from`, the old tool's files and table, and rollback with `yodel revert` |
 | [The two workflows](workflows.md) | the declarative path (`yodel plan`, `yodel apply` against the declared schema) and the versioned path (`yodel new`, then `yodel apply`) |
 | [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair`, `yodel checkpoint`, and rollback with `yodel revert` |
-| [Steps](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, and manual steps |
+| [Steps](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, `yodel cleanup` of what they keep, and manual steps |
 | [Access control](access.md) | Postgres row-level security, policies, roles and grants: `access` per environment, what the schema owns and what the environment owns, the plan's access section, adopting them |
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
@@ -60,6 +60,7 @@ Commands:
   rebase      move a migration onto a new parent and recompute its schema
   repair      record a new checksum for an applied migration, with a reason
   revert      undo the newest applied migration from its recorded schemas
+  cleanup     drop the old tables and columns steps kept, once past their date
   mcp         serve read-only tools to a coding agent (MCP, stdio)
 
 Options:
@@ -101,5 +102,6 @@ With `--json`, a command prints one JSON document on stdout. Each document has a
 | `yodel drift <env> --json` | [`drift`](https://intentius.io/sql-yodeler/schemas/v1/drift.schema.json) |
 | `yodel rebase --json` | [`rebase`](https://intentius.io/sql-yodeler/schemas/v1/rebase.schema.json) |
 | `yodel repair <env> <id> --reason <text> --json` | [`repair`](https://intentius.io/sql-yodeler/schemas/v1/repair.schema.json) |
+| `yodel cleanup <env> --json` | [`cleanup`](https://intentius.io/sql-yodeler/schemas/v1/cleanup.schema.json) |
 
 The version is in each schema's `$id` (`v1`). Within a version, fields are only added, so a reader ignores fields it does not know; removing a field or changing what one means is a new version. The exit code is the same with or without `--json`. `yodel mcp` serves the read-only commands to a coding agent, with these schemas: [Set up with a coding agent](agents.md#read-only-tools-yodel-mcp).

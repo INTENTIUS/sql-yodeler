@@ -3,6 +3,7 @@ import { apply } from "./apply.js";
 import { ci } from "./ci.js";
 import { approve } from "./approve.js";
 import { checkpoint } from "./checkpoint.js";
+import { cleanup } from "./cleanup.js";
 import { docs } from "./docs.js";
 import { drift } from "./drift.js";
 import { init } from "./init.js";
@@ -37,5 +38,6 @@ export const commands: readonly Command[] = [
   rebase,
   repair,
   revert,
+  cleanup,
   mcp,
 ];

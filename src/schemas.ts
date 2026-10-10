@@ -35,6 +35,7 @@ export const COMMAND_SCHEMAS = {
   rebase: "rebase",
   repair: "repair",
   revert: "revert",
+  cleanup: "cleanup",
   test: "test",
 } as const;
 

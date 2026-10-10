@@ -18,6 +18,7 @@ import { applyJson, type DeclarativeOutcome, type VersionedOutcome } from "../sr
 import { driftJson } from "../src/commands/drift.js";
 import { initJson } from "../src/commands/init.js";
 import { repairJson } from "../src/commands/repair.js";
+import { cleanupJson } from "../src/commands/cleanup.js";
 import { revertJson } from "../src/commands/revert.js";
 import { testJson } from "../src/testing/report.js";
 import type { Adopted } from "../src/init/adopt.js";
@@ -421,6 +422,13 @@ describe("each command's --json output validates against its schema", () => {
         ],
       }),
     );
+  });
+
+  it("cleanup", () => {
+    const table = { kind: "table" as const, name: "shop.events__chant_old", of: "shop.events", retainUntil: "2026-10-17T05:30:05.216Z", due: true, identity: "5f0c" };
+    const column = { kind: "column" as const, name: "shop.orders.customer_email", of: "shop.orders.email", due: false, identity: "16384:3", trigger: { name: "email__chant_sync", fn: "orders__email__chant_sync" }, marker: {} };
+    expectValid("cleanup", cleanupJson({ environment: "prod", now: "2026-10-20T00:00:00.000Z", retained: [table, column], planDigest: "jcs1-sha256:a", approve: "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:a", dropped: [] }));
+    expectValid("cleanup", cleanupJson({ environment: "prod", now: "2026-10-20T00:00:00.000Z", retained: [], dropped: ["shop.events__chant_old"] }));
   });
 
   it("repair", () => {

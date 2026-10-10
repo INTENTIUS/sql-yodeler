@@ -16,6 +16,7 @@ import { YodelError, type Environment, type Project, type SqlDialect } from "../
 import { scanMigrations, type Migration, type MigrationCheck } from "../migrations/index.js";
 import { describeTopology } from "../history/index.js";
 import { asBackfill } from "../steps/kinds.js";
+import { retainedNote } from "../cleanup/index.js";
 import { EXIT_REFUSED } from "../exit.js";
 import {
   BROKEN_CHAIN,
@@ -189,6 +190,8 @@ async function collectWith(
     if (!(await sameDigest(prev, report.digest))) plan.sinceLast = await explainMove({ approvedDigest: prev, now: subject, previous: options.previous, ordered, applied: status.applied });
   }
 
+  const kept = await retainedNote(venv);
+  if (kept) plan.notes.push(kept);
   plan.approval = await approvalView(project, env, venv, ordered, plan, options);
   // The policy as the base commit has it (#73): a pull request that loosens a rule is judged by the old one.
   const basePolicy = await policyAtBase(project, options.processEnv);
