@@ -10,6 +10,7 @@ import type { CheckOutcome, Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import { declarativeTopologyRefusal, LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
+import { policyAtBase } from "../config/base.js";
 import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
@@ -335,6 +336,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
 
   if (a.waveApply !== undefined) {
     const planned = readWavePlan(a.waveApply);
+    const { policy: basePolicy, note: policyNote } = await policyAtBase(project);
+    if (policyNote) io.err(`${policyNote}\n`);
     if (planned.environment !== env.name) throw new YodelError(`refused: ${a.waveApply} is ${planned.environment}'s plan, not ${env.name}'s; nothing was applied`, EXIT_REFUSED);
     const cwd = process.cwd();
     const result = await executeApply(venv, ordered, {
@@ -342,7 +345,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       allowOutOfOrder: a.allowOutOfOrder,
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
       ...(a.standDown ? { standDown: standingDown(project, env) } : {}),
-      ...(project.yodel?.config.policy
+      ...(basePolicy
         ? {
             policy: async (digest, toApply) => {
               const ledger = async () => {
@@ -352,7 +355,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
                   return undefined;
                 }
               };
-              const results = await judgePlan({ policy: project.yodel?.config.policy, environment: env.name, dialect: project.dialect, toApply, digest, ledger });
+              const results = await judgePlan({ policy: basePolicy, environment: env.name, dialect: project.dialect, toApply, digest, ledger });
               const refusal = policyRefusal(results, env.name, digest, "under the lock");
               if (refusal) throw refusal;
               for (const line of describeResults(results)) io.err(`${line}\n`);
@@ -378,6 +381,8 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
 
   if (a.execute) {
     const approved = process.env[APPROVED_PLAN_ENV];
+    const { policy: basePolicy, note: policyNote } = await policyAtBase(project);
+    if (policyNote) io.err(`${policyNote}\n`);
     if (!approved) throw new YodelError(`--execute applies only the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel apply ${env.name}`);
     // The env var is only the Op's hand-off; the approval itself is checked in chant's gate ledger, under the lock.
     const op = await findMigrateOp(project, env, a.op);
@@ -395,10 +400,10 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       },
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
-      ...(project.yodel?.config.policy
+      ...(basePolicy
         ? {
             policy: async (digest, toApply) => {
-              const results = await judgePlan({ policy: project.yodel?.config.policy, environment: env.name, dialect: project.dialect, toApply, digest, ledger: () => Promise.resolve({ port: ledger, op }) });
+              const results = await judgePlan({ policy: basePolicy, environment: env.name, dialect: project.dialect, toApply, digest, ledger: () => Promise.resolve({ port: ledger, op }) });
               const refusal = policyRefusal(results, env.name, digest, "under the lock");
               if (refusal) throw refusal;
               for (const line of describeResults(results)) io.err(`${line}\n`);
@@ -461,9 +466,11 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   }
 
   const op = await findMigrateOp(project, env, a.op);
-  // The policy (#53): a rule that denies this plan, with no override recorded for its digest, refuses before the gate.
+  // The policy (#53), as the base commit has it (#73): a rule that denies this plan, with no override recorded for its digest, refuses before the gate.
+  const basePolicy = await policyAtBase(project);
+  if (basePolicy.note && !a.json) io.err(`${basePolicy.note}\n`);
   const policy = await judgePlan({
-    policy: project.yodel?.config.policy,
+    policy: basePolicy.policy,
     environment: env.name,
     dialect: project.dialect,
     toApply: report.status.pending,

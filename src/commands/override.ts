@@ -3,6 +3,7 @@ import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { EXIT_REFUSED } from "../exit.js";
+import { policyAtBase } from "../config/base.js";
 import { runChant } from "../chant/process.js";
 import { runnable } from "../chant/runnable.js";
 import { closeVersioned, findMigrateOp, hasMigrations, judgePlan, openVersioned, overrideGate, readChain, statusReport, ALLOW_OUT_OF_ORDER_ENV } from "../versioned/index.js";
@@ -78,8 +79,9 @@ export const override: Command = {
       const env = resolveEnvironment(project, name);
       if (rules.length === 0 || reason === "") throw new YodelError(`--rule and --reason are required: an override names the rule and says why\n${usage}`);
       if (!hasMigrations(project)) throw new YodelError(`${project.dir} has no migrations/ directory with a migration; policy is for versioned migrations`);
-      const policy = project.yodel?.config.policy;
-      if (!policy) throw new YodelError(`yodel.config.ts declares no policy, so there is nothing to override`, EXIT_REFUSED);
+      // The policy apply judges: the base commit's (#73).
+      const { policy, note } = await policyAtBase(project);
+      if (!policy) throw new YodelError(note ? `${note} There is nothing to override.` : "yodel.config.ts declares no policy, so there is nothing to override", EXIT_REFUSED);
       const unknown = rules.filter((r) => !policy.rules.some((x) => x.id === r));
       if (unknown.length > 0) throw new YodelError(`no policy rule ${unknown.join(", ")} (policy.rules: ${policy.rules.map((r) => r.id).join(", ")}); nothing recorded`, EXIT_REFUSED);
       if (by !== undefined && !(policy.overriders ?? []).includes(by)) {

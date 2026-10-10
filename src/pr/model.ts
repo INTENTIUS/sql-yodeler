@@ -40,6 +40,7 @@ import { currentSubject, explainAgainst, explainMove, latestApproval, type Lates
 import type { DigestSubject } from "../versioned/digest.js";
 import type { ServerInfo } from "../server.js";
 import { waveView, type WaveView } from "../waves/index.js";
+import { policyAtBase } from "../config/base.js";
 
 export interface StepView {
   index: number;
@@ -188,10 +189,13 @@ async function collectWith(
   }
 
   plan.approval = await approvalView(project, env, venv, ordered, plan, options);
-  if (project.yodel?.config.policy && !report.refusal) {
+  // The policy as the base commit has it (#73): a pull request that loosens a rule is judged by the old one.
+  const basePolicy = await policyAtBase(project, options.processEnv);
+  if (basePolicy.note) plan.notes.push(basePolicy.note);
+  if (basePolicy.policy && !report.refusal) {
     const approval = plan.approval;
     plan.policy = await judgePlan({
-      policy: project.yodel.config.policy,
+      policy: basePolicy.policy,
       environment: env.name,
       dialect: project.dialect,
       toApply: status.pending,

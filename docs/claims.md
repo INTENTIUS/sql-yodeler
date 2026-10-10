@@ -8,7 +8,7 @@ claims: []
 
 Each scenario claim (`scenarios/claims/`) is a promise the docs make, run against chant's emulator. A claim runs twice: plain, where it should pass, and broken (`BREAK=1`), where the claim's own check should catch the fault it plants. `npm run claims` runs them; see the comment at the top of `scenarios/run.ts`.
 
-The record was last written at 2026-10-10 06:38 UTC, at commit `856a189`. A row run in an earlier run keeps that run's commit and date.
+The record was last written at 2026-10-10 07:31 UTC, at commit `d69ee66`. A row run in an earlier run keeps that run's commit and date.
 
 A row marked "not recorded" has not been run into the record. CI does not run the template claim, which needs a Forgejo with a runner.
 
@@ -24,8 +24,8 @@ Each docs page names the claims that prove it, and `npm run check` fails when a 
 | lint-ci | Postgres | yodel lint, offline, fails a migrations directory with a fork (exit 3), naming both migrations | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [getting-started](getting-started.md), [lint](lint.md) |
 | pr-comment | ClickHouse | the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md) |
 | pr-comment | Postgres | the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md) |
-| approve-and-apply | ClickHouse | a pending migration applies only after chant approve of its plan digest, and the history records that digest | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md), [audit](audit.md), [getting-started](getting-started.md), [migrations](migrations.md), [workflows](workflows.md) |
-| approve-and-apply | Postgres | a pending migration applies only after chant approve of its plan digest, and the history records that digest | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md), [audit](audit.md), [getting-started](getting-started.md), [migrations](migrations.md), [workflows](workflows.md) |
+| approve-and-apply | ClickHouse | a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed | pass | caught | `d69ee66` | 2026-10-10 07:31 UTC | [approval](approval.md), [audit](audit.md), [getting-started](getting-started.md), [migrations](migrations.md), [workflows](workflows.md) |
+| approve-and-apply | Postgres | a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed | pass | caught | `d69ee66` | 2026-10-10 07:31 UTC | [approval](approval.md), [audit](audit.md), [getting-started](getting-started.md), [migrations](migrations.md), [workflows](workflows.md) |
 | digest-moved | ClickHouse | an approval is refused once the migration changed after it, and nothing is applied | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md) |
 | digest-moved | Postgres | an approval is refused once the migration changed after it, and nothing is applied | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [approval](approval.md) |
 | resume | ClickHouse | a migration that failed part way resumes at the statement that failed, never resending one that ran | pass | caught | `322e789` | 2026-10-10 03:08 UTC | [migrations](migrations.md) |
