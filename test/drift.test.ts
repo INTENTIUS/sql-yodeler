@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { driftExitCode, driftFromLifecycle, renderDrift } from "../src/chant/drift.js";
 import { lastJsonLine } from "../src/chant/process.js";
+import { projectFrom, yodel } from "./helpers/run.js";
 
 // The shape of `chant lifecycle diff <env> --live --json` (chant 0.112.0), trimmed.
 const doc = (sql: Record<string, unknown>) => ({ environment: "e2e", lexicons: { sql } });
@@ -75,5 +76,21 @@ describe("lastJsonLine", () => {
     expect(lastJsonLine('fold: 1 file folded\n{"a":1}\n')).toEqual({ a: 1 });
     expect(lastJsonLine('{\n  "a": 2\n}\n')).toEqual({ a: 2 });
     expect(lastJsonLine("no json here")).toBeUndefined();
+  });
+});
+
+describe("yodel drift and the topology", () => {
+  // chant renders the declaration for sql.profiles.<env>.topology alone, so a topology only yodel.config.ts sets would show every replicated engine as drift.
+  it("refuses an environment whose yodel.config.ts topology chant.config.ts does not set, before reading the server", async () => {
+    const { dir, dispose } = projectFrom("clickhouse-topology");
+    try {
+      const ran = await yodel(["drift", "replicated", "--dir", dir]);
+      expect(ran.code).toBe(1);
+      expect(ran.err).toContain("sets environments.replicated.topology to replicated:yodel");
+      expect(ran.err).toContain("Set sql.profiles.replicated.topology to the same in chant.config.ts");
+      expect(ran.out).toBe("");
+    } finally {
+      dispose();
+    }
   });
 });

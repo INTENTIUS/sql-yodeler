@@ -6,6 +6,12 @@
  * `ON CLUSTER` works. The pattern is chant's `startScratchCluster`
  * (lexicons/sql/src/clickhouse/container.ts), with the two settings it does
  * not set. Removed by `stop()`.
+ *
+ * With `{ shards: 2 }` a third server joins as the second shard, and every
+ * server also declares the cluster `yodel_sharded`: shard s1 is the two
+ * replicas, shard s2 the third server. `yodel` stays the one-shard cluster
+ * of the first two, so a Replicated database and a sharded cluster can run
+ * side by side, in different databases.
  */
 
 import { execFile } from "node:child_process";
@@ -20,17 +26,26 @@ import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 const exec = promisify(execFile);
 
 export const CLUSTER = "yodel";
+/** The two-shard cluster `{ shards: 2 }` declares. */
+export const SHARDED_CLUSTER = "yodel_sharded";
 
 export interface KeeperCluster {
+  /** Shard s1's two replicas. */
   replicas: [ClickHouseEndpoint, ClickHouseEndpoint];
+  /** With `{ shards: 2 }`, the server of shard s2. */
+  shard2?: ClickHouseEndpoint;
   stop(): Promise<void>;
 }
 
-/** Starts the cluster. Its containers are named `<containers>-<pid>-<random>-r1` and `-r2`; underscores in `containers` become dashes. */
-export async function startKeeperCluster(containers = "yodel-keeper"): Promise<KeeperCluster> {
+/**
+ * Starts the cluster. Its containers are named `<containers>-<pid>-<random>-r1`
+ * and `-r2` (and `-r3` with two shards); underscores in `containers` become dashes.
+ */
+export async function startKeeperCluster(containers = "yodel-keeper", options: { shards?: 1 | 2 } = {}): Promise<KeeperCluster> {
+  const sharded = options.shards === 2;
   const name = uniqueContainerName(containers.replaceAll("_", "-"));
   const network = `${name}-net`;
-  const nodes = [`${name}-r1`, `${name}-r2`] as const;
+  const nodes = sharded ? [`${name}-r1`, `${name}-r2`, `${name}-r3`] : [`${name}-r1`, `${name}-r2`];
   const dir = mkdtempSync(join(tmpdir(), "yodel-keeper-"));
   let removed = false;
   const stop = async () => {
@@ -40,7 +55,9 @@ export async function startKeeperCluster(containers = "yodel-keeper"): Promise<K
     await exec("docker", ["network", "rm", network]).catch(() => undefined);
     rmSync(dir, { recursive: true, force: true });
   };
-  const keeper = nodes[0];
+  const keeper = `${name}-r1`;
+  const [s1, s2] = [nodes.slice(0, 2), nodes.slice(2)];
+  const shard = (hosts: string[]) => `<shard><internal_replication>true</internal_replication>${hosts.map((n) => `<replica><host>${n}</host><port>9000</port></replica>`).join("")}</shard>`;
   const config = (node: string, i: number) => `<clickhouse>
 ${
   i === 0
@@ -56,8 +73,8 @@ ${
 }  <zookeeper><node><host>${keeper}</host><port>9181</port></node></zookeeper>
   <keeper_map_path_prefix>/keeper_map_tables</keeper_map_path_prefix>
   <distributed_ddl><path>/clickhouse/task_queue/ddl</path></distributed_ddl>
-  <remote_servers><${CLUSTER}><shard><internal_replication>true</internal_replication>${nodes.map((n) => `<replica><host>${n}</host><port>9000</port></replica>`).join("")}</shard></${CLUSTER}></remote_servers>
-  <macros><shard>s1</shard><replica>r${String(i + 1)}</replica></macros>
+  <remote_servers><${CLUSTER}>${shard(s1)}</${CLUSTER}>${sharded ? `<${SHARDED_CLUSTER}>${shard(s1)}${shard(s2)}</${SHARDED_CLUSTER}>` : ""}</remote_servers>
+  <macros><shard>${i < 2 ? "s1" : "s2"}</shard><replica>r${String(i + 1)}</replica></macros>
   <interserver_http_host>${node}</interserver_http_host>
 </clickhouse>
 `;
@@ -83,7 +100,9 @@ ${
         await new Promise((r) => setTimeout(r, 500));
       }
     }
-    return { replicas: endpoints as [ClickHouseEndpoint, ClickHouseEndpoint], stop };
+    const [r1, r2, r3] = endpoints;
+    if (!r1 || !r2) throw new Error("the cluster's replicas did not start");
+    return { replicas: [r1, r2], ...(r3 ? { shard2: r3 } : {}), stop };
   } catch (e) {
     await stop();
     throw e;

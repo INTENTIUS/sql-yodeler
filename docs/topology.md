@@ -20,7 +20,7 @@ $ npx yodel status dev
 Migrations in dev (history yodel_18_history.history, topology single (default))
 ```
 
-The declarative path (no `migrations/`) plans and applies through chant, which reads only `sql.profiles.<env>.topology`. A topology set only in `yodel.config.ts` is refused there; set it in `chant.config.ts` too. A rebuild step (`ClickHouseRebuildOp`) runs through chant as well, and yodel hands it the environment's topology, so it renders for the same topology as the statements around it.
+The declarative path (no `migrations/`) plans and applies through chant, which reads only `sql.profiles.<env>.topology`. A topology set only in `yodel.config.ts` is refused there; set it in `chant.config.ts` too. `yodel drift` reads through chant as well and refuses the same way, on either path: chant compares the server against the declaration rendered for the profile's topology, so a cluster's `ReplicatedMergeTree` would otherwise show as drift from the declared `MergeTree`. A rebuild step (`ClickHouseRebuildOp`) runs through chant as well, and yodel hands it the environment's topology, so it renders for the same topology as the statements around it.
 
 ## The same statements on each topology
 
@@ -82,4 +82,12 @@ A cluster, a `Replicated` database and Cloud never fall back: without the `Keepe
 
 ## What has been run where
 
-The examples run on a single node (the emulator). `test/e2e/topology.test.ts` applies one migrations directory to the emulator and to a `Replicated` database on a scratch two-replica cluster with Keeper, and `test/e2e/keeper.test.ts` runs the lock and the replicated history on that cluster (both need Docker and `YODEL_E2E_KEEPER=1`). The `cluster` and `cloud` renderings above are the renderer's output, covered by unit tests; no test in this repository applies to a sharded cluster or to Cloud.
+The examples run on a single node (the emulator). `test/e2e/topology.test.ts` applies one migrations directory to the emulator and to a `Replicated` database on a scratch two-replica cluster with Keeper, and `test/e2e/keeper.test.ts` runs the lock and the replicated history on that cluster (both need Docker and `YODEL_E2E_KEEPER=1`).
+
+The `topology` claim (`npm run claims -- topology`, `scenarios/claims/topology.ts`) does the same, and also applies to a sharded cluster: a third server joins the scratch cluster as a second shard (`test/e2e/keeper-cluster.ts` with `{ shards: 2 }`), and an environment with topology `cluster:yodel_sharded` gets two versioned migrations, `ON CLUSTER`, with `ReplicatedMergeTree` tables and a `Distributed` table over them. The claim checks the tables on every server, rows written through the `Distributed` table landing half on each shard, the history read from the second shard, and `yodel drift`: clean after the applies, then naming a TTL changed and a table dropped `ON CLUSTER`.
+
+What it does not cover yet:
+
+- A rebuild step (`ClickHouseRebuildOp`) on a cluster of more than one shard waits on [INTENTIUS/chant#3663](https://github.com/INTENTIUS/chant/issues/3663). The step creates and swaps the new table on every server, but copies and verifies rows only on the server the profile names, so every other shard's live table loses its rows (they stay in `<table>__chant_old`). Do not run a rebuild on a sharded cluster until that is fixed. The claim's check for it is pending and runs only with `YODEL_CLAIMS_SHARDED_REBUILD=1`. A rebuild in a `Replicated` database is not affected.
+- `yodel drift` on a sharded cluster reads only the server the profile names, so it sees a change made `ON CLUSTER` but not one made on another shard alone, until [INTENTIUS/chant#3664](https://github.com/INTENTIUS/chant/issues/3664). The same issue covers a `Distributed` table's arguments: declared unquoted (`Distributed(main, shop, events, id)`), drift reports them changed against the server's quoted form, so declare them quoted (`Distributed('main', 'shop', 'events', id)`).
+- ClickHouse Cloud is untested beyond rendering: the `cloud` output above comes from the renderer and its unit tests, and nothing in this repository has applied to a Cloud service.

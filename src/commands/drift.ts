@@ -1,6 +1,7 @@
 import type { Command } from "../command.js";
 import { guarded, parseEnvArgs, usage } from "../env-args.js";
 import { loadProject, resolveEnvironment } from "../project.js";
+import { declarativeTopologyRefusal } from "../config/settings.js";
 import { driftExitCode, readDrift, renderDrift } from "../chant/drift.js";
 
 const help = `${usage("drift")}
@@ -30,6 +31,9 @@ export const drift: Command = {
       const { env: name, json, dir } = parseEnvArgs("drift", args);
       const project = await loadProject(dir);
       const env = resolveEnvironment(project, name);
+      // chant renders the declaration for sql.profiles.<env>.topology alone; a different one in yodel.config.ts would show every replicated engine as drift.
+      const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
+      if (refusal) throw refusal;
       const result = await readDrift(project, env);
       const code = driftExitCode(result);
       if (json) io.out(`${JSON.stringify({ ...result, dialect: project.dialect, drifted: code === 2 }, null, 2)}\n`);
