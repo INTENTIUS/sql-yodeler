@@ -105,6 +105,7 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   };
   edit("chant.config.ts", /^ {6}prod: \w+\("prod".*\n/m);
   edit("yodel.config.ts", /^ {4}prod: .*\n/m);
+  edit("yodel.config.ts", /^ {4}\{ env: "prod".*\n/m);
   for (const f of ["ops/migrate-prod.op.ts", "ops/watch-prod.op.ts", ".forgejo/workflows/watch-prod.yml", ".github/workflows/watch-prod.yml"]) rmSync(join(dir, f), { force: true });
   for (const f of existsSync(join(dir, ".gitlab")) ? readdirSync(join(dir, ".gitlab"), { recursive: true }) : []) {
     if (String(f).includes("prod")) rmSync(join(dir, ".gitlab", String(f)), { force: true });
@@ -138,6 +139,8 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   await sh("git", ["config", "user.name", "yodel34"]);
   await sh("git", ["config", "user.email", "yodel34@example.invalid"]);
   await sh("git", ["config", "commit.gpgsign", "false"]);
+  // The apply waves read their gate at the first parent, so the first push has one.
+  await sh("git", ["commit", "-q", "--allow-empty", "-m", "chore: start"]);
   await sh("npm", ["run", "ci"]);
   await sh("git", ["add", "-A"]);
   await sh("git", ["commit", "-qm", "feat: the schema"]);
@@ -158,24 +161,20 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   await sh("git", ["push", "-q", "origin", "main"]);
   const first = await repo.pushed(await head());
   hold(!first.ok, `the first push's apply on ${forge.name} ended ${first.status}, with nothing approved`);
-  hold(first.log.includes("approve migrate-dev approve-migrate-dev --plan jcs1-sha256:"), "the failed apply does not give the chant approve command");
+  const WAVE_APPROVE = /chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64}/;
+  const firstCmd = WAVE_APPROVE.exec(first.log)?.[0];
+  hold(firstCmd !== undefined, "the waiting wave does not give the chant approve command");
   hold(!first.log.includes("SQL_YODELER_TOKEN"), "the apply job still has a step for SQL_YODELER_TOKEN; sql-yodeler installs from npm with no token");
   hold(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists with nothing approved`);
   // The apply stopped at the gate: the receiver has the waiting event, signed with the key (BREAK: checked with another).
   judgeNotify(ctx, notify.part);
 
-  // Approve what yodel plan shows, push the approval, run the apply again.
-  const approveCmd = async (): Promise<string> => {
-    const plan = await sh("npx", ["yodel", "plan", "dev", "--json"]);
-    const cmd = (JSON.parse(plan.out.slice(plan.out.indexOf("{"))) as { approve?: string }).approve;
-    if (!cmd?.startsWith("chant approve ")) throw new Error("yodel plan dev gave no chant approve command");
-    return cmd;
-  };
+  // Approve what the waiting wave printed, push the approval, run the failed job again.
   const approve = async (cmd: string) => {
     await sh("npx", ["chant", ...cmd.split(" ").slice(1)]);
     await sh("git", ["push", "-q", "origin", "chant/lifecycle"]);
   };
-  await approve(await approveCmd());
+  await approve(firstCmd);
   const second = await repo.applyAgain(await head());
   hold(second.ok, `the apply after the approval ended ${second.status}`);
   hold(await ctx.db.tableExists(table), `${ctx.db.name}.${table} is not on the server after the approved apply`);
@@ -195,7 +194,7 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(pr.checks.ok, `the pull request's lint and plan ended ${pr.checks.status}`);
   hold(pr.checks.log.includes("Every migration replays to its recorded schema."), "the pull request's lint job did not replay the migrations into its own server");
   const comment = (await repo.comments(pr.id)).find((c) => c.startsWith("<!-- yodel:plan env=dev -->")) ?? "";
-  const cmd = /```sh\n(chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:[0-9a-f]{64})\n/.exec(comment)?.[1];
+  const cmd = /```sh\n(chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64})\n/.exec(comment)?.[1];
   hold(cmd !== undefined, "the pull request has no plan comment with an approve command");
   hold(!(await ctx.db.columnExists(table, "note")), "the pull request's jobs changed the server");
 

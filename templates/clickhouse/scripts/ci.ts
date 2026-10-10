@@ -8,11 +8,15 @@
  * Environments are the keys of `sql.profiles` in chant.config.ts, in order,
  * but `replay`, which is the lint job's throwaway server.
  * Each one needs ops/migrate-<env>.op.ts and ops/watch-<env>.op.ts.
+ * The apply pipeline's waves are yodel.config.ts `waves`, in order; without
+ * it, one wave per environment in profile order, each with gate `always`.
  *
- * Three pipelines per forge, each declared with chant: yodel-pr and
- * yodel-apply with the github lexicon's Workflow, Job and Step (Forgejo
- * renders the same declaration through the forgejo lexicon's dialect) and
- * the gitlab lexicon's Workflow and Job; the watch with generateOpsPipeline.
+ * Three pipelines per forge, each declared with chant: yodel-pr with the
+ * github lexicon's Workflow, Job and Step (Forgejo renders the same
+ * declaration through the forgejo lexicon's dialect) and the gitlab
+ * lexicon's Workflow and Job; yodel-apply with chant's
+ * generateOpWavesPipeline, from the waves spec this script writes
+ * (yodel-waves.json); the watch with generateOpsPipeline.
  *
  * - yodel-pr: on a pull (merge) request, `npm run ci:check` (these files are
  *   what this script renders), `yodel lint`, and the replay check into a
@@ -20,13 +24,18 @@
  *   environment `yodel plan <env> --comment`, which posts the pending
  *   migrations and the digest to approve. One job per environment, holding
  *   that environment's reader credentials and nothing else.
- * - yodel-apply: on a push to main, `yodel apply <env>` for each environment
- *   in order. The only jobs that hold a writer's credentials, one
- *   environment's each, with YODEL_CREDENTIALS=writer. Two merges in quick
- *   succession do not fail the second apply: it waits for the first's lock
- *   (YODEL_LOCK_WAIT), and an apply whose commit is no longer main's tip
- *   stands down (YODEL_STAND_DOWN), since the newer commit's apply applies
- *   the same environment.
+ * - yodel-apply: on a push to main, one job per wave, each needing the one
+ *   before, running `chant run wave`: it plans the environment (`yodel apply
+ *   <env> --wave-plan`), reads the wave's gate policy from yodel-waves.json
+ *   as the commit before the push has it, waits for an approval when that
+ *   policy asks for one (exit 3, and the waves after it do not run), and
+ *   applies (`yodel apply <env> --wave-apply`). The only jobs that hold a
+ *   writer's credentials, one environment's each, with
+ *   YODEL_CREDENTIALS=writer. Two merges in quick succession do not fail the
+ *   second apply: it waits for the first's lock (YODEL_LOCK_WAIT), and an
+ *   apply whose commit is no longer main's tip stands down
+ *   (YODEL_STAND_DOWN), since the newer commit's waves apply the same
+ *   environments.
  * - watch-<env>: the environment's WatchOp on its own schedule, rendered by
  *   chant's generateOpsPipeline, with the reader's credentials. After the
  *   Op, `yodel drift <env> --issue` compares the server with the schema the
@@ -56,7 +65,7 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
-import { emitYAMLEntry } from "@intentius/chant/yaml";
+import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
 import {
   Concurrency,
   Job as ActionsJob,
@@ -68,10 +77,9 @@ import {
 import { githubSerializer } from "@intentius/chant-lexicon-github/serializer";
 import { forgejoSerializer } from "@intentius/chant-lexicon-forgejo/serializer";
 import {
-  Environment as GitLabEnvironment,
+  Artifacts as GitLabArtifacts,
   Image,
   Job as GitLabJob,
-  Need,
   Rule,
   Service as GitLabService,
   Workflow as GitLabWorkflow,
@@ -105,6 +113,8 @@ export type Dialect = "clickhouse" | "postgres";
 export interface Environments {
   dialect: Dialect;
   names: readonly string[];
+  /** The apply pipeline's waves, in order. */
+  waves: readonly Wave[];
   /** chant.config.ts declares the `replay` profile, so the lint job runs the replay check. */
   replay: boolean;
 }
@@ -207,6 +217,31 @@ export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 export const CI_CHECK = "npm run ci:check";
 
 /**
+ * Webhook events (yodel.config.ts `notify`): the variables the apply, plan
+ * and watch jobs pass from the forge's secrets. yodel sends nothing while
+ * they are unset (empty), so an unconfigured repository needs neither.
+ * GitLab jobs have the project's variables already.
+ */
+export const WEBHOOK_VARIABLES = ["YODEL_WEBHOOK_URL", "YODEL_WEBHOOK_KEY"];
+
+/** Where the plan and apply jobs write `yodel report`, kept as the job's artifact. */
+export const REPORT_DIR = "yodel-report";
+
+/**
+ * `yodel report <env>` as JSON and as the HTML run view, into REPORT_DIR.
+ * It runs whatever the job's outcome, and a gap it reports (exit 4) does not
+ * fail the job: the report is for reading. `yodel` is the project's, named
+ * by path, since GitLab's after_script does not keep before_script's PATH.
+ */
+export const reportCommand = (env: string): string =>
+  `mkdir -p ${REPORT_DIR}; ./node_modules/.bin/yodel report ${env} --json > ${REPORT_DIR}/${env}.json || true; ./node_modules/.bin/yodel report ${env} --html ${REPORT_DIR}/${env}.html || true`;
+
+/** The artifact a job keeps its report in. */
+export const reportArtifact = (job: string): string => `yodel-report-${job}`;
+
+const UPLOAD_ARTIFACT = "actions/upload-artifact@v4";
+
+/**
  * The comment at the top of every file. Added here, not by chant: neither the
  * github nor the gitlab lexicon's serializer writes YAML comments
  * (INTENTIUS/chant#3667, INTENTIUS/chant#3669).
@@ -241,6 +276,14 @@ type AWorkflow = InstanceType<typeof ActionsWorkflow>;
 function renderActions(forge: Actions, workflow: AWorkflow): string {
   const serializer = forge === "github" ? githubSerializer : forgejoSerializer;
   return oneFile(forge, serializer.serialize(new Map([["workflow", workflow]])));
+}
+
+/** The report steps of a job: `yodel report` into REPORT_DIR and the artifact, whatever the job's outcome. */
+function reportSteps(env: string, job: string): AStep[] {
+  return [
+    new Step({ name: `yodel report ${env}`, if: "always()", run: reportCommand(env) }),
+    new Step({ name: "Keep the report", if: "always()", uses: UPLOAD_ARTIFACT, with: { name: reportArtifact(job), path: REPORT_DIR, "if-no-files-found": "ignore" } }),
+  ];
 }
 
 /** `inContainer`: the job runs in IMAGE, which has node, so it needs no setup-node. */
@@ -302,11 +345,12 @@ export function actionsReview(forge: Actions, { dialect, names: envs, replay }: 
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
       ...runner(inContainer(forge)),
-      env: secrets(readerVariables(env, dialect)),
+      env: secrets([...readerVariables(env, dialect), ...WEBHOOK_VARIABLES]),
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
         ...setupSteps(inContainer(forge)),
         new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
+        ...reportSteps(env, `plan-${env}`),
       ],
     });
   }
@@ -333,55 +377,17 @@ export function actionsReview(forge: Actions, { dialect, names: envs, replay }: 
   };
 }
 
-export function actionsApply(forge: Actions, { dialect, names: envs }: Environments): RenderedFile {
-  const jobs: Record<string, AJob> = {};
-  let previous: string | undefined;
-  for (const env of envs) {
-    const job = `apply-${env}`;
-    jobs[job] = new ActionsJob({
-      ...runner(inContainer(forge)),
-      ...(previous ? { needs: [previous] } : {}),
-      // A GitHub environment holds the writer's secrets, restricted to main.
-      ...(forge === "github" ? { environment: env } : {}),
-      concurrency: new Concurrency({ group: `yodel-apply-${env}`, "cancel-in-progress": false }),
-      env: { YODEL_CREDENTIALS: "writer", ...APPLY_LOCK, ...secrets(writerVariables(env, dialect)) },
-      steps: [...setupSteps(inContainer(forge)), new Step({ name: `yodel apply ${env}`, run: `yodel apply ${env}` })],
-    });
-    previous = job;
-  }
-  const workflow = new ActionsWorkflow({
-    name: "yodel-apply",
-    on: { push: { branches: [MAIN] }, workflow_dispatch: {} },
-    permissions: new Permissions({ contents: "read" }),
-    jobs,
-  });
-  const header = [
-    ...HEADER,
-    "#",
-    "# A push to main: yodel apply per environment, in order. These are the only",
-    "# jobs that hold a writer's credentials, one environment's each. yodel apply",
-    "# runs the environment's migrate Op, whose gate needs an approval of the plan",
-    "# digest the pull request comment showed: run the chant approve command from",
-    "# the comment and push chant/lifecycle. Without one, the job fails with the",
-    "# command to run, and applies nothing; approve, then run this workflow again.",
-    ...(forge === "forgejo"
-      ? ["#", "# Forgejo has no environments: every secret is the repository's. Name each in", "# its own job only, as below, and keep who can push workflows short."]
-      : []),
-  ];
-  return {
-    path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-apply.yml`,
-    content: withHeader(header, renderActions(forge, workflow)),
-  };
-}
-
 // ── GitLab CI ───────────────────────────────────────────────────────────────
 
 export const GITLAB_WATCH_FILE = ".gitlab/yodel-watch.gitlab-ci.yml";
+export const GITLAB_APPLY_FILE = ".gitlab/yodel-apply.gitlab-ci.yml";
 
-/** The stages the watch file's jobs use, after the ones this file's jobs use. */
-const GITLAB_STAGES = ["review", "apply", "ops"];
+/** The stage of each wave's job in GITLAB_APPLY_FILE, as chant names it. */
+const waveStages = (waves: readonly Wave[]): string[] => waves.map((w, i) => `wave-${String(i + 1)}-${w.env}`);
 
-export function gitlabPipeline({ dialect, names: envs, replay }: Environments): RenderedFile {
+export function gitlabPipeline({ dialect, names: envs, replay, waves }: Environments): RenderedFile {
+  // The stages this file's jobs use, then the apply file's waves and the watch file's ops.
+  const stages = ["review", ...waveStages(waves), "ops"];
   const mr = () => [new Rule({ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' })];
   const workflow = new GitLabWorkflow({
     rules: [
@@ -415,40 +421,30 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     }),
   );
   for (const env of envs) {
-    jobs.set(`plan-${env}`, new GitLabJob({ extends: ".yodel", stage: "review", rules: mr(), script: [`yodel plan ${env} --comment`] }));
-  }
-  let previous: string | undefined;
-  for (const env of envs) {
-    const job = `apply-${env}`;
     jobs.set(
-      job,
+      `plan-${env}`,
       new GitLabJob({
         extends: ".yodel",
-        stage: "apply",
-        rules: [new Rule({ if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")' })],
-        ...(previous ? { needs: [new Need({ job: previous })] } : {}),
-        // The writer's variables are scoped to this environment, so no other job gets them.
-        environment: new GitLabEnvironment({ name: env }),
-        resource_group: `yodel-apply-${env}`,
-        variables: { YODEL_CREDENTIALS: "writer", ...APPLY_LOCK },
-        script: [`yodel apply ${env}`],
+        stage: "review",
+        rules: mr(),
+        script: [`yodel plan ${env} --comment`],
+        after_script: [reportCommand(env)],
+        artifacts: new GitLabArtifacts({ name: reportArtifact(`plan-${env}`), when: "always", paths: [`${REPORT_DIR}/`] }),
       }),
     );
-    previous = job;
   }
-
   const serialize = (entities: Map<string, Declarable>): string => oneFile("gitlab", gitlabSerializer.serialize(entities));
   // Exception (INTENTIUS/chant#3669): the gitlab serializer writes no
   // top-level include or variables, and its stages are only the ones the
   // declared jobs name, so not the watch file's ops. It writes those stages
   // first; they are replaced by GITLAB_STAGES, and include and variables are
   // written beside them.
-  const derived = `${emitYAMLEntry("stages", GITLAB_STAGES.slice(0, 2))}\n\n`;
+  const derived = `${emitYAMLEntry("stages", ["review"])}\n\n`;
   const jobsYaml = serialize(jobs);
   if (!jobsYaml.startsWith(derived)) throw new Error(`gitlab: expected the jobs' YAML to start with\n${derived}`);
   const topLevel = [
-    emitYAMLEntry("include", [{ local: GITLAB_WATCH_FILE }]),
-    emitYAMLEntry("stages", GITLAB_STAGES),
+    emitYAMLEntry("include", [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }]),
+    emitYAMLEntry("stages", stages),
     emitYAMLEntry("variables", { GIT_DEPTH: "0" }),
   ];
   const yaml = `${serialize(new Map([["workflow", workflow]]))}\n${topLevel.join("\n\n")}\n\n${jobsYaml.slice(derived.length)}`;
@@ -457,14 +453,14 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     `#   ${readerVariables(env, dialect).join(", ")}: not protected (merge request`,
     "#     pipelines run on unprotected branches), masked; no environment scope.",
     `#   ${writerVariables(env, dialect).slice(1).join(", ")}: protected, masked,`,
-    `#     environment scope "${env}": only apply-${env} declares that environment.`,
+    `#     environment scope "${env}": only ${env}'s wave job declares that environment.`,
   ]);
   const header = [
     ...HEADER,
     "#",
     "# Merge requests: lint and the plan comment (stage review). A push to the",
-    "# default branch: yodel apply per environment (stage apply). The drift",
-    `# watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
+    `# default branch: the apply waves, one stage each, in ${GITLAB_APPLY_FILE}.`,
+    `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
     "#",
     "# GitLab gives every job the project's CI/CD variables unless a variable is",
     "# protected or scoped to an environment, so the split between reader and",
@@ -474,9 +470,168 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     "#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN",
     "#     cannot write merge request notes or issues.",
     "# The jobs that hold no writer read with the reader: chant.config.ts picks",
-    "# the writer only under YODEL_CREDENTIALS=writer, which only the apply jobs set.",
+    "# the writer only under YODEL_CREDENTIALS=writer, which only the wave jobs set.",
   ];
   return { path: ".gitlab-ci.yml", content: withHeader(header, yaml) };
+}
+
+// ── The apply waves, through chant's generateOpWavesPipeline ───────────────
+
+/** When a wave waits for an approval; yodel.config.ts `waves[].gate`. */
+export type WaveGate = "always" | "on-destructive" | "never";
+const WAVE_GATES: readonly WaveGate[] = ["always", "on-destructive", "never"];
+
+export interface Wave {
+  env: string;
+  gate: WaveGate;
+}
+
+/** The waves spec: committed, and read by every wave job (its gate policy at the commit before the push). */
+export const WAVES_SPEC = "yodel-waves.json";
+export const APPLY_PIPELINE = "yodel-apply";
+
+interface WavesSpec {
+  name: string;
+  op: string;
+  plan: string[];
+  apply: string[];
+  branches: string[];
+  waves: Array<{
+    name: string;
+    runs: Array<{ target: string; op: string }>;
+    gate: WaveGate;
+    environment?: { name: string };
+    variables?: Record<string, string>;
+  }>;
+}
+
+/**
+ * The waves spec. What the file holds is the same for every forge; each
+ * forge's jobs get their own variables on top (`variables`).
+ */
+export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>): WavesSpec {
+  const first = waves[0];
+  if (!first) throw new Error("no waves to render");
+  return {
+    name: APPLY_PIPELINE,
+    op: `migrate-${first.env}`,
+    plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", WAVES_SPEC],
+    apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", WAVES_SPEC],
+    branches: [MAIN],
+    waves: waves.map((w) => ({
+      name: w.env,
+      runs: [{ target: w.env, op: `migrate-${w.env}` }],
+      gate: w.gate,
+      ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
+    })),
+  };
+}
+
+interface WavesPipelineResult {
+  success: boolean;
+  files?: Array<{ name: string; yaml: string }>;
+  error?: string;
+}
+
+/** The waves spec file and the apply pipeline on each forge. */
+export async function applyPipelines(dir: string, { dialect, waves }: Environments): Promise<RenderedFile[]> {
+  const { generateOpWavesPipeline } = (await import("@intentius/chant/op")) as unknown as {
+    generateOpWavesPipeline: (spec: unknown, lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<WavesPipelineResult>;
+  };
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(wavesSpec(waves), null, 2)}\n` }];
+  // A GitLab job already has the project's variables, a writer's only under its environment.
+  const variables = (forge: Forge) => (env: string) => ({
+    YODEL_CREDENTIALS: "writer",
+    ...APPLY_LOCK,
+    ...(forge === "gitlab" ? {} : secrets([...writerVariables(env, dialect), ...WEBHOOK_VARIABLES])),
+  });
+  const header = [
+    ...HEADER,
+    "#",
+    "# A push to main: one job per wave, each needing the one before. Each runs",
+    "# chant run wave: yodel apply <env> --wave-plan plans the environment, the",
+    `# wave's gate policy is read from ${WAVES_SPEC} as the commit before the push`,
+    "# has it (yodel.config.ts waves, rendered), and a wave that needs an approval",
+    "# exits 3 with the chant approve command, so the waves after it do not run.",
+    "# Approve, push chant/lifecycle, and run the failed job again. These are the",
+    "# only jobs that hold a writer's credentials, one environment's each.",
+  ];
+  for (const forge of FORGES) {
+    const path = forge === "gitlab" ? 'export PATH="$PWD/node_modules/.bin:$PATH"' : 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"';
+    const result = await generateOpWavesPipeline(
+      wavesSpec(waves, variables(forge)),
+      forge,
+      {
+        specFile: WAVES_SPEC,
+        image: IMAGE,
+        beforeScript: ["npm ci", path, FETCH_APPROVALS],
+        ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
+      },
+      dir,
+    );
+    if (!result.success || !result.files) throw new Error(`${forge}: ${result.error ?? "generateOpWavesPipeline rendered nothing"}`);
+    for (const file of result.files) {
+      const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
+      out.push({ path: at, content: withHeader(header, withWaveReports(forge, file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`, waves)) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The wave jobs' report: chant's generateOpWavesPipeline takes run lines
+ * after the wave's command but no step that runs when it fails (a wave that
+ * waits exits 3), and no artifact, so they are added to its output here.
+ * The output is parsed and emitted again; the emitter is checked to give
+ * back chant's text unchanged before anything is added, so a change in
+ * chant's emitter fails here instead of rendering something else.
+ */
+function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[]): string {
+  const envOf = (job: string) => waves.find((w, i) => job === `wave-${String(i + 1)}-${w.env}`)?.env;
+  const body = yaml.search(/^[^#\n]/m);
+  const header = yaml.slice(0, body);
+  const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
+  if (forge === "gitlab") {
+    const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
+    if (emit(doc) !== yaml) throw new Error("gitlab: the apply waves do not emit back to chant's text");
+    for (const [name, job] of Object.entries(doc)) {
+      const env = envOf(name);
+      if (!env || typeof job !== "object" || job === null) continue;
+      Object.assign(job, { after_script: [reportCommand(env)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] } });
+    }
+    return emit(doc);
+  }
+  const at = yaml.indexOf("\njobs:\n");
+  if (at < 0) throw new Error(`${forge}: the apply waves have no jobs`);
+  const jobs = doc.jobs as Record<string, { steps: Array<Record<string, unknown>> }>;
+  const emit = () => `${yaml.slice(0, at + 1)}${emitYAMLEntry("jobs", jobs)}\n`;
+  if (emit() !== yaml) throw new Error(`${forge}: the apply waves do not emit back to chant's text`);
+  for (const [name, job] of Object.entries(jobs)) {
+    const env = envOf(name);
+    if (!env) continue;
+    job.steps.push(
+      { name: `yodel report ${env}`, if: "always()", run: reportCommand(env) },
+      // chant's forgejo output is already in Forgejo's dialect, so the action is named as the forgejo lexicon names it.
+      { name: "Keep the report", if: "always()", uses: forge === "forgejo" ? `https://code.forgejo.org/${UPLOAD_ARTIFACT}` : UPLOAD_ARTIFACT, with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
+    );
+  }
+  return emit();
+}
+
+/** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
+export async function readWaves(dir: string, envs: readonly string[]): Promise<Wave[]> {
+  const file = join(dir, "yodel.config.ts");
+  const config = existsSync(file) ? ((await import(pathToFileURL(file).href)) as { default?: { waves?: unknown } }).default : undefined;
+  const declared = config?.waves;
+  if (declared === undefined) return envs.map((env) => ({ env, gate: "always" }));
+  if (!Array.isArray(declared) || declared.length === 0) throw new Error("yodel.config.ts: waves must list at least one { env, gate }");
+  return declared.map((w: { env?: unknown; gate?: unknown }, i) => {
+    const env = String(w.env);
+    if (!envs.includes(env)) throw new Error(`yodel.config.ts: waves[${String(i)}].env ${env} is not an environment (${envs.join(", ")})`);
+    const gate = (w.gate ?? "always") as WaveGate;
+    if (!WAVE_GATES.includes(gate)) throw new Error(`yodel.config.ts: waves[${String(i)}].gate ${String(w.gate)} is not ${WAVE_GATES.join(", ")}`);
+    return { env, gate };
+  });
 }
 
 // ── The drift watch, through chant's generateOpsPipeline ────────────────────
@@ -498,7 +653,7 @@ export function watchSpec(env: string, dialect: Dialect, forge: Forge): { name: 
   // The job's token, for the tracking issue: GitHub grants it issues: write here, Forgejo's can write already.
   return {
     name: `watch-${env}`,
-    variables: { ...secrets(readerVariables(env, dialect)), GITHUB_TOKEN: "${{ github.token }}" },
+    variables: { ...secrets([...readerVariables(env, dialect), ...WEBHOOK_VARIABLES]), GITHUB_TOKEN: "${{ github.token }}" },
     ...(forge === "github" ? { permissions: { issues: "write" } } : {}),
   };
 }
@@ -554,23 +709,17 @@ export async function environments(dir: string): Promise<Environments> {
       if (!existsSync(join(dir, "ops", `${op}.op.ts`))) throw new Error(`sql.profiles.${env} has no ops/${op}.op.ts`);
     }
   }
-  return { dialect, names: envs, replay };
+  return { dialect, names: envs, replay, waves: await readWaves(dir, envs) };
 }
 
-/** The pipelines that need no Op discovery: pull requests and apply. */
-export function reviewAndApply(envs: Environments): RenderedFile[] {
-  return [
-    actionsReview("github", envs),
-    actionsApply("github", envs),
-    actionsReview("forgejo", envs),
-    actionsApply("forgejo", envs),
-    gitlabPipeline(envs),
-  ];
+/** The pipelines that need no Op discovery: pull requests, and GitLab's main file. */
+export function review(envs: Environments): RenderedFile[] {
+  return [actionsReview("github", envs), actionsReview("forgejo", envs), gitlabPipeline(envs)];
 }
 
 export async function render(dir: string): Promise<RenderedFile[]> {
   const envs = await environments(dir);
-  return [...reviewAndApply(envs), ...(await watchPipelines(dir, envs))];
+  return [...review(envs), ...(await applyPipelines(dir, envs)), ...(await watchPipelines(dir, envs))];
 }
 
 // ── The replay check on this machine ────────────────────────────────────────

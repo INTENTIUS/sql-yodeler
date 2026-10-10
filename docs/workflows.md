@@ -1,5 +1,5 @@
 ---
-claims: [declarative, new, approve-and-apply]
+claims: [declarative, new, approve-and-apply, waves]
 ---
 
 # The two workflows
@@ -113,6 +113,10 @@ npx yodel apply dev           # behind the migrations Op's gate
 ```
 
 `yodel apply` on this path runs the pending migrations in chain order, statement by statement, recording each in the history table under a lock, and resumes a migration that failed part way at the statement that failed. A change that is not one statement (a rebuild, a backfill, an expand-and-contract column change) is a step inside the migration, recorded in the same history. [Migrations](migrations.md) has the details, and [Steps](steps.md) the steps.
+
+## More than one environment
+
+Each environment is a profile in `chant.config.ts`, with its own history. The starter templates' apply pipeline applies them in the order of `yodel.config.ts` `waves` after every push to main, one job per environment, each waiting for the one before; a wave that stops at its gate stops the ones after it. Each wave has its own gate policy (`always`, `on-destructive` or `never`), read from the commit the push merged onto. [Approval](approval.md#waves-a-gate-per-environment) has how a wave plans, waits and applies.
 
 ## Moving from one to the other
 

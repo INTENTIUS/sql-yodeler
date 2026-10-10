@@ -13,6 +13,8 @@ import { declarativeTopologyRefusal, LOCK_WAIT_ENV, parseDuration } from "../con
 import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
+import { EXIT_REFUSED } from "../exit.js";
+import { planWave, readWavePlan, verifyWaveDecision, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile } from "../waves/index.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -87,17 +89,21 @@ export type DeclarativeOutcome = { plan: Record<string, unknown> } & (
 /** The parts of a `yodel apply --json` document, by path. */
 export type ApplyDoc =
   | { mode: "versioned"; report: StatusReport; outcome: VersionedOutcome }
-  | { mode: "execute"; environment: string; planDigest: string; result: ExecuteResult }
+  | { mode: "execute"; environment: string; planDigest: string; result: ExecuteResult; wavePlanDigest?: string }
+  | { mode: "wave-plan"; plan: WavePlanFile }
   | { mode: "declarative"; environment: string; dialect: SqlDialect; server?: ServerInfo | undefined; op: string; outcome: DeclarativeOutcome };
 
 /** The document `yodel apply --json` prints (schemas/apply.schema.json). */
 export function applyJson(doc: ApplyDoc): Record<string, unknown> {
   if (doc.mode === "versioned") return { ...statusJson(doc.report), mode: "versioned", ...doc.outcome };
-  if (doc.mode === "execute") return { environment: doc.environment, status: doc.result.stoodDown ? "stood-down" : "applied", planDigest: doc.planDigest, ...doc.result };
+  if (doc.mode === "execute") return { environment: doc.environment, status: doc.result.stoodDown ? "stood-down" : "applied", planDigest: doc.planDigest, ...(doc.wavePlanDigest ? { wavePlanDigest: doc.wavePlanDigest } : {}), ...doc.result };
+  if (doc.mode === "wave-plan") return { ...doc.plan };
   return { environment: doc.environment, dialect: doc.dialect, ...(doc.server ? { server: doc.server } : {}), op: doc.op, ...doc.outcome };
 }
 
 const usage = "usage: yodel apply <env> [--json] [--dir <project>] [--op <name>] [--allow-out-of-order] [--plan] [--lock-wait <duration>] [--stand-down]";
+
+const waveModes = ["wave-plan", "wave-apply"] as const;
 
 const help = `${usage}
 
@@ -168,6 +174,16 @@ The migrations Op runs two steps of its own, not for direct use:
              ${APPROVED_PLAN_ENV} and chant's gate ledger holds an approval
              of the Op's gate for it (the Op's Apply step)
 
+The apply pipeline's wave jobs (chant run wave, ${WAVES_SPEC_FILE}) run two more:
+  --wave-plan <file>   write the environment's wave plan to <file>: the
+                       plan digest, the gate policy at the base commit, and
+                       whether a pending step is destructive
+  --wave-apply <file>  apply the plan in <file> under the lock, if it is
+                       still the plan now and chant's decision for the
+                       wave lets it through (an approval of the wave's
+                       digest, or a policy at the base commit that needs none)
+  --spec <file>        the waves spec (default ${WAVES_SPEC_FILE})
+
 Exit codes:
   0  applied, or nothing to apply, or (--stand-down) stood down for a newer
      commit, applying nothing
@@ -198,6 +214,9 @@ interface ApplyArgs {
   /** `--lock-wait`, in ms; undefined when not given. */
   lockWaitMs: number | undefined;
   standDown: boolean;
+  wavePlan: string | undefined;
+  waveApply: string | undefined;
+  spec: string;
 }
 
 function parseApplyArgs(args: string[]): ApplyArgs {
@@ -217,6 +236,9 @@ function parseApplyArgs(args: string[]): ApplyArgs {
         execute: { type: "boolean" },
         "lock-wait": { type: "string" },
         "stand-down": { type: "boolean" },
+        "wave-plan": { type: "string" },
+        "wave-apply": { type: "string" },
+        spec: { type: "string" },
       },
     });
   } catch (e) {
@@ -226,7 +248,8 @@ function parseApplyArgs(args: string[]): ApplyArgs {
   const [env, ...rest] = positionals;
   if (env === undefined || rest.length > 0) throw new YodelError(usage);
   const flag = (k: string) => values[k] === true;
-  const modes = ["plan", "digest", "execute"].filter(flag);
+  const str = (k: string) => (typeof values[k] === "string" ? values[k] : undefined);
+  const modes = [...["plan", "digest", "execute"].filter(flag), ...waveModes.filter((k) => str(k) !== undefined)];
   if (modes.length > 1) throw new YodelError(`--${modes.join(" and --")} cannot be combined\n${usage}`);
   return {
     env,
@@ -239,6 +262,9 @@ function parseApplyArgs(args: string[]): ApplyArgs {
     execute: flag("execute"),
     lockWaitMs: typeof values["lock-wait"] === "string" ? parseDuration(values["lock-wait"], "--lock-wait") : undefined,
     standDown: flag("stand-down") || standDownFromEnv(process.env),
+    wavePlan: str("wave-plan"),
+    waveApply: str("wave-apply"),
+    spec: str("spec") ?? WAVES_SPEC_FILE,
   };
 }
 
@@ -253,8 +279,8 @@ export const apply: Command = {
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
       if (hasMigrations(project)) return versionedApply(project, env, a, io);
-      if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down")) {
-        throw new YodelError(`--plan, --digest, --execute, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+      if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down") || a.wavePlan !== undefined || a.waveApply !== undefined) {
+        throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
       }
       const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
       if (refusal) throw refusal;
@@ -291,6 +317,59 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const { status } = await inspect(venv, ordered);
     const toApply = selectToApply(status, a.allowOutOfOrder);
     io.out(`${await currentDigest(venv, status, toApply)}\n`);
+    return 0;
+  }
+
+  if (a.wavePlan !== undefined) {
+    const plan = await writeWavePlan(project, venv, ordered, a.wavePlan, { allowOutOfOrder: a.allowOutOfOrder });
+    io.err(
+      `${env.name}: ${plan.empty ? "nothing to apply" : `${String(plan.pending.length)} pending (${plan.pending.join(", ")})`}; gate ${plan.gate} at ${plan.base.slice(0, 12)}` +
+        `${plan.destructive ? `; destructive: ${plan.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : ""}; plan ${plan.planDigest}\n`,
+    );
+    if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "wave-plan", plan }), null, 2)}\n`);
+    return 0;
+  }
+
+  if (a.waveApply !== undefined) {
+    const planned = readWavePlan(a.waveApply);
+    if (planned.environment !== env.name) throw new YodelError(`refused: ${a.waveApply} is ${planned.environment}'s plan, not ${env.name}'s; nothing was applied`, EXIT_REFUSED);
+    const cwd = process.cwd();
+    const result = await executeApply(venv, ordered, {
+      approvedDigest: planned.migrations,
+      allowOutOfOrder: a.allowOutOfOrder,
+      ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
+      ...(a.standDown ? { standDown: standingDown(project, env) } : {}),
+      ...(project.yodel?.config.policy
+        ? {
+            policy: async (digest, toApply) => {
+              const ledger = async () => {
+                try {
+                  return { port: await gitLedger(project.dir), op: await findMigrateOp(project, env, a.op) };
+                } catch {
+                  return undefined;
+                }
+              };
+              const results = await judgePlan({ policy: project.yodel?.config.policy, environment: env.name, dialect: project.dialect, toApply, digest, ledger });
+              const refusal = policyRefusal(results, env.name, digest, "under the lock");
+              if (refusal) throw refusal;
+              for (const line of describeResults(results)) io.err(`${line}\n`);
+              return results.flatMap((r) => (r.override ? [r.override] : []));
+            },
+          }
+        : {}),
+      approve: async () => {
+        // Under the lock: the wave plan now, and chant's decision for it.
+        const now = await planWave(project, venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
+        if (now.planDigest !== planned.planDigest) {
+          throw new YodelError(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`, 1);
+        }
+        io.err(`${await verifyWaveDecision(cwd, a.spec, env.name, planned.planDigest)}\n`);
+      },
+      log: (l) => { io.err(`${l}\n`); },
+      silences: migrationSilences,
+    });
+    if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "execute", environment: env.name, planDigest: planned.migrations, wavePlanDigest: planned.planDigest, result }), null, 2)}\n`);
+    else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
     return 0;
   }
 

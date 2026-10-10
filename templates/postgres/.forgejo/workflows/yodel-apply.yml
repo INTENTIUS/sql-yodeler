@@ -1,15 +1,18 @@
 # Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
 # Edit those and render again; npm run ci:check says when this file is stale.
 #
-# A push to main: yodel apply per environment, in order. These are the only
-# jobs that hold a writer's credentials, one environment's each. yodel apply
-# runs the environment's migrate Op, whose gate needs an approval of the plan
-# digest the pull request comment showed: run the chant approve command from
-# the comment and push chant/lifecycle. Without one, the job fails with the
-# command to run, and applies nothing; approve, then run this workflow again.
-#
-# Forgejo has no environments: every secret is the repository's. Name each in
-# its own job only, as below, and keep who can push workflows short.
+# A push to main: one job per wave, each needing the one before. Each runs
+# chant run wave: yodel apply <env> --wave-plan plans the environment, the
+# wave's gate policy is read from yodel-waves.json as the commit before the push
+# has it (yodel.config.ts waves, rendered), and a wave that needs an approval
+# exits 3 with the chant approve command, so the waves after it do not run.
+# Approve, push chant/lifecycle, and run the failed job again. These are the
+# only jobs that hold a writer's credentials, one environment's each.
+# chant dropped the environment of each of these waves: dev -> dev, prod -> prod.
+# Forgejo Actions has no environments, so nothing on the forge holds these jobs.
+# Each wave's own chant gate does: it records a pending fact on chant/lifecycle
+# and the wave exits 3 until `chant approve` approves its set digest.
+
 name: yodel-apply
 
 on:
@@ -18,13 +21,14 @@ on:
       - main
   workflow_dispatch: {}
 
+concurrency:
+  group: yodel-apply
+  cancel-in-progress: false
+
 jobs:
-  apply-dev:
+  wave-1-dev:
     runs-on: docker
     container: node:22-bookworm
-    concurrency:
-      group: yodel-apply-dev
-      cancel-in-progress: false
     env:
       YODEL_CREDENTIALS: writer
       YODEL_LOCK_WAIT: '10m'
@@ -32,24 +36,32 @@ jobs:
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_WRITER_USER: '${{ secrets.DEV_POSTGRES_WRITER_USER }}'
       DEV_POSTGRES_WRITER_PASSWORD: '${{ secrets.DEV_POSTGRES_WRITER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-      - name: Fetch the approvals (chant/lifecycle)
-        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
-      - name: yodel apply dev
-        run: yodel apply dev
-  apply-prod:
+      - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: Plan, gate and apply wave 1 (dev)
+        run: chant run wave --spec yodel-waves.json --wave 1
+      - name: yodel report dev
+        if: always()
+        run: mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+      - name: Keep the report
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: yodel-report-wave-1-dev
+          path: yodel-report
+          if-no-files-found: ignore
+  wave-2-prod:
     runs-on: docker
-    container: node:22-bookworm
     needs:
-      - apply-dev
-    concurrency:
-      group: yodel-apply-prod
-      cancel-in-progress: false
+      - wave-1-dev
+    container: node:22-bookworm
     env:
       YODEL_CREDENTIALS: writer
       YODEL_LOCK_WAIT: '10m'
@@ -57,13 +69,24 @@ jobs:
       PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
       PROD_POSTGRES_WRITER_USER: '${{ secrets.PROD_POSTGRES_WRITER_USER }}'
       PROD_POSTGRES_WRITER_PASSWORD: '${{ secrets.PROD_POSTGRES_WRITER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-      - name: Fetch the approvals (chant/lifecycle)
-        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
-      - name: yodel apply prod
-        run: yodel apply prod
+      - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - name: Plan, gate and apply wave 2 (prod)
+        run: chant run wave --spec yodel-waves.json --wave 2
+      - name: yodel report prod
+        if: always()
+        run: mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+      - name: Keep the report
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: yodel-report-wave-2-prod
+          path: yodel-report
+          if-no-files-found: ignore

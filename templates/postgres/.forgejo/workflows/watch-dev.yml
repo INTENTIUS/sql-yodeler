@@ -19,6 +19,8 @@ jobs:
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
       DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
       GITHUB_TOKEN: '${{ github.token }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7

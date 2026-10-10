@@ -93,6 +93,9 @@ export default defineConfig({
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
 | lint rule levels | `lint.rules` | | | each rule's own |
+| the apply pipeline's waves and their gates | `waves` | | | none: every environment waits for an approval |
+
+`waves` lists the environments in the order the apply pipeline applies them, each with a gate policy: `[{ env: "dev", gate: "never" }, { env: "prod", gate: "on-destructive" }]`. An environment it does not name, or a wave without `gate`, waits for an approval whenever it has a migration to apply (`always`). The pipeline reads a wave's gate from the commit a change merges onto, not from the change; [Approval](approval.md#waves-a-gate-per-environment) has the rest.
 
 `sources` names DDL sources, the tables an ORM defines read from the DDL it prints; see [Schema from an ORM](orm.md).
 

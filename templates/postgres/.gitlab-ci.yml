@@ -2,8 +2,8 @@
 # Edit those and render again; npm run ci:check says when this file is stale.
 #
 # Merge requests: lint and the plan comment (stage review). A push to the
-# default branch: yodel apply per environment (stage apply). The drift
-# watches are in .gitlab/yodel-watch.gitlab-ci.yml (stage ops).
+# default branch: the apply waves, one stage each, in .gitlab/yodel-apply.gitlab-ci.yml.
+# The drift watches are in .gitlab/yodel-watch.gitlab-ci.yml (stage ops).
 #
 # GitLab gives every job the project's CI/CD variables unless a variable is
 # protected or scoped to an environment, so the split between reader and
@@ -11,16 +11,16 @@
 #   DEV_POSTGRES_URL, DEV_POSTGRES_READER_USER, DEV_POSTGRES_READER_PASSWORD: not protected (merge request
 #     pipelines run on unprotected branches), masked; no environment scope.
 #   DEV_POSTGRES_WRITER_USER, DEV_POSTGRES_WRITER_PASSWORD: protected, masked,
-#     environment scope "dev": only apply-dev declares that environment.
+#     environment scope "dev": only dev's wave job declares that environment.
 #   PROD_POSTGRES_URL, PROD_POSTGRES_READER_USER, PROD_POSTGRES_READER_PASSWORD: not protected (merge request
 #     pipelines run on unprotected branches), masked; no environment scope.
 #   PROD_POSTGRES_WRITER_USER, PROD_POSTGRES_WRITER_PASSWORD: protected, masked,
-#     environment scope "prod": only apply-prod declares that environment.
+#     environment scope "prod": only prod's wave job declares that environment.
 #   GITLAB_TOKEN: a project access token with the api scope (Reporter), for
 #     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN
 #     cannot write merge request notes or issues.
 # The jobs that hold no writer read with the reader: chant.config.ts picks
-# the writer only under YODEL_CREDENTIALS=writer, which only the apply jobs set.
+# the writer only under YODEL_CREDENTIALS=writer, which only the wave jobs set.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -29,11 +29,13 @@ workflow:
     - if: '$CI_COMMIT_BRANCH'
 
 include:
+  - local: .gitlab/yodel-apply.gitlab-ci.yml
   - local: .gitlab/yodel-watch.gitlab-ci.yml
 
 stages:
   - review
-  - apply
+  - wave-1-dev
+  - wave-2-prod
   - ops
 
 variables:
@@ -74,6 +76,13 @@ plan-dev:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - yodel plan dev --comment
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+  artifacts:
+    name: yodel-report-plan-dev
+    when: always
+    paths:
+      - yodel-report/
 
 plan-prod:
   extends: .yodel
@@ -82,35 +91,10 @@ plan-prod:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
     - yodel plan prod --comment
-
-apply-dev:
-  extends: .yodel
-  stage: apply
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
-  environment:
-    name: dev
-  resource_group: yodel-apply-dev
-  variables:
-    YODEL_CREDENTIALS: writer
-    YODEL_LOCK_WAIT: '10m'
-    YODEL_STAND_DOWN: '1'
-  script:
-    - yodel apply dev
-
-apply-prod:
-  extends: .yodel
-  stage: apply
-  rules:
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "web")'
-  needs:
-    - job: apply-dev
-  environment:
-    name: prod
-  resource_group: yodel-apply-prod
-  variables:
-    YODEL_CREDENTIALS: writer
-    YODEL_LOCK_WAIT: '10m'
-    YODEL_STAND_DOWN: '1'
-  script:
-    - yodel apply prod
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+  artifacts:
+    name: yodel-report-plan-prod
+    when: always
+    paths:
+      - yodel-report/

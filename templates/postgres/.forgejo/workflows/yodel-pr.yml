@@ -54,6 +54,8 @@ jobs:
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
       DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
@@ -66,6 +68,16 @@ jobs:
         run: yodel plan dev --comment
         env:
           FORGEJO_TOKEN: '${{ github.token }}'
+      - name: yodel report dev
+        if: always()
+        run: mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+      - name: Keep the report
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: yodel-report-plan-dev
+          path: yodel-report
+          if-no-files-found: ignore
   plan-prod:
     runs-on: docker
     container: node:22-bookworm
@@ -73,6 +85,8 @@ jobs:
       PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
       PROD_POSTGRES_READER_USER: '${{ secrets.PROD_POSTGRES_READER_USER }}'
       PROD_POSTGRES_READER_PASSWORD: '${{ secrets.PROD_POSTGRES_READER_PASSWORD }}'
+      YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
+      YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
@@ -85,3 +99,13 @@ jobs:
         run: yodel plan prod --comment
         env:
           FORGEJO_TOKEN: '${{ github.token }}'
+      - name: yodel report prod
+        if: always()
+        run: mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+      - name: Keep the report
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v4
+        with:
+          name: yodel-report-plan-prod
+          path: yodel-report
+          if-no-files-found: ignore

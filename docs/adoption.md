@@ -33,6 +33,7 @@ Created:
   .github/workflows/yodel-pr.yml
   .gitignore
   .gitlab-ci.yml
+  .gitlab/yodel-apply.gitlab-ci.yml
   .gitlab/yodel-watch.gitlab-ci.yml
   chant.config.ts
   justfile
@@ -47,6 +48,7 @@ Created:
   scripts/local.ts
   src/schema.ts
   tsconfig.json
+  yodel-waves.json
   yodel.config.ts
   .chant/workspace.lock.json
 

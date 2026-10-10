@@ -16,6 +16,7 @@ import { asBackfill } from "../steps/kinds.js";
 import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
 import { describeResults, type RuleResult } from "../versioned/policy.js";
+import { describeWave } from "../waves/index.js";
 
 /** The marker that identifies one environment's plan comment. */
 export const commentMarker = (env: string): string => `<!-- yodel:plan env=${env} -->`;
@@ -89,6 +90,10 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   if (plan.refusal) lines.push("", `yodel apply would refuse (exit ${String(plan.refusal.exitCode)}): ${plan.refusal.message}`);
   if (plan.policy && plan.policy.length > 0) lines.push("", "Policy:", ...describeResults(plan.policy).map((l) => `  ${l.replace(/^policy /, "")}`));
   if (plan.sinceLast) lines.push("", `Since the last comment's plan (${plan.sinceLast.approved}): ${describeMove(plan.sinceLast)}`);
+  if (plan.wave) {
+    lines.push("", describeWave(plan.wave));
+    if (plan.wave.waits) lines.push(`Approve it for the pipeline with:`, `  ${run(plan.wave.approve)}`);
+  }
   if (plan.digest) {
     lines.push("", `Plan digest: ${plan.digest}`);
     if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it with:`, `  ${run(plan.approval.command)}`, `or, at a terminal, with ${run(`yodel approve ${plan.environment}`)}, which shows the plan and asks you first.`);
@@ -195,8 +200,12 @@ export function renderPlanMarkdown(plan: VersionedPlan, options: { sql?: boolean
   if (plan.refusal) out.push("", `**\`yodel apply\` would refuse (exit ${String(plan.refusal.exitCode)})**, and applies nothing:`, "", fence(plan.refusal.message, "text"));
   if (plan.policy && plan.policy.length > 0) out.push("", ...policyMarkdown(plan.policy, plan.environment));
   if (plan.sinceLast) out.push("", `Since the previous version of this comment (\`${plan.sinceLast.approved}\`): ${describeMove(plan.sinceLast)}.`);
+  if (plan.wave) {
+    out.push("", "#### The apply pipeline", "", describeWave(plan.wave, (c) => `\`${c}\``));
+    if (plan.wave.waits) out.push("", "Approve it before merging:", "", fence(plan.wave.approve, "sh"));
+  }
   if (plan.digest) {
-    out.push("", "#### Approval", "", `Plan digest the apply gate binds: \`${plan.digest}\``);
+    out.push("", "#### Approval", "", plan.wave ? `Plan digest \`yodel apply ${plan.environment}\` binds, outside the pipeline: \`${plan.digest}\`` : `Plan digest the apply gate binds: \`${plan.digest}\``);
     if (plan.approval?.kind === "op" && plan.approval.command) out.push("", "Approve it with:", "", fence(plan.approval.command, "sh"));
   }
   const a = approvalLines(plan.approval, plan.digest, true);
@@ -252,6 +261,7 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
         ? { opMissing: a.message.split("\n")[0] }
         : {}),
     ...(plan.policy ? { policy: plan.policy } : {}),
+    ...(plan.wave ? { wave: plan.wave } : {}),
     ...(plan.sinceLast ? { sinceLast: { digest: plan.sinceLast.approved, confirmed: plan.sinceLast.confirmed, changes: plan.sinceLast.changes } } : {}),
     notes: plan.notes,
   };

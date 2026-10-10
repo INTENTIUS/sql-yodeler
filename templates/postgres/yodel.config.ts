@@ -12,4 +12,14 @@ export default {
     // The lint job's throwaway server (chant.config.ts), with the same history schema.
     replay: { history: { database: "{{chant:history_schema}}" } },
   },
+  // The apply pipeline's waves, in order: scripts/ci.ts renders one job per
+  // wave, each needing the one before. A wave's gate says when it waits for
+  // an approval: "always" (whenever it has a migration to apply),
+  // "on-destructive" (a drop, a table rewrite or lock-heavy statement, a
+  // rebuild, an Op or manual step) or "never". The pipeline reads the gate
+  // from the commit before the push, so a change cannot loosen its own.
+  waves: [
+    { env: "dev", gate: "always" },
+    { env: "prod", gate: "always" },
+  ],
 } satisfies YodelConfig;

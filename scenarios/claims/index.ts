@@ -17,6 +17,7 @@ import { templateClaim } from "./template.js";
 import { templateGithub } from "./template-github.js";
 import { templateGitlab } from "./template-gitlab.js";
 import { topology } from "./topology.js";
+import { wavesClaim } from "./waves.js";
 
 /** Every claim, in the order the summary and the record list them: #34's list, then the Postgres-only ones. */
 export const claims: readonly Claim[] = [
@@ -40,4 +41,5 @@ export const claims: readonly Claim[] = [
   templateGitlab,
   lockRetry,
   columnChange,
+  wavesClaim,
 ];
