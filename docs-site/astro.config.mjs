@@ -17,7 +17,13 @@ export default defineConfig({
 		starlight({
 			title: 'SQL Yodeler',
 			description: 'Schema management and migrations for ClickHouse and Postgres, on chant\'s sql lexicon.',
-			social: [{ icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/@intentius/sql-yodeler' }],
+			social: [
+				{ icon: 'github', label: 'GitHub', href: 'https://github.com/INTENTIUS/sql-yodeler' },
+				{ icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/@intentius/sql-yodeler' },
+			],
+			// The pages are generated from docs/, so each page's front matter names its
+			// source file as editUrl (pages.mjs); this base is the fallback.
+			editLink: { baseUrl: 'https://github.com/INTENTIUS/sql-yodeler/edit/main/' },
 			sidebar: sidebar(),
 			// The hat (scripts/brand.py draws it): the logo beside the title, the
 			// favicons, and the square 400 px hat a shared link shows.
