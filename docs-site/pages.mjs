@@ -4,7 +4,8 @@
 // page under src/content/docs/ (gitignored, never committed): the first
 // heading becomes the title, links between docs pages become site links, and
 // links into the rest of the repository (examples, source files) become their
-// plain text. The landing page is the
+// plain text. Each page's editUrl points "Edit page" at its docs/ file (none
+// for claims.md, which npm run claims:page writes). The landing page is the
 // README's intro over docs/README.md, and the sidebar follows the order of
 // docs/README.md's table, then any page the table does not list. The 404
 // page is written here too, with the hat.
@@ -14,6 +15,12 @@ import { fileURLToPath } from 'node:url';
 import { pagePrompts } from './prompts.mjs';
 
 export const base = '/sql-yodeler';
+
+/** Where "Edit page" opens a docs file on GitHub. */
+const editBase = 'https://github.com/INTENTIUS/sql-yodeler/edit/main/docs/';
+
+/** Pages generated from something else, with no file to edit by hand. */
+const generated = new Set(['claims']);
 
 const repo = new URL('../', import.meta.url);
 const docsDir = new URL('docs/', repo);
@@ -183,6 +190,7 @@ export function writePages() {
 			rank: order.indexOf(slug),
 			claims: front.claims,
 			...(front.draft ? { unproven: true } : {}),
+			editUrl: generated.has(slug) ? false : `${editBase}${file}`,
 		};
 		writeFileSync(`${outDir}${slug}.md`, frontmatter(fields) + rewriteLinks(top + body.trimEnd() + bottom, slugs));
 	}
@@ -194,6 +202,7 @@ head:
   - tag: title
     content: ${JSON.stringify(`${index.title}: schema management and migrations for ClickHouse and Postgres`)}
 description: "What SQL Yodeler is, and the docs pages"
+editUrl: ${JSON.stringify(`${editBase}README.md`)}
 template: splash
 hero:
   tagline: ${JSON.stringify(tagline())}
