@@ -97,8 +97,8 @@ src/commands/plan.ts                   adopt declarative pr-comment template tem
 src/pr/                                pr-comment drift template template-github template-gitlab
 
 # yodel report and the audit log (#57).
-src/commands/report.ts                 approve-and-apply
-src/report/                            approve-and-apply
+src/commands/report.ts                 approval
+src/report/                            approval
 
 # The apply pipeline's waves.
 src/waves/                             waves template template-github template-gitlab
