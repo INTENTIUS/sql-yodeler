@@ -1,5 +1,6 @@
-import { hold, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
+import { accessOnServer, manageAccess, reader } from "../lib/access.js";
 
 /** The database a team already has, made by hand: no ownership markers, and data. */
 async function handMade(ctx: Ctx): Promise<void> {
@@ -19,7 +20,12 @@ async function handMade(ctx: Ctx): Promise<void> {
       COMMENT ON TABLE ${n}.orders IS 'raw orders';
       CREATE FUNCTION ${n}.orders_lower_status() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.status := lower(NEW.status); RETURN NEW; END $$;
       CREATE TRIGGER orders_lower_status BEFORE INSERT OR UPDATE ON ${n}.orders FOR EACH ROW EXECUTE FUNCTION ${n}.orders_lower_status();
-      INSERT INTO ${n}.customers (email) VALUES ('a@example.invalid'), ('b@example.invalid');`);
+      INSERT INTO ${n}.customers (email) VALUES ('a@example.invalid'), ('b@example.invalid');
+      ALTER TABLE ${n}.orders ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE ${n}.orders FORCE ROW LEVEL SECURITY;
+      CREATE POLICY orders_placed ON ${n}.orders FOR SELECT TO ${reader(ctx)} USING (status = 'placed');
+      GRANT USAGE ON SCHEMA ${n} TO ${reader(ctx)};
+      GRANT SELECT ON ${n}.orders TO ${reader(ctx)};`);
   }
 }
 
@@ -31,6 +37,60 @@ const comment = (ctx: Ctx) =>
   );
 const rows = (ctx: Ctx) => ctx.db.count(`SELECT count(*) FROM ${ctx.db.name}.${ctx.dialect === "ch" ? "events" : "customers"}`);
 
+/** One adoption, shared by the parts: whichever runs first makes it. */
+interface Adoption {
+  done?: { p: Project; doc: InitDoc; before: { comment: string; rows: number } };
+  /** Whether init runs with access managed (Postgres). */
+  access?: boolean;
+}
+
+interface InitDoc {
+  status: string;
+  migration?: { id: string; checksum: string };
+}
+
+/** The hand-made database, adopted with yodel init --from (once). */
+async function adopted(ctx: Ctx, s: Adoption): Promise<NonNullable<Adoption["done"]>> {
+  if (s.done) return s.done;
+  await handMade(ctx);
+  const before = { comment: await comment(ctx), rows: await rows(ctx) };
+  const p = await Project.create(ctx, { noSource: true });
+  if (s.access !== undefined) manageAccess(p, s.access);
+  const init = await p.yodel(["init", "--from", p.env, "--json"]);
+  const doc = parse<InitDoc>(init);
+  hold(init.code === 0 && doc.status === "adopted", `yodel init --from exited ${String(init.code)} (${doc.status})`);
+  await p.commit("adopted");
+  s.done = { p, doc, before };
+  return s.done;
+}
+
+/**
+ * Postgres access control (#45) is adopted with the tables: orders has
+ * row-level security forced on, a policy for a role and grants on the
+ * schema and orders, made by hand, and the environment manages access
+ * (yodel.config.ts). init --from declares the policy, the row-level
+ * security and the grants, names the role as text (a role is the
+ * environment's, so it is never declared or created), records them in the
+ * baseline, and leaves the server's access as it was.
+ * BREAK: access is off in yodel.config.ts, so init adopts the tables alone.
+ */
+async function accessPart(ctx: Ctx, s: Adoption): Promise<void> {
+  const r = reader(ctx);
+  await ctx.db.exec(`DO $$ BEGIN CREATE ROLE ${r} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+  s.access = !ctx.broken;
+  const { p, doc } = await adopted(ctx, s);
+  const src = p.read("src/schema.ts");
+  for (const want of ["= policy`", "= grant`", "ENABLE ROW LEVEL SECURITY", "FORCE ROW LEVEL SECURITY", `TO ${r}`]) {
+    hold(src.includes(want), `yodel init --from did not declare ${want}`);
+  }
+  hold(!src.includes("= role`"), "yodel init --from declared the role, which is the environment's");
+  const baseline = doc.migration ? p.migration(doc.migration.id).steps : [];
+  const rules = baseline.map((st) => st.rule ?? "");
+  hold(rules.includes("SQLPG296"), `the baseline does not record the grants (SQLPG296): ${[...new Set(rules)].join(", ")}`);
+  const on = await accessOnServer(ctx);
+  hold(on.rls && on.forced && on.policy && on.usage && on.select && !on.insert, `the server's access changed during the adoption: ${JSON.stringify(on)}`);
+}
+
 /**
  * `yodel init --from <env>` adopts a database made by hand (on Postgres,
  * with a trigger function and a trigger): it writes the declarations and a
@@ -39,15 +99,9 @@ const rows = (ctx: Ctx) => ctx.db.count(`SELECT count(*) FROM ${ctx.db.name}.${c
  * BREAK: one adopted declaration is edited after init (a column's type),
  * so the declared schema no longer matches the server.
  */
-async function body(ctx: Ctx): Promise<void> {
-  await handMade(ctx);
-  const before = { comment: await comment(ctx), rows: await rows(ctx) };
-  const p = await Project.create(ctx, { noSource: true });
-  const init = await p.yodel(["init", "--from", p.env, "--json"]);
-  const doc = parse<{ status: string; migration?: { id: string; checksum: string } }>(init);
-  hold(init.code === 0 && doc.status === "adopted", `yodel init --from exited ${String(init.code)} (${doc.status})`);
+async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
+  const { p, doc, before } = await adopted(ctx, s);
   hold(doc.migration !== undefined && p.migrationIds().length === 1, "init wrote no baseline migration");
-  await p.commit("adopted");
   if (ctx.dialect === "pg") {
     // Functions and triggers are adopted with the tables (#44), so the declared schema holds what the server does.
     const src = p.read("src/schema.ts");
@@ -81,8 +135,20 @@ async function body(ctx: Ctx): Promise<void> {
   }
 }
 
+/**
+ * On Postgres, the access part first (it decides whether init manages
+ * access), then the adoption's own checks; ClickHouse has the latter alone.
+ */
+async function body(ctx: Ctx): Promise<void> {
+  const s: Adoption = {};
+  if (ctx.dialect === "pg") await runParts(ctx, s, [["access", accessPart], ["init", initPart]] as const);
+  else await runParts(ctx, s, [["init", initPart]] as const);
+}
+
 export const adopt: Claim = {
   name: "adopt",
-  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change",
+  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too",
   dialects: { ch: body, pg: body },
+  // access is Postgres's alone: BREAK=access runs with --dialect pg.
+  parts: ["access", "init"],
 };

@@ -8,6 +8,7 @@
  * | history database | `environments.<env>.history.database`  |                                   | `YODEL_HISTORY_DATABASE`| `yodeler`|
  * | lock TTL         | `environments.<env>.lockTtl` (seconds) |                                   | `YODEL_LOCK_TTL`        | 900      |
  * | lock wait        | `environments.<env>.lockWait` (seconds)|                                   | `YODEL_LOCK_WAIT`       | 0        |
+ * | access (Postgres)| `environments.<env>.access`            | `sql.profiles.<env>.access`       |                         | off      |
  *
  * `yodel apply --lock-wait <duration>` sets the lock wait over all three.
  *
@@ -138,6 +139,31 @@ export function declarativeTopologyRefusal(project: Pick<Project, "config" | "yo
   return new YodelError(
     `${CONFIG_FILE} sets environments.${name}.topology to ${topologyLabel(ours)}, but the declarative path plans and applies through chant, which reads sql.profiles.${name}.topology ` +
       `(${profile === undefined ? "unset, so a single node" : topologyLabel(chants)}). Set sql.profiles.${name}.topology to the same in chant.config.ts, or leave the topology to chant.config.ts.`,
+  );
+}
+
+/** Whether yodel manages access control in environment `name`, and where that came from (`yodel.config.ts`, `sql.profiles.<env>.access` or `default`). */
+export function environmentAccess(own: { access?: boolean } | undefined, profile: { access?: unknown } | undefined, name: string): { access: boolean; source: string } {
+  if (own?.access !== undefined) return { access: own.access, source: CONFIG_FILE };
+  if (typeof profile?.access === "boolean") return { access: profile.access, source: `sql.profiles.${name}.access` };
+  return { access: false, source: "default" };
+}
+
+/**
+ * The declarative apply (the project's ApplyOp, run by `chant run`) and
+ * `chant lifecycle diff` read chant.config.ts themselves, so an `access`
+ * set in yodel.config.ts that chant.config.ts does not say would be
+ * ignored there. It is refused unless the profile says the same; yodel's own
+ * plan, `yodel new`, lint and `yodel init --from` use yodel.config.ts's.
+ */
+export function declarativeAccessRefusal(project: Pick<Project, "configPath" | "yodel" | "profileAccess">, name: string): YodelError | undefined {
+  const own = project.yodel?.config.environments?.[name]?.access;
+  if (own === undefined) return undefined;
+  const chants = project.profileAccess?.[name] === true;
+  if (own === chants) return undefined;
+  return new YodelError(
+    `${CONFIG_FILE} sets environments.${name}.access to ${String(own)}, but the declarative path applies through chant, which reads sql.profiles.${name}.access in ${project.configPath} ` +
+      `(${project.profileAccess?.[name] === undefined ? "unset, so off" : String(chants)}). Set sql.profiles.${name}.access to ${String(own)} as well, or leave access to chant.config.ts.`,
   );
 }
 

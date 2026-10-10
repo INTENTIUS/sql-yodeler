@@ -66,6 +66,33 @@
             "type": "object"
           }
         },
+        "access": {
+          "description": "Postgres: whether access control is managed in the environment (environments.<env>.access in yodel.config.ts, else sql.profiles.<env>.access) and the plan's access changes. byHand marks a revoke of a privilege no declaration grants: one granted by hand (or whose declaration was deleted), which the apply takes away.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["managed", "source", "changes"],
+          "properties": {
+            "managed": { "type": "boolean" },
+            "source": { "type": "string" },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["object", "rule", "class", "field"],
+                "properties": {
+                  "object": { "type": "string" },
+                  "rule": { "type": "string" },
+                  "class": { "type": "string" },
+                  "field": { "type": "string" },
+                  "before": {},
+                  "after": {},
+                  "byHand": { "const": true }
+                }
+              }
+            }
+          }
+        },
         "mode": false
       }
     },

@@ -75,6 +75,19 @@ export interface EnvironmentConfig {
    * Each outcome is recorded in the history. See {@link ApplySteps}.
    */
   steps?: ApplySteps;
+  /**
+   * Postgres: whether yodel plans, applies and compares access control in
+   * this environment: row-level security, policies, the roles the schema
+   * declares, grants and default privileges (chant's
+   * `sql.profiles.<env>.access`). Off, the access declarations are left out
+   * of the plan and the server's access is not read. On, the declared
+   * privileges are the whole of them: one granted by hand is revoked.
+   * Passwords and role memberships are the environment's and are never
+   * declared. Default: `sql.profiles.<env>.access` in chant.config.ts, then
+   * off. The declarative apply and drift run chant, which reads
+   * chant.config.ts, so there the two must agree.
+   */
+  access?: boolean;
 }
 
 /** `steps` of an environment: run in order, `before` under the lock before the first migration, `after` after the last. */

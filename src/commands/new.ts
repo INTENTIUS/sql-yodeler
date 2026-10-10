@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { accessSteps, describeAccessSteps } from "../chant/access.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -152,6 +153,13 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
           manual: refused.filter((s) => s.kind === "manual").map((s) => ({ object: s.object, name: s.name, rules: s.changes.map((c) => c.rule), detail: s.detail })),
           hints: made.document.hints,
           checks: made.document.checks ?? [],
+          access: accessSteps(steps).map((a) => ({
+            step: a.index,
+            object: a.step.object,
+            name: a.step.name,
+            ...(a.step.kind === "statement" ? { rule: a.step.rule, class: a.step.class } : {}),
+            ...(a.away ? { takesAway: a.away } : {}),
+          })),
         },
         null,
         2,
@@ -178,6 +186,7 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
     }
   }
   for (const c of made.document.checks ?? []) lines.push(`  check ${c.name}: ${c.sql} (${describeExpect(c)}, before the first statement)`);
+  for (const l of describeAccessSteps(steps)) lines.push(`  ${l}`);
   for (const h of made.document.hints) lines.push(`  hint: ${h}`);
   io.out(`${lines.join("\n")}\n`);
 }

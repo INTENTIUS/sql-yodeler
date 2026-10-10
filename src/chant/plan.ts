@@ -39,15 +39,22 @@ export function planExitCode(plan: Plan): number {
  * the project does not declare, as drops; an ApplyOp never touches those
  * (it only prunes objects carrying chant's marker), so they are not work
  * left for apply. chant labels a declared object `<export> (<name>)` and an
- * undeclared one by its name alone.
+ * undeclared one by its name alone. A privilege change (#45) is labelled by
+ * its ACL entry (`relation app.t TO reader`); chant plans one only where the
+ * environment manages access, always on a declared object, and the apply
+ * makes it, so it is work too.
  */
 export function declaredChanges(plan: Plan, build: Build): ClassifiedChange[] {
   const exports = new Set(build.output.objects.map((o) => o.export));
   return plan.diff.changes.filter((c) => {
+    if (PRIVILEGE_RULES.has(c.rule)) return true;
     const at = c.object.indexOf(" (");
     return at > 0 && c.object.endsWith(")") && exports.has(c.object.slice(0, at));
   });
 }
+
+/** chant's rules for a privilege granted, revoked, or a default privilege changed. */
+const PRIVILEGE_RULES = new Set(["SQLPG296", "SQLPG297", "SQLPG298"]);
 
 /** The plan as `yodel plan --json` prints it: chant's diff, with the environment and dialect it is of. */
 export function planJson(plan: Plan): Record<string, unknown> {

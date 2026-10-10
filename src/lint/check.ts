@@ -16,8 +16,9 @@ import type { VersionedStatus } from "../versioned/state.js";
 import { levelOf, type LintSettings } from "./config.js";
 import { LINT_RULES, type LintLevel, type LintRule } from "./rules.js";
 import { mapMigrationSql, type Silence } from "./silences.js";
-import { refusedStep, stepFindings, unreadableStep, type Dialect } from "./statements.js";
+import { createdObjects, refusedStep, stepFindings, unreadableStep, type Dialect } from "./statements.js";
 import { routineFindings } from "./routines.js";
+import { accessFindings } from "./access.js";
 
 /** One thing a rule found. */
 export interface Finding {
@@ -245,6 +246,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
     silences[m.id] = map.silences;
     for (const p of map.problems) raw.push({ rule: p.rule, migration: m.id, message: p.message, ...(p.step !== undefined ? { step: p.step } : {}), ...(p.line !== undefined ? { line: p.line } : {}) });
 
+    const created = d === "postgres" ? createdObjects(steps) : undefined;
     steps.forEach((step, i) => {
       const name = stepName(step);
       const where = { migration: m.id, step: i, ...(name !== undefined ? { object: name } : {}) };
@@ -255,7 +257,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
       }
       const refused = refusedStep(step);
       if (refused) raw.push({ rule: "refused-step", ...where, message: `step ${String(i)}: yodel apply refuses ${refused}` });
-      for (const f of stepFindings(d, step)) {
+      for (const f of stepFindings(d, step, created ? { created } : {})) {
         const rule = rules[f.rule];
         if (rule?.dialect !== undefined && rule.dialect !== d) continue;
         const silence = map.silences.find((s) => s.step === i && s.rule === f.rule);
@@ -264,7 +266,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
       }
     });
     if (d === "postgres") {
-      for (const f of routineFindings(m.document)) {
+      for (const f of [...routineFindings(m.document), ...accessFindings(m.document)]) {
         const name = stepName(steps[f.step] as MigrationStep);
         const silence = map.silences.find((s) => s.step === f.step && s.rule === f.rule);
         if (silence) used.add(silence);

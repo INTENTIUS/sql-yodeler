@@ -14,6 +14,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [The two workflows](workflows.md) | the declarative path (`yodel plan`, `yodel apply` against the declared schema) and the versioned path (`yodel new`, then `yodel apply`) |
 | [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair` |
 | [Steps](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, and manual steps |
+| [Access control](access.md) | Postgres row-level security, policies, roles and grants: `access` per environment, what the schema owns and what the environment owns, the plan's access section, adopting them |
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Reports and the audit log](audit.md) | `yodel report`: every environment's migrations side by side, the audit log derived from the history and the gate ledger, its gaps, `audit.jsonl` and the HTML run view |

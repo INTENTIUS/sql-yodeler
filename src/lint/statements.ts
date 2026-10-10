@@ -5,6 +5,11 @@
  *
  * - `destructive`: a statement marked destructive (a table or column drop),
  *   or an Op step one of whose changes is.
+ * - `pg-access`: a Postgres statement that takes access away (#45): a
+ *   privilege revoked (SQLPG297), a policy dropped (SQLPG292), row-level
+ *   security turned off or no longer forced (SQLPG293). A revoke on an
+ *   object the same migration creates (`REVOKE EXECUTE ... FROM PUBLIC` on
+ *   a new function) takes nothing from anyone and is left out.
  * - `ch-mutation`: a ClickHouse statement of class `rewrite`, or one that
  *   waits for its mutation (a column type or TTL change).
  * - `ch-rebuild`: a `ClickHouseRebuildOp` step.
@@ -29,6 +34,7 @@ import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-state
 import { CLASSIFIER_RULES } from "@intentius/chant-lexicon-sql/clickhouse/plan/rules";
 import { PG_CLASSIFIER_RULES } from "@intentius/chant-lexicon-sql/postgres/plan/rules";
 import { planStep, REBUILD_OP } from "../steps/kinds.js";
+import { takesAccessAway } from "../chant/access.js";
 
 export type Dialect = "clickhouse" | "postgres";
 
@@ -95,8 +101,28 @@ export function unreadableStep(dialect: Dialect, step: MigrationStep): string | 
   return undefined;
 }
 
+/** What a step is read with: the names of the objects its migration creates (`schema.table`, `schema.fn(args)`), from {@link createdObjects}. */
+export interface StepContext {
+  created?: ReadonlySet<string>;
+}
+
+const CREATE = /^\s*CREATE\b/i;
+const REVOKE_ON = /\bON\s+(?:TABLE|SEQUENCE|FUNCTION|PROCEDURE|ROUTINE|SCHEMA)\s+(.+?)\s+FROM\b/is;
+
+/** The objects a migration's statements create, by the name each step carries. */
+export function createdObjects(steps: readonly MigrationStep[]): Set<string> {
+  return new Set(steps.flatMap((s) => (s.kind === "statement" && s.class === "create" && CREATE.test(s.sql) ? [s.name.replace(/\s+/g, "")] : [])));
+}
+
+/** A REVOKE on an object `created` holds: nobody had the privilege before the migration. */
+function revokesOnNew(step: Extract<MigrationStep, { kind: "statement" }>, created: ReadonlySet<string> | undefined): boolean {
+  if (step.rule !== "SQLPG297" || !created || created.size === 0) return false;
+  const on = REVOKE_ON.exec(step.sql)?.[1];
+  return on !== undefined && on.split(",").every((n) => created.has(n.replace(/\s+/g, "")));
+}
+
 /** The statement-rule findings for one step, before levels and silences. */
-export function stepFindings(dialect: Dialect, step: MigrationStep): StepFinding[] {
+export function stepFindings(dialect: Dialect, step: MigrationStep, context: StepContext = {}): StepFinding[] {
   const out: StepFinding[] = [];
   if (step.kind === "statement") {
     if (COMMENT.test(step.sql)) return out;
@@ -112,6 +138,8 @@ export function stepFindings(dialect: Dialect, step: MigrationStep): StepFinding
       }
       const lock = pgLock(step);
       if (lock) out.push({ rule: "pg-lock", message: `${what}: ${lock}` });
+      const away = takesAccessAway(step);
+      if (away && !revokesOnNew(step, context.created)) out.push({ rule: "pg-access", message: `${what}: ${away}, which changes what a role can do: ${step.sql.split("\n")[0] ?? ""}` });
     }
     return out;
   }

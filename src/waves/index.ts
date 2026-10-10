@@ -28,7 +28,7 @@ import { dirname, join, resolve } from "node:path";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { baseRef, loadYodelConfigAtBase, type ConfigAtBase } from "../config/base.js";
 import type { WaveGate, YodelConfig } from "../config/define.js";
-import { stepFindings } from "../lint/statements.js";
+import { createdObjects, stepFindings } from "../lint/statements.js";
 import type { Migration } from "../migrations/index.js";
 import { YodelError, type Project } from "../project.js";
 import { describeStep } from "../steps/kinds.js";
@@ -66,19 +66,22 @@ export interface DestructiveStep {
   why: string;
 }
 
-const GATED_RULES = new Set(["destructive", "pg-rewrite", "pg-lock", "ch-mutation", "ch-rebuild"]);
+const GATED_RULES = new Set(["destructive", "pg-rewrite", "pg-lock", "pg-access", "ch-mutation", "ch-rebuild"]);
 
 /**
  * The steps of `pending` that `on-destructive` waits on: a destructive
- * statement or Op step, a Postgres rewrite or lock-heavy statement, a
+ * statement or Op step, a Postgres rewrite or lock-heavy statement, one
+ * that takes access away (a revoke, a policy dropped, row-level security
+ * turned off), a
  * ClickHouse mutation or rebuild (lint's statement rules, whatever their
  * level or silences), and any Op or manual step.
  */
 export function destructiveSteps(dialect: "clickhouse" | "postgres", pending: ReadonlyArray<Pick<PendingMigration, "id"> & { migration: Pick<Migration, "document"> }>): DestructiveStep[] {
   const out: DestructiveStep[] = [];
   for (const p of pending) {
+    const created = dialect === "postgres" ? createdObjects(p.migration.document.steps) : undefined;
     p.migration.document.steps.forEach((step: MigrationStep, i: number) => {
-      const rules = stepFindings(dialect, step).map((f) => f.rule).filter((r) => GATED_RULES.has(r));
+      const rules = stepFindings(dialect, step, created ? { created } : {}).map((f) => f.rule).filter((r) => GATED_RULES.has(r));
       const why = rules[0] ?? (step.kind === "op" ? "op-step" : step.kind === "manual" ? "manual-step" : undefined);
       if (why) out.push({ migration: p.id, step: i, what: describeStep(step), why: [...new Set([why, ...rules])].join(", ") });
     });
