@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { applyPipelines, type Wave, type WaveGate } from "../../templates/postgres/scripts/ci.js";
+import { applyPipelines, type Wave, type WaveGate } from "../../src/ci/render.js";
 import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
 import { run } from "../lib/exec.js";
@@ -11,7 +11,7 @@ import { addColumn, mainTable } from "../lib/schema.js";
 
 /**
  * The apply pipeline as waves (#42): two environments, staging then prod,
- * each a wave of the pipeline the template's scripts/ci.ts renders from
+ * each a wave of the pipeline yodel ci renders from
  * yodel.config.ts `waves`, run here the way a forge runs it: each job's
  * `chant run wave` in the order of the rendered GitHub workflow, a job
  * running only when the jobs it needs succeeded, on commits whose first

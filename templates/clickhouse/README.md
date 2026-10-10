@@ -5,15 +5,14 @@ The ClickHouse schema of database `{{chant:database}}`, managed with SQL Yodeler
 | Path | What it is |
 |---|---|
 | `chant.config.ts` | the dialect and one profile per environment (`dev`, `prod`): the server and the credentials, by environment variable; and `replay`, the lint job's throwaway server |
-| `yodel.config.ts` | per environment: the ClickHouse topology the migrations are rendered for, and the history's database |
+| `yodel.config.ts` | the apply pipeline's waves; `ci`, the forges `yodel ci` renders pipelines for and the project's own jobs; per environment: the ClickHouse topology the migrations are rendered for, and the history's database |
 | `src/schema.ts` | the declared schema |
 | `migrations/` | the versioned migrations, written by `yodel new` |
 | `ops/migrate-<env>.op.ts` | the Op `yodel apply <env>` runs: plan, a gate bound to the plan digest, apply |
 | `ops/watch-<env>.op.ts` | the drift watch, a chant `WatchOp` on a schedule |
-| `scripts/ci.ts` | renders the pipelines below (`npm run ci`), and runs the lint job's replay check on your machine (`npm run replay`) |
 | `scripts/local.ts` | after `just up`: says whether dev's server is the emulator, and what `.env` needs for dev on it |
 | `justfile` | the routine commands as `just` targets (below) |
-| `.github/workflows/`, `.forgejo/workflows/`, `.gitlab-ci.yml`, `.gitlab/` | the pipelines for GitHub Actions, Forgejo Actions and GitLab CI |
+| `.github/workflows/`, `.forgejo/workflows/`, `.gitlab-ci.yml`, `.gitlab/` | the pipelines for GitHub Actions, Forgejo Actions and GitLab CI, rendered by `yodel ci` (`npm run ci`) from the files above; `yodel ci --check` (`npm run ci:check`) fails when one is stale |
 
 The history table and the apply lock live in database `{{chant:history_database}}`, set per environment in `yodel.config.ts` with each environment's ClickHouse topology (`single` here; a cluster is `cluster:<name>`).
 
@@ -42,14 +41,14 @@ Then create the users and the forge's secrets (below), and push. Every change af
 | `just down` | `npx @intentius/chant emulator down --lexicon sql` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |
-| `just replay` | `npm run replay` (see [The replay check](#the-replay-check)) |
+| `just replay` | `npm run replay`, which is `yodel ci --replay` (see [The replay check](#the-replay-check)) |
 | `just plan [env]` | `npx yodel plan <env>` |
 | `just approve [env]` | prints the approve command from `npx yodel plan <env> --json`, as `npx @intentius/chant approve ...`, and `git push origin chant/lifecycle`; it never runs them |
 | `just apply [env]` | `YODEL_CREDENTIALS=writer npx yodel apply <env>` |
 | `just drift [env]` | `npx yodel drift <env>` |
 | `just status [env]` | `npx yodel status <env>` |
-| `just ci` | `npm run ci` |
-| `just ci-check` | `npm run ci:check` |
+| `just ci` | `npm run ci`, which is `yodel ci` |
+| `just ci-check` | `npm run ci:check`, which is `yodel ci --check` |
 
 If 127.0.0.1 reaches another server (a ClickHouse installed on this machine), `just up` says so; point dev at the emulator through another address of this machine in `.env`: `DEV_CLICKHOUSE_URL=http://<address>:8123`, with the address from `ipconfig getifaddr en0` on macOS.
 
@@ -125,7 +124,7 @@ GitLab CI:
 
 The `replay` profile in `chant.config.ts` is not an environment: it is a throwaway server, and `--reset` drops what the history names there before replaying. In CI it is the service the lint job starts from the image chant's emulator runs.
 
-On your machine, run `just replay` (`npm run replay`, in `scripts/ci.ts`; it needs Docker). It starts a server of its own from the same image on a free port, points `replay` at it with `REPLAY_CLICKHOUSE_URL`, runs `yodel lint --replay replay --reset`, and removes the server. Do not point `replay` at the emulator dev uses: the history names dev's database, `{{chant:database}}`, and `--reset` would drop it. Without `REPLAY_CLICKHOUSE_URL` the profile names no server (`replay.invalid`), so a plain `npx yodel lint --replay replay` reaches nothing.
+On your machine, run `just replay` (`npm run replay`, which is `yodel ci --replay`; it needs Docker). It starts a server of its own from the same image on a free port, points `replay` at it with `REPLAY_CLICKHOUSE_URL`, runs `yodel lint --replay replay --reset`, and removes the server. Do not point `replay` at the emulator dev uses: the history names dev's database, `{{chant:database}}`, and `--reset` would drop it. Without `REPLAY_CLICKHOUSE_URL` the profile names no server (`replay.invalid`), so a plain `npx yodel lint --replay replay` reaches nothing.
 
 Delete the profile and `npm run ci` to stop running the check.
 

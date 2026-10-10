@@ -8,9 +8,9 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "ci": "tsx scripts/ci.ts",
-    "ci:check": "tsx scripts/ci.ts --check",
-    "replay": "tsx scripts/ci.ts --replay"
+    "ci": "yodel ci",
+    "ci:check": "yodel ci --check",
+    "replay": "yodel ci --replay"
   },
   "dependencies": {
     "@intentius/chant": "0.116.0",
@@ -18,9 +18,6 @@
     "@intentius/sql-yodeler": "^0.2.0"
   },
   "devDependencies": {
-    "@intentius/chant-lexicon-forgejo": "0.116.0",
-    "@intentius/chant-lexicon-github": "0.116.0",
-    "@intentius/chant-lexicon-gitlab": "0.116.0",
     "@types/node": "^22.20.5",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"

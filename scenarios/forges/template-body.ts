@@ -10,20 +10,23 @@
  * and `npm ci` in every job take @intentius/sql-yodeler from the npm
  * registry, at the version the template's range resolves to, with no
  * token: the claim runs the project a user gets, and the yodel its jobs run
- * is the released one, not this checkout. The dev profile is
+ * is the released one, not this checkout. Until a release in that range has
+ * `yodel ci` (#65), which the template's `npm run ci` runs, the project takes
+ * yodel from `npm pack` of this checkout instead, committed in the project
+ * (vendor/), so every job's `npm ci` installs the same. The dev profile is
  * the claim's database yodel_34_<claim>, the history yodel_34_<claim>_history,
  * with a reader and a writer user made for it (yodel_34_reader,
  * yodel_34_writer). The lint job replays into its own service container
  * (replay-clickhouse / replay-postgres), never the shared emulator.
  */
 
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hold, type Body, type Ctx } from "../lib/claim.js";
 import { endpoints } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { repoRoot } from "../lib/project.js";
-import type { Forge } from "./forge.js";
+import { NODE_IMAGE, type Forge } from "./forge.js";
 import { judgeNotify, startNotifyPart, type NotifyPart } from "./notify-part.js";
 
 const READER = { user: "yodel_34_reader", password: "yodel-34-reader" };
@@ -65,9 +68,15 @@ async function users(ctx: Ctx): Promise<void> {
  * server it fails and opens one tracking issue naming the environment and
  * the object; with a second change it updates that issue; with both put
  * back it passes and closes it.
+ * The pipelines are rendered by the installed package (`yodel ci`, #65),
+ * with a job of the project's own declared in ci/jobs.ts (yodel.config.ts
+ * `ci.jobs`): the pull request runs it beside lint and the plan. A yodel
+ * that renders differently (a newer release) makes `yodel ci --check` fail
+ * until the files are rendered again and committed.
  * BREAK: the pull request is merged without approving its digest, so the
- * apply after the merge applies nothing; and the server is not changed by
- * hand, so the watch opens no issue.
+ * apply after the merge applies nothing; the server is not changed by
+ * hand, so the watch opens no issue; and the installed yodel is built to
+ * drop the project's own jobs, so the pull request does not run it.
  */
 export function templateBody(makeForge: () => Forge): Body {
   return async (ctx: Ctx): Promise<void> => {
@@ -131,6 +140,46 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   ctx.log(`@intentius/sql-yodeler ${range} installed ${locked?.version ?? "nothing"} from ${locked?.resolved ?? "nowhere"}`);
   hold(/^\^\d+\.\d+\.\d+$/.test(range), `the template's package.json takes @intentius/sql-yodeler as ${range}, not a registry range`);
   hold(locked?.resolved?.startsWith("https://registry.npmjs.org/@intentius/sql-yodeler/-/") === true, `npm install took @intentius/sql-yodeler from ${locked?.resolved ?? "nowhere"}, not the npm registry`);
+  const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
+  if (!existsSync(join(installed, "dist", "ci", "render.js"))) {
+    // The release in the template's range has no yodel ci yet: this checkout's, packed and committed with the project.
+    const vendor = join(dir, "vendor");
+    mkdirSync(vendor, { recursive: true });
+    const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
+    const file = packed.out.trim().split("\n").at(-1) ?? "";
+    if (packed.code !== 0 || !file.endsWith(".tgz")) throw new Error(`npm pack of this checkout failed: ${packed.err}`);
+    await sh("npm", ["install", "--no-audit", "--no-fund", `./vendor/${file}`], 600_000);
+    ctx.log(`the release ${locked.version ?? "?"} has no yodel ci (#65): the project takes this checkout's yodel, vendor/${file}`);
+  }
+  // The project's own job (#65), declared with chant in ci/jobs.ts; yodel ci adds it to the pull request's pipeline.
+  mkdirSync(join(dir, "ci"), { recursive: true });
+  writeFileSync(
+    join(dir, "ci", "jobs.ts"),
+    `import { Job, Step } from "@intentius/chant-lexicon-github";
+import { Image, Job as GitLabJob, Rule } from "@intentius/chant-lexicon-gitlab";
+
+// The output is not the command's text, so a log that echoes commands does not hold it.
+const say = 'echo "the project job, $((40 + 2))"';
+export const actions = { "project-job": new Job({ "runs-on": "ubuntu-latest", steps: [new Step({ run: say })] }) };
+export const gitlab = {
+  "project-job": new GitLabJob({ stage: "test", image: new Image({ name: "${NODE_IMAGE}" }), rules: [new Rule({ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' })], script: [say] }),
+};
+`,
+  );
+  {
+    const path = join(dir, "yodel.config.ts");
+    writeFileSync(path, readFileSync(path, "utf8").replace(/^( {2}ci: \{ forges: \[[^\]]*\])( \},)$/m, '$1, jobs: "ci/jobs.ts"$2'));
+    if (!readFileSync(path, "utf8").includes('jobs: "ci/jobs.ts"')) throw new Error("could not name ci/jobs.ts in yodel.config.ts ci");
+  }
+  if (ctx.broken) {
+    // BREAK: the installed yodel built to drop the project's jobs.
+    const render = join(dir, "node_modules", "@intentius", "sql-yodeler", "dist", "ci", "render.js");
+    const text = readFileSync(render, "utf8");
+    const broken = text.replace(/Object\.assign\(jobs, ownJobs\(/, "(() => {})(").replace(/for \(const \[name, job\] of Object\.entries\(ownJobs\(/, "for (const [name, job] of Object.entries(((..._a) => ({}))(");
+    if (broken === text) throw new Error(`the project's jobs are not merged in ${render}; the broken build cannot drop them`);
+    writeFileSync(render, broken);
+    ctx.log("BREAK: the installed yodel drops the project's own jobs");
+  }
   await sh("npx", ["yodel", "new", "init"]);
   // The webhook (#61): notify in yodel.config.ts and a receiver, before the pipelines are rendered again.
   notify.part = await startNotifyPart(ctx, dir);
@@ -144,6 +193,7 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   await sh("npm", ["run", "ci"]);
   await sh("git", ["add", "-A"]);
   await sh("git", ["commit", "-qm", "feat: the schema"]);
+  await upgraded(dir, sh);
 
   // The repository, fresh, with the secrets the pipelines name.
   const repo = await forge.repo(ctx, repoName, {
@@ -191,6 +241,7 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   await sh("git", ["commit", "-qm", "feat: a note column"]);
   await sh("git", ["push", "-q", "origin", "add-note"]);
   const pr = await repo.openPr("add-note", await head(), "feat: a note column");
+  hold(pr.checks.log.includes("the project job, 42"), "the pull request did not run the project's own job, declared in ci/jobs.ts and rendered by yodel ci");
   hold(pr.checks.ok, `the pull request's lint and plan ended ${pr.checks.status}`);
   hold(pr.checks.log.includes("Every migration replays to its recorded schema."), "the pull request's lint job did not replay the migrations into its own server");
   const comment = (await repo.comments(pr.id)).find((c) => c.startsWith("<!-- yodel:plan env=dev -->")) ?? "";
@@ -232,4 +283,31 @@ async function flow(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undefi
   hold(clean.ok, `the drift watch ended ${clean.status} with dev put back`);
   const closed = await tracking();
   hold(closed.length === 1 && closed[0]?.number === issue.number && !closed[0].open, `the watch did not close #${String(issue.number)} once dev was put back: ${JSON.stringify(closed.map((i) => ({ n: i.number, open: i.open })))}`);
+}
+
+/**
+ * A newer yodel renders the pipelines differently: `yodel ci --check` fails
+ * until `yodel ci` renders them again, and they are committed. Played with
+ * the installed yodel's header line changed, then put back.
+ */
+async function upgraded(dir: string, sh: (cmd: string, args: string[], timeoutMs?: number) => Promise<Ran>): Promise<void> {
+  const render = join(dir, "node_modules", "@intentius", "sql-yodeler", "dist", "ci", "render.js");
+  const saved = `${render}.saved`;
+  copyFileSync(render, saved);
+  const text = readFileSync(render, "utf8");
+  const newer = text.replace("# Edit those and render again;", "# Edit those, then render again;");
+  if (newer === text) throw new Error(`the rendered files' header is not in ${render}`);
+  try {
+    writeFileSync(render, newer);
+    const check = await run("npx", ["yodel", "ci", "--check"], { cwd: dir, timeoutMs: 300_000 });
+    hold(check.code === 1 && check.err.includes("stale, run yodel ci"), `after the installed yodel changed its pipelines, yodel ci --check exited ${String(check.code)}`);
+    await sh("npx", ["yodel", "ci"]);
+    hold((await sh("npx", ["yodel", "ci", "--check"])).code === 0, "yodel ci --check failed after yodel ci");
+    hold((await sh("git", ["status", "--porcelain"])).out.includes(".github/workflows/yodel-pr.yml"), "the newer yodel's yodel ci did not change the committed pipelines");
+  } finally {
+    copyFileSync(saved, render);
+    rmSync(saved);
+  }
+  await sh("npx", ["yodel", "ci"]);
+  hold((await sh("git", ["status", "--porcelain"])).out.trim() === "", "rendering again with the installed yodel did not give back the committed pipelines");
 }

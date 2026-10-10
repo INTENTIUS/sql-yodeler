@@ -1,5 +1,5 @@
-# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
-# Edit those and render again; npm run ci:check says when this file is stale.
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
 #
 # Merge requests: lint and the plan comment (stage review). A push to the
 # default branch: the apply waves, one stage each, in .gitlab/yodel-apply.gitlab-ci.yml.
@@ -56,7 +56,7 @@ lint:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
-    - npm run ci:check
+    - yodel ci --check
     - yodel lint
     - node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "replay-postgres", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-postgres:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
     - yodel lint --replay replay --reset

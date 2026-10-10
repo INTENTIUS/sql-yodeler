@@ -1,5 +1,5 @@
-# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
-# Edit those and render again; npm run ci:check says when this file is stale.
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
 #
 # Pull requests: yodel lint and the replay check (into a throwaway server the
 # lint job starts), and the plan comment per environment with the
@@ -40,7 +40,7 @@ jobs:
       - name: Fetch the approvals (chant/lifecycle)
         run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: The pipelines are up to date
-        run: npm run ci:check
+        run: yodel ci --check
       - name: yodel lint
         run: yodel lint
       - name: Wait for the replay server (replay-postgres)

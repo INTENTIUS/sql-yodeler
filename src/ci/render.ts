@@ -1,9 +1,17 @@
 /**
- * Renders this project's CI for GitHub Actions, GitLab CI and Forgejo Actions.
+ * `yodel ci` (#65): a project's CI for GitHub Actions, GitLab CI and Forgejo
+ * Actions, rendered by the installed package, so a fix to the pipelines
+ * reaches a project when it upgrades yodel and renders again. Until #65 the
+ * templates carried this as scripts/ci.ts.
  *
- *   npm run ci          write the files
- *   npm run ci:check    exit 1 when a file differs from what this renders
- *   npm run replay      the lint job's replay check on this machine (see replayLocally)
+ *   yodel ci            write the files
+ *   yodel ci --check    exit 1 when a file differs from what this renders
+ *   yodel ci --replay   the lint job's replay check on this machine (./replay.ts)
+ *
+ * yodel.config.ts `ci` picks the forges (default all three) and names the
+ * module that declares the project's own jobs, which are merged after
+ * yodel's into the pull request pipeline and kept on every render
+ * ({@link ProjectJobs}).
  *
  * Environments are the keys of `sql.profiles` in chant.config.ts, in order,
  * but `replay`, which is the lint job's throwaway server.
@@ -15,11 +23,11 @@
  * github lexicon's Workflow, Job and Step (Forgejo renders the same
  * declaration through the forgejo lexicon's dialect) and the gitlab
  * lexicon's Workflow and Job; yodel-apply with chant's
- * generateOpWavesPipeline, from the waves spec this script writes
+ * generateOpWavesPipeline, from the waves spec this writes
  * (yodel-waves.json); the watch with generateOpsPipeline.
  *
- * - yodel-pr: on a pull (merge) request, `npm run ci:check` (these files are
- *   what this script renders), `yodel lint`, and the replay check into a
+ * - yodel-pr: on a pull (merge) request, `yodel ci --check` (these files are
+ *   what yodel ci renders), `yodel lint`, and the replay check into a
  *   throwaway server the job starts (the `replay` profile), then for each
  *   environment `yodel plan <env> --comment`, which posts the pending
  *   migrations and the digest to approve. One job per environment, holding
@@ -58,11 +66,11 @@
  * needs no token.
  */
 
-import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { YodelConfig } from "../config/define.js";
+import { loadYodelConfig } from "../config/load.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
@@ -113,6 +121,10 @@ export type Dialect = "clickhouse" | "postgres";
 export interface Environments {
   dialect: Dialect;
   names: readonly string[];
+  /** The forges to render for: yodel.config.ts `ci.forges`, default every one. */
+  forges?: readonly Forge[];
+  /** The project's own jobs (yodel.config.ts `ci.jobs`), merged after yodel's. */
+  jobs?: ProjectJobs;
   /** The apply pipeline's waves, in order. */
   waves: readonly Wave[];
   /** chant.config.ts declares the `replay` profile, so the lint job runs the replay check. */
@@ -120,7 +132,7 @@ export interface Environments {
 }
 
 /** DEV_CLICKHOUSE for dev on ClickHouse: what an environment's variables start with. */
-const variablePrefix = (env: string, dialect: Dialect): string => `${prefixOf(env)}_${dialect.toUpperCase()}`;
+export const variablePrefix = (env: string, dialect: Dialect): string => `${prefixOf(env)}_${dialect.toUpperCase()}`;
 
 /** The variables a job reading `env` holds: the URL and the reader. */
 export const readerVariables = (env: string, dialect: Dialect): string[] => {
@@ -213,8 +225,8 @@ export const waitFor = (host: string, port: number): string =>
 export const LINT = "yodel lint";
 export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 
-/** Fails a pull request whose pipelines differ from what this script renders. */
-export const CI_CHECK = "npm run ci:check";
+/** Fails a pull request whose pipelines differ from what yodel ci renders. */
+export const CI_CHECK = "yodel ci --check";
 
 /**
  * Webhook events (yodel.config.ts `notify`): the variables the apply, plan
@@ -247,8 +259,8 @@ const UPLOAD_ARTIFACT = "actions/upload-artifact@v4";
  * (INTENTIUS/chant#3667, INTENTIUS/chant#3669).
  */
 const HEADER = [
-  "# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.",
-  "# Edit those and render again; npm run ci:check says when this file is stale.",
+  "# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.",
+  "# Edit those and render again; yodel ci --check says when this file is stale.",
 ];
 
 const withHeader = (header: readonly string[], yaml: string): string => `${[...header, ""].join("\n")}${yaml}`;
@@ -340,7 +352,7 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean): AJob {
   });
 }
 
-export function actionsReview(forge: Actions, { dialect, names: envs, replay, waves }: Environments): RenderedFile {
+export function actionsReview(forge: Actions, { dialect, names: envs, replay, waves, jobs: own }: Environments): RenderedFile {
   const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay) };
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
@@ -355,6 +367,7 @@ export function actionsReview(forge: Actions, { dialect, names: envs, replay, wa
       ],
     });
   }
+  Object.assign(jobs, ownJobs<AJob>(own?.actions, jobs, "actions"));
   const workflow = new ActionsWorkflow({
     name: "yodel-pr",
     on: { pull_request: { branches: [MAIN] } },
@@ -386,9 +399,7 @@ export const GITLAB_APPLY_FILE = ".gitlab/yodel-apply.gitlab-ci.yml";
 /** The stage of each wave's job in GITLAB_APPLY_FILE, as chant names it. */
 const waveStages = (waves: readonly Wave[]): string[] => waves.map((w, i) => `wave-${String(i + 1)}-${w.env}`);
 
-export function gitlabPipeline({ dialect, names: envs, replay, waves }: Environments): RenderedFile {
-  // The stages this file's jobs use, then the apply file's waves and the watch file's ops.
-  const stages = ["review", ...waveStages(waves), "ops"];
+export function gitlabPipeline({ dialect, names: envs, replay, waves, jobs: own }: Environments): RenderedFile {
   const mr = () => [new Rule({ if: '$CI_PIPELINE_SOURCE == "merge_request_event"' })];
   const workflow = new GitLabWorkflow({
     rules: [
@@ -434,15 +445,20 @@ export function gitlabPipeline({ dialect, names: envs, replay, waves }: Environm
       }),
     );
   }
+  for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, Object.fromEntries(jobs), "gitlab"))) jobs.set(name, job);
   const serialize = (entities: Map<string, Declarable>): string => oneFile("gitlab", gitlabSerializer.serialize(entities));
   // Exception (INTENTIUS/chant#3669): the gitlab serializer writes no
   // top-level include or variables, and its stages are only the ones the
   // declared jobs name, so not the watch file's ops. It writes those stages
   // first; they are replaced by GITLAB_STAGES, and include and variables are
   // written beside them.
-  const derived = `${emitYAMLEntry("stages", ["review"])}\n\n`;
   const jobsYaml = serialize(jobs);
-  if (!jobsYaml.startsWith(derived)) throw new Error(`gitlab: expected the jobs' YAML to start with\n${derived}`);
+  const end = jobsYaml.indexOf("\n\n");
+  const derivedStages = (parseYAMLDocument(jobsYaml.slice(0, end + 1)) as { stages?: unknown }).stages;
+  if (!jobsYaml.startsWith("stages:\n") || !Array.isArray(derivedStages) || derivedStages[0] !== "review") throw new Error("gitlab: expected the jobs' YAML to start with their stages, review first");
+  const derived = jobsYaml.slice(0, end + 2);
+  // The stages this file's jobs use (review, then any the project's own jobs add), then the apply file's waves and the watch file's ops.
+  const stages = [...new Set([...derivedStages.map(String), ...waveStages(waves), "ops"])];
   const topLevel = [
     emitYAMLEntry("include", [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }]),
     emitYAMLEntry("stages", stages),
@@ -641,9 +657,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[]): st
 
 /** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
 export async function readWaves(dir: string, envs: readonly string[]): Promise<Wave[]> {
-  const file = join(dir, "yodel.config.ts");
-  const config = existsSync(file) ? ((await import(pathToFileURL(file).href)) as { default?: { waves?: unknown } }).default : undefined;
-  const declared = config?.waves;
+  const declared = (await readConfig(dir))?.waves as unknown;
   if (declared === undefined) return envs.map((env, i) => ({ env, gate: "always", ...(i > 0 ? { requires: envs[i - 1] } : {}) }));
   if (!Array.isArray(declared) || declared.length === 0) throw new Error("yodel.config.ts: waves must list at least one { env, gate }");
   return declared.map((w: { env?: unknown; gate?: unknown; requires?: unknown }, i, all: Array<{ env?: unknown }>) => {
@@ -732,7 +746,61 @@ export async function environments(dir: string): Promise<Environments> {
       if (!existsSync(join(dir, "ops", `${op}.op.ts`))) throw new Error(`sql.profiles.${env} has no ops/${op}.op.ts`);
     }
   }
-  return { dialect, names: envs, replay, waves: await readWaves(dir, envs) };
+  const ci = (await readConfig(dir))?.ci;
+  return { dialect, names: envs, replay, waves: await readWaves(dir, envs), forges: ci?.forges ?? FORGES, ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}) };
+}
+
+/** yodel.config.ts, checked; undefined when the project has none. */
+async function readConfig(dir: string): Promise<YodelConfig | undefined> {
+  return (await loadYodelConfig(dir))?.config;
+}
+
+/**
+ * The project's own jobs (#65): the module yodel.config.ts `ci.jobs` names,
+ * relative to the project, declaring jobs with chant's lexicons. `actions`
+ * (the github lexicon's Job) goes into yodel-pr on GitHub and Forgejo, after
+ * yodel's jobs; `gitlab` (the gitlab lexicon's Job) into .gitlab-ci.yml,
+ * after yodel's, its stages after `review`. They are declared here, not
+ * edited into the rendered files, so every `yodel ci` keeps them:
+ *
+ * ```ts
+ * // ci/jobs.ts
+ * import { Job, Step } from "@intentius/chant-lexicon-github";
+ * import { Job as GitLabJob, Image } from "@intentius/chant-lexicon-gitlab";
+ * export const actions = { test: new Job({ "runs-on": "ubuntu-latest", steps: [new Step({ uses: "actions/checkout@v7" }), new Step({ run: "npm test" })] }) };
+ * export const gitlab = { test: new GitLabJob({ stage: "test", image: new Image({ name: "node:22" }), script: ["npm test"] }) };
+ * ```
+ */
+export interface ProjectJobs {
+  actions?: Record<string, Declarable>;
+  gitlab?: Record<string, Declarable>;
+}
+
+/** Loads the module `ci.jobs` names. */
+export async function loadProjectJobs(dir: string, file: string): Promise<ProjectJobs> {
+  const path = resolve(dir, file);
+  if (!existsSync(path)) throw new Error(`yodel.config.ts: ci.jobs names ${file}, which is not there`);
+  const mod = (await import(pathToFileURL(path).href)) as Record<string, unknown>;
+  const out: ProjectJobs = {};
+  for (const key of Object.keys(mod)) {
+    if (key !== "actions" && key !== "gitlab" && key !== "default") throw new Error(`${file}: export ${key} is not actions or gitlab`);
+  }
+  for (const key of ["actions", "gitlab"] as const) {
+    const v = mod[key];
+    if (v === undefined) continue;
+    if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error(`${file}: ${key} must be an object of jobs, keyed by the job's name`);
+    out[key] = v as Record<string, Declarable>;
+  }
+  return out;
+}
+
+/** The project's jobs for one pipeline, refusing a name yodel's jobs already use. */
+function ownJobs<T>(own: Record<string, Declarable> | undefined, yodels: Record<string, unknown>, what: string): Record<string, T> {
+  if (!own) return {};
+  for (const name of Object.keys(own)) {
+    if (name in yodels) throw new Error(`ci.jobs: ${what} job ${name} has the name of one of yodel's jobs; name it something else`);
+  }
+  return own as Record<string, T>;
 }
 
 /** The pipelines that need no Op discovery: pull requests, and GitLab's main file. */
@@ -740,99 +808,21 @@ export function review(envs: Environments): RenderedFile[] {
   return [actionsReview("github", envs), actionsReview("forgejo", envs), gitlabPipeline(envs)];
 }
 
+/** The forge a rendered file is for; undefined for the waves spec, which every forge's apply reads. */
+export function forgeOf(path: string): Forge | undefined {
+  if (path.startsWith(".github/")) return "github";
+  if (path.startsWith(".forgejo/")) return "forgejo";
+  if (path.startsWith(".gitlab")) return "gitlab";
+  return undefined;
+}
+
 export async function render(dir: string): Promise<RenderedFile[]> {
   const envs = await environments(dir);
-  return [...review(envs), ...(await applyPipelines(dir, envs)), ...(await watchPipelines(dir, envs))];
-}
-
-// ── The replay check on this machine ────────────────────────────────────────
-
-const docker = (args: string[]): { code: number; out: string } => {
-  const ran = spawnSync("docker", args, { encoding: "utf8" });
-  if (ran.error) throw new Error(`docker: ${ran.error.message}; npm run replay needs Docker`);
-  return { code: ran.status ?? 1, out: `${ran.stdout}${ran.stderr}`.trim() };
-};
-
-/**
- * `npm run replay [-- <yodel lint options>]`: the lint job's replay check,
- * run here. Starts a throwaway server with Docker from the image the lint
- * job's service runs, published on a port Docker picks on 127.0.0.1; points
- * the `replay` profile at it (REPLAY_<DIALECT>_URL and the server's
- * credentials); runs REPLAY; and removes the server, whatever the result.
- * The exit code is yodel's.
- *
- * A server of its own because the replay drops and replays the databases
- * (or schemas) the history names, and those are dev's names too: against
- * the emulator dev uses on this machine, --reset would drop dev's.
- */
-export async function replayLocally(dir: string, args: readonly string[]): Promise<number> {
-  const { dialect, replay } = await environments(dir);
-  if (!replay) throw new Error(`chant.config.ts declares no sql.profiles.${REPLAY_PROFILE}, so there is no replay check to run`);
-  const svc = REPLAY_SERVICE[dialect];
-  const name = `yodel-replay-${randomBytes(4).toString("hex")}`;
-  const env = Object.entries(svc.env).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
-  const started = docker(["run", "--detach", "--rm", "--name", name, "--publish", `127.0.0.1::${String(svc.port)}`, ...env, svc.image]);
-  if (started.code !== 0) throw new Error(`could not start the replay server (${svc.image}):\n${started.out}`);
-  const stop = () => docker(["rm", "--force", "--volumes", name]);
-  process.once("SIGINT", () => {
-    stop();
-    process.exit(130);
+  const forges = envs.forges ?? FORGES;
+  const files = [...review(envs), ...(await applyPipelines(dir, envs)), ...(await watchPipelines(dir, envs))];
+  return files.filter((f) => {
+    const forge = forgeOf(f.path);
+    return forge === undefined || forges.includes(forge);
   });
-  try {
-    const published = /:(\d+)\s*$/m.exec(docker(["port", name, `${String(svc.port)}/tcp`]).out)?.[1];
-    if (!published) throw new Error(`docker did not publish ${name}'s port ${String(svc.port)}`);
-    console.error(`replay server ${name} (${svc.image}) on 127.0.0.1:${published}`);
-    // The service's own health check, run in the container, until it passes.
-    for (let i = 0; docker(["exec", name, "sh", "-c", svc.health]).code !== 0; i++) {
-      if (i >= 90) throw new Error(`${name} did not pass \`${svc.health}\` in 90 s`);
-      await new Promise((ok) => setTimeout(ok, 1000));
-    }
-    const [cmd = "yodel", ...rest] = REPLAY.split(" ");
-    const ran = spawnSync(cmd, [...rest, ...args], {
-      cwd: dir,
-      stdio: "inherit",
-      env: { ...process.env, [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url("127.0.0.1", Number(published)), ...svc.jobEnv },
-    });
-    if (ran.error) throw new Error(`${REPLAY}: ${ran.error.message} (npm run replay puts node_modules/.bin on PATH)`);
-    return ran.status ?? 1;
-  } finally {
-    stop();
-  }
 }
 
-// ── The command ─────────────────────────────────────────────────────────────
-
-async function main(argv: readonly string[]): Promise<number> {
-  const dir = resolve(".");
-  if (argv[0] === "--replay") return replayLocally(dir, argv.slice(1));
-  const check = argv.includes("--check");
-  const files = await render(dir);
-  const stale: string[] = [];
-  for (const file of files) {
-    const abs = join(dir, file.path);
-    const current = existsSync(abs) ? readFileSync(abs, "utf8") : undefined;
-    if (current === file.content) continue;
-    if (check) {
-      stale.push(file.path);
-      continue;
-    }
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, file.content);
-    console.log(`wrote ${file.path}`);
-  }
-  if (check && stale.length > 0) {
-    console.error(`stale, run npm run ci: ${stale.join(", ")}`);
-    return 1;
-  }
-  if (check) console.log(`${String(files.length)} CI files are up to date`);
-  return 0;
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  try {
-    process.exitCode = await main(process.argv.slice(2));
-  } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = 1;
-  }
-}

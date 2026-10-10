@@ -118,6 +118,29 @@ npx yodel apply dev           # behind the migrations Op's gate
 
 Each environment is a profile in `chant.config.ts`, with its own history. The starter templates' apply pipeline applies them in the order of `yodel.config.ts` `waves` after every push to main, one job per environment, each waiting for the one before; a wave that stops at its gate stops the ones after it. Each wave has its own gate policy (`always`, `on-destructive` or `never`), read from the commit the push merged onto, and applies only migrations the environment before it has applied: prod refuses (exit 4) a migration staging's history does not record. [Approval](approval.md#waves-a-gate-per-environment) has how a wave plans, waits and applies.
 
+## The pipelines: yodel ci
+
+`yodel ci` renders a project's pipelines for GitHub Actions, GitLab CI and Forgejo Actions from `chant.config.ts` (the environments), `yodel.config.ts` (`waves`, `ci`) and `ops/` (each environment's migrate and watch Ops), each declared with chant's lexicons: `yodel-pr` (lint, the replay check and the plan comment on a pull request), `yodel-apply` (the waves, after a push to main) and a `watch-<env>` per environment. The templates' `npm run ci` runs it.
+
+The pipelines come from the installed package, so a fix to them reaches a project when it upgrades `@intentius/sql-yodeler` and runs `yodel ci` again. `yodel ci --check` writes nothing and exits 1 naming each file that differs from what it renders; the pull request's lint job runs it, so a pipeline edited by hand, or not rendered again after an upgrade, fails the pull request until the rendered files are committed. `yodel ci --replay` runs the lint job's replay check on your machine, in a throwaway server it starts with Docker.
+
+`ci.forges` in `yodel.config.ts` picks the forges (default all three). A project's own jobs go in the module `ci.jobs` names, declared with chant, never in the rendered files:
+
+```ts
+// ci/jobs.ts, with ci: { jobs: "ci/jobs.ts" } in yodel.config.ts
+import { Job, Step } from "@intentius/chant-lexicon-github";
+import { Image, Job as GitLabJob } from "@intentius/chant-lexicon-gitlab";
+
+export const actions = {
+  test: new Job({ "runs-on": "ubuntu-latest", steps: [new Step({ uses: "actions/checkout@v7" }), new Step({ run: "npm ci && npm test" })] }),
+};
+export const gitlab = {
+  test: new GitLabJob({ stage: "test", image: new Image({ name: "node:22" }), script: ["npm ci", "npm test"] }),
+};
+```
+
+`yodel ci` adds `actions` to `yodel-pr` on GitHub and Forgejo and `gitlab` to `.gitlab-ci.yml`, after its own jobs, with a GitLab job's stage after `review`, so they are there after every render. A job with the name of one of yodel's (`lint`, `plan-<env>`, `.yodel`) is refused.
+
 ## Postgres objects
 
 A Postgres project declares these with the `sql` lexicon's tags, and both paths plan, apply, watch for drift and adopt them. The claims column names the scenario claims that run each against a server.

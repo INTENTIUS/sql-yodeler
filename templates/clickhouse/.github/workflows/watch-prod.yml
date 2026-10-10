@@ -1,5 +1,5 @@
-# Rendered by scripts/ci.ts (npm run ci) from chant.config.ts and ops/.
-# Edit those and render again; npm run ci:check says when this file is stale.
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
 name: watch-prod
 
 on:

@@ -44,7 +44,6 @@ Created:
   ops/watch-prod.op.ts
   package.json
   README.md
-  scripts/ci.ts
   scripts/local.ts
   src/schema.ts
   tsconfig.json

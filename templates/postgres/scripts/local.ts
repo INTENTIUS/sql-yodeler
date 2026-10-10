@@ -20,7 +20,8 @@ import { pathToFileURL } from "node:url";
 import { loadChantConfig } from "@intentius/chant/config";
 import { CLICKHOUSE_EMULATOR_SPEC, POSTGRES_EMULATOR, POSTGRES_EMULATOR_SPEC } from "@intentius/chant-lexicon-sql/op/activities";
 import { connectPostgres } from "@intentius/chant-lexicon-sql/postgres/live/client";
-import { environments, type Dialect } from "./ci.js";
+
+type Dialect = "clickhouse" | "postgres";
 
 const LOCAL = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const PG_PASSWORD = POSTGRES_EMULATOR.env("").POSTGRES_PASSWORD ?? "";
@@ -61,8 +62,9 @@ function envLines(dialect: Dialect): string[] {
 
 async function main(): Promise<number> {
   const dir = resolve(".");
-  const { dialect } = await environments(dir);
   const { config } = await loadChantConfig(dir);
+  const dialect = (config as { sql?: { dialect?: string } }).sql?.dialect;
+  if (dialect !== "clickhouse" && dialect !== "postgres") throw new Error(`chant.config.ts: sql.dialect must be clickhouse or postgres, got ${String(dialect)}`);
   const dev = (config as { sql?: { profiles?: Record<string, { url?: string }> } }).sql?.profiles?.dev?.url;
   const url = dev ? new URL(dev) : undefined;
   if (url && LOCAL.has(url.hostname)) {
