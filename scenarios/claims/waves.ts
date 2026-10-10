@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { applyPipelines, withTenants, type Wave, type WaveGate } from "../../src/ci/render.js";
-import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, runParts, Violation, type Claim, type Ctx, type Part as RunPart } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { parse, Project } from "../lib/project.js";
@@ -81,13 +81,6 @@ interface State {
 }
 
 const ENV_KEYS = ["staging", "prod"] as const;
-
-/** Whether `part` runs broken: under BREAK=1 every part, under BREAK=<part> that one. */
-function breaks(ctx: Ctx, part: Part): boolean {
-  const named = process.env.BREAK;
-  if (!ctx.broken) return false;
-  return named === "1" || named === "true" || named === part || !(PARTS as readonly string[]).includes(named ?? "");
-}
 
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
@@ -503,7 +496,7 @@ async function tenants(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   hold(waiting?.code === 3, `the tenant set's wave did not wait for an approval (exit ${String(waiting?.code)})`);
   for (const t of names) hold(!(await onTenant(ctx, t)), `${t} got the migrations before the wave was approved`);
   const approve = approveCommand(waiting);
-  hold((waiting.out.match(/chant approve \S+ \S+ --plan/g) ?? []).length === 1, "the tenant set's wave asked for more than one approval");
+  hold(new Set(waiting.out.match(/chant approve \S+ \S+ --plan \S+/g)).size === 1, "the tenant set's wave asked for more than one approval");
   await st.p.approve(approve);
   const applied = await pipeline(st, first);
   for (const t of names) hold(await onTenant(ctx, t), `${t} does not have the migrations after the tenant set's wave was approved`);
@@ -552,34 +545,28 @@ const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>>
   tenants,
 };
 
+/** The parts, run by runParts; a part that caught its break leaves the servers where its break took them, so they are levelled for the parts after. */
+const parts = PARTS.map((name): readonly [string, RunPart<State>] => [
+  name,
+  async (ctx, st) => {
+    try {
+      await RUN[name](ctx, st, ctx.broken);
+    } catch (e) {
+      if (e instanceof Violation && ctx.broken) await level(st);
+      throw e;
+    }
+  },
+]);
+
 async function body(ctx: Ctx): Promise<void> {
   const prod = await prodServer(ctx);
   await dropTenants(ctx);
-  const caught: string[] = [];
-  const held: string[] = [];
   try {
-    const st = await setup(ctx, prod.url);
-    for (const part of PARTS) {
-      const broken = breaks(ctx, part);
-      ctx.log(`part ${part}${broken ? " (broken)" : ""}`);
-      try {
-        await RUN[part](ctx, st, broken);
-      } catch (e) {
-        if (!(e instanceof Violation) || !broken) throw e instanceof Violation ? new Violation(`${part}: ${e.message}`) : e;
-        ctx.log(`part ${part} caught its break: ${e.message}`);
-        caught.push(`${part}: ${e.message}`);
-        // A broken part leaves the servers where its break took them; the parts after start from a fresh project state.
-        await level(st);
-        continue;
-      }
-      if (broken) held.push(part);
-    }
+    await runParts(ctx, await setup(ctx, prod.url), parts);
   } finally {
     await prod.close();
     await dropTenants(ctx);
   }
-  if (held.length > 0) throw new Error(`break=not-caught: ${held.join(", ")} held with the property broken`);
-  if (caught.length > 0) throw new Violation(caught.join("; "));
 }
 
 /** After a caught break: approve and apply whatever is pending on both environments, outside the pipeline. */
@@ -596,6 +583,7 @@ async function level(st: State): Promise<void> {
 
 export const wavesClaim: Claim = {
   name: "waves",
-  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, and applies only what the wave before applied",
+  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate",
   dialects: { ch: body, pg: body },
+  parts: PARTS,
 };

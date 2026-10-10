@@ -150,6 +150,12 @@ Two paths, chosen by the project:
   statement. One that fails refuses (exit 4), naming it, and nothing of that
   migration is applied.
 
+  <env> can be one tenant of a tenant set, <env>/<tenant> (yodel.config.ts
+  environments.<env>.tenants): the environment's profile on the tenant's
+  database or schema, each statement with the template's name replaced by
+  the tenant's, and a history of its own. A tenant set is applied tenant by
+  tenant, or by its wave, which gates once for every tenant.
+
 - Declarative: no migrations. Plans the declared schema against the live
   database, then runs the project's ApplyOp for the environment behind its
   plan-bound gate.
@@ -377,7 +383,9 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
     const forecast = await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
-      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}). Approve it with yodel approve ${env.name}, or: ${forecast.approve}\n`);
+      // A tenant set's wave (#56) is approved once for every tenant, with chant approve.
+      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with: ` : `. Approve it with yodel approve ${env.name}, or: `;
+      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)})${how}${forecast.approve}\n`);
       outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve: forecast.approve };
     }
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "wave-plan", plan }), null, 2)}\n`);
