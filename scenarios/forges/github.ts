@@ -8,14 +8,14 @@
  * send, running the generated .github/workflows file. `yodel plan
  * --comment` in the job posts to the mock (GITHUB_API_URL).
  *
- * act runs the jobs on the Docker host's network, as GitHub runs them on
- * the runner's host, so a job reaches the mock and the emulator at
- * localhost and the lint job's replay server at the port its service
- * publishes. One change to act's copy of yodel-pr.yml: the replay server's
- * port on the host. The emulator already holds 8123 and 5432 on the host,
- * so the service publishes on a free port, and the job's URL and wait step
- * follow it. The pushed workflow is untouched (the lint job's ci:check
- * reads it).
+ * act runs the generated workflow file as it was pushed, with no changes.
+ * A job without a container runs on the Docker host's network, as GitHub
+ * runs it on the runner's host, so the plan and apply jobs reach the mock
+ * and the emulator at localhost. The lint job runs in a job container on
+ * the network act makes for its replay service, and reaches that server by
+ * the service's name, so it never meets the emulator's 8123 or 5432 on the
+ * host. From there the mock is not on localhost, so the lint job's fetch of
+ * chant/lifecycle fails and says nothing is approved, which lint does not need.
  *
  *   YODEL_CLAIMS_ACT                      the act binary, default act
  *   YODEL_CLAIMS_GITHUB_CLICKHOUSE_URL    the emulator as a job sees it, default YODEL_CLAIMS_CLICKHOUSE_URL's
@@ -23,8 +23,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dockerSerializer } from "@intentius/chant-lexicon-docker";
 import { publishedPort, uniqueContainerName } from "@intentius/chant-lexicon-sql/core/container";
@@ -37,28 +36,6 @@ const USER = "yodel34";
 const ACT = process.env.YODEL_CLAIMS_ACT ?? "act";
 /** The actions the workflows use, which act fetches from github.com, not the mock. */
 const ACTIONS = ["actions/checkout", "actions/setup-node"];
-
-/** A port free on this host, for the replay service to publish on. */
-async function freePort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((ok) => server.listen(0, "0.0.0.0", ok));
-  const { port } = server.address() as AddressInfo;
-  await new Promise((ok) => server.close(ok));
-  return port;
-}
-
-/** yodel-pr.yml as act runs it: the lint job's replay server published on `port` instead of the engine's own. */
-export function actWorkflow(text: string, port: number): string {
-  const engine = /- '(8123|5432):\1'/.exec(text)?.[1];
-  if (!engine) throw new Error("yodel-pr.yml's lint job publishes no replay port (8123:8123 or 5432:5432); the template changed, so the claim's copy for act needs to follow it");
-  const p = String(port);
-  const out = text
-    .replace(`- '${engine}:${engine}'`, `- '${p}:${engine}'`)
-    .replaceAll(`localhost:${engine}`, `localhost:${p}`)
-    .replaceAll(`net.connect(${engine}, "localhost"`, `net.connect(${p}, "localhost"`);
-  if (!out.includes(`localhost:${p}`) || !out.includes(`net.connect(${p}, "localhost"`)) throw new Error(`yodel-pr.yml's lint job does not reach its replay server at localhost:${engine}; the claim's copy for act needs to follow the template`);
-  return out;
-}
 
 export function githubForge(): Forge {
   let down: (() => Promise<void>) | undefined;
@@ -118,10 +95,6 @@ export function githubForge(): Forge {
         await git("-C", dir, "checkout", "-q", "-B", branch, sha);
         // The job's git (the approvals on chant/lifecycle) reads from the mock as the job sees it.
         await git("-C", dir, "remote", "set-url", "origin", `http://localhost:${port}/${USER}/${name}.git`);
-        const wfDir = join(ctx.work, `act-${String(n)}-workflows`);
-        mkdirSync(wfDir, { recursive: true });
-        const text = readFileSync(join(dir, ".github", "workflows", workflow), "utf8");
-        writeFileSync(join(wfDir, workflow), workflow === "yodel-pr.yml" ? actWorkflow(text, await freePort()) : text);
         const eventFile = join(ctx.work, `act-${String(n)}-event.json`);
         writeFileSync(eventFile, JSON.stringify({ ...payload, repository }));
         ctx.log(`act ${event} ${workflow} on ${name}@${sha.slice(0, 8)} (${branch})`);
@@ -129,7 +102,7 @@ export function githubForge(): Forge {
           ACT,
           [
             event,
-            "--workflows", wfDir,
+            "--workflows", join(dir, ".github", "workflows", workflow),
             "--eventpath", eventFile,
             "--platform", `ubuntu-latest=${NODE_IMAGE}`,
             "--rm",

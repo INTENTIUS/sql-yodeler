@@ -134,7 +134,8 @@ export const watchOutcome = (op: string): string => `tsx scripts/watch-outcome.t
  * migration, in order, into a fresh database on the `replay` profile's
  * server and fails when one does not give the schema it recorded. That
  * server is a throwaway container the lint job starts as a service, the
- * image chant's emulator runs; never a server whose data matters, since
+ * image chant's emulator runs, which the job (in IMAGE, on every forge)
+ * reaches by the service's name; never a server whose data matters, since
  * --reset drops what the history names there first.
  */
 export const REPLAY_PROFILE = "replay";
@@ -225,10 +226,11 @@ function renderActions(forge: Actions, workflow: AWorkflow): string {
   return oneFile(forge, serializer.serialize(new Map([["workflow", workflow]])));
 }
 
-function setupSteps(forge: Actions): AStep[] {
+/** `inContainer`: the job runs in IMAGE, which has node, so it needs no setup-node. */
+function setupSteps(inContainer: boolean): AStep[] {
   // Step inputs are strings in the lexicon's schema (INTENTIUS/chant#3670); the actions read them as strings either way.
   const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": "0" } })];
-  if (forge === "github") steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": "22", cache: "npm" } }));
+  if (!inContainer) steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": "22", cache: "npm" } }));
   steps.push(
     new Step({ run: "npm ci" }),
     new Step({ run: 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"' }),
@@ -237,8 +239,9 @@ function setupSteps(forge: Actions): AStep[] {
   return steps;
 }
 
-/** Forgejo runs the job in IMAGE; GitHub on the runner's VM. */
-const runner = (forge: Actions) => ({ "runs-on": "ubuntu-latest", ...(forge === "forgejo" ? { container: IMAGE } : {}) });
+/** Forgejo runs every job in IMAGE; GitHub on the runner's VM, unless the job asks for the container. */
+const inContainer = (forge: Actions): boolean => forge === "forgejo";
+const runner = (container: boolean) => ({ "runs-on": "ubuntu-latest", ...(container ? { container: IMAGE } : {}) });
 
 /** The token `yodel plan --comment` posts with: the job's own. */
 function commentToken(forge: Actions): Record<string, string> {
@@ -246,35 +249,32 @@ function commentToken(forge: Actions): Record<string, string> {
 }
 
 function lintJob(forge: Actions, dialect: Dialect, replay: boolean): AJob {
+  // With the replay check, the job runs in IMAGE on every forge and reaches
+  // its replay server by the service's name on the job's own network. On
+  // GitHub's VM the service would be on localhost through a published port,
+  // which collides with any database already on that port (act, a
+  // self-hosted runner).
+  const container = replay || inContainer(forge);
   const steps = [
-    ...setupSteps(forge),
+    ...setupSteps(container),
     new Step({ name: "The pipelines are up to date", run: CI_CHECK }),
     new Step({ name: "yodel lint", run: LINT }),
   ];
-  if (!replay) return new ActionsJob({ ...runner(forge), steps });
+  if (!replay) return new ActionsJob({ ...runner(container), steps });
   const svc = REPLAY_SERVICE[dialect];
-  // GitHub runs this job on the VM, where a service is on localhost; Forgejo
-  // runs it in a container, where a service is on its name.
-  const host = forge === "github" ? "localhost" : svc.name;
-  const port = String(svc.port);
   return new ActionsJob({
-    ...runner(forge),
+    ...runner(container),
     services: {
       [svc.name]: new ActionsService({
         image: svc.image,
         env: svc.env,
-        // Exception (INTENTIUS/chant#3670): the lexicon's schema says ports
-        // are numbers, but a bare 8123 publishes the port on a random host
-        // port; the job reaches the service on localhost:8123, so it needs
-        // the host:container form GitHub also accepts.
-        ...(forge === "github" ? { ports: [`${port}:${port}`] } : {}),
         options: `--health-cmd "${svc.health}" --health-interval 2s --health-timeout 5s --health-retries 45`,
       }),
     },
-    env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(host), ...svc.jobEnv },
+    env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
     steps: [
       ...steps,
-      new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(host, svc.port) }),
+      new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }),
       new Step({ name: "yodel lint --replay", run: REPLAY }),
     ],
   });
@@ -284,11 +284,11 @@ export function actionsReview(forge: Actions, { dialect, names: envs, replay }: 
   const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay) };
   for (const env of envs) {
     jobs[`plan-${env}`] = new ActionsJob({
-      ...runner(forge),
+      ...runner(inContainer(forge)),
       env: secrets(readerVariables(env, dialect)),
       steps: [
         // The plan explains what moved since an approval from git's history of migrations/.
-        ...setupSteps(forge),
+        ...setupSteps(inContainer(forge)),
         new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
       ],
     });
@@ -322,13 +322,13 @@ export function actionsApply(forge: Actions, { dialect, names: envs }: Environme
   for (const env of envs) {
     const job = `apply-${env}`;
     jobs[job] = new ActionsJob({
-      ...runner(forge),
+      ...runner(inContainer(forge)),
       ...(previous ? { needs: [previous] } : {}),
       // A GitHub environment holds the writer's secrets, restricted to main.
       ...(forge === "github" ? { environment: env } : {}),
       concurrency: new Concurrency({ group: `yodel-apply-${env}`, "cancel-in-progress": false }),
       env: { YODEL_CREDENTIALS: "writer", ...secrets(writerVariables(env, dialect)) },
-      steps: [...setupSteps(forge), new Step({ name: `yodel apply ${env}`, run: `yodel apply ${env}` })],
+      steps: [...setupSteps(inContainer(forge)), new Step({ name: `yodel apply ${env}`, run: `yodel apply ${env}` })],
     });
     previous = job;
   }

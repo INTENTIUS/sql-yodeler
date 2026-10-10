@@ -12,7 +12,8 @@
  *   npm run claims -- --record FILE lint new
  *                                      those claims; when FILE exists, only their rows change
  *   npm run claims -- --list           the claims, what each says, and the dialects it runs on
- *   npm run claims -- --skip template  every claim but those named (comma-separated)
+ *   npm run claims -- --skip template,template-github,template-gitlab
+ *                                      every claim but those named (comma-separated)
  *   npm run claims -- --affected [base]
  *                                      the claims the change since base (default origin/main) can affect
  *   npm run claims -- --affected --list
@@ -71,8 +72,12 @@
  * pull request, since a pull request merges only on a full green run.
  * A new file under src/ needs a line there (test/claim-paths.test.ts).
  *
- * The template claim needs the local Forgejo (scenarios/claims/template.ts
- * says which variables); CI on GitHub has none and runs --skip template.
+ * The template claims need a forge: template a local Forgejo
+ * (scenarios/forges/forgejo.ts), template-github act and a mock GitHub
+ * (scenarios/forges/github.ts), template-gitlab a local GitLab
+ * (scenarios/forges/gitlab.ts); each file says which variables it reads.
+ * CI on GitHub has none of them and runs
+ * --skip template,template-github,template-gitlab.
  *
  * A new claim: a file in scenarios/claims/ exporting a Claim, listed in
  * scenarios/claims/index.ts.

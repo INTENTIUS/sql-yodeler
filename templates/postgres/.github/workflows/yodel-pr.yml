@@ -22,26 +22,21 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    container: node:22-bookworm
     services:
       replay-postgres:
         image: postgres:18.6
         env:
           POSTGRES_PASSWORD: replay
-        ports:
-          - '5432:5432'
         options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 45
     env:
-      REPLAY_POSTGRES_URL: postgres://localhost:5432/postgres
+      REPLAY_POSTGRES_URL: postgres://replay-postgres:5432/postgres
       REPLAY_POSTGRES_USER: postgres
       REPLAY_POSTGRES_PASSWORD: replay
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: '0'
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: npm
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
@@ -51,7 +46,7 @@ jobs:
       - name: yodel lint
         run: yodel lint
       - name: Wait for the replay server (replay-postgres)
-        run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "localhost", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("localhost:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
+        run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "replay-postgres", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-postgres:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
       - name: yodel lint --replay
         run: yodel lint --replay replay --reset
   plan-dev:
