@@ -62,6 +62,18 @@ describe("test files", () => {
     expect(await store.read(r)).toBe("done");
     expect(await memoryReceipts().read(r)).toBeUndefined();
   });
+
+  it("gives a rebuild its partitions' receipts under the addresses it asks for (#112)", async () => {
+    const store = memoryReceipts();
+    const part = (p: string) => ({ name: `rebuild/shop.events/${p}`, effect: `rebuild/shop.events/${p}`, flavor: "hash" as const, inputs: {} });
+    await store.write(part("202609"), "h1");
+    await store.write(part("202610"), "h2");
+    await store.write({ name: "x", effect: "rebuild/shop.other/202610", flavor: "hash", inputs: {} }, "h3");
+    // chant's addresses are <stack>/<env>/<effect>.
+    expect(await store.readAll("app/staging/rebuild/shop.events/")).toEqual(new Map([["app/staging/rebuild/shop.events/202609", "h1"], ["app/staging/rebuild/shop.events/202610", "h2"]]));
+    expect(await store.readAll("-/-/rebuild/shop.events/")).toEqual(new Map([["-/-/rebuild/shop.events/202609", "h1"], ["-/-/rebuild/shop.events/202610", "h2"]]));
+    expect((await memoryReceipts().readAll("-/-/rebuild/shop.events/")).size).toBe(0);
+  });
 });
 
 describe("the report", () => {

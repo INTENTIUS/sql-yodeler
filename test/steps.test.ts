@@ -178,6 +178,18 @@ describe("the rebuild step's Op", () => {
     );
     expect(ran).toEqual(Object.keys(activities));
     expect(JSON.parse(schema)).toEqual(build(BEFORE));
+
+    // A receipt store given to the step reaches the backfill activity (yodel test's per-case store, #112).
+    const receipts = { read: () => Promise.resolve(undefined), readAll: () => Promise.resolve(new Map<string, string>()), write: () => Promise.resolve() };
+    let given: unknown;
+    await runRebuild(
+      { name: "rebuild-yodel_12-events", table: `${DB}.events`, dualWrite: { mode: "materialized-view", cutoverColumn: "ts" } },
+      {
+        environment: "e2e", projectDir: tempDir(), schema: build(BEFORE), base: new Map(), receipts,
+        activities: { ...activities, clickhouseRebuildBackfill: (_args: Record<string, unknown>, _signal?: AbortSignal, deps?: unknown) => { given = (deps as { backfill?: { receipts?: unknown } } | undefined)?.backfill?.receipts; return Promise.resolve({}); } },
+      },
+    );
+    expect(given).toBe(receipts);
     expect(summary).toEqual({
       op: "ClickHouseRebuildOp", table: `${DB}.events`, state: "rebuild", partitions: 3, copied: 1, skipped: 2, cleared: 0, repaired: 0, verifiedRows: 30, swapped: true,
       oldTable: `${DB}.events__chant_old`, retainUntil: "2026-10-16T00:00:00.000Z",
