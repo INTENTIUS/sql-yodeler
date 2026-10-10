@@ -2,37 +2,35 @@
 
 Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.
 
+SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for three things only: `chant init` to make a project from a template, `chant approve` to approve a plan, and `chant emulator up` for a local database. Run it as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it.
+
+## Getting started
+
+[Your first migration](docs/getting-started.md) goes from an empty directory to two applied migrations on a local ClickHouse, with every command and its output. In short:
+
+```sh
+npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+cd my-schema && npm install && git init -b main && git add -A && git commit -m "chore: a new yodel project"
+npx chant emulator up --lexicon sql            # ClickHouse and Postgres in Docker
+export DEV_CLICKHOUSE_READER_USER=default DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
+npx yodel new init && npx yodel lint
+git add -A && git commit -m "feat: the first migration"
+npx yodel apply dev                            # stops at the approval
+npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
+npx yodel apply dev
+```
+
+For Postgres, use `templates/postgres` with `--param name=app-schema --param schema=app`.
+
+Each template gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `scripts/ci.ts` in the project renders the pipelines again after an environment is added (`npm run ci`). The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup.
+
 ## Documentation
 
-[`docs/`](docs/README.md) covers [installing](docs/configuration.md#installing) (`npm install @intentius/sql-yodeler`), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
+The documentation is at [intentius.io/sql-yodeler](https://intentius.io/sql-yodeler/), built from [`docs/`](docs/README.md): [installing](docs/configuration.md#installing) (`npm install @intentius/sql-yodeler`), [starting a project](docs/adoption.md) from a template or with `yodel init --from`, [the declarative and versioned workflows](docs/workflows.md), [migrations](docs/migrations.md), [steps](docs/steps.md), [lint](docs/lint.md), [approval](docs/approval.md), [drift](docs/drift.md) and [topology](docs/topology.md).
 
-[`examples/clickhouse`](examples/clickhouse/README.md) and [`examples/postgres`](examples/postgres/README.md) are example projects, each with a transcript of a run against chant's emulator.
+[`examples/clickhouse`](examples/clickhouse/README.md) and [`examples/postgres`](examples/postgres/README.md) are finished example projects, each with a transcript of a run against chant's emulator.
 
-## Starting a project
-
-`templates/clickhouse` and `templates/postgres` are starter projects for `chant init --from`:
-
-```sh
-chant init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
-chant init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
-```
-
-Each gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `scripts/ci.ts` in the project renders the pipelines again after an environment is added (`npm run ci`). The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup. `npm install` in the new project installs `yodel` from npm (`@intentius/sql-yodeler`) with chant and its lexicons, and needs no token.
-
-## Development
-
-Node 22 (`.nvmrc`).
-
-```sh
-npm ci
-npm run build
-npx yodel --help
-npm run check   # typecheck, lint and test
-```
-
-Working rules are in `AGENTS.md`.
-
-## Versioned migrations (ClickHouse)
+## Versioned migrations
 
 `yodel apply <env>` takes the versioned path when the project has a `migrations/` directory holding at least one migration (`yodel new` writes them); otherwise it is the declarative path, unchanged. `yodel status <env>` lists applied, pending, out-of-order and part-way migrations and checksum mismatches (`--json`; exit 0 up to date, 3 pending, 4 mismatch or out of order, 2 an Op step, 1 error).
 
@@ -87,7 +85,7 @@ export const op = Op({
 });
 ```
 
-`yodel apply prod` stops at the gate and prints `chant approve migrate-prod approve-migrate-prod --plan <digest>`; approve, then run it again. `yodel apply prod --plan` prints the pending migrations and the digest without applying. Running `chant run migrate-prod` directly needs `yodel` on PATH.
+`yodel apply prod` stops at the gate and prints `chant approve migrate-prod approve-migrate-prod --plan <digest>`; approve (inside the project, `npx chant approve ...`), then run it again. `yodel apply prod --plan` prints the pending migrations and the digest without applying. Running `chant run migrate-prod` directly needs `yodel` on PATH.
 
 ## yodel lint
 
@@ -108,4 +106,8 @@ The reason is required. `yodel apply` records each silence (step, rule, reason) 
 
 `yodel lint --env <env>` also reads the environment's history: an applied migration whose files changed since it ran is a `checksum` error, a pending migration's edit a warning. `yodel.config.ts` sets rule levels: `lint: { rules: { "ch-mutation": "warning", "pg-lock": "off" } }`; the integrity rules cannot be lowered. `yodel lint --rules` lists the rules and their levels.
 
-`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server (a throwaway emulator, `chant emulator up --lexicon sql`) and compares each with its recorded schema; the first that differs fails the run (rule `replay`, exit 3), named. The databases or schemas the history names must not exist there yet: otherwise it exits 4 and runs nothing, unless `--reset`, which drops them first (never point it at a server whose data matters). `--keep` leaves the replayed database in place to look at.
+`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server (a throwaway emulator, `npx chant emulator up --lexicon sql`) and compares each with its recorded schema; the first that differs fails the run (rule `replay`, exit 3), named. The databases or schemas the history names must not exist there yet: otherwise it exits 4 and runs nothing, unless `--reset`, which drops them first (never point it at a server whose data matters). `--keep` leaves the replayed database in place to look at.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers building SQL Yodeler from a clone, the checks, and the scenario claims.

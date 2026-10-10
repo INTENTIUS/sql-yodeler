@@ -66,7 +66,7 @@ describe("docs", () => {
       expect(made.length).toBeGreaterThan(0);
       for (const q of made) {
         const page = readFileSync(join(repoRoot, "docs", q.page), "utf8");
-        const b = findBlock(page, q.command);
+        const b = findBlock(page, q.command, q.nth);
         expect(b, `docs/${q.page}: "$ ${q.command}"`).toBeDefined();
         if (b) expect(id(page.slice(b.start, b.end))).toBe(id(q.text));
       }
@@ -74,4 +74,33 @@ describe("docs", () => {
       dispose();
     }
   }, 120_000);
+
+  it("getting-started.md has a block for each quoted step of examples/walkthrough/getting-started.ts, with its exit code", async () => {
+    // The steps need a server, so this checks the shape; run.ts getting-started --write refreshes the output.
+    const w = await load("getting-started");
+    const page = readFileSync(join(repoRoot, "docs", "getting-started.md"), "utf8");
+    const groups: Array<Array<{ run: string; code: number }>> = [];
+    let open: Array<{ run: string; code: number }> | undefined;
+    for (const step of w.steps) {
+      if ("run" in step && step.quote === "getting-started.md") {
+        if (/\{[a-z]/.test(step.run)) throw new Error(`a quoted step's command must be literal: ${step.run}`);
+        if (!open) groups.push((open = []));
+        open.push({ run: step.run, code: step.code });
+      } else open = undefined;
+    }
+    const seen = new Map<string, number>();
+    for (const g of groups) {
+      const first = g[0]?.run ?? "";
+      const nth = seen.get(first) ?? 0;
+      seen.set(first, nth + 1);
+      const b = findBlock(page, first, nth);
+      expect(b, `docs/getting-started.md: block ${String(nth + 1)} starting "$ ${first}"`).toBeDefined();
+      if (!b) continue;
+      const text = page.slice(b.start, b.end);
+      const commands = text.split("\n").filter((l) => l.startsWith("$ ")).map((l) => l.slice(2));
+      expect(commands).toEqual(g.map((s) => s.run));
+      const exits = text.split("\n$ ").map((part) => /\n\[exit (\d+)\]$/.exec(part.trimEnd())?.[1] ?? "0");
+      expect(exits).toEqual(g.map((s) => String(s.code)));
+    }
+  });
 });

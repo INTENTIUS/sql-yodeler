@@ -88,6 +88,17 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:a9948d55a9e2c9dc97e6
 ...
 ```
 
+### On your own machine
+
+yodel prints the approve command as `chant approve ...`. In a project, chant is installed in `node_modules`, so run it with `npx` in front. To skip copying the digest, let `yodel apply <env> --digest` print it into the command:
+
+```sh
+npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
+npx yodel apply dev
+```
+
+It is the same approval, bound to the plan as it is when you run it. In a repository with no remote, chant warns that the approval (and the pending record `yodel apply` writes at the gate) was not pushed; on your own machine that is expected.
+
 ## The pull request comment
 
 `yodel plan <env> --comment` posts the plan as one comment per environment on the pull (merge) request, and updates that comment on the next push rather than adding another. `--format markdown` prints the same Markdown without posting. From the ClickHouse example, for its rebuild:

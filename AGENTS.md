@@ -1,6 +1,6 @@
 # Working on SQL Yodeler
 
-Rules for anyone, person or agent, who changes this repo.
+Rules for anyone, person or agent, who changes this repo. Building from a clone, the tests against a server, the walkthroughs and the claims are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Git and pull requests
 

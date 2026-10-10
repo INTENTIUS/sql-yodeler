@@ -80,6 +80,11 @@ export interface Walkthrough {
   sql: (sql: string) => Promise<string>;
   /** Drops what the walkthrough makes on the server. */
   reset: () => Promise<void>;
+  /**
+   * Text replaced in what the README and docs show, after <tmp> and <clone>:
+   * for example the server's real address, shown as the one a reader has.
+   */
+  shown?: () => Array<[string, string]>;
   steps: Step[];
 }
 
@@ -220,7 +225,8 @@ export async function runWalkthrough(
       const shownCommand = command.split(clone).join("<clone>");
       log(`$ ${shownCommand}`);
       const { code, output } = await sh(command, step.cwd ? join(dir, step.cwd) : dir, env);
-      const shown = output.split(root).join("<tmp>").split(clone).join("<clone>");
+      let shown = output.split(root).join("<tmp>").split(clone).join("<clone>");
+      for (const [from, to] of w.shown?.() ?? []) if (from) shown = shown.split(from).join(to);
       log(shown.trimEnd());
       ran.push({ step, command: shownCommand, output: shown, code });
       const approve = /chant approve \S+ \S+ --plan jcs1-sha256:[0-9a-f]{64}/.exec(output);
@@ -251,6 +257,8 @@ export interface Quote {
   page: string;
   /** The block's first command, as its `$ ` line shows it. */
   command: string;
+  /** Which block on the page starting with that command: 0 for the first. */
+  nth: number;
   /** The block, without its fence. */
   text: string;
 }
@@ -271,12 +279,21 @@ export function quotes(ran: Ran[]): Quote[] {
       open = undefined;
     }
   }
-  return out.map((q) => ({ page: q.page, command: q.ran[0]?.command ?? "", text: q.ran.map(consoleBlock).join("\n") }));
+  const seen = new Map<string, number>();
+  return out.map((q) => {
+    const command = q.ran[0]?.command ?? "";
+    const key = `${q.page}\n${command}`;
+    const nth = seen.get(key) ?? 0;
+    seen.set(key, nth + 1);
+    return { page: q.page, command, nth, text: q.ran.map(consoleBlock).join("\n") };
+  });
 }
 
-/** The console block in `text` whose first line is `$ <command>`: where its body starts and ends. */
-export function findBlock(text: string, command: string): { start: number; end: number } | undefined {
-  const at = text.indexOf("```console\n$ " + command + "\n");
+/** The `nth` console block in `text` whose first line is `$ <command>` (0, the first): where its body starts and ends. */
+export function findBlock(text: string, command: string, nth = 0): { start: number; end: number } | undefined {
+  const head = "```console\n$ " + command + "\n";
+  let at = text.indexOf(head);
+  for (let i = 0; i < nth && at !== -1; i++) at = text.indexOf(head, at + head.length);
   if (at === -1) return undefined;
   const start = at + "```console\n".length;
   const end = text.indexOf("\n```", start);
@@ -289,8 +306,8 @@ export function writeQuotes(ran: Ran[]): string[] {
   for (const q of quotes(ran)) {
     const path = join(repoRoot, "docs", q.page);
     const text = readFileSync(path, "utf8");
-    const b = findBlock(text, q.command);
-    if (!b) throw new Error(`docs/${q.page} has no console block starting with "$ ${q.command}"`);
+    const b = findBlock(text, q.command, q.nth);
+    if (!b) throw new Error(`docs/${q.page} has no console block ${String(q.nth + 1)} starting with "$ ${q.command}"`);
     writeFileSync(path, text.slice(0, b.start) + q.text + text.slice(b.end));
     pages.push(`docs/${q.page}`);
   }
