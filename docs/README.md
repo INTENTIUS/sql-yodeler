@@ -14,6 +14,8 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
+| [Set up with a coding agent](agents.md) | the prompt to hand a coding agent, the steps it follows to add SQL Yodeler to a repository, and what it leaves to people |
+| [Glossary](glossary.md) | the chant terms yodel's commands and output use, in yodel's terms |
 
 Two example projects, one per dialect, show each of these on a real server. They are finished projects, and their READMEs are transcripts of the runs that made them, against chant's emulator, with the output each command printed. To follow along step by step, start with [Your first migration](getting-started.md):
 

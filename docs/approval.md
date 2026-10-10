@@ -1,6 +1,6 @@
 # Approval
 
-`yodel apply` applies only a plan someone approved, on both paths. The approval is chant's: a gate in an Op, bound to a plan digest, resolved with `chant approve`, and kept on the `chant/lifecycle` branch of the project's git repository. yodel keeps no approval store of its own. The output quoted here is from the examples' runs; `...` marks lines left out.
+`yodel apply` applies only a plan someone approved, on both paths. The approval is chant's (the [Glossary](glossary.md) has the terms): a gate in an Op, bound to a plan digest, resolved with `chant approve`, and kept on the `chant/lifecycle` branch of the project's git repository. yodel keeps no approval store of its own. The output quoted here is from the examples' runs; `...` marks lines left out.
 
 ## The migrations Op
 

@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 import { findBlock, load, quotes, runWalkthrough } from "../examples/walkthrough/run.js";
 import { render } from "../examples/walkthrough/topology.js";
 import { repoRoot, yodel } from "./helpers/run.js";
+// @ts-expect-error docs-site/prompts.mjs is plain JavaScript, with no types
+import { neverLine, pagePrompts, pageUrl, setupPrompt } from "../docs-site/prompts.mjs";
 
 /** The console block in `page` that starts with `$ <command>`, without the command line. */
 function block(page: string, command: string): string {
@@ -102,5 +104,25 @@ describe("docs", () => {
       const exits = text.split("\n$ ").map((part) => /\n\[exit (\d+)\]$/.exec(part.trimEnd())?.[1] ?? "0");
       expect(exits).toEqual(g.map((s) => String(s.code)));
     }
+  });
+
+  describe("the prompts for coding agents (docs-site/prompts.mjs)", () => {
+    const prompts = Object.entries(pagePrompts as Record<string, string>);
+    const flat = (text: string) => text.replace(/\s+/g, " ");
+
+    it.each(prompts)("%s's prompt carries the never-line word for word and names its page", (slug, prompt) => {
+      expect(flat(prompt), "end it with the never-line from docs-site/prompts.mjs").toContain(neverLine as string);
+      expect(prompt).toContain((pageUrl as (s: string) => string)(slug));
+    });
+
+    it.each(prompts)("%s is a page in docs/", (slug) => {
+      expect(existsSync(join(repoRoot, "docs", `${slug}.md`))).toBe(true);
+    });
+
+    it("agents.md and its prompt are there, and agents.md quotes the setup prompt word for word", () => {
+      expect(pagePrompts).toHaveProperty("agents", setupPrompt);
+      const page = readFileSync(join(repoRoot, "docs", "agents.md"), "utf8");
+      expect(page).toContain("```text\n" + (setupPrompt as string) + "\n```");
+    });
   });
 });
