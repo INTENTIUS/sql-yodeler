@@ -6,6 +6,25 @@ claims: [declarative]
 
 When an ORM defines some of the tables, yodel can read them from the DDL the ORM prints instead of having them rewritten as declarations. The ORM's tables then go through the same plan, approval and apply as the ones in `src/`.
 
+## Plain .sql files in src/
+
+The simplest way to keep schema as DDL is a `.sql` file in `src/`. chant's build reads every `.sql` file in the source directory beside the TypeScript declarations, so yodel needs no configuration for it:
+
+```sql
+-- src/billing.sql
+CREATE TABLE app.invoices (
+  id bigint PRIMARY KEY,
+  customer_id bigint NOT NULL REFERENCES app.customers (id),
+  amount numeric(12, 2) NOT NULL
+);
+
+CREATE INDEX invoices_customer ON app.invoices (customer_id);
+```
+
+A file reads the same statements a DDL source does (below). A name in it that another object declares, in a `.sql` file or in TypeScript, is a dependency, so the plan creates `app.customers` first. An object declared in a file and in a template is a build error naming both. A file whose first line is `-- chant-discovery-skip` is not read, for seed data or queries kept beside the schema.
+
+Use a file when you write or paste the DDL yourself. Use a DDL source when a command prints it, such as an ORM's, so the declarations follow the model each time yodel builds.
+
 ## A DDL source
 
 Name each source in `yodel.config.ts` under `sources`, with the command that prints its DDL or a file that holds it:
@@ -49,11 +68,11 @@ Commit the generated file. A build that yodel does not start, such as `chant bui
 
 Keep a `file` source's DDL out of the schema build. chant's build reads every `.sql` file in the directory it builds, and an ApplyOp's diff builds the project root unless `chant.config.ts` sets `sourceDir`. A DDL file there would declare each object a second time, beside the generated file. Set `sourceDir: "src"` in `chant.config.ts`, or start the file with a `-- chant-discovery-skip` line.
 
-On Postgres, yodel reads `CREATE SCHEMA`, `TABLE`, `INDEX`, `VIEW`, `MATERIALIZED VIEW`, `SEQUENCE`, `TYPE ... AS ENUM`, `DOMAIN` and `EXTENSION`, with `COMMENT ON` for those. ORMs print foreign keys as `ALTER TABLE <t> ADD CONSTRAINT ... FOREIGN KEY ...`; yodel folds each `ALTER TABLE ... ADD` of a table constraint into `<t>`'s `CREATE TABLE`, where a declaration holds it. `BEGIN` and `COMMIT` are skipped. On ClickHouse, it reads `CREATE DATABASE`, `TABLE`, `VIEW` and `MATERIALIZED VIEW`.
+yodel reads the DDL with the sql lexicon's `sqlFileDeclarations`, the reader chant's build uses for a `.sql` file in `src/`, so a source and a file read the same statements. On Postgres that is each `CREATE`, `GRANT`, `REVOKE` and `ALTER DEFAULT PRIVILEGES`, with `COMMENT ON` and `ALTER TABLE ... ROW LEVEL SECURITY` folded into the object they finish. ORMs print foreign keys as `ALTER TABLE <t> ADD CONSTRAINT ... FOREIGN KEY ...`; each `ALTER TABLE ... ADD` of a table constraint is folded into `<t>`'s `CREATE TABLE`, where a declaration holds it. `BEGIN` and `COMMIT` are skipped. On ClickHouse, it reads `CREATE DATABASE`, `TABLE`, `VIEW`, `MATERIALIZED VIEW`, `DICTIONARY` and `FUNCTION`.
 
 Any other statement is an error that names it, and nothing is built. Leaving it out would leave part of the ORM's schema unmanaged without saying so.
 
-With `schema` set, yodel qualifies the unqualified names: on Postgres, each object's own name, an index's table, a foreign key's table, and a column whose type is an enum or domain the same DDL creates; on ClickHouse, each object's own name.
+With `schema` set, the unqualified names are qualified with it: on Postgres, each object's own name, an index's table, a foreign key's table, and a column whose type is an enum or domain the same DDL creates; on ClickHouse, each object's own name except a function's, which belongs to no database.
 
 ## One owner per object
 

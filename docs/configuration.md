@@ -24,7 +24,7 @@ A project is one directory:
 ```
 chant.config.ts     the dialect and one profile per environment (chant's config)
 yodel.config.ts     optional: what yodel needs per environment that chant's config does not say
-src/                the declared schema (chant's sql lexicon)
+src/                the declared schema: chant's sql lexicon, in TypeScript or plain .sql files
 migrations/         the versioned migrations, written by yodel new (absent on the declarative path)
 ops/                the Ops yodel apply runs (a migrations Op or an ApplyOp per environment), and drift watches
 package.json
