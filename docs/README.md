@@ -11,8 +11,9 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Your first migration](getting-started.md) | from an empty directory to applied migrations on a local database: the template, the emulator, the variables, plan, approve and apply |
 | [Installing and configuring](configuration.md) | installing `yodel`, the project layout, `chant.config.ts` profiles, `yodel.config.ts`, the environment variables |
 | [Starting a project](adoption.md) | a new project from a starter template, and `yodel init --from` to adopt a database that already exists |
+| [Coming from another migration tool](from-other-tools.md) | for a database golang-migrate, goose, Flyway or dbmate manages: the concepts mapped, adopting it with `yodel init --from`, the old tool's files and table, and rollback with `yodel revert` |
 | [The two workflows](workflows.md) | the declarative path (`yodel plan`, `yodel apply` against the declared schema) and the versioned path (`yodel new`, then `yodel apply`) |
-| [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair` |
+| [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair`, `yodel checkpoint`, and rollback with `yodel revert` |
 | [Steps](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, and manual steps |
 | [Access control](access.md) | Postgres row-level security, policies, roles and grants: `access` per environment, what the schema owns and what the environment owns, the plan's access section, adopting them |
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
