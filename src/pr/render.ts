@@ -9,6 +9,7 @@
  * the live catalog. Server addresses and tokens are never rendered.
  */
 
+import { describeServer } from "../server.js";
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
 import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
 import { asBackfill } from "../steps/kinds.js";
@@ -66,7 +67,7 @@ function approvalLines(a: ApprovalView | undefined, digest: string | undefined, 
 
 /** `yodel plan <env>` for a project with migrations. */
 export function renderPlanText(plan: VersionedPlan): string {
-  const lines = [`Plan for ${plan.environment} (${plan.dialect}${plan.history ? `, history ${plan.history}` : ""}): ${String(plan.appliedCount)} applied, ${String(plan.pending.length)} pending`];
+  const lines = [`Plan for ${plan.environment} (${plan.server ? describeServer(plan.server) : plan.dialect}${plan.history ? `, history ${plan.history}` : ""}): ${String(plan.appliedCount)} applied, ${String(plan.pending.length)} pending`];
   for (const n of plan.notes) lines.push("", n);
   for (const p of plan.pending) {
     const marks = pendingMarks(p);
@@ -191,6 +192,7 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
     environment: plan.environment,
     dialect: plan.dialect,
     mode: "versioned",
+    ...(plan.server ? { server: plan.server } : {}),
     ...(plan.history ? { history: plan.history } : {}),
     applied: plan.appliedCount,
     pending: plan.pending.map((p) => ({

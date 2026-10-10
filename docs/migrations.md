@@ -160,7 +160,7 @@ A run that finds the lock taken exits 5 and names the holder. To clear a lock by
 
 ```console
 $ npx yodel apply dev
-Migrations in dev (history yodel_18_history.history, topology single (default))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history, topology single (default))
 
 Applied (1):
   20261009T2305-baseline  2026-10-09 23:05:28.654129 by yodel@example
@@ -218,7 +218,7 @@ Fix the cause (on the server, or that statement in the migration's files), then 
 
 ```console
 $ npx yodel status dev
-Migrations in dev (history yodel_18_history.history)
+Migrations in dev (postgres 18.6 at 127.0.0.1:5432/postgres, history yodel_18_history.history)
 
 Applied (2):
   20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example
@@ -253,7 +253,7 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:a86038e389aa7bdc40ca
 
 ```console
 $ npx yodel status dev
-Migrations in dev (history yodel_18_history.history)
+Migrations in dev (postgres 18.6 at 127.0.0.1:5432/postgres, history yodel_18_history.history)
 
 Applied (7):
   20261009T2308-baseline  2026-10-09 23:08:56.172658 by yodel@example

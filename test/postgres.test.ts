@@ -334,7 +334,8 @@ describe("executeApply on Postgres", () => {
     const report = await statusReport(venv, [m1]);
     expect(report.status.applied.map((a) => a.id)).toEqual([m1.id]);
     // Topology is ClickHouse's: a Postgres report leaves it out.
-    expect(renderStatus(report).split("\n")[0]).toBe(`Migrations in e2e (history ${SCHEMA}.history)`);
+    expect(renderStatus(report).split("\n")[0]).toBe(`Migrations in e2e (postgres 18.6 at pg:5432/db, history ${SCHEMA}.history)`);
+    expect(statusJson(report).server).toEqual({ dialect: "postgres", address: "pg:5432/db", version: "18.6" });
     expect(renderStatus(report)).not.toContain("topology");
     expect(statusJson(report)).not.toHaveProperty("topology");
     expect(statusJson(report).history).toEqual({ database: SCHEMA });
@@ -353,7 +354,7 @@ describe("executeApply on Postgres", () => {
       const op = { name: "migrate-e2e", filePath: "/p/ops/migrate-e2e.op.ts", gate: "approve-migrate-e2e", quorum: false };
       const plan = await collectVersionedPlan(project, { name: "e2e", profile: { url: "postgres://pg:5432/db" } }, { venv, op, ledger: null });
       expect(plan.history).toBe(`${SCHEMA}.history`);
-      expect(renderPlanText(plan).split("\n")[0]).toBe(`Plan for e2e (postgres, history ${SCHEMA}.history): 0 applied, 1 pending`);
+      expect(renderPlanText(plan).split("\n")[0]).toBe(`Plan for e2e (postgres 18.6 at pg:5432/db, history ${SCHEMA}.history): 0 applied, 1 pending`);
       expect(renderPlanMarkdown(plan)).toContain(`Postgres, history \`${SCHEMA}.history\`: 0 applied`);
       await closeVersioned(venv);
     } finally {

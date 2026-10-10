@@ -48,7 +48,7 @@ It is chant's plan digest (`jcs1-sha256:...`), so `chant approve <op> <gate> --p
 
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodel_18_history.history (single (default))): 1 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history (single (default))): 1 applied, 1 pending
 
 20261009T2305-add-country
   0  statement  SQLCH201 metadata  yodel_18_shop.events
@@ -165,7 +165,7 @@ In the ClickHouse example a plan is approved, then someone adds a column by hand
 
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodel_18_history.history (single (default))): 4 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history (single (default))): 4 applied, 1 pending
 
 20261009T2307-add-source
   0  statement  SQLCH201 metadata  yodel_18_shop.events
@@ -219,7 +219,7 @@ Dropping the column puts the live schema back, and the digest is the approved on
 
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodel_18_history.history (single (default))): 4 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.history (single (default))): 4 applied, 1 pending
 
 20261009T2307-add-source
   0  statement  SQLCH201 metadata  yodel_18_shop.events

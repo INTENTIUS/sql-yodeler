@@ -125,6 +125,7 @@ export class FakePgConnection implements PgLockConnection {
       return [{ n: s.locks.get(key) === this.pid ? 1 : 0 }];
     }
     if (sql.includes("FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n")) return [{ present: s.historyExists }];
+    if (sql === "SHOW server_version") return [{ server_version: "18.6 (Fake)" }];
     if (sql.startsWith("CREATE SCHEMA IF NOT EXISTS") || sql.startsWith("COMMENT ON TABLE")) return [];
     if (/^CREATE TABLE IF NOT EXISTS \S+\."history"/.test(sql)) {
       s.historyExists = true;

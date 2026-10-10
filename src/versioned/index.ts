@@ -20,6 +20,7 @@ import type { Migration } from "../migrations/index.js";
 import { currentDigest, inspect, integrityRefusal, stepRefusal, type VersionedEnv } from "./engine.js";
 import type { StatusReport } from "./report.js";
 import { describeSettingsTopology } from "../config/settings.js";
+import { softly } from "../server.js";
 
 export * from "./approval.js";
 export * from "./digest.js";
@@ -48,7 +49,9 @@ export async function statusReport(venv: VersionedEnv, ordered: readonly Migrati
   const { status } = await inspect(venv, ordered, options.sync === undefined ? {} : { sync: options.sync });
   const refusal = integrityRefusal(status, options.allowOutOfOrder === true) ?? stepRefusal(status.pending);
   const digest = !refusal && status.pending.length > 0 ? await currentDigest(venv, status, status.pending) : undefined;
+  const server = venv.server ? await softly(venv.server) : undefined;
   return {
+    ...(server ? { server } : {}),
     environment: venv.environment,
     dialect: venv.dialect,
     location: venv.location,

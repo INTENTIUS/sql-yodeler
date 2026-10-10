@@ -27,7 +27,7 @@ The run below is the ClickHouse example's first apply. The Op stops at its gate 
 
 ```console
 $ npx yodel apply dev
-Plan for dev (clickhouse, sql.profiles.dev)
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, sql.profiles.dev)
 
 shop (yodel_18_shop)
   [create] object: yodel_18_shop

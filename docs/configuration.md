@@ -60,7 +60,7 @@ export default {
 | `databases` (ClickHouse) | the databases the project's schema lives in. `yodel init --from` needs it, and the history's database must not be one of them. |
 | `schemas` (Postgres) | the same, for schemas. |
 | `topology` (ClickHouse) | the topology chant renders for; see [Topology](topology.md). |
-| `lockTimeoutMs`, `statementTimeoutMs`, `scanTimeoutMs` (Postgres) | the `lock_timeout` of every statement `yodel apply` sends (default 5000), the `statement_timeout` of a catalog change (default 60000), and of a statement that reads or rewrites rows (default none). |
+| `lockTimeoutMs`, `statementTimeoutMs`, `scanTimeoutMs` (Postgres) | the `lock_timeout` of every statement `yodel apply` sends, and of the live-schema reads before it and in `yodel drift`, which name the lock they waited on (default 5000), the `statement_timeout` of a catalog change (default 60000), and of a statement that reads or rewrites rows (default none). |
 
 The starter templates read a reader's or a writer's credentials by `YODEL_CREDENTIALS` (`writer` only in the apply job); see each template's README.
 

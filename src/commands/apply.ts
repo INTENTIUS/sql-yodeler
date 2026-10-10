@@ -9,6 +9,7 @@ import { readMigrations, type Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
+import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -238,7 +239,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     return emit({ status: "refused" }, report.refusal.exitCode);
   }
   if (report.status.pending.length === 0) {
-    if (!a.json) io.out(`${env.name} is up to date: every migration is applied.\n`);
+    if (!a.json) io.out(`${env.name}${report.server ? ` (${describeServer(report.server)})` : ""} is up to date: every migration is applied.\n`);
     return emit({ status: "unchanged" }, 0);
   }
 
@@ -276,15 +277,17 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
 async function declarativeApply(project: Project, env: Environment, a: ApplyArgs, io: Io): Promise<number> {
   const json = a.json;
   const op = await findApplyOp(project, env, a.op);
+  let server: ServerInfo | undefined;
   const report = (doc: Record<string, unknown>, code: number) => {
-    if (json) io.out(`${JSON.stringify({ environment: env.name, dialect: project.dialect, op: op.name, ...doc }, null, 2)}\n`);
+    if (json) io.out(`${JSON.stringify({ environment: env.name, dialect: project.dialect, ...(server ? { server } : {}), op: op.name, ...doc }, null, 2)}\n`);
     return code;
   };
 
   const build = await buildSchema(project);
   try {
     const before = await planEnvironment(project, env, build);
-    if (!json) io.out(`${await renderPlan(before, `Plan for ${env.name} (${project.dialect}, sql.profiles.${env.name})`)}\n`);
+    server = await probeServer(project, env);
+    if (!json) io.out(`${await renderPlan(before, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name})`)}\n`);
     if (planExitCode(before) === PLAN_NEEDS_OP) {
       if (!json) io.err(`yodel apply: refused: ${String(before.refused.length)} change(s) need their own Op; nothing was applied\n`);
       return report({ status: "refused", plan: planJson(before) }, PLAN_NEEDS_OP);

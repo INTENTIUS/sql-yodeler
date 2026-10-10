@@ -3,10 +3,13 @@
 import type { SqlDialect } from "../project.js";
 import { describeTopology, type HistoryLocation } from "../history/index.js";
 import { describeStep } from "../steps/index.js";
+import { describeServer, type ServerInfo } from "../server.js";
 import { outOfOrder, partWay, type VersionedStatus } from "./state.js";
 
 export interface StatusReport {
   environment: string;
+  /** The server the history was read from (#11). */
+  server?: ServerInfo | undefined;
   /** Postgres has no topology: its report leaves it out. Default ClickHouse. */
   dialect?: SqlDialect | undefined;
   location: HistoryLocation;
@@ -23,6 +26,7 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
   const { status } = r;
   return {
     environment: r.environment,
+    ...(r.server ? { server: r.server } : {}),
     ...(r.dialect === "postgres"
       ? { history: { database: r.location.database } }
       : { history: { database: r.location.database, topology: describeTopology(r.location.topology) }, topology: r.topology ?? describeTopology(r.location.topology) }),
@@ -54,7 +58,8 @@ export function statusJson(r: StatusReport): Record<string, unknown> {
 export function renderStatus(r: StatusReport): string {
   const { status } = r;
   const topology = r.dialect === "postgres" ? "" : `, topology ${r.topology ?? describeTopology(r.location.topology)}`;
-  const lines = [`Migrations in ${r.environment} (history ${r.location.database}.history${topology})`, ""];
+  const server = r.server ? `${describeServer(r.server)}, ` : "";
+  const lines = [`Migrations in ${r.environment} (${server}history ${r.location.database}.history${topology})`, ""];
   lines.push(status.applied.length === 0 ? "Applied: none" : `Applied (${String(status.applied.length)}):`);
   for (const a of status.applied) {
     lines.push(`  ${a.id}${a.index === undefined ? "  (not in the directory)" : ""}  ${a.recordedAt} by ${a.appliedBy}`);
