@@ -93,11 +93,11 @@ src/replay/                            replay template template-github template-
 
 # yodel plan and the pull request comment it posts.
 src/commands/plan.ts                   adopt declarative pr-comment template template-github template-gitlab
-src/pr/                                pr-comment template template-github template-gitlab
+src/pr/                                pr-comment drift template template-github template-gitlab
 
-# yodel drift.
-src/commands/drift.ts                  drift
-src/chant/drift.ts                     drift
+# yodel drift, which the templates' watch runs (--issue).
+src/commands/drift.ts                  drift template template-github template-gitlab
+src/chant/drift.ts                     drift template template-github template-gitlab
 
 # yodel rebase and yodel repair.
 src/commands/rebase.ts                 out-of-order
