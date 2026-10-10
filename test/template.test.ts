@@ -23,7 +23,6 @@ import {
   writerVariables,
   type Dialect,
 } from "../templates/clickhouse/scripts/ci.js";
-import { verdict, newest } from "../templates/clickhouse/scripts/watch-outcome.js";
 
 const run = promisify(execFile);
 const load = (text: string): unknown => parseYAMLDocument(text);
@@ -178,17 +177,23 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
 describe("the templates' scripts", () => {
   it("are the same in every template", () => {
-    for (const f of ["justfile", "scripts/ci.ts", "scripts/local.ts", "scripts/watch-outcome.ts", "ops/migrate-dev.op.ts", "ops/watch-dev.op.ts"]) {
+    for (const f of ["justfile", "scripts/ci.ts", "scripts/local.ts", "ops/migrate-dev.op.ts", "ops/watch-dev.op.ts"]) {
       expect(readFileSync(join(templateDir("postgres"), f), "utf8"), f).toBe(readFileSync(join(templateDir("clickhouse"), f), "utf8"));
     }
   });
 
-  it("the watch's verdict fails the job on drift or a failed run", () => {
-    const at = (ended: string, status: string, drift: boolean) => ({ op: "watch-dev", id: ended, status, ended, outcomes: { Drift: drift } });
-    expect(verdict("watch-dev", undefined).code).toBe(1);
-    expect(verdict("watch-dev", at("1", "ok", false))).toEqual({ line: "watch-dev: no drift (run 1)", code: 0 });
-    expect(verdict("watch-dev", at("1", "ok", true)).code).toBe(1);
-    expect(verdict("watch-dev", at("1", "failed", false)).code).toBe(1);
-    expect(newest([at("2026-01-02", "ok", true), at("2026-01-03", "ok", false), at("2026-01-01", "ok", false)])?.id).toBe("2026-01-03");
+  it("ends each watch with yodel drift --issue, with a token that can write issues", () => {
+    for (const dialect of DIALECTS) {
+      const dir = templateDir(dialect);
+      for (const forge of [".github", ".forgejo"]) {
+        const doc = load(readFileSync(join(dir, forge, "workflows", "watch-dev.yml"), "utf8")) as { permissions?: Record<string, string>; jobs: Record<string, { env?: Record<string, string>; steps: Array<{ run?: string }> }> };
+        const job = doc.jobs["watch-dev"];
+        expect(job?.steps.at(-1)?.run, `${dialect} ${forge}`).toBe("yodel drift dev --issue");
+        expect(job?.env?.GITHUB_TOKEN, `${dialect} ${forge}`).toBe("${{ github.token }}");
+        if (forge === ".github") expect(doc.permissions).toEqual({ contents: "read", issues: "write" });
+      }
+      const gitlab = load(readFileSync(join(dir, ".gitlab", "yodel-watch.gitlab-ci.yml"), "utf8")) as Record<string, { script?: string[] }>;
+      expect(gitlab["watch-dev"]?.script?.at(-1)).toBe('yodel drift "${CI_JOB_NAME#watch-}" --issue');
+    }
   });
 });

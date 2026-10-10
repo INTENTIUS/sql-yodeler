@@ -214,7 +214,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { cat: "ops/watch-dev.op.ts", quote: "drift.md#watch-op" },
     { run: "npx chant run watch-dev", code: 0, expect: ["Drift=true"], quote: "drift.md#watch-run" },
     {
-      say: "`chant run` exits 0 when the watch completes, drift or not; the drift is the run's `Drift` outcome. The starter templates' `scripts/watch-outcome.ts` turns it into a failed CI job. Put the default back:",
+      say: "`chant run` exits 0 when the watch completes, drift or not; the drift is the run's `Drift` outcome. The starter templates' watch jobs run `yodel drift <env> --issue` after it, which fails the job on drift and keeps a tracking issue. Put the default back:",
     },
     { sql: "ALTER TABLE shop.events MODIFY COLUMN source LowCardinality(String) DEFAULT 'web'" },
     { run: "npx yodel drift dev", code: 0, expect: ["No drift"], quote: "drift.md#no-drift" },

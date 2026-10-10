@@ -85,7 +85,7 @@ On your machine, put an environment's variables in `.env` (or export them) to ru
 | a pull request to main | `lint` | `npm run ci:check`, `yodel lint`, and `yodel lint --replay replay --reset`: every migration replayed into a throwaway server the job starts as a service (profile `replay`) and compared with the schema it recorded | none (the service's own) |
 | | `plan-<env>` | `yodel plan <env> --comment`: one comment per environment with the pending migrations and the plan digest | reader, and a forge token that can comment |
 | a push to main | `apply-<env>`, in order | `yodel apply <env>` | writer |
-| on each watch's schedule (and by hand) | `watch-<env>` | `chant run watch-<env>`: drift, declared against live | reader |
+| on each watch's schedule (and by hand) | `watch-<env>` | `chant run watch-<env>`, then `yodel drift <env> --issue`: drift against the newest applied migration, and the environment's tracking issue | reader |
 
 ### Approving
 
@@ -100,7 +100,7 @@ The approval is a commit on the `chant/lifecycle` branch; every job fetches that
 
 ### Drift
 
-The watch reports a declared object changed out of band or gone; an object `src/` does not declare is never reported. It reads with the reader and never pushes: its snapshot stays in the job. A read-only CI token is enough.
+The watch reports a declared object changed out of band or gone; an object `src/` does not declare is never reported. It compares the server with the schema the newest applied migration records, so a migration merged but waiting at its gate is not drift. It keeps one issue per environment: opened when drift is found, updated while the drift changes, closed when it is gone; a run that cannot read a declared object leaves the issue as it is. It reads with the reader and never pushes: its snapshot stays in the job. Its token writes only issues (GitHub: `issues: write`; GitLab: `GITLAB_TOKEN`).
 
 ## Setting up each forge
 
@@ -119,7 +119,7 @@ Forgejo Actions:
 GitLab CI:
 
 - CI/CD variables: readers not protected (merge request pipelines run on unprotected branches); writers protected and scoped to environment `dev` or `prod`, which only `apply-<env>` declares.
-- `GITLAB_TOKEN`: a project access token with the `api` scope, for the plan comment (`CI_JOB_TOKEN` cannot write merge request notes).
+- `GITLAB_TOKEN`: a project access token with the `api` scope, for the plan comment and the watch's tracking issue (`CI_JOB_TOKEN` cannot write merge request notes or issues).
 - GitLab has no cron in the file: create one pipeline schedule per watch (Settings > CI/CD > Schedules) with the cron and the `CHANT_SCHEDULED_OP` value noted at the top of `.gitlab/yodel-watch.gitlab-ci.yml`.
 
 ### The replay check

@@ -12,6 +12,10 @@
  *   PUT    /api/v3/repos/:o/:r/pulls/:n/merge        a merge commit on the base branch
  *   GET|POST /api/v3/repos/:o/:r/issues/:n/comments  (per_page and page)
  *   PATCH  /api/v3/repos/:o/:r/issues/comments/:id
+ *   GET|POST /api/v3/repos/:o/:r/issues               (state open, closed or all; per_page and page)
+ *   PATCH  /api/v3/repos/:o/:r/issues/:n             title, body, state
+ *
+ * Pull requests and issues share one numbering, as on GitHub.
  *   GET|POST /:o/:r.git/...                          git; a push needs the token
  *
  * Writes take `Authorization: Bearer <MOCK_TOKEN>` (or `token`), git pushes
@@ -45,9 +49,19 @@ interface Comment {
   body: string;
   user: { login: string };
 }
+interface Issue {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  html_url: string;
+}
 interface Repo {
   pulls: Pull[];
   comments: Comment[];
+  issues: Issue[];
+  /** The last number given to a pull request or an issue. */
+  last: number;
 }
 
 const repos = new Map<string, Repo>();
@@ -173,7 +187,7 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
     }
     mkdirSync(dir, { recursive: true });
     git(dir, "init", "-q", "--bare", "-b", "main");
-    repos.set(`${USER}/${name}`, { pulls: [], comments: [] });
+    repos.set(`${USER}/${name}`, { pulls: [], comments: [], issues: [], last: 0 });
     json(res, 201, { name, full_name: `${USER}/${name}`, default_branch: "main" });
     return;
   }
@@ -183,7 +197,7 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
     json(res, 404, { message: "Not Found" });
     return;
   }
-  const st = repos.get(`${o}/${r}`) ?? { pulls: [], comments: [] };
+  const st = repos.get(`${o}/${r}`) ?? { pulls: [], comments: [], issues: [], last: 0 };
   repos.set(`${o}/${r}`, st);
   const rest = seg.slice(3);
 
@@ -208,7 +222,7 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
       json(res, 422, { message: "Validation Failed: head or base is not a branch" });
       return;
     }
-    const p: Pull = { number: st.pulls.length + 1, state: "open", merged: false, head, base, title: str("title") };
+    const p: Pull = { number: ++st.last, state: "open", merged: false, head, base, title: str("title") };
     st.pulls.push(p);
     json(res, 201, pullJson(o, r, p));
     return;
@@ -243,6 +257,34 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
     }
     c.body = str("body") || c.body;
     json(res, 200, c);
+    return;
+  }
+  if (rest[0] === "issues" && rest.length === 1) {
+    if (req.method === "GET") {
+      const state = url.searchParams.get("state") ?? "open";
+      const per = Number(url.searchParams.get("per_page") ?? 30) || 30;
+      const page = Number(url.searchParams.get("page") ?? 1) || 1;
+      json(res, 200, st.issues.filter((i) => state === "all" || i.state === state).slice((page - 1) * per, page * per));
+      return;
+    }
+    if (req.method === "POST") {
+      const n = ++st.last;
+      const issue: Issue = { number: n, title: str("title"), body: str("body"), state: "open", html_url: `http://mock-github/${o}/${r}/issues/${String(n)}` };
+      st.issues.push(issue);
+      json(res, 201, issue);
+      return;
+    }
+  }
+  if (rest[0] === "issues" && rest.length === 2 && req.method === "PATCH") {
+    const issue = st.issues.find((i) => i.number === Number(rest[1]));
+    if (!issue) {
+      json(res, 404, { message: "Not Found" });
+      return;
+    }
+    if (typeof data.title === "string") issue.title = data.title;
+    if (typeof data.body === "string") issue.body = data.body;
+    if (data.state === "open" || data.state === "closed") issue.state = data.state;
+    json(res, 200, issue);
     return;
   }
   if (rest[0] === "issues" && rest[2] === "comments" && rest.length === 3) {

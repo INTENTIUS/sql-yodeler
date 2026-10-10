@@ -45,7 +45,6 @@ Created:
   README.md
   scripts/ci.ts
   scripts/local.ts
-  scripts/watch-outcome.ts
   src/schema.ts
   tsconfig.json
   yodel.config.ts

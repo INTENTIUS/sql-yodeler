@@ -27,7 +27,7 @@ watch-dev:
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
     - git remote set-url --push origin no-push://the-drift-watch-only-reads
     - chant run watch-dev
-    - tsx scripts/watch-outcome.ts "$CI_JOB_NAME"
+    - 'yodel drift "${CI_JOB_NAME#watch-}" --issue'
 
 watch-prod:
   stage: ops
@@ -41,4 +41,4 @@ watch-prod:
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
     - git remote set-url --push origin no-push://the-drift-watch-only-reads
     - chant run watch-prod
-    - tsx scripts/watch-outcome.ts "$CI_JOB_NAME"
+    - 'yodel drift "${CI_JOB_NAME#watch-}" --issue'

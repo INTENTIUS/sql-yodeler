@@ -1,7 +1,8 @@
 /**
  * What the template claims need from a forge: a fresh repository with the
  * pipelines' secrets, the runs a push and a pull request start, the pull
- * request's comments, and a merge. Forgejo and GitLab run the pipelines
+ * request's comments, a merge, a run of the drift watch and the issues it
+ * keeps. Forgejo and GitLab run the pipelines
  * themselves on a push; on GitHub, act runs them for the mock GitHub.
  */
 
@@ -32,6 +33,17 @@ export interface ForgeRepo {
   comments(id: number): Promise<string[]>;
   /** Merges the pull request; main's sha after the merge. */
   merge(id: number): Promise<string>;
+  /** Runs dev's drift watch (watch-dev) on main at `sha`, as its schedule would, and waits for it. */
+  watch(sha: string): Promise<ForgeRun>;
+  /** The repository's issues, open and closed (not pull requests). */
+  issues(): Promise<ForgeIssue[]>;
+}
+
+export interface ForgeIssue {
+  number: number;
+  title: string;
+  body: string;
+  open: boolean;
 }
 
 export interface Forge {
