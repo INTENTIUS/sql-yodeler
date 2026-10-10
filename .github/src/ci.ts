@@ -2,9 +2,10 @@
 
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { siteBuildSteps } from "./pages.js";
-import { checkout, setupNode } from "./shared.js";
+import { checkout, rendered, setupNode } from "./shared.js";
 
 export const workflow = new Workflow({
+  comment: rendered("ci.ts"),
   name: "ci",
   on: { pull_request: null, push: { branches: ["main"] } },
   permissions: { contents: "read" },

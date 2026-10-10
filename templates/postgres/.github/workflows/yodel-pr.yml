@@ -6,6 +6,7 @@
 # environment's reader credentials. No job here holds a writer, and each plan
 # job shows it first: yodel config check --write-probe tries a write and
 # fails the job when the server lets it through.
+
 name: yodel-pr
 
 on:
@@ -38,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
@@ -62,10 +63,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
@@ -101,10 +102,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: '0'
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"

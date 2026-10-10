@@ -115,7 +115,6 @@ async function access(ctx: Ctx, { p }: Declarative): Promise<void> {
 
   if (ctx.broken) {
     manageAccess(p, false);
-    p.edit("chant.config.ts", "\n        access: true,", "");
     await p.commit("access off");
   }
   await ctx.db.exec(`GRANT INSERT ON ${ctx.db.name}.orders TO ${reader(ctx)}`);
@@ -196,8 +195,7 @@ async function functionPart(ctx: Ctx, { p }: Declarative): Promise<void> {
  * by hand is drift: yodel drift reports it, yodel plan calls it out as
  * revoked by the next apply, and the approved apply revokes it.
  * BREAK: access is turned off for the environment before the grant is made
- * by hand, so yodel refuses to plan the declared access and nothing calls
- * the grant out.
+ * by hand, so chant reads no access there and nothing calls the grant out.
  */
 async function chAccess(ctx: Ctx, { p }: Declarative): Promise<void> {
   const { reader: role } = chNames(ctx);
@@ -317,8 +315,6 @@ export const declarative: Claim = {
   name: "declarative",
   says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
   dialects: { ch: body, pg: body },
-  // It makes and drops a ClickHouse function, which adopt's import would read.
-  shares: ["ch:udf"],
   parts: partNames(parts),
   partDialects: partDialects(parts),
 };

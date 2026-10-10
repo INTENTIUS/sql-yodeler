@@ -4,9 +4,8 @@
  * chant's sql lexicon plans and applies them where `sql.profiles.<env>.access`
  * is on (yodel.config.ts's `environments.<env>.access` sets it per
  * environment). On ClickHouse (#46): users, roles, row policies and grants,
- * which chant plans whenever the build declares them; yodel refuses the
- * declarative path where the environment does not manage access
- * ({@link clickhouseAccessRefusal}).
+ * which chant plans and applies where `sql.profiles.<env>.access` is on, as
+ * on Postgres.
  *
  * The plan already lists each access change with its rule and class. This
  * module picks them out so `yodel plan`, `yodel new`, lint and the pull
@@ -24,8 +23,7 @@ import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classif
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { BuildOutput } from "./build.js";
 import { environmentAccess } from "../config/settings.js";
-import { CONFIG_FILE } from "../config/load.js";
-import { YodelError, type Project } from "../project.js";
+import type { Project } from "../project.js";
 
 /** chant's access rules: policies, row-level security, roles, grants, revokes, default privileges; on ClickHouse role settings, user clauses, row policies, grants and revokes. */
 export const ACCESS_RULES: ReadonlySet<string> = new Set([
@@ -183,24 +181,13 @@ export function describeAccessSteps(steps: readonly MigrationStep[], md = false)
 }
 
 /**
- * ClickHouse: the declarative path's refusal where environment `name` does
- * not manage access and the build declares users, roles, row policies or
- * grants. chant's ClickHouse apply (the project's ApplyOp) and `chant
- * lifecycle diff` plan every access declaration they find, with no switch of
- * their own, so yodel cannot leave them out there: rather than plan without
- * them and apply with them, it refuses. `undefined` when access is managed,
- * or nothing is declared.
+ * ClickHouse: whether environment `name` manages access, from yodel.config.ts
+ * or `sql.profiles.<env>.access`. chant plans and applies the users, roles,
+ * row policies and grants only where the profile's `access` is on, and the
+ * declarative path refuses a yodel.config.ts that says otherwise
+ * (`declarativeAccessRefusal`), so the two agree there.
  */
-export function clickhouseAccessRefusal(project: Pick<Project, "yodel" | "profileAccess">, name: string, build: Pick<BuildOutput, "objects">, what = "the declared schema"): YodelError | undefined {
-  const declared = build.objects.filter((o) => CH_ACCESS_TYPES.has(o.type ?? ""));
-  if (declared.length === 0) return undefined;
+export function clickhouseAccessManaged(project: Pick<Project, "yodel" | "profileAccess">, name: string): boolean {
   const chant = project.profileAccess?.[name];
-  const { access, source } = environmentAccess(project.yodel?.config.environments?.[name], chant !== undefined ? { access: chant } : undefined, name);
-  if (access) return undefined;
-  const names = declared.map((o) => o.export);
-  return new YodelError(
-    `${what} declares access control (${names.slice(0, 5).join(", ")}${names.length > 5 ? `, and ${String(names.length - 5)} more` : ""}), but ${name} does not manage access (${source === "default" ? "off by default" : `${source} says false`}). ` +
-      `On ClickHouse the declarative apply and drift run chant, which plans every user, role, row policy and grant it is given, so yodel will not plan them away here and apply them there. ` +
-      `Set environments.${name}.access to true in ${CONFIG_FILE}, or move the access declarations out of the source directory.`,
-  );
+  return environmentAccess(project.yodel?.config.environments?.[name], chant !== undefined ? { access: chant } : undefined, name).access;
 }

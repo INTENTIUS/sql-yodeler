@@ -11,7 +11,7 @@
 # the only jobs that hold a writer's credentials, one environment's each, with
 # the reader of the environment before (waves[].requires): yodel apply refuses
 # a migration that environment's history does not record as applied.
-# chant Op waves "yodel-apply" (#3679): one stage per wave, each needing the one before.
+# chant Op waves "yodel-apply": one stage per wave, each needing the one before.
 # A wave that waits at its gate exits 3 and stops the waves after it; approve the
 # digest it prints, then retry the job.
 

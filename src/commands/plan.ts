@@ -3,10 +3,10 @@ import { eventFromRun, sendEvent } from "../notify/index.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
-import { declarativeAccessRefusal, declarativeTopologyRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
+import { declarativeRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
-import { accessReview, clickhouseAccessRefusal, renderAccessReview } from "../chant/access.js";
+import { accessReview, renderAccessReview } from "../chant/access.js";
 import { hasMigrations } from "../versioned/index.js";
 import { describeServer, probeServer } from "../server.js";
 import { runnable } from "../chant/runnable.js";
@@ -162,13 +162,11 @@ export const plan: Command = {
 };
 
 async function declarativePlan(project: Project, env: Environment, json: boolean, io: Io): Promise<number> {
-  const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : declarativeAccessRefusal(project, env.name);
+  const refusal = declarativeRefusal(project, env.name);
   if (refusal) throw refusal;
   const topology = project.dialect === "clickhouse" ? `, topology ${describeSettingsTopology(environmentSettings(project, env.name))}` : "";
   const build = await buildSchema(project);
   try {
-    const chRefusal = project.dialect === "clickhouse" ? clickhouseAccessRefusal(project, env.name, build.output) : undefined;
-    if (chRefusal) throw chRefusal;
     const result = await planEnvironment(project, env, build);
     const server = await probeServer(project, env);
     const access = await accessReview(project, env.name, result.diff.changes, build.output);

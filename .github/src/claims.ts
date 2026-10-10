@@ -1,13 +1,14 @@
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
-import { checkout, claimsEnv, emulatorSteps, setupNode } from "./shared.js";
+import { checkout, claimsEnv, emulatorSteps, rendered, setupNode } from "./shared.js";
 
-export const comment = `The scenario claims (scenarios/run.ts): every claim against the sql
+const comment = `The scenario claims (scenarios/run.ts): every claim against the sql
 emulator, plain and under BREAK=1. The template claims need a forge with a
 runner (template a Forgejo, template-github act and a mock GitHub,
 template-gitlab a GitLab), which this job has not, so they are skipped
 here. The record and every run's log are kept as the run's artifacts.`;
 
 export const workflow = new Workflow({
+  comment: rendered("claims.ts", comment),
   name: "claims",
   on: { pull_request: null, push: { branches: ["main"] }, workflow_dispatch: null },
   permissions: { contents: "read" },

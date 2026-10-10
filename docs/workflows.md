@@ -164,7 +164,7 @@ A ClickHouse project declares these with the `sql` lexicon's tags, from `@intent
 Dictionaries and functions:
 
 - A dictionary's changed comment is SQLCH203. Any other change (its source, layout, lifetime, attributes) is SQLCH245, applied as one `CREATE OR REPLACE DICTIONARY`.
-- A function belongs to no database. A changed lambda is SQLCH260, applied as `CREATE OR REPLACE FUNCTION`; the server prints `x * k` as `(x * k)`, and the plan asks the server's formatter before calling that a change. A function cannot carry chant's ownership marker, so it is never pruned and a function made by hand is never read. `yodel init --from` adopts every SQL function on the server, since none belongs to a database.
+- A function belongs to no database. A changed lambda is SQLCH260, applied as `CREATE OR REPLACE FUNCTION`; the server prints `x * k` as `(x * k)`, and the plan asks the server's formatter before calling that a change. A function cannot carry chant's ownership marker, so it is never pruned and a function made by hand is never read. `yodel init --from` adopts the SQL functions `sql.profiles.<env>.importFunctions` names (names, or prefixes ending in `*`), and the functions those call; it warns naming each function on the server it leaves out. chant's import also adopts a function an adopted object calls, but ClickHouse stores a view's query or a column's default with the function's body in place of the call, so in practice the list is what adopts one.
 - Users, roles, row policies and grants are planned only where the environment manages access ([Access control](access.md#clickhouse)).
 
 ## Postgres objects

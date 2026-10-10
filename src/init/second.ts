@@ -28,8 +28,7 @@ import { EXIT_REFUSED } from "../exit.js";
 import type { Build, BuildOutput } from "../chant/build.js";
 import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classifier";
 import { planEnvironment, renderPlan, unreadableOf } from "../chant/plan.js";
-import { clickhouseAccessRefusal } from "../chant/access.js";
-import { declarativeAccessRefusal, declarativeTopologyRefusal } from "../config/settings.js";
+import { declarativeRefusal } from "../config/settings.js";
 import type { Migration } from "../migrations/index.js";
 import { appliedBy, withLock, type HistoryRow } from "../history/index.js";
 import { sameDigest } from "../versioned/digest.js";
@@ -57,9 +56,8 @@ export function projectBaseline(ordered: readonly Migration[]): Migration {
 }
 
 /** The refusals before anything is read: the same as yodel drift's, since the comparison is a plan of a recorded schema. */
-export function baselineConfigRefusal(project: Project, env: Environment, schema: BuildOutput): YodelError | undefined {
-  if (project.dialect === "clickhouse") return declarativeTopologyRefusal(project, env.name) ?? clickhouseAccessRefusal(project, env.name, schema, "the baseline's recorded schema");
-  return declarativeAccessRefusal(project, env.name);
+export function baselineConfigRefusal(project: Project, env: Environment): YodelError | undefined {
+  return declarativeRefusal(project, env.name);
 }
 
 /** A recorded schema as a build file the planner reads, in a temporary directory its dispose removes. */
@@ -140,7 +138,7 @@ export async function baselineDigest(venv: VersionedEnv, baseline: Pick<Migratio
  * returns the digest the gate binds.
  */
 export async function planBaseline(project: Project, env: Environment, venv: VersionedEnv, baseline: Migration, processEnv: NodeJS.ProcessEnv = process.env): Promise<string> {
-  const refusal = baselineConfigRefusal(project, env, baseline.document.schema);
+  const refusal = baselineConfigRefusal(project, env);
   if (refusal) throw refusal;
   await historyEmpty(venv);
   const cmp = await compareBaseline(project, env, baseline, processEnv);
