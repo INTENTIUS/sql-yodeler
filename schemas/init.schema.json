@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/init.schema.json",
+  "title": "yodel init --from <env> --json",
+  "description": "Version 1. What adopting a live database wrote: the declarations, the baseline migration, and the history row that records it applied. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["environment", "dialect", "status", "objects", "schemaFiles", "migration", "recorded", "warnings"],
+  "properties": {
+    "environment": { "type": "string" },
+    "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+    "status": { "const": "adopted" },
+    "objects": { "description": "The objects read, as <kind> <name>.", "$ref": "common.schema.json#/$defs/stringList" },
+    "schemaFiles": { "description": "The declaration files written, relative to the project.", "$ref": "common.schema.json#/$defs/stringList" },
+    "migration": {
+      "description": "The baseline migration.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "id", "checksum", "statements"],
+      "properties": { "path": { "type": "string" }, "id": { "type": "string" }, "checksum": { "type": "string" }, "statements": { "type": "integer" } }
+    },
+    "recorded": {
+      "description": "The baseline's history row.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["history", "seq", "note", "appliedBy"],
+      "properties": { "history": { "type": "string" }, "seq": { "type": "integer" }, "note": { "type": "string" }, "appliedBy": { "type": "string" } }
+    },
+    "warnings": { "$ref": "common.schema.json#/$defs/stringList" }
+  }
+}

@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/plan.schema.json",
+  "title": "yodel plan <env> --json",
+  "description": "Version 1. A project with migrations prints the versioned plan (mode \"versioned\"); a project without prints the declarative plan, chant's diff with the environment and dialect it is of. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/versioned"
+    },
+    {
+      "$ref": "#/$defs/declarative"
+    }
+  ],
+  "$defs": {
+    "declarative": {
+      "description": "chant's diff (chant sql plan --json) with environment, dialect and server added. chant owns the diff's fields: ones beyond those listed may appear.",
+      "type": "object",
+      "required": [
+        "environment",
+        "dialect",
+        "changes",
+        "hints"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "dialect": {
+          "$ref": "common.schema.json#/$defs/dialect"
+        },
+        "server": {
+          "$ref": "common.schema.json#/$defs/server"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/change"
+          }
+        },
+        "hints": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "rebuilds": {
+          "description": "ClickHouse: the changes that need a ClickHouseRebuildOp.",
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/change"
+          }
+        },
+        "rebuildOps": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "refused": {
+          "description": "Postgres: the changes that need a PostgresMigrationOp.",
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/change"
+          }
+        },
+        "migrationOps": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "mode": false
+      }
+    },
+    "stepChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule",
+        "class",
+        "field"
+      ],
+      "properties": {
+        "rule": {
+          "type": "string"
+        },
+        "class": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "destructive": {
+          "const": true
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind",
+        "object",
+        "name",
+        "done"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "statement",
+            "op",
+            "manual"
+          ]
+        },
+        "object": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "class": {
+          "type": "string"
+        },
+        "destructive": {
+          "const": true
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stepChange"
+          }
+        },
+        "sql": {
+          "description": "A statement step's SQL, with passwords, secrets and tokens redacted.",
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "applyRuns": {
+          "description": "An Op or manual step: whether yodel apply runs it.",
+          "type": "boolean"
+        },
+        "refused": {
+          "description": "Why yodel apply does not run this step.",
+          "type": "string"
+        },
+        "done": {
+          "description": "It succeeded in an earlier run and is not sent again.",
+          "type": "boolean"
+        }
+      }
+    },
+    "moved": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "part",
+          "message"
+        ],
+        "properties": {
+          "part": {
+            "enum": [
+              "environment",
+              "history",
+              "pending",
+              "live"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "versioned": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "dialect",
+        "mode",
+        "applied",
+        "pending",
+        "problems",
+        "notes"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "dialect": {
+          "$ref": "common.schema.json#/$defs/dialect"
+        },
+        "mode": {
+          "const": "versioned"
+        },
+        "server": {
+          "$ref": "common.schema.json#/$defs/server"
+        },
+        "history": {
+          "description": "<database>.history, and on ClickHouse the topology and where it came from.",
+          "type": "string"
+        },
+        "applied": {
+          "description": "How many migrations the history records applied.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "outOfOrder",
+              "steps"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "outOfOrder": {
+                "type": "boolean"
+              },
+              "resumeAt": {
+                "type": "integer"
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/check"
+                }
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/step"
+                }
+              }
+            }
+          }
+        },
+        "problems": {
+          "description": "Directory problems, checksum mismatches, out-of-order migrations.",
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "refusal": {
+          "$ref": "common.schema.json#/$defs/refusal"
+        },
+        "planDigest": {
+          "description": "The digest the migrations Op's gate binds; absent when apply would refuse or has nothing to do.",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "common.schema.json#/$defs/policy"
+        },
+        "op": {
+          "description": "The migrations Op.",
+          "type": "string"
+        },
+        "gate": {
+          "description": "The Op's gate.",
+          "type": "string"
+        },
+        "approve": {
+          "description": "The command a person runs to approve this plan. An agent prints it and never runs it.",
+          "type": "string"
+        },
+        "approval": {
+          "description": "The newest approval of the gate in chant's ledger.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "by",
+            "at",
+            "holds",
+            "sameDigest"
+          ],
+          "properties": {
+            "digest": {
+              "type": "string"
+            },
+            "by": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            },
+            "holds": {
+              "type": "boolean"
+            },
+            "sameDigest": {
+              "type": "boolean"
+            },
+            "askedAgain": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "at"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                }
+              }
+            },
+            "moved": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "confirmed",
+                "changes"
+              ],
+              "properties": {
+                "confirmed": {
+                  "type": "boolean"
+                },
+                "changes": {
+                  "$ref": "#/$defs/moved"
+                }
+              }
+            }
+          }
+        },
+        "opMissing": {
+          "description": "The project declares no migrations Op for the environment: the first line of how to declare one.",
+          "type": "string"
+        },
+        "sinceLast": {
+          "description": "The pull request comment this plan replaces showed another digest: what moved since.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "digest",
+            "confirmed",
+            "changes"
+          ],
+          "properties": {
+            "digest": {
+              "type": "string"
+            },
+            "confirmed": {
+              "type": "boolean"
+            },
+            "changes": {
+              "$ref": "#/$defs/moved"
+            }
+          }
+        },
+        "notes": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        }
+      }
+    }
+  }
+}

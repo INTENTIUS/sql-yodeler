@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/lint.schema.json",
+  "title": "yodel lint --json",
+  "description": "Version 1. The findings, the silences each migration holds, and with --replay the replay check's result. yodel lint --rules --json prints lint-rules.schema.json instead. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "dialect",
+    "migrations",
+    "errors",
+    "warnings",
+    "silenced",
+    "findings",
+    "silences"
+  ],
+  "properties": {
+    "status": {
+      "description": "failed when a finding at level error is not silenced: the command exits 3.",
+      "enum": [
+        "passed",
+        "failed"
+      ]
+    },
+    "environment": {
+      "description": "With --env: the environment whose history the migrations were compared with.",
+      "type": "string"
+    },
+    "dialect": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/dialect"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "migrations": {
+      "description": "Every migration read, sorted by id.",
+      "$ref": "common.schema.json#/$defs/stringList"
+    },
+    "errors": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "silenced": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule",
+          "level",
+          "message"
+        ],
+        "properties": {
+          "rule": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "error",
+              "warning"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "migration": {
+            "type": "string"
+          },
+          "step": {
+            "type": "integer"
+          },
+          "object": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "silenced": {
+            "description": "A -- yodel:allow line silenced it: the reason given. A silenced finding fails nothing.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "silences": {
+      "description": "The silences each migration's migration.sql holds, by migration id.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "step",
+            "rule",
+            "reason",
+            "line"
+          ],
+          "properties": {
+            "step": {
+              "type": "integer"
+            },
+            "rule": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "replay": {
+      "$ref": "#/$defs/replay"
+    }
+  },
+  "$defs": {
+    "replayed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "statements",
+        "ran",
+        "skipped"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "statements": {
+          "type": "integer"
+        },
+        "ran": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "skipped": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        }
+      }
+    },
+    "replay": {
+      "description": "With --replay: the history replayed into an empty database, migration by migration, against each one's recorded schema.",
+      "type": "object",
+      "required": [
+        "dialect",
+        "where",
+        "scope",
+        "reset",
+        "kept",
+        "matched",
+        "total",
+        "outcome",
+        "ok"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "dialect": {
+          "$ref": "common.schema.json#/$defs/dialect"
+        },
+        "where": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "kept": {
+          "type": "boolean"
+        },
+        "matched": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/replayed"
+          }
+        },
+        "total": {
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "matches",
+            "differs",
+            "failed",
+            "unreplayable"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "outcome": {
+              "const": "matches"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "required": [
+            "migration",
+            "changes"
+          ],
+          "properties": {
+            "outcome": {
+              "const": "differs"
+            },
+            "migration": {
+              "$ref": "#/$defs/replayed"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/change"
+              }
+            }
+          },
+          "type": "object"
+        },
+        {
+          "required": [
+            "migration",
+            "step",
+            "error"
+          ],
+          "properties": {
+            "outcome": {
+              "const": "failed"
+            },
+            "migration": {
+              "type": "string"
+            },
+            "step": {
+              "type": "integer"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        {
+          "required": [
+            "migration",
+            "step",
+            "reason"
+          ],
+          "properties": {
+            "outcome": {
+              "const": "unreplayable"
+            },
+            "migration": {
+              "type": "string"
+            },
+            "step": {
+              "type": "integer"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    }
+  }
+}

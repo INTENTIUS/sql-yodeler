@@ -94,6 +94,11 @@ export const repair: Command = {
     }),
 };
 
+/** `yodel repair --json` (schemas/repair.schema.json). */
+export function repairJson(r: { id: string; environment: string; oldChecksum: string; newChecksum: string; reason: string; seq: number; runId: string; migrationJsonUpdated: boolean }): Record<string, unknown> {
+  return { repaired: true, ...r };
+}
+
 async function repairWith(venv: VersionedEnv, m: Migration | undefined, { id, envName, reason, json, io }: { id: string; envName: string; reason: string; json: boolean; io: Io }): Promise<number> {
   checkRepair(m, id, await venv.store.state(), envName); // refuse before taking the lock
 
@@ -110,11 +115,7 @@ async function repairWith(venv: VersionedEnv, m: Migration | undefined, { id, en
 
   if (json) {
     io.out(
-      `${JSON.stringify(
-        { repaired: true, id, environment: envName, oldChecksum: row.check.oldChecksum, newChecksum: row.check.newChecksum, reason, seq: row.r.seq, runId: row.r.run_id, migrationJsonUpdated: synced },
-        null,
-        2,
-      )}\n`,
+      `${JSON.stringify(repairJson({ id, environment: envName, oldChecksum: row.check.oldChecksum, newChecksum: row.check.newChecksum, reason, seq: row.r.seq, runId: row.r.run_id, migrationJsonUpdated: synced }), null, 2)}\n`,
     );
   } else {
     io.out(

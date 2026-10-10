@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/rebase.schema.json",
+  "title": "yodel rebase --json",
+  "description": "Version 1. The migration moved onto its new parent and every migration rewritten, or rebased false when there was nothing to move. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rebased"],
+      "properties": { "rebased": { "const": false } }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rebased", "moved", "from", "onto", "historiesChecked", "rewritten"],
+      "properties": {
+        "rebased": { "const": true },
+        "moved": { "type": "string" },
+        "from": { "type": ["string", "null"] },
+        "onto": { "type": "string" },
+        "historiesChecked": { "description": "The environments (--env) whose histories were checked so a migration that ran is never moved.", "$ref": "common.schema.json#/$defs/stringList" },
+        "rewritten": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "path", "oldParent", "parent", "oldChecksum", "checksum", "statements", "refused", "silences", "handEdited"],
+            "properties": {
+              "id": { "type": "string" },
+              "path": { "type": "string" },
+              "oldParent": { "type": ["string", "null"] },
+              "parent": { "type": ["string", "null"] },
+              "oldChecksum": { "type": "string" },
+              "checksum": { "type": "string" },
+              "statements": { "type": "integer", "minimum": 0 },
+              "refused": { "type": "boolean" },
+              "silences": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["step", "rule", "reason", "line"],
+                  "properties": { "step": { "type": "integer" }, "rule": { "type": "string" }, "reason": { "type": "string" }, "line": { "type": "integer" } }
+                }
+              },
+              "handEdited": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
