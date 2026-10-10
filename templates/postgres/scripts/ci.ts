@@ -35,11 +35,8 @@
  * CI_JOB_TOKEN) as with Forgejo's token, which can write. A push that could
  * land would race the approvals people push to chant/lifecycle.
  *
- * Every job installs @intentius/sql-yodeler from npm, which needs no token.
- * A project that takes it from git instead (the repository is private) sets
- * a SQL_YODELER_TOKEN secret (GitLab: CI/CD variable): before `npm ci`, the
- * job rewrites that repository's URLs to HTTPS with the token. Without the
- * secret the step only says so, and npm installs as it would anywhere.
+ * Every job installs @intentius/sql-yodeler from npm with `npm ci`, which
+ * needs no token.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -125,31 +122,6 @@ const secrets = (names: readonly string[]) => Object.fromEntries(names.map((n) =
  */
 export const FETCH_APPROVALS =
   "git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'";
-
-/** The secret (GitLab: CI/CD variable) holding a token that can read INTENTIUS/sql-yodeler. */
-export const YODELER_TOKEN = "SQL_YODELER_TOKEN";
-const YODELER_REPO = "github.com/INTENTIUS/sql-yodeler";
-
-/**
- * Before `npm ci`: when YODELER_TOKEN is set, fetch sql-yodeler over HTTPS
- * with it. The lockfile records the dependency as git+ssh, and npm falls back
- * to HTTPS, so both forms (and scp-style SSH) are rewritten. Only that
- * repository's URLs: the job's own remote keeps the forge's token.
- */
-export const GIT_ACCESS = [
-  `if [ -n "$${YODELER_TOKEN}" ]; then`,
-  `for from in ssh://git@${YODELER_REPO} git@${YODELER_REPO.replace("/", ":")} https://${YODELER_REPO};`,
-  `do git config --global --add url."https://x-access-token:$${YODELER_TOKEN}@${YODELER_REPO}".insteadOf "$from"; done;`,
-  `else echo '${YODELER_TOKEN} is not set, so npm fetches @intentius/sql-yodeler with no token'; fi`,
-].join(" ");
-
-/** The step that runs GIT_ACCESS on GitHub and Forgejo, with the secret in its own env only. */
-const gitAccessStep = (): AStep =>
-  new Step({
-    name: "Read access to sql-yodeler (SQL_YODELER_TOKEN)",
-    run: GIT_ACCESS,
-    env: { [YODELER_TOKEN]: secret(YODELER_TOKEN) },
-  });
 
 /** The watch reads; it never pushes. See the comment at the top. */
 export const NO_PUSH = "git remote set-url --push origin no-push://the-drift-watch-only-reads";
@@ -258,7 +230,6 @@ function setupSteps(forge: Actions): AStep[] {
   const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": "0" } })];
   if (forge === "github") steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": "22", cache: "npm" } }));
   steps.push(
-    gitAccessStep(),
     new Step({ run: "npm ci" }),
     new Step({ run: 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"' }),
     new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }),
@@ -407,7 +378,7 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     ".yodel",
     new GitLabJob({
       image: new Image({ name: IMAGE }),
-      before_script: [GIT_ACCESS, "npm ci", 'export PATH="$PWD/node_modules/.bin:$PATH"', FETCH_APPROVALS],
+      before_script: ["npm ci", 'export PATH="$PWD/node_modules/.bin:$PATH"', FETCH_APPROVALS],
     }),
   );
   const svc = REPLAY_SERVICE[dialect];
@@ -482,8 +453,6 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     "# protected or scoped to an environment, so the split between reader and",
     "# writer is in the variables' settings (Settings > CI/CD > Variables):",
     ...variables,
-    `#   ${YODELER_TOKEN}: optional, masked; a token that can read ${YODELER_REPO},`,
-    "#     only when package.json takes it from git instead of npm. Unset, the jobs skip it.",
     "#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for",
     "#     the plan comment; CI_JOB_TOKEN cannot write merge request notes.",
     "# The jobs that hold no writer read with the reader: chant.config.ts picks",
@@ -508,7 +477,7 @@ interface OpsPipelineResult {
  */
 export function watchSpec(env: string, dialect: Dialect, forge: Forge): { name: string; variables?: Record<string, string> } {
   if (forge === "gitlab") return { name: `watch-${env}` };
-  return { name: `watch-${env}`, variables: secrets([...readerVariables(env, dialect), YODELER_TOKEN]) };
+  return { name: `watch-${env}`, variables: secrets(readerVariables(env, dialect)) };
 }
 
 export async function watchPipelines(dir: string, { dialect, names: envs }: Environments): Promise<RenderedFile[]> {
@@ -523,7 +492,7 @@ export async function watchPipelines(dir: string, { dialect, names: envs }: Envi
       forge,
       {
         image: IMAGE,
-        beforeScript: [GIT_ACCESS, "npm ci", path, FETCH_APPROVALS, NO_PUSH],
+        beforeScript: ["npm ci", path, FETCH_APPROVALS, NO_PUSH],
         extraScript,
         ...(forge === "gitlab" ? { opsStage: "ops", opsFileName: GITLAB_WATCH_FILE } : {}),
       },
