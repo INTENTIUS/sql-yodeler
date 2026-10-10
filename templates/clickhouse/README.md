@@ -75,7 +75,7 @@ The watch reports a declared object changed out of band or gone; an object `src/
 
 GitHub Actions:
 
-- Repository secrets: the readers' variables and the URLs, and nothing for sql-yodeler, which installs from npm (see [The sql-yodeler dependency](#the-sql-yodeler-dependency)).
+- Repository secrets: the readers' variables and the URLs.
 - Environments `dev` and `prod`, each limited to the `main` branch, holding that environment's URL and writer variables. Pull request jobs cannot read an environment's secrets.
 - The workflows set their own token permissions: `contents: read`, and `pull-requests: write` on the pull request workflow for the comment.
 
@@ -100,12 +100,4 @@ Add its profile to `chant.config.ts` (in the order merges apply them) and its en
 
 ## The sql-yodeler dependency
 
-`package.json` takes `@intentius/sql-yodeler` from npm, `^0.1.0`, and `package-lock.json` pins the version `npm install` resolved. `npm install` and `npm ci` need no token. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.2.0 after 0.1.x) needs the range changed, since `^0.1.0` stops at 0.1.x.
-
-Every job that runs `npm ci` first has a step named for `SQL_YODELER_TOKEN`. It is for a project that takes sql-yodeler from git instead (`github:INTENTIUS/sql-yodeler#<ref>`, a private repository), for example to run a commit that is not released yet. With the secret set (GitLab: a masked CI/CD variable holding a token that can read `INTENTIUS/sql-yodeler`), the step rewrites that repository's SSH and HTTPS URLs to HTTPS with the token, and nothing else:
-
-```sh
-git config --global --add url."https://x-access-token:${SQL_YODELER_TOKEN}@github.com/INTENTIUS/sql-yodeler".insteadOf "https://github.com/INTENTIUS/sql-yodeler"
-```
-
-(and the same for `ssh://git@github.com/INTENTIUS/sql-yodeler` and `git@github.com:INTENTIUS/sql-yodeler`). Without the secret, which is the case when sql-yodeler comes from npm, the step prints that it is not set and does nothing.
+`package.json` takes `@intentius/sql-yodeler` from npm, `^0.1.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.2.0 after 0.1.x) needs the range changed, since `^0.1.0` stops at 0.1.x.

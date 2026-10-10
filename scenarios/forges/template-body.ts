@@ -9,8 +9,8 @@
  * Its package.json is left as the template wrote it, so `npm install` here
  * and `npm ci` in every job take @intentius/sql-yodeler from the npm
  * registry, at the version the template's range resolves to, with no
- * SQL_YODELER_TOKEN: the claim runs the project a user gets, and the yodel
- * its jobs run is the released one, not this checkout. The dev profile is
+ * token: the claim runs the project a user gets, and the yodel its jobs run
+ * is the released one, not this checkout. The dev profile is
  * the claim's database yodel_34_<claim>, the history yodel_34_<claim>_history,
  * with a reader and a writer user made for it (yodel_34_reader,
  * yodel_34_writer). The lint job replays into its own service container
@@ -148,7 +148,7 @@ async function flow(ctx: Ctx, forge: Forge): Promise<void> {
   const first = await repo.pushed(await head());
   hold(!first.ok, `the first push's apply on ${forge.name} ended ${first.status}, with nothing approved`);
   hold(first.log.includes("approve migrate-dev approve-migrate-dev --plan jcs1-sha256:"), "the failed apply does not give the chant approve command");
-  hold(first.log.includes("SQL_YODELER_TOKEN is not set"), "the apply job's npm ci ran with a SQL_YODELER_TOKEN, or without the step that checks for it");
+  hold(!first.log.includes("SQL_YODELER_TOKEN"), "the apply job still has a step for SQL_YODELER_TOKEN; sql-yodeler installs from npm with no token");
   hold(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists with nothing approved`);
 
   // Approve what yodel plan shows, push the approval, run the apply again.

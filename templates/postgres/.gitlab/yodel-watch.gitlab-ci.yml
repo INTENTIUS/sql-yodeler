@@ -22,7 +22,6 @@ watch-dev:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CHANT_SCHEDULED_OP == "watch-dev"'
   script:
-    - if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
@@ -37,7 +36,6 @@ watch-prod:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $CHANT_SCHEDULED_OP == "watch-prod"'
   script:
-    - if [ -n "$SQL_YODELER_TOKEN" ]; then for from in ssh://git@github.com/INTENTIUS/sql-yodeler git@github.com:INTENTIUS/sql-yodeler https://github.com/INTENTIUS/sql-yodeler; do git config --global --add url."https://x-access-token:$SQL_YODELER_TOKEN@github.com/INTENTIUS/sql-yodeler".insteadOf "$from"; done; else echo 'SQL_YODELER_TOKEN is not set, so npm fetches @intentius/sql-yodeler with no token'; fi
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
