@@ -1,5 +1,5 @@
 ---
-claims: [declarative, new, approve-and-apply, waves]
+claims: [declarative, new, approve-and-apply, waves, adopt]
 ---
 
 # The two workflows
@@ -117,6 +117,30 @@ npx yodel apply dev           # behind the migrations Op's gate
 ## More than one environment
 
 Each environment is a profile in `chant.config.ts`, with its own history. The starter templates' apply pipeline applies them in the order of `yodel.config.ts` `waves` after every push to main, one job per environment, each waiting for the one before; a wave that stops at its gate stops the ones after it. Each wave has its own gate policy (`always`, `on-destructive` or `never`), read from the commit the push merged onto. [Approval](approval.md#waves-a-gate-per-environment) has how a wave plans, waits and applies.
+
+## Postgres objects
+
+A Postgres project declares these with the `sql` lexicon's tags, and both paths plan, apply, watch for drift and adopt them. The claims column names the scenario claims that run each against a server.
+
+| Object | Tag | Claims |
+| --- | --- | --- |
+| Schema | `schema` | declarative, new, adopt |
+| Table | `table` | declarative, new, adopt |
+| Index | `index` | declarative, new, adopt |
+| Function | `func` | declarative, new, adopt |
+| Procedure | `procedure` | declarative, new |
+| Trigger | `trigger` | declarative, new, adopt |
+| View and materialized view, sequence, enum, domain, extension | `view`, `sequence`, `type`, `domain`, `extension` | none yet |
+
+Functions, procedures and triggers:
+
+- A function or procedure is its name and its parameter types, so two overloads are two objects. A new body or new attributes are `CREATE OR REPLACE` (SQLPG280, metadata). A change `CREATE OR REPLACE` refuses (the result type, an output parameter, an input parameter's name, a removed default, or other parameter types between two builds) is a drop and a create in one transaction (SQLPG281); while a view, trigger, default or other routine depends on the function it is an expand change (SQLPG282), which `yodel new` writes as a manual step.
+- A trigger is its name on its table. Created on a table that already exists, it takes SHARE ROW EXCLUSIVE on that table (SQLPG283, metadata); created with its table, it is part of the create (SQLPG200). A changed trigger is `CREATE OR REPLACE TRIGGER` (SQLPG284), and a dropped one is SQLPG285.
+- Statements go in dependency order: a function before the trigger that runs it and after the tables its body names, and a trigger dropped before its function.
+- `yodel lint` flags a migration that drops and creates a function or procedure with another signature (`pg-signature`), and one that drops a function a declared trigger still executes (`pg-routine-in-use`); see [Lint](lint.md).
+- `yodel drift` reports a function replaced by hand and a declared trigger that is gone. `yodel init --from` adopts the functions, procedures and triggers in the profile's schemas with the tables.
+- On the declarative path, a function or trigger on the server that the project does not declare shows in `yodel plan` as a drop, the way an undeclared table does. Only a prune makes it, and only for an object carrying chant's ownership marker. A migration never drops one unless an earlier migration declared it.
+- A routine with a SQL-standard body (`RETURN ...`, `BEGIN ATOMIC`) cannot be declared: the server stores it rewritten. `init --from` leaves one out with a warning.
 
 ## Moving from one to the other
 

@@ -29,7 +29,7 @@ export function renderLint(report: LintReport): string {
     for (const f of list) out.push(...line(f));
     out.push("");
   }
-  const silenceHint = report.findings.some((f) => f.silenced === undefined && f.level === "error" && ["destructive", "pg-rewrite", "pg-lock", "ch-mutation", "ch-rebuild"].includes(f.rule));
+  const silenceHint = report.findings.some((f) => f.silenced === undefined && f.level === "error" && ["destructive", "pg-rewrite", "pg-lock", "pg-signature", "ch-mutation", "ch-rebuild"].includes(f.rule));
   if (silenceHint) {
     out.push("A statement rule can be silenced for one statement, with a reason the history records when it applies:", "  a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql", "");
   }

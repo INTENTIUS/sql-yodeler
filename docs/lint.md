@@ -1,5 +1,5 @@
 ---
-claims: [lint-ci, replay]
+claims: [lint-ci, replay, new]
 ---
 
 # Lint
@@ -28,6 +28,10 @@ pg-rewrite         error, silenceable, postgres
                    Postgres: rewrites or scans the whole table under ACCESS EXCLUSIVE, blocking reads and writes while it runs
 pg-lock            error, silenceable, postgres
                    Postgres: holds a lock that blocks writes for a whole scan or index build (an index without CONCURRENTLY, a constraint validated in place)
+pg-signature       error, silenceable, postgres
+                   Postgres: a function or procedure dropped and created with another signature or result; a caller written for the old one fails
+pg-routine-in-use  error, postgres
+                   Postgres: a function dropped while a trigger the migration's schema declares still executes it; the DROP fails
 ch-mutation        error, silenceable, clickhouse
                    ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback
 ch-rebuild         error, silenceable, clickhouse
@@ -43,6 +47,8 @@ replay             error
 ```
 
 `fork`, `directory`, `checksum` and `unreadable-object` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
+
+Two Postgres rules read a step with the rest of its migration (#44). `pg-signature` flags a function or procedure dropped and created with another signature: SQLPG281 (the result type, an output parameter, an input parameter's name or a removed default, which `CREATE OR REPLACE` refuses, or other parameter types between two builds), or a routine dropped and one of the same name with other parameter types created in the same migration. A caller written for the old signature fails once it runs; it can be silenced for the statement. `pg-routine-in-use` flags a function dropped while a trigger in the migration's recorded schema still executes it, which happens when the trigger names the function in its text rather than through its declaration. The `DROP` would fail on the server, so it cannot be silenced: declare the function again, or drop the trigger in the same migration.
 
 Findings from the Postgres example. A CHECK constraint added in place:
 

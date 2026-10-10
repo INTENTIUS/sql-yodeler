@@ -17,6 +17,8 @@ async function handMade(ctx: Ctx): Promise<void> {
       CREATE TABLE ${n}.orders (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, customer_id bigint NOT NULL REFERENCES ${n}.customers(id), status text NOT NULL DEFAULT 'placed');
       CREATE INDEX orders_status_idx ON ${n}.orders (status);
       COMMENT ON TABLE ${n}.orders IS 'raw orders';
+      CREATE FUNCTION ${n}.orders_lower_status() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.status := lower(NEW.status); RETURN NEW; END $$;
+      CREATE TRIGGER orders_lower_status BEFORE INSERT OR UPDATE ON ${n}.orders FOR EACH ROW EXECUTE FUNCTION ${n}.orders_lower_status();
       INSERT INTO ${n}.customers (email) VALUES ('a@example.invalid'), ('b@example.invalid');`);
   }
 }
@@ -30,9 +32,9 @@ const comment = (ctx: Ctx) =>
 const rows = (ctx: Ctx) => ctx.db.count(`SELECT count(*) FROM ${ctx.db.name}.${ctx.dialect === "ch" ? "events" : "customers"}`);
 
 /**
- * `yodel init --from <env>` adopts a database made by hand: it writes the
- * declarations and a baseline migration, records the baseline applied
- * without running it (the objects keep their data and stay as they were),
+ * `yodel init --from <env>` adopts a database made by hand (on Postgres,
+ * with a trigger function and a trigger): it writes the declarations and a
+ * baseline migration, records the baseline applied without running it (the objects keep their data and stay as they were),
  * and then yodel plan shows no change and yodel apply has nothing to do.
  * BREAK: one adopted declaration is edited after init (a column's type),
  * so the declared schema no longer matches the server.
@@ -46,6 +48,11 @@ async function body(ctx: Ctx): Promise<void> {
   hold(init.code === 0 && doc.status === "adopted", `yodel init --from exited ${String(init.code)} (${doc.status})`);
   hold(doc.migration !== undefined && p.migrationIds().length === 1, "init wrote no baseline migration");
   await p.commit("adopted");
+  if (ctx.dialect === "pg") {
+    // Functions and triggers are adopted with the tables (#44), so the declared schema holds what the server does.
+    const src = p.read("src/schema.ts");
+    hold(/= func`/.test(src) && /= trigger`/.test(src) && src.includes("orders_lower_status"), "yodel init --from did not declare the function and the trigger it found");
+  }
 
   if (ctx.broken) {
     if (ctx.dialect === "ch") p.edit("src/schema.ts", "kind LowCardinality(String)", "kind String");
