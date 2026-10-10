@@ -337,7 +337,7 @@ Each template has a `justfile` for these steps. [just](https://github.com/casey/
 
 | just | Runs |
 |---|---|
-| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator and prints the credentials for a `.env` file |
+| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator, makes the read-only user `reader` there (the statements in step 3, or for Postgres below), and prints the reader and writer lines for a `.env` file |
 | `just down` | `npx @intentius/chant emulator down --lexicon sql` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |

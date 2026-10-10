@@ -10,7 +10,11 @@
  * and still breaks `chant init --from INTENTIUS/sql-yodeler@main#templates/<dialect>`.
  * Here, for each template: `chant init --from` this checkout's template,
  * `npm install` (the range, from the registry), `git init`, `yodel ci --check`,
- * `npm run typecheck`, `yodel new init` and `yodel lint`.
+ * `npm run typecheck`, `just up`'s second half against a throwaway server
+ * (Docker, the emulator's image: scripts/local.ts makes the read-only
+ * reader there, and with the .env lines it prints `yodel status dev` exits
+ * 0, so yodel does not refuse dev's reader and writer as one user, #139),
+ * `yodel new init` and `yodel lint`.
  *
  * One exception: when no release on npm satisfies the range and the range's
  * lowest version is this checkout's package.json version, this checkout is
@@ -20,10 +24,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { CLICKHOUSE_EMULATOR_SPEC, POSTGRES_EMULATOR_SPEC } from "@intentius/chant-lexicon-sql/op/activities";
 
 const PKG = "@intentius/sql-yodeler";
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -32,10 +38,10 @@ const chant = join(root, "node_modules", ".bin", "chant");
 
 class Failed extends Error {}
 
-function run(cmd: string, args: string[], cwd: string, capture = false): string {
+function run(cmd: string, args: string[], cwd: string, capture = false, extraEnv: Record<string, string> = {}): string {
   process.stdout.write(`$ ${[cmd, ...args].join(" ")}\n`);
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("npm_") && k !== "INIT_CWD"));
-  const ran = spawnSync(cmd, args, { cwd, env: { ...env, NO_COLOR: "1" }, encoding: "utf8", stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit" });
+  const ran = spawnSync(cmd, args, { cwd, env: { ...env, NO_COLOR: "1", ...extraEnv }, encoding: "utf8", stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit" });
   if (ran.status !== 0) throw new Failed(`${cmd} ${args.join(" ")} exited ${String(ran.status ?? ran.signal)}`);
   return capture ? ran.stdout : "";
 }
@@ -49,7 +55,67 @@ function released(range: string): string[] {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
-function check(template: string): void {
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
+/** A throwaway server from the emulator's image, on a free port of 127.0.0.1, removed by `close`. */
+async function throwawayServer(template: string): Promise<{ url: string; close: () => void }> {
+  const spec = template === "clickhouse" ? CLICKHOUSE_EMULATOR_SPEC : POSTGRES_EMULATOR_SPEC;
+  const name = `yodel-templates-check-${template}-${randomBytes(3).toString("hex")}`;
+  const docker = (args: string[]) => spawnSync("docker", args, { encoding: "utf8" });
+  const started = docker(["run", "--detach", "--rm", "--name", name, "--publish", `127.0.0.1::${String(spec.containerPort)}`, ...(spec.runArgs ?? []), spec.image]);
+  if (started.status !== 0) throw new Failed(`could not start a throwaway ${template} server: ${started.stderr.trim()}`);
+  const close = () => {
+    docker(["rm", "--force", "--volumes", name]);
+  };
+  const port = /:(\d+)\s*$/m.exec(docker(["port", name, `${String(spec.containerPort)}/tcp`]).stdout)?.[1];
+  if (!port) {
+    close();
+    throw new Failed(`docker did not publish ${name}'s port`);
+  }
+  const url = template === "clickhouse" ? `http://127.0.0.1:${port}` : `postgres://127.0.0.1:${port}/postgres`;
+  for (let i = 0; i < 90; i++) {
+    const ready =
+      template === "clickhouse"
+        ? await fetch(`${url}/ping`).then((r) => r.ok, () => false)
+        : docker(["exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]).status === 0;
+    if (ready) return { url, close };
+    await sleep(1000);
+  }
+  close();
+  throw new Failed(`the throwaway ${template} server ${name} did not come up`);
+}
+
+/**
+ * `just up` after `chant emulator up`, against a throwaway server: the
+ * project's scripts/local.ts makes the reader there and prints the .env
+ * lines; with them, `yodel status dev` reads as the reader and exits 0.
+ */
+async function upThenStatus(template: string, work: string, dir: string): Promise<void> {
+  const server = await throwawayServer(template);
+  try {
+    const up = join(work, "up.mts");
+    writeFileSync(
+      up,
+      `const local = await import(${JSON.stringify(pathToFileURL(join(dir, "scripts", "local.ts")).href)});\n` +
+        `await local.makeReader(${JSON.stringify(template)}, new URL(${JSON.stringify(server.url)}));\n` +
+        `for (const line of local.envLines(${JSON.stringify(template)})) console.log(line);\n`,
+    );
+    const lines = run("npx", ["tsx", up], dir, true).trim().split("\n");
+    const env: Record<string, string> = { [`DEV_${template.toUpperCase()}_URL`]: server.url };
+    for (const line of lines) {
+      const at = line.indexOf("=");
+      if (at > 0) env[line.slice(0, at)] = line.slice(at + 1);
+    }
+    process.stdout.write(`${lines.join("\n")}\n`);
+    const p = `DEV_${template.toUpperCase()}`;
+    if (!env[`${p}_READER_USER`] || env[`${p}_READER_USER`] === env[`${p}_WRITER_USER`]) throw new Failed(`scripts/local.ts printed ${String(env[`${p}_READER_USER`])} as dev's reader and ${String(env[`${p}_WRITER_USER`])} as its writer, not two users`);
+    run("npx", ["yodel", "status", "dev"], dir, false, env);
+  } finally {
+    server.close();
+  }
+}
+
+async function check(template: string): Promise<void> {
   const work = mkdtempSync(join(tmpdir(), `yodel-template-${template}-`));
   try {
     run(chant, ["init", "--from", `${root}#templates/${template}`, "project"], work);
@@ -75,6 +141,8 @@ function check(template: string): void {
     run("git", ["init", "-q", "-b", "main"], dir);
     run("npx", ["yodel", "ci", "--check"], dir);
     run("npm", ["run", "typecheck"], dir);
+    // Before the first migration, so a reader that yodel takes leaves nothing pending: exit 0.
+    await upThenStatus(template, work, dir);
     run("npx", ["yodel", "new", "init"], dir);
     run("npx", ["yodel", "lint"], dir);
   } finally {
@@ -86,7 +154,7 @@ const failed: string[] = [];
 for (const template of ["clickhouse", "postgres"]) {
   process.stdout.write(`\n== templates/${template}\n`);
   try {
-    check(template);
+    await check(template);
     process.stdout.write(`templates/${template}: works with the ${PKG} its range resolves to\n`);
   } catch (err) {
     if (!(err instanceof Failed)) throw err;
