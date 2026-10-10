@@ -224,7 +224,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
       say: "`yodel lint --replay replay` replays every migration, in order, into the server the `replay` profile names and compares each with the schema it recorded. Here that profile points at the same emulator as dev, which already holds `shop`, so it refuses:",
     },
     { run: "npx yodel lint --replay replay", code: 4, expect: ["Nothing was run"], quote: "lint.md#replay-refused" },
-    { say: "`--reset` drops the database first. In CI the profile points at a throwaway server the job starts; here it empties dev's database, so it runs last:" },
-    { run: "npx yodel lint --replay replay --reset", code: 0, expect: ["Every migration replays to its recorded schema."], quote: [{ at: "lint.md#replay", excerpt: { from: "Replay of" } }, { at: "steps.md#replay-rebuild", excerpt: { from: "events-by-id: replaying", to: "events-by-id: matches its recorded schema" } }] },
+    { say: "`--reset` drops the database first. In CI the profile points at a throwaway server the job starts. Here it is dev's server, and dev names the same database, so the replay would empty it; `--reset-shared dev` says that is intended, and the check runs last:" },
+    { run: "npx yodel lint --replay replay --reset --reset-shared dev", code: 0, expect: ["Every migration replays to its recorded schema."], quote: [{ at: "lint.md#replay", excerpt: { from: "Replay of" } }, { at: "steps.md#replay-rebuild", excerpt: { from: "events-by-id: replaying", to: "events-by-id: matches its recorded schema" } }] },
   ],
 };

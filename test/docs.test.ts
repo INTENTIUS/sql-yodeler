@@ -64,7 +64,7 @@ describe("docs", () => {
     try {
       for (const f of ["chant.config.ts", "package.json", "src"]) cpSync(join(repoRoot, "examples", "clickhouse", f), join(dir, f), { recursive: true });
       symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"), "dir");
-      writeFileSync(join(dir, "yodel.config.ts"), 'export default { environments: { dev: { topology: "single" } } };\n');
+      writeFileSync(join(dir, "yodel.config.ts"), 'export default { environments: { dev: { topology: "cluster:main" } } };\n');
       const ran = await yodel(["plan", "dev", "--dir", dir]);
       expect(ran.code).toBe(1);
       expect(block(page("configuration.md"), "yodel plan dev", "docs/configuration.md")).toBe(ran.err.trimEnd());

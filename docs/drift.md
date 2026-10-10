@@ -66,9 +66,9 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
   - events (ClickHouse::Table)
       columns[4].default.expr: 'web' → 'app' [from: authored]
 [phase] Snapshot
-  ✓ lifecycleSnapshot(env=dev)   897ms
+  ✓ lifecycleSnapshot(env=dev)   908ms
 [phase] Diff
-  ✓ lifecycleDiff(env=dev, live=true)   746ms
+  ✓ lifecycleDiff(env=dev, live=true)   742ms
     [outcome] Drift=true
 Op "watch-dev" completed in 1.8s
 ```

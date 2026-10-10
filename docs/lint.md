@@ -45,7 +45,7 @@ Findings from the Postgres example. A CHECK constraint added in place:
 <!-- quote: postgres#pg-rewrite -->
 ```console
 $ npx yodel lint
-20261010T0518-coupons
+20261010T0532-coupons
   error    pg-rewrite: step 1: SQLPG218 Add a CHECK constraint on shop.orders: blocks reads and writes on the table while it runs (ADD CONSTRAINT ... CHECK reads every row under ACCESS EXCLUSIVE. Declare it NOT VALID, then remove NOT VALID to validate it under SHARE UPDATE EXCLUSIVE (SQLPG220).)
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -60,11 +60,11 @@ an index built without `CONCURRENTLY`:
 <!-- quote: postgres#pg-lock -->
 ```console
 $ npx yodel lint
-20261010T0519-drop-coupon
+20261010T0533-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
-20261010T0519-index-placed-at
+20261010T0533-index-placed-at
   error    pg-lock: step 0: SQLPG241 Create an index without CONCURRENTLY on shop.orders_placed_at_idx: builds an index without CONCURRENTLY: SHARE on the table, blocking every write until the build ends; declare the index CONCURRENTLY
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -79,7 +79,7 @@ and a column dropped:
 <!-- quote: postgres#destructive -->
 ```console
 $ npx yodel lint
-20261010T0519-drop-coupon
+20261010T0533-drop-coupon
   error    destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
@@ -113,8 +113,8 @@ The reason is required. For an Op step, the line goes above the step's comment. 
 
 <!-- quote: postgres#silence-sql -->
 ```sql
--- yodel migration 20261010T0519-drop-coupon
--- parent: 20261010T0518-rename-email
+-- yodel migration 20261010T0533-drop-coupon
+-- parent: 20261010T0532-rename-email
 
 -- orders (shop.orders): SQLPG204 metadata, destructive
 -- yodel:allow destructive no order ever had a coupon; checked on dev
@@ -126,8 +126,8 @@ The line is part of `migration.sql`, so it changes the migration's checksum, and
 <!-- quote: clickhouse#checksum -->
 ```console
 $ npx yodel lint
-20261010T0522-events-by-id
-  error    checksum: 20261010T0522-events-by-id: its files hash to sha256:0321359f62f444627464d99bef4d1420f31a8518fa4f6b7bf217c731482e46b4, but migration.json records sha256:2226293d0e9cb4c669437ae86595d8def34aaba6d1ce9ac7a609e502030fe254; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261010T0522-events-by-id; if it is, undo the edit, or record it with yodel repair 20261010T0522-events-by-id --reason ... <env>
+20261010T0528-events-by-id
+  error    checksum: 20261010T0528-events-by-id: its files hash to sha256:e6cb32f46db79611af518459f51b4e2a45a70784a7f7d7ee4b2ddedf796c2c10, but migration.json records sha256:54254e89d129da3f9617204d714e67294518a27832828572f42086dcb0927962; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261010T0528-events-by-id; if it is, undo the edit, or record it with yodel repair 20261010T0528-events-by-id --reason ... <env>
   silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 
@@ -139,9 +139,9 @@ For a migration not applied anywhere yet, `--update-checksum <id>` (repeatable) 
 
 <!-- quote: postgres#update-checksum -->
 ```console
-$ npx yodel lint --update-checksum 20261010T0519-drop-coupon
-20261010T0519-drop-coupon: checksum sha256:3542a6c8d83851efe3c47775adbb8956daa1b7ff565ff59f78e6bc97c20e57d5 is now sha256:8616e6ac91e0ddd7dbacd0f7c119077887e83870c690be201771e18e7ae8527f
-20261010T0519-drop-coupon
+$ npx yodel lint --update-checksum 20261010T0533-drop-coupon
+20261010T0533-drop-coupon: checksum sha256:ba19680b8db2c23fe9e84b445602a4d3dec2e1910923121636ce21fde6ab3bd2 is now sha256:4d629ea6b3b71520270b61696af81a22569982c02bc55adce08d0488d9de990e
+20261010T0533-drop-coupon
   silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
@@ -181,7 +181,7 @@ A `yodel:allow` line that is malformed, names a rule that cannot be silenced, ha
 <!-- quote: clickhouse#replay-refused -->
 ```console
 $ npx yodel lint --replay replay
-yodel lint: refused: the replay needs a fresh database, and http://127.0.0.1:8123 (sql.profiles.replay) already holds shop. Point the replay at a throwaway emulator (chant emulator up --lexicon sql), or pass reset to drop it first. Nothing was run.
+yodel lint: refused: replay and dev are the same server (127.0.0.1:8123) and both name shop; the replay would drop dev's database, with or without --reset. Point replay at a throwaway server of its own (a second emulator on another port), or, to empty dev too, add --reset-shared dev. Nothing was run.
 [exit 4]
 ```
 
@@ -189,18 +189,18 @@ yodel lint: refused: the replay needs a fresh database, and http://127.0.0.1:812
 
 <!-- quote: clickhouse#replay -->
 ```console
-$ npx yodel lint --replay replay --reset
+$ npx yodel lint --replay replay --reset --reset-shared dev
 ...
 Replay of 5 migrations (clickhouse) into http://127.0.0.1:8123 (sql.profiles.replay)
   databases: shop (emptied first)
-  ok      20261010T0521-baseline (2 statements)
-  ok      20261010T0521-add-country (1 statement)
-  ok      20261010T0522-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (shop.events) (swapped))
-  ok      20261010T0524-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
-  ok      20261010T0524-add-source (1 statement)
+  ok      20261010T0528-baseline (2 statements)
+  ok      20261010T0528-add-country (1 statement)
+  ok      20261010T0528-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (shop.events) (swapped))
+  ok      20261010T0530-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
+  ok      20261010T0530-add-source (1 statement)
 Every migration replays to its recorded schema.
 
-20261010T0522-events-by-id
+20261010T0528-events-by-id
   silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 

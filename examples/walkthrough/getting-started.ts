@@ -2,7 +2,8 @@ import type { Walkthrough } from "./run.js";
 
 /**
  * docs/getting-started.md: a project made from templates/clickhouse, taken to
- * a first applied migration and a second one on a local ClickHouse. It writes no README and keeps nothing; `run.ts getting-started
+ * a first applied migration, a second one and a drift report on a local
+ * ClickHouse. It writes no README and keeps nothing; `run.ts getting-started
  * --write` refreshes the page's quotes from it.
  *
  * It drops and creates databases `events` and `yodeler`, so point it at a
@@ -97,5 +98,8 @@ export const walkthrough: Walkthrough = {
       quote: "getting-started.md#approve-second",
     },
     { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve-second" },
+    { say: "" },
+    { sql: "ALTER TABLE events.events MODIFY COLUMN country LowCardinality(String) DEFAULT 'US'" },
+    { run: "npx yodel drift dev", cwd: dir, code: 2, expect: ["Changed out of band"], quote: "getting-started.md#drift" },
   ],
 };

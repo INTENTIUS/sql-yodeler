@@ -288,8 +288,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
 
     { say: "## 9. The replay check" },
     {
-      say: "`yodel lint --replay replay --reset` replays every migration, in order, into the server the `replay` profile names, and compares each with the schema it recorded. In CI that profile points at a throwaway server the job starts. Here it points at the same emulator as dev, so `--reset` drops dev's schema, and the check runs last:",
+      say: "`yodel lint --replay replay --reset` replays every migration, in order, into the server the `replay` profile names, and compares each with the schema it recorded. In CI that profile points at a throwaway server the job starts. Here it points at the same emulator as dev, so the replay empties dev's schema; `--reset-shared dev` says that is intended, and the check runs last:",
     },
-    { run: "npx yodel lint --replay replay --reset", code: 0, expect: ["Every migration replays to its recorded schema."] },
+    { run: "npx yodel lint --replay replay --reset --reset-shared dev", code: 0, expect: ["Every migration replays to its recorded schema."] },
   ],
 };
