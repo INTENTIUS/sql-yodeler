@@ -253,8 +253,14 @@ async function setup(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undef
   const installed = join(dir, "node_modules", "@intentius", "sql-yodeler");
   const approveJs = join(installed, "dist", "commands", "approve.js");
   const renderJs = () => readFileSync(join(installed, "dist", "ci", "render.js"), "utf8");
-  if (!existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !renderJs().includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !renderJs().includes("code.forgejo.org/forgejo/upload-artifact")) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129) or no Forgejo report upload that works on Forgejo yet: this checkout's, packed and committed with the project.
+  // The chant minor the installed yodel takes and the one the template pins: in 0.x a caret range stays in its minor, so when they differ the project holds two chants and yodel's lexicons are not the project's.
+  const minor = (v: string | undefined) => (v ?? "").replace(/^[\^~]/, "").split(".").slice(0, 2).join(".");
+  const yodelChant = (JSON.parse(readFileSync(join(installed, "package.json"), "utf8")) as { dependencies?: Record<string, string> }).dependencies?.["@intentius/chant"];
+  const projectChant = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { dependencies: Record<string, string> }).dependencies["@intentius/chant"];
+  const chantApart = minor(yodelChant) !== minor(projectChant);
+  if (chantApart) ctx.log(`the installed yodel takes @intentius/chant ${yodelChant ?? "?"}, the template pins ${projectChant ?? "?"}`);
+  if (chantApart || !existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !renderJs().includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !renderJs().includes("code.forgejo.org/forgejo/upload-artifact")) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129) or no Forgejo report upload that works on Forgejo yet, or takes another chant minor than the template pins: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
