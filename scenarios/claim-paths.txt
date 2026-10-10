@@ -1,0 +1,109 @@
+# Which scenario claims a changed path can affect, read by
+# `npm run claims -- --affected [base]` (scenarios/affected.ts).
+#
+#   <glob>  <claim>...     the claims a change to a matching path can affect
+#   <glob>  ALL            every claim
+#   <glob>  -              no claim: nothing a claim runs or reads
+#
+# The first line whose glob matches a path wins, so a file goes before its
+# directory. A path no line matches runs every claim. Globs are relative to
+# the repository root: * is any run of characters but /, ** any run that
+# may cross /, and a glob ending in / is everything under that directory.
+#
+# test/claim-paths.test.ts checks that every claim is named by some line
+# other than ALL, that every file under src/ matches a line, that each file
+# in scenarios/claims/ maps to the claims it defines, and that every line
+# matches a file in the repository.
+
+# Inert: prose, tests, CI configuration and the files only the check reads.
+# None of them is read by a claim run, so none changes a verdict.
+docs/                                  -
+examples/                              -
+test/                                  -
+.github/                               -
+*.md                                   -
+LICENSE                                -
+.gitignore                             -
+.nvmrc                                 -
+eslint.config.js                       -
+vitest.config.ts                       -
+scenarios/claim-paths.txt              -
+scenarios/affected.ts                  -
+scenarios/record.ts                    -
+scenarios/images.ts                    -
+
+# What every claim stands on: the build, the runner and its fixtures.
+package.json                           ALL
+package-lock.json                      ALL
+tsconfig.json                          ALL
+tsconfig.build.json                    ALL
+scenarios/run.ts                       ALL
+scenarios/claim.ts                     ALL
+scenarios/lib/                         ALL
+scenarios/fixtures/                    ALL
+scenarios/claims/index.ts              ALL
+
+# Each claim's own file.
+scenarios/claims/adopt.ts              adopt
+scenarios/claims/new.ts                new
+scenarios/claims/lint.ts               lint-ci replay
+scenarios/claims/pr-comment.ts         pr-comment
+scenarios/claims/approve-and-apply.ts  approve-and-apply
+scenarios/claims/digest-moved.ts       digest-moved
+scenarios/claims/resume.ts             resume
+scenarios/claims/out-of-order.ts       out-of-order
+scenarios/claims/rebuild.ts            rebuild-refused rebuild-as-step
+scenarios/claims/backfill-resumed.ts   backfill-resumed
+scenarios/claims/drift.ts              drift
+scenarios/claims/declarative.ts        declarative
+scenarios/claims/topology.ts           topology
+scenarios/claims/template.ts           template
+scenarios/claims/lock-retry.ts         lock-retry
+scenarios/claims/column-change.ts      column-change
+
+# The starter templates: only the template claim makes a project from them.
+templates/                             template
+
+# yodel init, and what --from adopts with.
+src/commands/init.ts                   adopt template
+src/init/                              adopt template
+
+# yodel lint. apply and rebase read a migration's yodel:allow lines through
+# lint/index.ts and lint/silences.ts, so those two reach every claim.
+src/lint/index.ts                      ALL
+src/lint/silences.ts                   ALL
+src/commands/lint.ts                   lint-ci replay template
+src/lint/                              lint-ci replay template
+src/replay/                            replay template
+
+# yodel plan and the pull request comment it posts.
+src/commands/plan.ts                   adopt declarative pr-comment template
+src/pr/                                pr-comment template
+
+# yodel drift.
+src/commands/drift.ts                  drift
+src/chant/drift.ts                     drift
+
+# yodel rebase and yodel repair.
+src/commands/rebase.ts                 out-of-order
+src/commands/repair.ts                 out-of-order
+src/rebase/                            out-of-order
+
+# Step kinds. The step index and kinds are on every migration's path.
+src/steps/rebuild.ts                   rebuild-refused rebuild-as-step topology
+src/steps/backfill.ts                  backfill-resumed
+src/steps/postgres-migration.ts        column-change
+src/steps/run.ts                       rebuild-refused rebuild-as-step backfill-resumed column-change topology
+src/steps/                             ALL
+
+# The core every claim runs: yodel new, apply and status, the migrations
+# directory, the history, the versioned engine and its gate, the topology
+# rendering (every ClickHouse statement goes through it), chant, config.
+src/commands/                          ALL
+src/migrations/                        ALL
+src/history/                           ALL
+src/versioned/                         ALL
+src/topology/                          ALL
+src/chant/                             ALL
+src/config/                            ALL
+src/*.ts                               ALL

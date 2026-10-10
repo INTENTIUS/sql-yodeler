@@ -9,8 +9,14 @@
  *   npm run claims -- --plain          the plain runs only
  *   npm run claims -- --dialect pg     one dialect's runs
  *   npm run claims -- --record FILE    every run, then the verdicts as JSON in FILE
+ *   npm run claims -- --record FILE lint new
+ *                                      those claims; when FILE exists, only their rows change
  *   npm run claims -- --list           the claims, what each says, and the dialects it runs on
  *   npm run claims -- --skip template  every claim but those named (comma-separated)
+ *   npm run claims -- --affected [base]
+ *                                      the claims the change since base (default origin/main) can affect
+ *   npm run claims -- --affected --list
+ *                                      which those are, and why, without running them
  *
  * `npm run claims` builds first; `tsx scenarios/run.ts` alone does not.
  *
@@ -48,6 +54,23 @@
  * fails as stalled, its last lines printed. Verdict lines print as runs
  * finish; the summary and the record list claims in their order here.
  *
+ * --record FILE: the record's shape is in scenarios/record.ts. When FILE
+ * exists, the run replaces the rows of the claims and dialects it ran and
+ * keeps every other row; each row carries the time and commit it was run
+ * at, so a record merged from several runs stays honest about its rows'
+ * ages. A run of every claim replaces every row. --record runs each claim
+ * both ways, so it refuses --plain, --break and BREAK.
+ *
+ * --affected [base]: the change is everything between the merge base with
+ * base and the working tree, untracked files included. Each changed path
+ * takes the claims of the first line of scenarios/claim-paths.txt whose
+ * glob matches it; a path no line matches runs every claim, and docs,
+ * tests and the other inert paths the file lists run none. The runner
+ * prints one line per claim picked naming the paths and lines that picked
+ * it. It is for local runs: the claims workflow runs every claim on every
+ * pull request, since a pull request merges only on a full green run.
+ * A new file under src/ needs a line there (test/claim-paths.test.ts).
+ *
  * The template claim needs the local Forgejo (scenarios/claims/template.ts
  * says which variables); CI on GitHub has none and runs --skip template.
  *
@@ -60,10 +83,12 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { affected, changedSince, readClaimPaths, reasons, unknownClaims } from "./affected.js";
 import { claims } from "./claims/index.js";
 import type { Dialect } from "./lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "./lib/db.js";
 import { killGroup } from "./lib/exec.js";
+import { mergeRecord, readRecord, type ClaimsRecord, type RecordRow } from "./record.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = dirname(here);
@@ -71,7 +96,8 @@ const root = dirname(here);
 let args: ReturnType<typeof parseArgs>;
 try {
   args = parseArgs({
-    args: process.argv.slice(2),
+    // --affected takes an optional base: --affected=main is --affected main.
+    args: process.argv.slice(2).flatMap((a) => (a.startsWith("--affected=") ? ["--affected", a.slice("--affected=".length)] : [a])),
     allowPositionals: true,
     options: {
       record: { type: "string" },
@@ -81,24 +107,55 @@ try {
       jobs: { type: "string" },
       list: { type: "boolean" },
       skip: { type: "string" },
+      affected: { type: "boolean" },
     },
   });
 } catch (e) {
   process.stderr.write(`claims: ${e instanceof Error ? e.message : String(e)}\n`);
   process.exit(2);
 }
-const opt = args.values as { record?: string; plain?: boolean; break?: boolean; dialect?: string; jobs?: string; list?: boolean; skip?: string };
+const opt = args.values as { record?: string; plain?: boolean; break?: boolean; dialect?: string; jobs?: string; list?: boolean; skip?: string; affected?: boolean };
 const skipped = (opt.skip ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const fail2 = (message: string): never => {
+  process.stderr.write(`claims: ${message}\n`);
+  process.exit(2);
+};
+
+// The claims named on the command line, or under --affected the ones the change picks.
+let named: string[] = args.positionals;
+if (opt.affected) {
+  if (args.positionals.length > 1) fail2("--affected takes one base and no claim names");
+  const base = args.positionals[0] ?? "origin/main";
+  const all = claims.map((c) => c.name);
+  const or2 = <T>(f: () => T): T => {
+    try {
+      return f();
+    } catch (e) {
+      return fail2(`--affected ${base}: ${e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e)}`);
+    }
+  };
+  const entries = or2(() => readClaimPaths());
+  const change = or2(() => changedSince(base, root));
+  const bad = unknownClaims(entries, all);
+  if (bad.length) fail2(`scenarios/claim-paths.txt names unknown claims: ${bad.join(", ")}`);
+  const a = affected(change.paths, entries, all);
+  process.stderr.write(`[affected] ${String(change.paths.length)} ${change.paths.length === 1 ? "path" : "paths"} changed since ${change.mergeBase} (merge base with ${base}); ${String(a.claims.length)} of ${String(all.length)} claims picked\n`);
+  for (const line of reasons(a)) process.stderr.write(`[affected] ${line}\n`);
+  if (a.inert.length) process.stderr.write(`[affected] no claim: ${a.inert.slice(0, 5).join(", ")}${a.inert.length > 5 ? `, and ${String(a.inert.length - 5)} more` : ""}\n`);
+  if (!a.claims.length && !opt.list) process.exit(0);
+  named = a.claims;
+}
 
 if (opt.list) {
   for (const c of claims) {
+    if (opt.affected && !named.includes(c.name)) continue;
     const ds = (Object.entries(c.dialects) as Array<[Dialect, unknown]>).map(([d, b]) => (typeof b === "function" ? d : `${d}(${(b as { needs: string }).needs})`));
     process.stdout.write(`${c.name.padEnd(18)} ${ds.join(",").padEnd(16)} ${c.says}\n`);
   }
   process.exit(0);
 }
 
-const unknown = [...args.positionals, ...skipped].filter((n) => !claims.some((c) => c.name === n));
+const unknown = [...named, ...skipped].filter((n) => !claims.some((c) => c.name === n));
 if (unknown.length) {
   process.stderr.write(`claims: unknown claim ${unknown.join(", ")}; --list shows them\n`);
   process.exit(2);
@@ -113,9 +170,12 @@ if (opt.record && modes.length !== 2) {
   process.stderr.write("claims: --record runs every claim both ways; drop --plain, --break and BREAK\n");
   process.exit(2);
 }
-if (opt.record && args.positionals.length) {
-  process.stderr.write("claims: --record runs every claim; name none\n");
-  process.exit(2);
+// A record that is there but is not one is refused before anything runs.
+let oldRecord: ClaimsRecord | undefined;
+try {
+  oldRecord = opt.record ? readRecord(opt.record) : undefined;
+} catch (e) {
+  fail2(`--record: ${e instanceof Error ? e.message : String(e)}`);
 }
 const jobs = Math.max(1, Number(opt.jobs ?? process.env.YODEL_CLAIMS_JOBS ?? 6) || 6);
 const stallMin = Number(process.env.YODEL_CLAIMS_STALL_MIN ?? 5) || 5;
@@ -143,7 +203,7 @@ interface Verdict {
   seconds: number | null;
 }
 
-const selected = claims.filter((c) => (!args.positionals.length || args.positionals.includes(c.name)) && !skipped.includes(c.name));
+const selected = claims.filter((c) => (!named.length || named.includes(c.name)) && !skipped.includes(c.name));
 const verdicts = new Map<string, Verdict>(); // key: claim:dialect:mode
 const key = (c: string, d: string, m: string) => `${c}:${d}:${m}`;
 const queue: Run[] = [];
@@ -334,28 +394,34 @@ for (const r of rows) {
 }
 
 if (opt.record) {
-  const commit = await import("node:child_process").then(({ execFileSync }) => {
+  const { execFileSync } = await import("node:child_process");
+  const gitOut = (a: string[]): string | null => {
     try {
-      return execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      return execFileSync("git", a, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
     } catch {
       return null;
     }
-  });
-  const doc = {
-    recorded: new Date().toISOString(),
-    commit,
-    claims: rows.map((r) => ({
-      claim: r.claim,
-      dialect: r.dialect,
-      says: r.says,
-      needs: r.needs,
-      verdict: r.plain?.verdict ?? null,
-      break: r.broken?.verdict ?? null,
-      seconds: { plain: r.plain?.seconds ?? null, break: r.broken?.seconds ?? null },
-    })),
   };
+  const stamp = {
+    recorded: new Date().toISOString(),
+    commit: gitOut(["rev-parse", "--short", "HEAD"]),
+    dirty: (gitOut(["status", "--porcelain", "--untracked-files=no"]) ?? "") !== "",
+  };
+  const fresh: RecordRow[] = rows.map((r) => ({
+    claim: r.claim,
+    dialect: r.dialect,
+    says: r.says,
+    needs: r.needs,
+    plain: r.plain?.verdict ?? null,
+    break: r.broken?.verdict ?? null,
+    seconds: { plain: r.plain?.seconds ?? null, break: r.broken?.seconds ?? null },
+    ...stamp,
+  }));
+  const order = claims.map((c) => ({ name: c.name, dialects: Object.keys(c.dialects) as Dialect[] }));
+  const doc = mergeRecord(oldRecord, fresh, order, stamp);
   writeFileSync(opt.record, `${JSON.stringify(doc, null, 2)}\n`);
-  process.stderr.write(`[claims] wrote ${opt.record}\n`);
+  const kept = doc.rows.length - fresh.length;
+  process.stderr.write(`[claims] wrote ${opt.record}: ${String(fresh.length)} rows from this run${kept ? `, ${String(kept)} kept from before` : ""}\n`);
 }
 
 const failed = [...verdicts.values()].some((v) => v.verdict === "fail");
