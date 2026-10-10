@@ -1,14 +1,15 @@
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { checkout, claimsEnv, emulatorSteps, rendered, setupNode } from "./shared.js";
 
-const comment = `Every claim, weekly, against @intentius/sql-yodeler as npm serves it
+const comment = `Every claim, run by hand, against @intentius/sql-yodeler as npm serves it
 (\`npm i @intentius/sql-yodeler@latest\`), not against this checkout: the
 claims link that install's node_modules (YODEL_CLAIMS_NODE_MODULES,
 scenarios/lib/project.ts). The run rewrites the committed record,
 scenarios/claims-record.json, and the status page made from it (npm run
 claims:page, docs/claims.md), and when either changed, opens a pull
 request from branch claims-weekly, or updates the one already open.
-The template claims are skipped here, as in claims.yml.`;
+The template claims are skipped here, as in claims.yml. It runs only when
+a person starts it (between development cycles), never on a schedule.`;
 
 const record = "scenarios/claims-record.json";
 const page = "docs/claims.md";
@@ -17,7 +18,7 @@ const branch = "claims-weekly";
 export const workflow = new Workflow({
   comment: rendered("claims-weekly.ts", comment),
   name: "claims-weekly",
-  on: { schedule: [{ cron: "0 6 * * 1" }], workflow_dispatch: null },
+  on: { workflow_dispatch: null },
   permissions: { contents: "read" },
   jobs: {
     claims: new Job({
@@ -71,7 +72,7 @@ title="chore: weekly claims record for @intentius/sql-yodeler@$VERSION"
 git commit -q -m "$title"
 git push -f origin ${branch}
 if [ -z "$(gh pr list --head ${branch} --state open --json number --jq '.[].number')" ]; then
-  gh pr create --head ${branch} --title "$title" --body "Every claim but the template claims, run weekly by claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+  gh pr create --head ${branch} --title "$title" --body "Every claim but the template claims, run by hand with claims-weekly.yml against @intentius/sql-yodeler@$VERSION from npm: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 fi
 `,
         }),
