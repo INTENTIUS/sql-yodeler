@@ -182,6 +182,14 @@ export type WaveGate = "always" | "on-destructive" | "never";
 export const WAVE_GATES: readonly WaveGate[] = ["always", "on-destructive", "never"];
 
 /**
+ * What a refusal of an unknown gate adds for `value`: terragucci spells
+ * on-destructive `on-destroy`, so a reader who uses both is pointed at it.
+ */
+export function waveGateHint(value: unknown): string {
+  return value === "on-destroy" ? ". on-destroy is terragucci's name for this policy; SQL Yodeler and chant call it on-destructive" : "";
+}
+
+/**
  * One wave of the apply pipeline: an environment, applied after the waves
  * before it, behind its own gate.
  */

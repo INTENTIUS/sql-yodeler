@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { checkYodelConfig, loadYodelConfigAtBase } from "../src/config/index.js";
+import { readWaves } from "../src/ci/render.js";
 import { describeWave, destructiveSteps, promotionRefusal, requiredIn, waveGate, wavePlanDigest } from "../src/waves/index.js";
 
 const temps: string[] = [];
@@ -25,6 +26,20 @@ describe("yodel.config.ts waves", () => {
     expect(check([{ env: "dev", gate: "sometimes" }])).toThrow(/waves\[0\]\.gate: "sometimes" is not a gate policy \(expected always, on-destructive, never\)/);
     expect(check([{ env: "dev", when: "always" }])).toThrow(/waves\[0\]\.when: unknown setting/);
     expect(check({ dev: "always" })).toThrow(/waves: expected a list/);
+  });
+
+  it("points on-destroy, terragucci's spelling, at on-destructive", () => {
+    expect(check([{ env: "dev", gate: "on-destroy" }])).toThrow(
+      /waves\[0\]\.gate: "on-destroy" is not a gate policy \(expected always, on-destructive, never\)\. on-destroy is terragucci's name for this policy; SQL Yodeler and chant call it on-destructive/,
+    );
+    expect(check([{ env: "dev", gate: "sometimes" }])).not.toThrow(/terragucci/);
+  });
+
+  it("points on-destroy at on-destructive when yodel ci reads the waves", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-waves-"));
+    temps.push(dir);
+    writeFileSync(join(dir, "yodel.config.ts"), 'export default { waves: [{ env: "dev", gate: "on-destroy" }] };\n');
+    await expect(readWaves(dir, ["dev"])).rejects.toThrow(/"?on-destroy"? is not .*on-destroy is terragucci's name for this policy; SQL Yodeler and chant call it on-destructive/);
   });
 
   it("gives an environment no wave names the gate always", () => {

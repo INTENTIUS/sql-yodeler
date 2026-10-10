@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { APPROVAL_MODES, CI_FORGES, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CI_FORGES, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
@@ -178,7 +178,7 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
     if (seen.has(env)) throw new YodelError(`${at}.env: ${env} has a wave already; an environment is one wave`);
     seen.add(env);
     if (wave.gate !== undefined && !WAVE_GATES.includes(wave.gate as never)) {
-      throw new YodelError(`${at}.gate: ${JSON.stringify(wave.gate)} is not a gate policy (expected ${WAVE_GATES.join(", ")})`);
+      throw new YodelError(`${at}.gate: ${JSON.stringify(wave.gate)} is not a gate policy (expected ${WAVE_GATES.join(", ")})${waveGateHint(wave.gate)}`);
     }
     const req = wave.requires;
     if (req !== undefined && req !== false) {
