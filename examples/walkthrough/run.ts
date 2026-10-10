@@ -86,6 +86,22 @@ export interface Excerpt {
 export type QuoteAt = string | { at: string; excerpt?: Excerpt };
 export type Quoted = QuoteAt | QuoteAt[];
 
+/**
+ * Names the walkthrough's databases and schemas take on the server in place
+ * of the ones the committed example and its transcripts use, as [clean, real]
+ * pairs: the e2e suite runs the examples on a shared server under its own
+ * prefix. A name is replaced where it stands alone (not inside a longer word,
+ * a path segment like sql-yodeler, or an Op name like rebuild-shop-events).
+ * The transcripts a run makes with names are not written anywhere.
+ */
+export type Names = Array<[string, string]>;
+
+/** The text with each clean name replaced by its real one. */
+export function renamer(names: Names | undefined): (text: string) => string {
+  if (!names?.length) return (text) => text;
+  return (text) => names.reduce((t, [from, to]) => t.replace(new RegExp(`(?<![\\w@-])${from}(?![\\w-])`, "g"), to), text);
+}
+
 export interface Walkthrough {
   dialect: "clickhouse" | "postgres";
   /** False when the walkthrough writes no README and keeps nothing: it only feeds docs quotes. */
@@ -100,8 +116,8 @@ export interface Walkthrough {
   env: () => Record<string, string>;
   /** Runs SQL on the server and returns its rows as text. */
   sql: (sql: string) => Promise<string>;
-  /** Drops what the walkthrough makes on the server. */
-  reset: () => Promise<void>;
+  /** Drops what the walkthrough makes on the server, its names passed through `rename` (see {@link Names}). */
+  reset: (rename?: (text: string) => string) => Promise<void>;
   /**
    * Text replaced in what the README and docs show, after <tmp> and <clone>:
    * for example the server's real address, shown as the one a reader has.
@@ -171,14 +187,24 @@ function migrationId(dir: string, name: string): string {
 export async function runWalkthrough(
   w: Walkthrough,
   log: (line: string) => void = () => undefined,
-  options: { start?: string[]; steps?: Step[] } = {},
+  options: { start?: string[]; steps?: Step[]; names?: Names } = {},
 ): Promise<{ ran: Ran[]; dir: string; dispose: () => void }> {
+  const rename = renamer(options.names);
   const root = realpathSync(mkdtempSync(join(tmpdir(), `yodel-example-${w.dialect}-`)));
   log(`# in ${root}`);
   const dir = join(root, w.dialect);
   const origin = join(root, "origin.git");
   mkdirSync(dir);
   for (const f of options.start ?? w.start) cpSync(join(exampleDir(w), f), join(dir, f), { recursive: true });
+  if (options.names?.length) {
+    for (const e of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+      if (!e.isFile()) continue;
+      const path = join(e.parentPath, e.name);
+      const text = readFileSync(path, "utf8");
+      const next = rename(text);
+      if (next !== text) writeFileSync(path, next);
+    }
+  }
   nodeModules(dir);
   await git(root, `init -q --bare -b main ${origin}`);
   for (const args of ["init -q -b main", "config user.name example", "config user.email example@example.invalid", `remote add origin ${origin}`, "add -A", "commit -q -m start", "push -q origin main"]) {
@@ -204,7 +230,7 @@ export async function runWalkthrough(
   delete env.GITHUB_ACTOR;
   delete env.GITLAB_USER_LOGIN;
 
-  await w.reset();
+  await w.reset(rename);
   const ran: Ran[] = [];
   let lastApprove: string | undefined;
   const fill = (text: string) =>
@@ -220,7 +246,7 @@ export async function runWalkthrough(
     if ("say" in step) {
       ran.push({ step });
     } else if ("file" in step) {
-      const content = step.content ?? readFileSync(join(exampleDir(w), step.file), "utf8");
+      const content = rename(step.content ?? readFileSync(join(exampleDir(w), step.file), "utf8"));
       mkdirSync(dirname(join(dir, step.file)), { recursive: true });
       writeFileSync(join(dir, step.file), content);
       ran.push({ step, output: content });
@@ -228,8 +254,9 @@ export async function runWalkthrough(
       const rel = fill(step.edit);
       const path = join(dir, rel);
       const text = readFileSync(path, "utf8");
-      if (!text.includes(step.from)) throw new Error(`edit ${rel}: ${JSON.stringify(step.from)} is not in:\n${text}`);
-      const next = text.replace(step.from, step.to);
+      const [from, to] = [rename(step.from), rename(step.to)];
+      if (!text.includes(from)) throw new Error(`edit ${rel}: ${JSON.stringify(from)} is not in:\n${text}`);
+      const next = text.replace(from, to);
       writeFileSync(path, next);
       ran.push({ step, command: rel, output: next });
     } else if ("rm" in step) {
@@ -240,10 +267,10 @@ export async function runWalkthrough(
       const path = fill(step.cat);
       ran.push({ step, command: path, output: readFileSync(join(dir, path), "utf8") });
     } else if ("sql" in step) {
-      const output = await w.sql(step.sql);
+      const output = await w.sql(rename(step.sql));
       ran.push({ step, output });
     } else {
-      const command = fill(step.run);
+      const command = fill(rename(step.run));
       const shownCommand = command.split(clone).join("<clone>");
       log(`$ ${shownCommand}`);
       const { code, output } = await sh(command, step.cwd ? join(dir, step.cwd) : dir, env);
@@ -428,10 +455,18 @@ export const committedSteps: Step[] = [
   { run: "npx yodel drift dev", code: 0 },
 ];
 
-/** Runs {@link committedSteps} in a copy of the committed example. */
-export function runCommitted(w: Walkthrough, log?: (line: string) => void): ReturnType<typeof runWalkthrough> {
+/**
+ * Runs {@link committedSteps} in a copy of the committed example. With
+ * `names`, the copy's migrations name the real databases, so their checksums
+ * are recorded again first (they are applied nowhere yet).
+ */
+export function runCommitted(w: Walkthrough, log?: (line: string) => void, names?: Names): ReturnType<typeof runWalkthrough> {
   const start = [...new Set([...w.start, ...w.keep])].filter((f) => existsSync(join(exampleDir(w), f)));
-  return runWalkthrough(w, log, { start, steps: committedSteps });
+  const recount: Step = {
+    run: `npx yodel lint ${readdirSync(join(exampleDir(w), "migrations")).sort().map((id) => `--update-checksum ${id}`).join(" ")}`,
+    code: 0,
+  };
+  return runWalkthrough(w, log, { start, steps: names?.length ? [recount, ...committedSteps] : committedSteps, ...(names ? { names } : {}) });
 }
 
 /** Copies what the walkthrough left back into the example. */

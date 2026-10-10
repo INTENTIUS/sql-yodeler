@@ -63,13 +63,15 @@ The run happened in a temporary copy of this directory, a git repository with a 
   // The server as a reader's emulator is: what the transcripts show does not depend on where the run was.
   shown: () => [[url().replace(/\/+$/, ""), "http://127.0.0.1:8123"]],
   sql,
-  reset: async () => {
-    await sql("DROP DATABASE IF EXISTS shop SYNC");
-    await sql("DROP DATABASE IF EXISTS yodeler SYNC");
+  reset: async (rename = (text: string) => text) => {
+    await sql(rename("DROP DATABASE IF EXISTS shop SYNC"));
+    await sql(rename("DROP DATABASE IF EXISTS yodeler SYNC"));
     // The rebuild's and the backfill's receipts from an earlier run (the rebuild's are keyed by the table).
     if ((await sql("EXISTS TABLE chant_receipts.receipts")).trim() === "1") {
       await sql(
-        "ALTER TABLE chant_receipts.receipts DELETE WHERE startsWith(address, '-/-/rebuild/shop.') OR match(address, '^yodel/dev/[0-9]{8}T[0-9]{4}-(events-by-id|fill-country)/') SETTINGS mutations_sync = 2",
+        rename(
+          "ALTER TABLE chant_receipts.receipts DELETE WHERE startsWith(address, '-/-/rebuild/shop.') OR match(address, '^yodel/dev/[0-9]{8}T[0-9]{4}-(events-by-id|fill-country)/') SETTINGS mutations_sync = 2",
+        ),
       );
     }
   },

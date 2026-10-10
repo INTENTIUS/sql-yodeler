@@ -94,8 +94,8 @@ The run happened in a temporary copy of this directory, a git repository with a 
     return [[`${u.hostname}:${u.port || "5432"}`, "127.0.0.1:5432"]];
   },
   sql,
-  reset: async () => {
-    await sql("DROP SCHEMA IF EXISTS shop CASCADE; DROP SCHEMA IF EXISTS yodeler CASCADE");
+  reset: async (rename = (text: string) => text) => {
+    await sql(rename("DROP SCHEMA IF EXISTS shop CASCADE; DROP SCHEMA IF EXISTS yodeler CASCADE"));
   },
   steps: [
     { say: "## 1. A declared schema, applied without migrations" },
