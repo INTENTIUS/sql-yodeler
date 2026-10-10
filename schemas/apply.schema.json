@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/apply.schema.json",
+  "title": "yodel apply <env> --json",
+  "description": "Version 1. On a project with migrations, the status (status.schema.json) with mode \"versioned\" and what apply did; with --execute (the migrations Op's Apply step), what the step applied; on a project without migrations, the declarative outcome with chant's plan. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/versioned"
+    },
+    {
+      "$ref": "#/$defs/execute"
+    },
+    {
+      "$ref": "#/$defs/declarative"
+    }
+  ],
+  "$defs": {
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "where"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "keeper",
+            "local",
+            "advisory"
+          ]
+        },
+        "where": {
+          "type": "string"
+        },
+        "notice": {
+          "type": "string"
+        }
+      }
+    },
+    "versioned": {
+      "type": "object",
+      "$ref": "status.schema.json#/$defs/report",
+      "required": [
+        "mode",
+        "status"
+      ],
+      "unevaluatedProperties": false,
+      "properties": {
+        "mode": {
+          "const": "versioned"
+        },
+        "status": {
+          "description": "planned (--plan, something pending), unchanged, refused, gated (waiting at the Op's gate for a person's approval), failed, applied.",
+          "enum": [
+            "planned",
+            "unchanged",
+            "refused",
+            "gated",
+            "failed",
+            "applied"
+          ]
+        },
+        "preChecks": {
+          "description": "The first pending migration's checks, when one failed before the gate.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "migration",
+            "checks"
+          ],
+          "properties": {
+            "migration": {
+              "type": "string"
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/checkOutcome"
+              }
+            }
+          }
+        },
+        "op": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string"
+        },
+        "approve": {
+          "description": "gated: the command a person runs to approve. An agent prints it and never runs it.",
+          "type": "string"
+        },
+        "gatePlanDigest": {
+          "type": "string"
+        },
+        "moved": {
+          "description": "gated: the gate's newest approval does not hold, and what moved since it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "approved",
+            "by",
+            "at",
+            "confirmed",
+            "changes"
+          ],
+          "properties": {
+            "approved": {
+              "type": "string"
+            },
+            "by": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string"
+            },
+            "confirmed": {
+              "type": "boolean"
+            },
+            "changes": {
+              "$ref": "plan.schema.json#/$defs/moved"
+            },
+            "askedAgain": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "at"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "exitCode": {
+          "description": "failed: yodel apply's exit code, the Apply step's own when it had one.",
+          "type": "integer"
+        },
+        "chantExitCode": {
+          "description": "failed: chant run's exit code.",
+          "type": "integer"
+        },
+        "appliedNow": {
+          "description": "applied: the migrations this run applied.",
+          "$ref": "common.schema.json#/$defs/stringList"
+        }
+      }
+    },
+    "execute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "status",
+        "planDigest",
+        "applied",
+        "skipped",
+        "lock"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "status": {
+          "const": "applied"
+        },
+        "planDigest": {
+          "description": "The digest the gate approved.",
+          "type": "string"
+        },
+        "applied": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "skipped": {
+          "description": "Statements not sent because an earlier run had already succeeded with them.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "statement"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "lock": {
+          "$ref": "#/$defs/lock"
+        }
+      }
+    },
+    "declarative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "dialect",
+        "op",
+        "status",
+        "plan"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "dialect": {
+          "$ref": "common.schema.json#/$defs/dialect"
+        },
+        "server": {
+          "$ref": "common.schema.json#/$defs/server"
+        },
+        "op": {
+          "description": "The ApplyOp.",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "refused",
+            "unchanged",
+            "gated",
+            "failed",
+            "incomplete",
+            "applied"
+          ]
+        },
+        "gate": {
+          "type": "string"
+        },
+        "approve": {
+          "description": "gated: the command a person runs to approve. An agent prints it and never runs it.",
+          "type": "string"
+        },
+        "planDigest": {
+          "type": "string"
+        },
+        "exitCode": {
+          "description": "failed: chant run's exit code.",
+          "type": "integer"
+        },
+        "plan": {
+          "description": "The plan before the run.",
+          "$ref": "plan.schema.json#/$defs/declarative"
+        },
+        "remaining": {
+          "description": "incomplete: the plan after the Op completed.",
+          "$ref": "plan.schema.json#/$defs/declarative"
+        }
+      }
+    }
+  }
+}

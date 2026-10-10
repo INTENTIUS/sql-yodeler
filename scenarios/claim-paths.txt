@@ -104,6 +104,13 @@ src/commands/rebase.ts                 out-of-order
 src/commands/repair.ts                 out-of-order
 src/rebase/                            out-of-order
 
+# yodel mcp and the --json schemas: no claim runs the server or reads a
+# schema (the unit tests prove them, #58).
+src/commands/mcp.ts                    -
+src/mcp/                               -
+src/schemas.ts                         -
+schemas/                               -
+
 # Step kinds. The step index and kinds are on every migration's path.
 src/steps/rebuild.ts                   rebuild-refused rebuild-as-step topology
 src/steps/backfill.ts                  backfill-resumed

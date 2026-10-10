@@ -48,6 +48,7 @@ Commands:
   drift     report declared objects changed out of band or gone
   rebase    move a migration onto a new parent and recompute its schema
   repair    record a new checksum for an applied migration, with a reason
+  mcp       serve read-only tools to a coding agent (MCP, stdio)
 
 Options:
   -h, --help     show this help
@@ -73,3 +74,19 @@ Exit codes (yodel <command> --help lists a command's own):
 ```
 
 `yodel <command> --help` lists each command's options and exit codes. The exit codes mean the same across commands where they can: 0 done, or nothing to do; 1 an error; 2 something `yodel` will not do itself (a change that needs an Op it does not run, a manual step); for `yodel drift`, drift found; 3 something outstanding: apply stopped at its approval gate, status found pending migrations, lint found errors; 4 refused, nothing done: a checksum mismatch, an applied migration gone from the directory, an out-of-order migration, a fork or another problem in the migrations directory; 5 another apply holds the lock. `yodel apply` exits with the code of its Op's Apply step, so a lock held by another apply is 5 there too. `yodel plan` exits 0 when migrations are pending: it reports, and a CI job that posts the plan on a pull request should not fail because the pull request adds a migration. To gate on pending migrations, use `yodel status`.
+
+With `--json`, a command prints one JSON document on stdout. Each document has a JSON Schema, shipped in the package's `schemas/` directory and published at `https://intentius.io/sql-yodeler/schemas/v1/<name>.schema.json`:
+
+| Command | Schema |
+|---|---|
+| `yodel init --from <env> --json` | [`init`](https://intentius.io/sql-yodeler/schemas/v1/init.schema.json) |
+| `yodel plan <env> --json` | [`plan`](https://intentius.io/sql-yodeler/schemas/v1/plan.schema.json): the versioned plan (`"mode": "versioned"`) or the declarative one |
+| `yodel apply <env> --json` | [`apply`](https://intentius.io/sql-yodeler/schemas/v1/apply.schema.json) |
+| `yodel new <name> --json` | [`new`](https://intentius.io/sql-yodeler/schemas/v1/new.schema.json) |
+| `yodel lint --json` | [`lint`](https://intentius.io/sql-yodeler/schemas/v1/lint.schema.json); `yodel lint --rules --json` prints [`lint-rules`](https://intentius.io/sql-yodeler/schemas/v1/lint-rules.schema.json) |
+| `yodel status <env> --json` | [`status`](https://intentius.io/sql-yodeler/schemas/v1/status.schema.json) |
+| `yodel drift <env> --json` | [`drift`](https://intentius.io/sql-yodeler/schemas/v1/drift.schema.json) |
+| `yodel rebase --json` | [`rebase`](https://intentius.io/sql-yodeler/schemas/v1/rebase.schema.json) |
+| `yodel repair <env> <id> --reason <text> --json` | [`repair`](https://intentius.io/sql-yodeler/schemas/v1/repair.schema.json) |
+
+The version is in each schema's `$id` (`v1`). Within a version, fields are only added, so a reader ignores fields it does not know; removing a field or changing what one means is a new version. The exit code is the same with or without `--json`. `yodel mcp` serves the read-only commands to a coding agent, with these schemas: [Set up with a coding agent](agents.md#read-only-tools-yodel-mcp).

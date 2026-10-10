@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/common.schema.json",
+  "title": "Definitions the yodel --json schemas share",
+  "description": "Version 1. Shared by the other schemas in this directory; no command prints this document on its own.",
+  "$defs": {
+    "dialect": { "enum": ["clickhouse", "postgres"] },
+    "server": {
+      "description": "The server read from: its dialect, its address (host:port on ClickHouse, host:port/database on Postgres) and its version, when it answered.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dialect", "address"],
+      "properties": {
+        "dialect": { "$ref": "#/$defs/dialect" },
+        "address": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "refusal": {
+      "description": "Why yodel apply would refuse, and the exit code it would refuse with.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exitCode", "message"],
+      "properties": {
+        "exitCode": { "type": "integer" },
+        "message": { "type": "string" }
+      }
+    },
+    "change": {
+      "description": "One classified change, as chant's sql lexicon reports it. chant owns this object: fields beyond the required ones may appear.",
+      "type": "object",
+      "required": ["object", "field", "rule", "class"],
+      "properties": {
+        "object": { "type": "string" },
+        "field": { "type": "string" },
+        "before": { "type": "string" },
+        "after": { "type": "string" },
+        "rule": { "type": "string" },
+        "class": { "type": "string" },
+        "destructive": { "type": "boolean" },
+        "note": { "type": "string" }
+      }
+    },
+    "check": {
+      "description": "A pre-migration check from migration.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sql"],
+      "properties": {
+        "name": { "type": "string" },
+        "sql": { "type": "string" },
+        "expect": {
+          "oneOf": [
+            { "enum": ["empty", "true"] },
+            { "type": "object", "additionalProperties": false, "properties": { "min": { "type": "number" }, "max": { "type": "number" } } }
+          ]
+        }
+      }
+    },
+    "checkOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "passed", "detail"],
+      "properties": {
+        "name": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "detail": { "type": "string" }
+      }
+    },
+    "stringList": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/mcp.schema.json",
+  "title": "A yodel mcp tool result",
+  "description": "Version 1. Every tool of yodel mcp returns this envelope, as the call's structuredContent and as its text. results follows the schema resultsSchema names: the command's own (status, plan, lint, drift) or a definition here (history, explain). Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "tool", "command", "exit", "results", "resultsSchema"],
+  "properties": {
+    "schema": { "description": "The envelope's version.", "const": 1 },
+    "tool": { "enum": ["status", "plan", "lint", "drift", "history", "explain"] },
+    "command": { "description": "The yodel command line the tool ran.", "type": "string" },
+    "exit": { "description": "The command's exit code, the same as on a terminal (yodel --help lists them).", "type": "integer" },
+    "results": { "description": "What the command printed with --json; null when it printed nothing (it failed: see error)." },
+    "resultsSchema": { "description": "The $id of the schema results follows.", "type": "string" },
+    "error": { "description": "What the command wrote to stderr: why it failed when results is null, else notices.", "type": "string" },
+    "forPerson": {
+      "description": "Steps that belong to a person, each with the command the person runs. An agent shows them and never runs them.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action", "command"],
+        "properties": { "action": { "type": "string" }, "command": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "history": {
+      "description": "The history tool: the migrations the environment's history records applied, from yodel status.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "history", "applied"],
+      "properties": {
+        "environment": { "type": "string" },
+        "server": { "$ref": "common.schema.json#/$defs/server" },
+        "history": { "$ref": "status.schema.json#/$defs/report/properties/history" },
+        "applied": { "$ref": "status.schema.json#/$defs/report/properties/applied" }
+      }
+    },
+    "explain": {
+      "description": "The explain tool: a lint rule, or an exit code.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["topic", "kind", "rule", "docs"],
+          "properties": {
+            "topic": { "type": "string" },
+            "kind": { "const": "lint-rule" },
+            "rule": { "$ref": "lint-rules.schema.json#/items" },
+            "docs": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["topic", "kind", "code", "meaning", "docs"],
+          "properties": {
+            "topic": { "type": "string" },
+            "kind": { "const": "exit-code" },
+            "code": { "type": "integer" },
+            "meaning": { "type": "string" },
+            "docs": { "type": "string" }
+          }
+        }
+      ]
+    }
+  }
+}

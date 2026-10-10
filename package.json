@@ -18,7 +18,8 @@
     "yodel": "dist/bin.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "publishConfig": {
     "access": "public"
@@ -52,6 +53,7 @@
     "@intentius/chant-lexicon-gitlab": "^0.115.0",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
+    "ajv": "^8.20.0",
     "eslint": "^10.12.0",
     "pg": "^8.23.1",
     "typescript": "^5.9.3",

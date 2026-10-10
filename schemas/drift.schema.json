@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/drift.schema.json",
+  "title": "yodel drift <env> --json",
+  "description": "Version 1. The declared objects changed out of band (changed) or gone (missing), and those chant could not read (unobserved: not drift, and not clean). Objects the project does not declare are never reported. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["environment", "dialect", "changed", "missing", "unobserved", "drifted"],
+  "properties": {
+    "environment": { "type": "string" },
+    "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+    "server": { "$ref": "common.schema.json#/$defs/server" },
+    "changed": {
+      "description": "chant's deep drift for each changed object: its name, kind and the properties that differ, declared against live. chant owns this object: fields beyond the required ones may appear.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["changes"],
+        "properties": { "changes": { "type": "array", "items": { "type": "object" } } }
+      }
+    },
+    "missing": { "$ref": "common.schema.json#/$defs/stringList" },
+    "unobserved": {
+      "description": "Declared objects chant could not read, each with its name and why.",
+      "type": "array",
+      "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
+    },
+    "lockWait": { "description": "Postgres: a read gave up at the lock timeout, and what it waited on.", "type": "string" },
+    "columns": {
+      "description": "Each changed table's declared column names, by position.",
+      "type": "object",
+      "additionalProperties": { "$ref": "common.schema.json#/$defs/stringList" }
+    },
+    "drifted": { "description": "A declared object changed or is gone: the command exits 2.", "type": "boolean" }
+  }
+}

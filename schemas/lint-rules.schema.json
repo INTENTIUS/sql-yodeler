@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/lint-rules.schema.json",
+  "title": "yodel lint --rules --json",
+  "description": "Version 1. Every lint rule, with the level yodel.config.ts sets for it in this project. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id",
+      "summary",
+      "level",
+      "silenceable",
+      "configurable",
+      "configured"
+    ],
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "level": {
+        "description": "The rule's default level.",
+        "enum": [
+          "error",
+          "warning"
+        ]
+      },
+      "silenceable": {
+        "description": "A -- yodel:allow <id> <reason> line can silence it for one statement.",
+        "type": "boolean"
+      },
+      "configurable": {
+        "description": "yodel.config.ts lint.rules may change its level.",
+        "type": "boolean"
+      },
+      "dialect": {
+        "description": "The dialect it applies to; both when absent.",
+        "$ref": "common.schema.json#/$defs/dialect"
+      },
+      "configured": {
+        "description": "The level in this project.",
+        "enum": [
+          "error",
+          "warning",
+          "off"
+        ]
+      }
+    }
+  }
+}

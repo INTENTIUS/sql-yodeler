@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/status.schema.json",
+  "title": "yodel status <env> --json",
+  "description": "Version 1. The environment's migrations against its history. Within a version, fields are only added; a reader ignores fields it does not know. yodel apply --json carries the same fields (apply.schema.json).",
+  "type": "object",
+  "$ref": "#/$defs/report",
+  "unevaluatedProperties": false,
+  "$defs": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "kind",
+        "object",
+        "name"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "op",
+            "manual"
+          ]
+        },
+        "object": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": [
+        "environment",
+        "history",
+        "applied",
+        "pending",
+        "outOfOrder",
+        "partWay",
+        "mismatches"
+      ],
+      "properties": {
+        "environment": {
+          "type": "string"
+        },
+        "server": {
+          "$ref": "common.schema.json#/$defs/server"
+        },
+        "history": {
+          "description": "Where the history table is: its database (ClickHouse) or schema (Postgres), and on ClickHouse the history's own topology.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "database"
+          ],
+          "properties": {
+            "database": {
+              "type": "string"
+            },
+            "topology": {
+              "type": "string"
+            }
+          }
+        },
+        "topology": {
+          "description": "ClickHouse only: the topology statements are rendered for, and where it came from.",
+          "type": "string"
+        },
+        "applied": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "checksum",
+              "appliedBy",
+              "recordedAt",
+              "planDigest",
+              "inDirectory"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "checksum": {
+                "type": "string"
+              },
+              "appliedBy": {
+                "type": "string"
+              },
+              "recordedAt": {
+                "type": "string"
+              },
+              "planDigest": {
+                "type": "string"
+              },
+              "inDirectory": {
+                "type": "boolean"
+              },
+              "repairs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "checksum",
+                    "by",
+                    "at",
+                    "reason"
+                  ],
+                  "properties": {
+                    "checksum": {
+                      "type": "string"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "at": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "checksum",
+              "outOfOrder",
+              "partWay",
+              "opSteps",
+              "refusedSteps"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "checksum": {
+                "type": "string"
+              },
+              "outOfOrder": {
+                "type": "boolean"
+              },
+              "partWay": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "status",
+                      "resumeAt",
+                      "error",
+                      "done",
+                      "edited"
+                    ],
+                    "properties": {
+                      "status": {
+                        "enum": [
+                          "failed",
+                          "started"
+                        ]
+                      },
+                      "resumeAt": {
+                        "type": "integer"
+                      },
+                      "failedStatement": {
+                        "type": "integer"
+                      },
+                      "error": {
+                        "type": "string"
+                      },
+                      "done": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        }
+                      },
+                      "edited": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                ]
+              },
+              "opSteps": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/step"
+                }
+              },
+              "refusedSteps": {
+                "type": "array",
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/step"
+                    },
+                    {
+                      "required": [
+                        "reason"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "outOfOrder": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "partWay": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "failedStatement"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "resumeAt": {
+                "type": "integer"
+              },
+              "failedStatement": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "mismatches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id",
+              "message"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "applied",
+                  "part-way",
+                  "missing"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "recorded": {
+                "type": "string"
+              },
+              "actual": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "planDigest": {
+          "description": "The digest yodel apply would ask approval for, when it would not refuse.",
+          "type": "string"
+        },
+        "refusal": {
+          "$ref": "common.schema.json#/$defs/refusal"
+        }
+      }
+    }
+  }
+}

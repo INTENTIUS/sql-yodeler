@@ -4,6 +4,7 @@ import { approve } from "./approve.js";
 import { drift } from "./drift.js";
 import { init } from "./init.js";
 import { lint } from "./lint.js";
+import { mcp } from "./mcp.js";
 import { newCommand } from "./new.js";
 import { override } from "./override.js";
 import { plan } from "./plan.js";
@@ -24,4 +25,5 @@ export const commands: readonly Command[] = [
   drift,
   rebase,
   repair,
+  mcp,
 ];

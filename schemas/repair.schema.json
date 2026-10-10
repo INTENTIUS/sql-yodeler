@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/repair.schema.json",
+  "title": "yodel repair <env> <id> --reason <text> --json",
+  "description": "Version 1. The checksum recorded for an applied migration, with the reason, and whether migration.json's own checksum field was written again. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repaired", "id", "environment", "oldChecksum", "newChecksum", "reason", "seq", "runId", "migrationJsonUpdated"],
+  "properties": {
+    "repaired": { "const": true },
+    "id": { "type": "string" },
+    "environment": { "type": "string" },
+    "oldChecksum": { "type": "string" },
+    "newChecksum": { "type": "string" },
+    "reason": { "type": "string" },
+    "seq": { "type": "integer" },
+    "runId": { "type": "string" },
+    "migrationJsonUpdated": { "type": "boolean" }
+  }
+}

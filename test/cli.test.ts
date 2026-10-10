@@ -22,9 +22,9 @@ async function run(argv: string[], list?: readonly Command[]) {
   return { code, out, err };
 }
 
-const verbs = ["init", "plan", "apply", "approve", "override", "new", "lint", "status", "drift", "rebase", "repair"];
+const verbs = ["init", "plan", "apply", "approve", "override", "new", "lint", "status", "drift", "rebase", "repair", "mcp"];
 const envVerbs = ["plan", "apply", "status", "drift"];
-const built = [...envVerbs, "approve", "override", "new", "init", "lint", "rebase", "repair"];
+const built = [...envVerbs, "approve", "override", "new", "init", "lint", "rebase", "repair", "mcp"];
 const notBuilt = verbs.filter((v) => !built.includes(v));
 
 describe("yodel", () => {
@@ -100,7 +100,7 @@ describe("yodel", () => {
     const dir = mkdtempSync(join(tmpdir(), "yodel-cli-"));
     try {
       for (const verb of built) {
-        const args = verb === "new" ? ["add-country"] : verb === "init" ? ["--from", "dev"] : verb === "repair" ? ["20261009T1000-one", "--reason", "x", "dev"] : verb === "lint" ? [] : ["dev"];
+        const args = verb === "new" ? ["add-country"] : verb === "init" ? ["--from", "dev"] : verb === "repair" ? ["20261009T1000-one", "--reason", "x", "dev"] : verb === "lint" || verb === "mcp" ? [] : ["dev"];
         const { code, err } = await run([verb, ...args, "--dir", dir]);
         expect(code).toBe(1);
         expect(err).toMatch(new RegExp(`^yodel ${verb}: no chant.config.ts in `));

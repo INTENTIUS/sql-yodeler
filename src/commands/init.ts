@@ -101,24 +101,23 @@ function parseInitArgs(args: string[]): InitArgs {
   };
 }
 
+/** `yodel init --json` (schemas/init.schema.json). */
+export function initJson(a: Adopted): Record<string, unknown> {
+  return {
+    environment: a.environment,
+    dialect: a.dialect,
+    status: "adopted",
+    objects: a.objects,
+    schemaFiles: a.schemaFiles,
+    migration: { path: a.migrationPath, ...a.baseline },
+    recorded: { history: a.recorded.database, seq: a.recorded.row.seq, note: a.recorded.row.note, appliedBy: a.recorded.row.applied_by },
+    warnings: a.warnings,
+  };
+}
+
 function report(io: Io, json: boolean, a: Adopted): void {
   if (json) {
-    io.out(
-      `${JSON.stringify(
-        {
-          environment: a.environment,
-          dialect: a.dialect,
-          status: "adopted",
-          objects: a.objects,
-          schemaFiles: a.schemaFiles,
-          migration: { path: a.migrationPath, ...a.baseline },
-          recorded: { history: a.recorded.database, seq: a.recorded.row.seq, note: a.recorded.row.note, appliedBy: a.recorded.row.applied_by },
-          warnings: a.warnings,
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    io.out(`${JSON.stringify(initJson(a), null, 2)}\n`);
     return;
   }
   const lines = [

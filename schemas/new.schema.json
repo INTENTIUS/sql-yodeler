@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/new.schema.json",
+  "title": "yodel new <name> --json",
+  "description": "Version 1. The migration written (written true), or why none was: a backfill template to fill in, a --replace that kept the migration, or no change from the newest migration's recorded schema. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "oneOf": [{ "$ref": "#/$defs/written" }, { "$ref": "#/$defs/template" }, { "$ref": "#/$defs/kept" }, { "$ref": "#/$defs/unchanged" }],
+  "$defs": {
+    "written": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["written", "id", "path", "parent", "checksum", "dialect", "statements", "ops", "manual", "hints", "checks"],
+      "properties": {
+        "written": { "const": true },
+        "id": { "type": "string" },
+        "path": { "type": "string" },
+        "parent": { "type": ["string", "null"] },
+        "checksum": { "type": "string" },
+        "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+        "statements": { "type": "integer", "minimum": 0 },
+        "ops": {
+          "description": "The Op steps written, which yodel apply runs or refuses.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["op", "object", "name", "rules"],
+            "properties": { "op": { "type": "string" }, "object": { "type": "string" }, "name": { "type": "string" }, "rules": { "$ref": "common.schema.json#/$defs/stringList" } }
+          }
+        },
+        "manual": {
+          "description": "The manual steps written: yodel apply refuses them.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["object", "name", "rules", "detail"],
+            "properties": { "object": { "type": "string" }, "name": { "type": "string" }, "rules": { "$ref": "common.schema.json#/$defs/stringList" }, "detail": { "type": "string" } }
+          }
+        },
+        "hints": { "$ref": "common.schema.json#/$defs/stringList" },
+        "checks": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/check" } }
+      }
+    },
+    "template": {
+      "description": "--backfill named a file that is not there: the template was written to it, and no migration.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["written", "template"],
+      "properties": { "written": { "const": false }, "template": { "type": "string" } }
+    },
+    "kept": {
+      "description": "--replace: the replacement would be the same, so the migration was kept.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["written", "replaced", "kept"],
+      "properties": { "written": { "const": false }, "replaced": { "type": "null" }, "kept": { "type": "string" } }
+    },
+    "unchanged": {
+      "description": "The declared schema matches the newest migration's recorded schema.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["written", "parent", "dialect", "hints"],
+      "properties": {
+        "written": { "const": false },
+        "parent": { "type": ["string", "null"] },
+        "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+        "hints": { "$ref": "common.schema.json#/$defs/stringList" }
+      }
+    }
+  }
+}
