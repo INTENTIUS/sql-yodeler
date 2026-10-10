@@ -18,6 +18,7 @@ import { migrateOpParts } from "../src/versioned/op.js";
 import {
   applyPipelines,
   environments,
+  FORGEJO_UPLOAD_ARTIFACT,
   readerVariables,
   readWaves,
   REPLAY,
@@ -223,7 +224,9 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       for (const [name, job] of Object.entries(doc.jobs).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
         const env = name.replace(/^plan-|^wave-\d+-/, "");
         expect(job.steps.find((s) => s.run === reportCommand(env))?.if, `${f} ${name}`).toBe("always()");
-        expect(job.steps.find((s) => s.uses?.includes("actions/upload-artifact@"))?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
+        // On Forgejo, Forgejo's fork: actions/upload-artifact@v4 refuses any server but github.com's.
+        const upload = f.startsWith(".forgejo") ? FORGEJO_UPLOAD_ARTIFACT : "actions/upload-artifact@v4";
+        expect(job.steps.find((s) => s.uses === upload)?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
         for (const v of WEBHOOK_VARIABLES) expect(job.env?.[v], `${f} ${name}`).toBe(`\${{ secrets.${v} }}`);
       }
     }

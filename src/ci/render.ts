@@ -403,6 +403,13 @@ export const reportCommand = (env: string, tc: Toolchain = { image: IMAGE, yodel
 export const reportArtifact = (job: string): string => `yodel-report-${job}`;
 
 const UPLOAD_ARTIFACT = "actions/upload-artifact@v4";
+/**
+ * Forgejo's fork of upload-artifact v4. actions/upload-artifact@v4 (as the
+ * forgejo lexicon resolves it, from code.forgejo.org/actions) refuses any
+ * server but github.com's and fails the step, so the job, on Forgejo.
+ */
+export const FORGEJO_UPLOAD_ARTIFACT = "https://code.forgejo.org/forgejo/upload-artifact@v4";
+const uploadArtifact = (forge: Actions): string => (forge === "forgejo" ? FORGEJO_UPLOAD_ARTIFACT : UPLOAD_ARTIFACT);
 
 /**
  * The comment at the top of every file, as `#` lines. The files declared here
@@ -447,10 +454,10 @@ function renderActions(forge: Actions, workflow: AWorkflow): string {
 }
 
 /** The report steps of a job: `yodel report` into REPORT_DIR and the artifact, whatever the job's outcome. */
-function reportSteps(env: string, job: string, tc: Toolchain): AStep[] {
+function reportSteps(forge: Actions, env: string, job: string, tc: Toolchain): AStep[] {
   return [
     new Step({ name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) }),
-    new Step({ name: "Keep the report", if: "always()", uses: UPLOAD_ARTIFACT, with: { name: reportArtifact(job), path: REPORT_DIR, "if-no-files-found": "ignore" } }),
+    new Step({ name: "Keep the report", if: "always()", uses: uploadArtifact(forge), with: { name: reportArtifact(job), path: REPORT_DIR, "if-no-files-found": "ignore" } }),
   ];
 }
 
@@ -521,7 +528,7 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
         ...actionsLogin(forge, loginsOf(envs_, planRoles(waves, env))),
         new Step({ name: "This job cannot write", run: writeProbe(read) }),
         new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
-        ...reportSteps(env, `plan-${env}`, tc),
+        ...reportSteps(forge, env, `plan-${env}`, tc),
       ],
     });
   }
@@ -910,8 +917,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
     insertSteps(job.steps, rawLogin(forge, loginsOf(envs, waveRoles(waves, env))), runsChant, `${forge}: ${name}`);
     job.steps.push(
       { name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) },
-      // chant's forgejo output is already in Forgejo's dialect, so the action is named as the forgejo lexicon names it.
-      { name: "Keep the report", if: "always()", uses: forge === "forgejo" ? `https://code.forgejo.org/${UPLOAD_ARTIFACT}` : UPLOAD_ARTIFACT, with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
+      { name: "Keep the report", if: "always()", uses: uploadArtifact(forge), with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
     );
   }
   return `${withIdToken(forge, top, cloudsOf(envs, waves.flatMap((w) => waveRoles(waves, w.env))))}${emitJobs()}`;
