@@ -1,4 +1,4 @@
-import { existsSync, renameSync } from "node:fs";
+import { renameSync } from "node:fs";
 import { join } from "node:path";
 import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
@@ -8,8 +8,6 @@ interface Lint {
   p: Project;
   /** The second migration, adding a column; the fork part sets it aside. */
   note?: string;
-  /** The fork part's migration on the other branch. */
-  audit?: string;
 }
 
 /**
@@ -61,7 +59,6 @@ export async function forkPart(ctx: Ctx, s: Lint): Promise<void> {
   addTable(p, "audit");
   const b = await p.newMigration("add-audit");
   if (b === undefined) throw new Error("yodel new wrote no migration");
-  s.audit = b;
   const one = await p.yodel(["lint", "--json"]);
   if (one.code !== 0) throw new Error(`yodel lint fails one branch on its own (exit ${String(one.code)})`);
   // Both pull requests merged: the one set aside comes back, following the same parent as b.
@@ -78,7 +75,8 @@ export async function forkPart(ctx: Ctx, s: Lint): Promise<void> {
 }
 
 /**
- * `yodel checkpoint` (#63): a checkpoint after the newest migration creates
+ * `yodel checkpoint` (#63), on a chain of two migrations yodel new wrote:
+ * a checkpoint after the newest migration creates
  * its recorded schema from nothing. `yodel lint --replay` replays the chain,
  * then the checkpoint alone into an empty database, and both give that
  * schema. A fresh environment then applies the checkpoint only, skips the
@@ -90,8 +88,9 @@ export async function forkPart(ctx: Ctx, s: Lint): Promise<void> {
  */
 export async function checkpointPart(ctx: Ctx, s: Lint): Promise<void> {
   const { p } = s;
-  // The fork part leaves both branches in the directory; the checkpoint follows one chain, so the audit branch goes.
-  if (s.note && s.audit && existsSync(p.path("migrations", s.note)) && existsSync(p.path("migrations", s.audit))) p.removeMigration(s.audit);
+  // The parts before leave two branches, and under BREAK an edited migration: the checkpoint's chain is the first migration and one yodel new writes now.
+  for (const id of p.migrationIds()) if (p.migration(id).parent !== null) p.removeMigration(id);
+  if ((await p.newMigration("note-and-audit")) === undefined) throw new Error("yodel new wrote no migration");
   const before = p.migrationIds();
   const wrote = await p.yodel(["checkpoint", "base", "--json"]);
   if (wrote.code !== 0) throw new Error(`yodel checkpoint exited ${String(wrote.code)}: ${wrote.err}`);
@@ -112,7 +111,8 @@ export async function checkpointPart(ctx: Ctx, s: Lint): Promise<void> {
 
   const replay = await p.yodel(["lint", "--replay", p.env, "--json"], { timeoutMs: 600_000 });
   hold(replay.code === 0, `yodel lint --replay exited ${String(replay.code)} with the checkpoint ${cp}: ${JSON.stringify(parse<unknown>(replay)).slice(0, 400)}`);
-  hold(JSON.stringify(parse<unknown>(replay)).includes(`"checkpoint": true`), `the replay did not replay the checkpoint ${cp} on its own`);
+  const replayed = parse<{ replay?: { matched?: Array<{ id: string; checkpoint?: boolean }> } }>(replay).replay?.matched ?? [];
+  hold(replayed.some((m) => m.id === cp && m.checkpoint === true), `the replay did not replay the checkpoint ${cp} on its own`);
 
   // A fresh environment: it starts at the checkpoint.
   const applied = await p.stepsApply();
@@ -120,7 +120,7 @@ export async function checkpointPart(ctx: Ctx, s: Lint): Promise<void> {
   const status = (await p.yodel(["status", p.env, "--json"])).out;
   const doc = JSON.parse(status.slice(status.indexOf("{"))) as { applied: Array<{ id: string }>; skipped?: Array<{ id: string; reason: string }> };
   hold(doc.applied.map((a) => a.id).join() === cp, `the fresh environment applied ${doc.applied.map((a) => a.id).join(", ")}, not the checkpoint ${cp} alone`);
-  hold((doc.skipped ?? []).map((k) => k.id).join() === before.filter((id) => existsSync(p.path("migrations", id))).join(), `the fresh environment did not skip the migrations before the checkpoint: ${JSON.stringify(doc.skipped)}`);
+  hold((doc.skipped ?? []).map((k) => k.id).sort().join() === before.join(), `the fresh environment did not skip the migrations before the checkpoint: ${JSON.stringify(doc.skipped)}`);
   const drift = await p.yodel(["drift", p.env, "--json"]);
   hold(drift.code === 0, `yodel drift after starting from the checkpoint exited ${String(drift.code)}: the environment is not at the recorded schema`);
 }
