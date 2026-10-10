@@ -28,6 +28,8 @@ import { replayJson, type ReplayResult } from "../src/replay/index.js";
 import { COMMAND_SCHEMAS, SCHEMA_BASE, SCHEMA_NAMES, readSchema, schemaId, schemasDir, type SchemaName } from "../src/schemas.js";
 import type { RuleResult } from "../src/versioned/policy.js";
 import { statusJson, type StatusReport } from "../src/versioned/report.js";
+import { compareHistory } from "../src/versioned/state.js";
+import { deriveState } from "../src/history/index.js";
 import { json, projectFrom, repoRoot, yodel } from "./helpers/run.js";
 
 const broken = !!process.env.BREAK && process.env.BREAK !== "0";
@@ -365,6 +367,25 @@ describe("each command's --json output validates against its schema", () => {
       const moved = await yodel(["rebase", "--json", "--dir", dir]);
       expect(moved.code, moved.err).toBe(0);
       expectValid("rebase", json(moved));
+    } finally {
+      dispose();
+    }
+  }, 60_000);
+
+  it("checkpoint: the checkpoint written, and the status of a fresh environment that starts at it", async () => {
+    const { dir, dispose } = projectFrom("clickhouse-versioned");
+    try {
+      const migrations = join(dir, "migrations");
+      const db: BuiltObject = { export: "db", type: "ClickHouse::Database", ddl: "CREATE DATABASE yodel_63 ENGINE = Atomic", dependsOn: [] };
+      const made = createMigration({ name: "one", build: { dialect: "clickhouse", objects: [db] }, now: new Date(Date.UTC(2026, 9, 10, 10, 0)) });
+      if (made.id === undefined) throw new Error("no change");
+      writeMigration(migrations, made);
+      const ran = await yodel(["checkpoint", "base", "--json", "--dir", dir]);
+      expect(ran.code, ran.err).toBe(0);
+      expectValid("checkpoint", json(ran));
+      const status = compareHistory(scanMigrations(migrations).ordered ?? [], deriveState([]));
+      expect(status.skipped).toEqual([{ id: made.id, reason: "covered", checkpoint: (json(ran) as { id: string }).id }]);
+      expectValid("status", statusJson({ ...statusReport("clickhouse"), status }));
     } finally {
       dispose();
     }

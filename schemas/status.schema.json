@@ -297,6 +297,20 @@
             }
           }
         },
+        "skipped": {
+          "description": "The migrations a checkpoint leaves out in this environment, in chain order: covered (before the checkpoint the environment starts from, named) or checkpoint (a checkpoint the environment does not start from). Absent when there are none.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "reason"],
+            "properties": {
+              "id": { "type": "string" },
+              "reason": { "enum": ["covered", "checkpoint"] },
+              "checkpoint": { "type": "string" }
+            }
+          }
+        },
         "planDigest": {
           "description": "The digest yodel apply would ask approval for, when it would not refuse.",
           "type": "string"

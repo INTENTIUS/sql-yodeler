@@ -22,6 +22,8 @@ checksum           error
                    a migration's files no longer hash to its checksum: an edit after it was written, or (with --env) after it was applied
 unreadable-object  error
                    an object in a recorded schema, or a step, the sql lexicon cannot read or classify; never skipped
+checkpoint         error
+                   a checkpoint whose recorded schema is no longer the one it was written from, its parent's, or that holds a step other than a statement
 destructive        error, silenceable
                    a statement or Op step removes data that cannot be recovered (a table or column drop)
 pg-rewrite         error, silenceable, postgres
@@ -46,7 +48,7 @@ replay             error
                    with --replay <env>: the history, replayed into a fresh database, does not give each migration's recorded schema
 ```
 
-`fork`, `directory`, `checksum` and `unreadable-object` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
+`fork`, `directory`, `checksum`, `unreadable-object` and `checkpoint` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
 
 Two Postgres rules read a step with the rest of its migration (#44). `pg-signature` flags a function or procedure dropped and created with another signature: SQLPG281 (the result type, an output parameter, an input parameter's name or a removed default, which `CREATE OR REPLACE` refuses, or other parameter types between two builds), or a routine dropped and one of the same name with other parameter types created in the same migration. A caller written for the old signature fails once it runs; it can be silenced for the statement. `pg-routine-in-use` flags a function dropped while a trigger in the migration's recorded schema still executes it, which happens when the trigger names the function in its text rather than through its declaration. The `DROP` would fail on the server, so it cannot be silenced: declare the function again, or drop the trigger in the same migration.
 
@@ -194,6 +196,8 @@ $ npx yodel lint --replay replay
 yodel lint: refused: replay and dev are the same server (127.0.0.1:8123) and both name shop; the replay would drop dev's database, with or without --reset. Point replay at a throwaway server of its own (a second emulator on another port), or, to empty dev too, add --reset-shared dev. Nothing was run.
 [exit 4]
 ```
+
+A checkpoint ([Migrations](migrations.md#checkpoints-yodel-checkpoint)) is replayed on its own: after the chain, the database is emptied again and the checkpoint's statements run into it, and the result must be its recorded schema.
 
 `--reset` drops them first. Never point it at a server whose data matters. `--keep` leaves the replayed database in place to look at. Rebuild and `PostgresMigrationOp` steps run in the replay; backfills are skipped, since the replayed database has no data. The end of the ClickHouse example's run:
 

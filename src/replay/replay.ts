@@ -22,6 +22,12 @@
  *   replayed: the check stops there, naming it ({@link ReplayResult} outcome
  *   `unreplayable`).
  *
+ * A checkpoint (#63) is left out of the chain: it creates its parent's
+ * recorded schema from nothing. After the chain, each checkpoint is
+ * replayed on its own into the database emptied again, and compared with
+ * its recorded schema, the one the chain was shown to give. So a fresh
+ * environment that starts from it ends where one that ran the chain does.
+ *
  * The database is the replay's: it must be fresh when the replay starts
  * (every database or schema the history names absent, the default one
  * empty), or emptied first when the caller says so (`reset`), and it is
@@ -32,7 +38,7 @@
 import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classifier";
 import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { YodelError, type SqlDialect } from "../project.js";
-import type { Migration } from "../migrations/index.js";
+import { isCheckpoint, type Migration } from "../migrations/index.js";
 import { asBackfill, describeStep, planStep, type BackfillStep } from "../steps/kinds.js";
 
 /** Exit code: the target is not fresh and `reset` was not given; nothing was run. */
@@ -74,6 +80,8 @@ export interface ReplayedMigration {
   ran: string[];
   /** Steps skipped, as `step <i>: <what> (<why>)`. */
   skipped: string[];
+  /** A checkpoint (#63), replayed on its own into an empty database after the chain. */
+  checkpoint?: true;
 }
 
 export type ReplayResult = {
@@ -127,41 +135,65 @@ export async function replayMigrations(ordered: readonly Migration[], driver: Re
   }
 
   const matched: ReplayedMigration[] = [];
-  try {
-    for (const m of ordered) {
-      const done: ReplayedMigration = { id: m.id, statements: 0, ran: [], skipped: [] };
-      log(`${m.id}: replaying`);
-      for (const [i, step] of m.document.steps.entries()) {
-        const s = step as typeof step | BackfillStep;
-        if (s.kind === "statement") {
-          try {
-            await driver.statement(m, i, s);
-          } catch (e) {
-            return { ...base, reset: occupied.length > 0, matched, outcome: "failed", migration: m.id, step: i, error: firstLine(message(e)) };
-          }
-          done.statements++;
-          continue;
+  const reset = occupied.length > 0;
+  type Failure = Exclude<ReplayResult, { outcome: "matches" }>;
+  /** Replays one migration's steps on what the database holds now, then compares; a failure, or the migration replayed. */
+  const replayOne = async (m: Migration): Promise<ReplayedMigration | Failure> => {
+    const done: ReplayedMigration = { id: m.id, statements: 0, ran: [], skipped: [], ...(isCheckpoint(m) ? { checkpoint: true } : {}) };
+    log(`${m.id}: replaying${isCheckpoint(m) ? " (a checkpoint, into an empty database)" : ""}`);
+    for (const [i, step] of m.document.steps.entries()) {
+      const s = step as typeof step | BackfillStep;
+      if (s.kind === "statement") {
+        try {
+          await driver.statement(m, i, s);
+        } catch (e) {
+          return { ...base, reset, matched, outcome: "failed", migration: m.id, step: i, error: firstLine(message(e)) };
         }
-        if (asBackfill(s)) {
-          done.skipped.push(`step ${String(i)}: ${describeStep(s)} (moves data; the replayed database has none)`);
-          continue;
-        }
-        const plan = planStep(s);
-        const outcome: OpStepOutcome = plan.run === "refused" ? { refused: plan.reason } : await driver.opStep(m, i);
-        if ("refused" in outcome) {
-          return { ...base, reset: occupied.length > 0, matched, outcome: "unreplayable", migration: m.id, step: i, reason: outcome.refused };
-        }
-        done.ran.push(`step ${String(i)}: ${describeStep(s)}${outcome.note ? ` (${outcome.note})` : ""}`);
+        done.statements++;
+        continue;
       }
-      const changes = await driver.compare(m);
-      if (changes.length > 0) {
-        log(`${m.id}: differs from its recorded schema (${String(changes.length)} difference${changes.length === 1 ? "" : "s"})`);
-        return { ...base, reset: occupied.length > 0, matched, outcome: "differs", migration: done, changes };
+      if (asBackfill(s)) {
+        done.skipped.push(`step ${String(i)}: ${describeStep(s)} (moves data; the replayed database has none)`);
+        continue;
       }
-      log(`${m.id}: matches its recorded schema`);
-      matched.push(done);
+      const plan = planStep(s);
+      const outcome: OpStepOutcome = plan.run === "refused" ? { refused: plan.reason } : await driver.opStep(m, i);
+      if ("refused" in outcome) {
+        return { ...base, reset, matched, outcome: "unreplayable", migration: m.id, step: i, reason: outcome.refused };
+      }
+      done.ran.push(`step ${String(i)}: ${describeStep(s)}${outcome.note ? ` (${outcome.note})` : ""}`);
     }
-    return { ...base, reset: occupied.length > 0, matched, outcome: "matches" };
+    const changes = await driver.compare(m);
+    if (changes.length > 0) {
+      log(`${m.id}: differs from its recorded schema (${String(changes.length)} difference${changes.length === 1 ? "" : "s"})`);
+      return { ...base, reset, matched, outcome: "differs", migration: done, changes };
+    }
+    log(`${m.id}: matches its recorded schema`);
+    return done;
+  };
+  const failed = (r: ReplayedMigration | Failure): r is Failure => "outcome" in r;
+
+  try {
+    // The chain, first to newest. A checkpoint (#63) creates its parent's schema from nothing, so on top of the chain it would only fail: it is replayed on its own below.
+    const checkpoints: Migration[] = [];
+    for (const m of ordered) {
+      if (isCheckpoint(m)) {
+        checkpoints.push(m);
+        log(`${m.id}: a checkpoint; replayed on its own, into an empty database, after the chain`);
+        continue;
+      }
+      const r = await replayOne(m);
+      if (failed(r)) return r;
+      matched.push(r);
+    }
+    // Each checkpoint into an empty database: its statements must give its recorded schema, its parent's, which the chain was just shown to give.
+    for (const m of checkpoints) {
+      await driver.clear();
+      const r = await replayOne(m);
+      if (failed(r)) return r;
+      matched.push(r);
+    }
+    return { ...base, reset, matched, outcome: "matches" };
   } finally {
     // Emptying afterwards is housekeeping: its failure is reported, never put in place of the result.
     if (options.keep !== true) await driver.clear().catch((e: unknown) => { log(`could not empty ${driver.scope.join(", ")} afterwards: ${firstLine(message(e))}`); });

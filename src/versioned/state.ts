@@ -21,10 +21,20 @@
  * migration that failed part way may be edited before it resumes (to fix
  * the statement that failed), as long as every statement that already
  * succeeded is unchanged: those are compared statement by statement.
+ *
+ * ## Checkpoints (#63)
+ *
+ * A checkpoint creates its parent's recorded schema from nothing. An
+ * environment whose history is empty starts at the newest checkpoint: the
+ * migrations before it are skipped, never run there. An environment whose
+ * history records a checkpoint started there, and skips the migrations
+ * before it the same way. Any other checkpoint is skipped: the environment
+ * ran (or started past) the migrations it stands for. A skipped migration
+ * is neither applied nor pending, so it is never out of order either.
  */
 
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { computeChecksum, type Migration } from "../migrations/index.js";
+import { computeChecksum, isCheckpoint, type Migration } from "../migrations/index.js";
 import { isApplied, statementDone, type HistoryState, type MigrationRecord, type Repair } from "../history/index.js";
 import { planStep, stepSha } from "../steps/index.js";
 
@@ -76,12 +86,23 @@ export type Mismatch =
   | { kind: "part-way"; id: string; statement: number; message: string }
   | { kind: "missing"; id: string; recorded: string; message: string };
 
+/** A migration this environment never runs, because of a checkpoint (#63). */
+export interface SkippedMigration {
+  id: string;
+  /** `covered`: it comes before the checkpoint the environment starts from. `checkpoint`: a checkpoint the environment does not start from. */
+  reason: "covered" | "checkpoint";
+  /** `covered`: the checkpoint the environment starts from. */
+  checkpoint?: string;
+}
+
 export interface VersionedStatus {
   /** In chain order; then any the directory no longer has, in the order they were applied. */
   applied: AppliedMigration[];
   /** In chain order. */
   pending: PendingMigration[];
   mismatches: Mismatch[];
+  /** In chain order: the migrations a checkpoint leaves out here. Absent when there are none. */
+  skipped?: SkippedMigration[];
 }
 
 export const outOfOrder = (s: VersionedStatus): PendingMigration[] => s.pending.filter((p) => p.outOfOrder);
@@ -182,10 +203,25 @@ export function compareHistory(ordered: readonly Migration[], state: HistoryStat
     });
   }
 
+  // The checkpoint this environment starts from: the newest one its history records, or, for an empty history, the newest one in the chain.
+  let start = -1;
+  for (const [i, m] of ordered.entries()) if (isCheckpoint(m) && state.byId.has(m.id)) start = i;
+  if (start < 0 && state.migrations.length === 0) for (const [i, m] of ordered.entries()) if (isCheckpoint(m)) start = i;
+  const startId = start < 0 ? undefined : ordered[start]?.id;
+  const skipped: SkippedMigration[] = [];
+
   const pending: PendingMigration[] = [];
   for (const [i, m] of ordered.entries()) {
     const rec = state.byId.get(m.id);
     if (isApplied(rec)) continue;
+    if (!rec && i < start) {
+      skipped.push({ id: m.id, reason: "covered", ...(startId ? { checkpoint: startId } : {}) });
+      continue;
+    }
+    if (!rec && i !== start && isCheckpoint(m)) {
+      skipped.push({ id: m.id, reason: "checkpoint" });
+      continue;
+    }
     const actual = computeChecksum(m.files);
     let pw: PartWay | undefined;
     if (rec) {
@@ -203,5 +239,5 @@ export function compareHistory(ordered: readonly Migration[], state: HistoryStat
       migration: m,
     });
   }
-  return { applied, pending, mismatches };
+  return { applied, pending, mismatches, ...(skipped.length > 0 ? { skipped } : {}) };
 }

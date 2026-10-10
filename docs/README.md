@@ -41,21 +41,22 @@ Usage: yodel <command> [options]
 Schema management and migrations for ClickHouse and Postgres.
 
 Commands:
-  init      adopt a live database: declarations and a baseline recorded applied
-  plan      show what apply would change in an environment
-  apply     bring an environment to its declared schema or pending migrations
-  approve   approve the plan yodel apply would run (a person at a terminal)
-  override  override a policy rule for the current plan, with a reason
-  new       write the next migration from the declared schema
-  lint      check the migrations against the lint rules
-  status    list applied, pending and out-of-order migrations
-  report    each environment's migrations side by side, and the audit log
-  drift     report declared objects changed out of band or gone
-  docs      write an HTML reference and a Mermaid ERD of the schema
-  ci        render the project's CI pipelines (GitHub, GitLab, Forgejo)
-  rebase    move a migration onto a new parent and recompute its schema
-  repair    record a new checksum for an applied migration, with a reason
-  mcp       serve read-only tools to a coding agent (MCP, stdio)
+  init        adopt a live database: declarations and an applied baseline
+  plan        show what apply would change in an environment
+  apply       bring an environment to its declared schema or pending migrations
+  approve     approve the plan yodel apply would run (a person at a terminal)
+  override    override a policy rule for the current plan, with a reason
+  new         write the next migration from the declared schema
+  checkpoint  write a checkpoint: the newest recorded schema from nothing
+  lint        check the migrations against the lint rules
+  status      list applied, pending and out-of-order migrations
+  report      each environment's migrations side by side, and the audit log
+  drift       report declared objects changed out of band or gone
+  docs        write an HTML reference and a Mermaid ERD of the schema
+  ci          render the project's CI pipelines (GitHub, GitLab, Forgejo)
+  rebase      move a migration onto a new parent and recompute its schema
+  repair      record a new checksum for an applied migration, with a reason
+  mcp         serve read-only tools to a coding agent (MCP, stdio)
 
 Options:
   -h, --help     show this help

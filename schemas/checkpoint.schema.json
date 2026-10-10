@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/checkpoint.schema.json",
+  "title": "yodel checkpoint <name> --json",
+  "description": "Version 1. The checkpoint written: its id and directory, the migration whose recorded schema it creates (its parent), its checksum, how many statements it holds, and the SHA-256 of the recorded schema it was written from. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["written", "id", "path", "parent", "checksum", "dialect", "statements", "schema"],
+  "properties": {
+    "written": { "const": true },
+    "id": { "type": "string" },
+    "path": { "type": "string" },
+    "parent": { "type": "string" },
+    "checksum": { "type": "string" },
+    "dialect": { "$ref": "common.schema.json#/$defs/dialect" },
+    "statements": { "type": "integer", "minimum": 1 },
+    "schema": { "type": "string" }
+  }
+}

@@ -58,7 +58,7 @@ export function renderReplay(result: ReplayResult): string {
   if (result.scope.length > 0) lines.push(`  ${result.dialect === "postgres" ? "schemas" : "databases"}: ${result.scope.join(", ")}${result.reset ? " (emptied first)" : ""}${result.kept ? " (left in place)" : ""}`);
   for (const m of result.matched) {
     const extra = [...m.ran.map((r) => `ran ${r}`), ...m.skipped.map((s) => `skipped ${s}`)];
-    lines.push(`  ok      ${m.id} (${String(m.statements)} statement${m.statements === 1 ? "" : "s"}${extra.length > 0 ? `; ${extra.join("; ")}` : ""})`);
+    lines.push(`  ok      ${m.id} (${String(m.statements)} statement${m.statements === 1 ? "" : "s"}${m.checkpoint ? ", a checkpoint, from an empty database" : ""}${extra.length > 0 ? `; ${extra.join("; ")}` : ""})`);
   }
   const failure = replayFailure(result);
   if (!failure) {

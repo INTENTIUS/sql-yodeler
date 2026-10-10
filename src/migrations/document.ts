@@ -66,6 +66,14 @@ export interface MigrationDocument {
   major?: number;
   /** ClickHouse: unset (or `single`): yodel writes migrations topology-neutral and renders them per environment at apply time. */
   topology?: string;
+  /**
+   * Set on a checkpoint (`yodel checkpoint`, #63): its steps create its
+   * parent's recorded schema from nothing, and `schema` is the SHA-256 of
+   * that recorded schema (see `./checkpoint.ts`). An environment whose
+   * history is empty starts at the newest checkpoint; one that already ran
+   * the chain skips it.
+   */
+  checkpoint?: { schema: string };
   /** True when a step is an Op or a manual step: the migration is more than its SQL. */
   refused: boolean;
   /** What the diff pointed out besides the changes, e.g. a likely rename written as a drop and an add. */
@@ -110,6 +118,7 @@ const DOCUMENT_ORDER: readonly (keyof MigrationDocument)[] = [
   "defaultSchema",
   "major",
   "topology",
+  "checkpoint",
   "refused",
   "hints",
   "checks",

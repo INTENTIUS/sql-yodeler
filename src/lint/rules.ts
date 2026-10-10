@@ -5,7 +5,7 @@
  * Two kinds:
  *
  * - Integrity rules, over the directory and each migration as a whole:
- *   `fork`, `directory`, `checksum`, `unreadable-object`. Always errors; no
+ *   `fork`, `directory`, `checksum`, `unreadable-object`, `checkpoint`. Always errors; no
  *   config lowers them and nothing silences them, because a migration that
  *   breaks one cannot be applied safely or cannot be checked at all.
  * - Statement rules, from the classes chant's classifier gives each step:
@@ -46,6 +46,7 @@ export const LINT_RULES = {
   directory: integrity("directory", "the migrations directory is not one readable chain: a bad name or file, a missing parent, a cycle, another dialect"),
   checksum: integrity("checksum", "a migration's files no longer hash to its checksum: an edit after it was written, or (with --env) after it was applied"),
   "unreadable-object": integrity("unreadable-object", "an object in a recorded schema, or a step, the sql lexicon cannot read or classify; never skipped"),
+  checkpoint: integrity("checkpoint", "a checkpoint whose recorded schema is no longer the one it was written from, its parent's, or that holds a step other than a statement"),
   destructive: statement("destructive", "a statement or Op step removes data that cannot be recovered (a table or column drop)"),
   "pg-rewrite": statement("pg-rewrite", "Postgres: rewrites or scans the whole table under ACCESS EXCLUSIVE, blocking reads and writes while it runs", "postgres"),
   "pg-lock": statement("pg-lock", "Postgres: holds a lock that blocks writes for a whole scan or index build (an index without CONCURRENTLY, a constraint validated in place)", "postgres"),

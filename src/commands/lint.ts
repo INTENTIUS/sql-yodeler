@@ -22,6 +22,8 @@ Rules (yodel lint --rules lists them with their levels):
   checksum           a migration's files no longer hash to its checksum
   unreadable-object  an object in a recorded schema, or a step, the sql
                      lexicon cannot read or classify; an error, never skipped
+  checkpoint         a checkpoint whose recorded schema is no longer its
+                     parent's, or that holds a step other than a statement
   destructive        a drop that removes data for good
   pg-rewrite         Postgres: a rewrite or full scan under ACCESS EXCLUSIVE
   pg-lock            Postgres: writes blocked for a whole index build or scan
@@ -38,7 +40,9 @@ Rules (yodel lint --rules lists them with their levels):
   silence            a yodel:allow line that is wrong or silences nothing
   replay             with --replay <env>: the history, replayed into a fresh
                      database on <env>'s server, does not give a migration's
-                     recorded schema (names the first that differs)
+                     recorded schema (names the first that differs); each
+                     checkpoint is replayed on its own, into an empty
+                     database
 
 Silencing: a line above a statement in its migration.sql,
   -- yodel:allow <rule> <reason>
@@ -51,7 +55,7 @@ record the new one with --update-checksum <id>.
 
 Levels: yodel.config.ts lint.rules sets a rule to "error", "warning" or
 "off", e.g. lint: { rules: { "ch-mutation": "warning" } }. fork, directory,
-checksum and unreadable-object are always errors.
+checksum, unreadable-object and checkpoint are always errors.
 
 Options:
   --env <env>             also compare with <env>'s history: a

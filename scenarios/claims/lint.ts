@@ -1,4 +1,4 @@
-import { renameSync } from "node:fs";
+import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
@@ -8,6 +8,8 @@ interface Lint {
   p: Project;
   /** The second migration, adding a column; the fork part sets it aside. */
   note?: string;
+  /** The fork part's migration on the other branch. */
+  audit?: string;
 }
 
 /**
@@ -59,6 +61,7 @@ export async function forkPart(ctx: Ctx, s: Lint): Promise<void> {
   addTable(p, "audit");
   const b = await p.newMigration("add-audit");
   if (b === undefined) throw new Error("yodel new wrote no migration");
+  s.audit = b;
   const one = await p.yodel(["lint", "--json"]);
   if (one.code !== 0) throw new Error(`yodel lint fails one branch on its own (exit ${String(one.code)})`);
   // Both pull requests merged: the one set aside comes back, following the same parent as b.
@@ -74,10 +77,59 @@ export async function forkPart(ctx: Ctx, s: Lint): Promise<void> {
   hold(!(await ctx.db.tableExists(ctx.dialect === "ch" ? "events" : "orders")), "lint changed the server");
 }
 
-/** The parts, in order, on one project: two migrations replayed, then a second branch forking them. */
+/**
+ * `yodel checkpoint` (#63): a checkpoint after the newest migration creates
+ * its recorded schema from nothing. `yodel lint --replay` replays the chain,
+ * then the checkpoint alone into an empty database, and both give that
+ * schema. A fresh environment then applies the checkpoint only, skips the
+ * migrations before it, and ends with no drift from the recorded schema:
+ * the schema an environment that ran the chain has.
+ * BREAK: the checkpoint's CREATE TABLE is edited (a column's type, in
+ * migration.json and migration.sql alike, its checksum updated), so it no
+ * longer creates the schema it records.
+ */
+export async function checkpointPart(ctx: Ctx, s: Lint): Promise<void> {
+  const { p } = s;
+  // The fork part leaves both branches in the directory; the checkpoint follows one chain, so the audit branch goes.
+  if (s.note && s.audit && existsSync(p.path("migrations", s.note)) && existsSync(p.path("migrations", s.audit))) p.removeMigration(s.audit);
+  const before = p.migrationIds();
+  const wrote = await p.yodel(["checkpoint", "base", "--json"]);
+  if (wrote.code !== 0) throw new Error(`yodel checkpoint exited ${String(wrote.code)}: ${wrote.err}`);
+  const cp = parse<{ id: string }>(wrote).id;
+  if (ctx.broken) {
+    const doc = JSON.parse(p.read(`migrations/${cp}/migration.json`)) as { steps: Array<{ kind: string; sql?: string }> };
+    const [from, to] = ctx.dialect === "ch" ? ["UInt64", "UInt32"] : ["bigint", "integer"];
+    const step = doc.steps.find((x) => x.kind === "statement" && x.sql?.includes("CREATE TABLE") && x.sql.includes(from));
+    if (!step?.sql) throw new Error(`the checkpoint ${cp} has no CREATE TABLE with ${from}`);
+    const old = step.sql;
+    step.sql = old.replace(from, to);
+    p.write(`migrations/${cp}/migration.json`, `${JSON.stringify(doc, null, 2)}\n`);
+    p.edit(`migrations/${cp}/migration.sql`, old, step.sql);
+    const updated = await p.yodel(["lint", "--update-checksum", cp]);
+    if (updated.code === 1) throw new Error(`yodel lint --update-checksum ${cp} exited 1`);
+  }
+  await p.commit("a checkpoint");
+
+  const replay = await p.yodel(["lint", "--replay", p.env, "--json"], { timeoutMs: 600_000 });
+  hold(replay.code === 0, `yodel lint --replay exited ${String(replay.code)} with the checkpoint ${cp}: ${JSON.stringify(parse<unknown>(replay)).slice(0, 400)}`);
+  hold(JSON.stringify(parse<unknown>(replay)).includes(`"checkpoint": true`), `the replay did not replay the checkpoint ${cp} on its own`);
+
+  // A fresh environment: it starts at the checkpoint.
+  const applied = await p.stepsApply();
+  hold(applied.code === 0, `yodel apply on a fresh environment exited ${String(applied.code)}: ${applied.err.slice(0, 300)}`);
+  const status = (await p.yodel(["status", p.env, "--json"])).out;
+  const doc = JSON.parse(status.slice(status.indexOf("{"))) as { applied: Array<{ id: string }>; skipped?: Array<{ id: string; reason: string }> };
+  hold(doc.applied.map((a) => a.id).join() === cp, `the fresh environment applied ${doc.applied.map((a) => a.id).join(", ")}, not the checkpoint ${cp} alone`);
+  hold((doc.skipped ?? []).map((k) => k.id).join() === before.filter((id) => existsSync(p.path("migrations", id))).join(), `the fresh environment did not skip the migrations before the checkpoint: ${JSON.stringify(doc.skipped)}`);
+  const drift = await p.yodel(["drift", p.env, "--json"]);
+  hold(drift.code === 0, `yodel drift after starting from the checkpoint exited ${String(drift.code)}: the environment is not at the recorded schema`);
+}
+
+/** The parts, in order, on one project: two migrations replayed, a second branch forking them, then a checkpoint on one chain. */
 const parts = [
   ["replay", replayPart],
   ["fork", forkPart],
+  ["checkpoint", checkpointPart],
 ] as const;
 
 async function body(ctx: Ctx): Promise<void> {
@@ -86,7 +138,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const lintClaim: Claim = {
   name: "lint",
-  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations",
+  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it",
   dialects: { ch: body, pg: body },
   parts: parts.map(([name]) => name),
 };
