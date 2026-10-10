@@ -85,7 +85,7 @@ Revoked by this apply, though no declaration revokes it: privileges granted by h
 To keep it, declare it with grant`...`.
 ```
 
-`yodel plan --json` has the same under `access`: `managed`, `source`, and `changes`, a revoke of a hand-made grant marked `byHand: true`. The apply prints the section before it runs, and its gate binds the plan, so a privilege granted by hand after the approval changes the digest and the apply asks again.
+`yodel plan --json` has the same under `access`: `managed`, `source`, and `changes`, a revoke of a hand-made grant marked `byHand: true`. The apply prints the section before it runs. Its gate binds the digest of chant's `lifecycle diff`, which observes policies and roles but not privileges, so an approval on the declarative path does not cover a privilege granted or revoked by hand after it: the apply makes the privileges match the declarations whatever changed in between. On the versioned path every statement, grants and revokes included, is in the migration's checksum and so in the digest the approval binds.
 
 On the versioned path, `yodel new` writes each access change as a statement with its rule and class (SQLPG200 for a role or policy created with its table, SQLPG290 to SQLPG298 otherwise), and prints how many steps are about access and which of them take access away. `yodel plan` and the pull request comment list the same under each pending migration.
 

@@ -77,12 +77,11 @@ interface AccessPlan {
   access?: { managed: boolean; source: string; changes: Array<{ object: string; rule: string; class: string; field: string; byHand?: true }> };
 }
 
-/** yodel plan, approved, yodel apply: the apply's exit code. `between` runs after the approval and before the apply. */
-async function approvedApply(p: Project, between?: () => Promise<void>): Promise<number> {
+/** yodel apply, approved at its gate, yodel apply again: the second apply's exit code. */
+async function approvedApply(p: Project): Promise<number> {
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)}): ${gated.ran.err.slice(-600)}`);
   await p.approve(gated.doc.approve);
-  if (between) await between();
   return (await p.apply()).ran.code;
 }
 
@@ -93,9 +92,9 @@ async function approvedApply(p: Project, between?: () => Promise<void>): Promise
  * are planned with their rules and classes, and applied behind the gate. A
  * privilege then granted by hand on orders is drift: yodel plan calls it out
  * as revoked by the next apply, and the approved apply revokes it.
- * BREAK: a second privilege is granted by hand after the approval, so the
- * approved plan no longer covers what the apply would revoke; the gate asks
- * again and the role keeps the first.
+ * BREAK: access is turned off for the environment before the grant is made
+ * by hand, so the plan does not read the server's privileges and the role
+ * keeps it.
  */
 async function access(ctx: Ctx, { p }: Declarative): Promise<void> {
   manageAccess(p);
@@ -113,13 +112,18 @@ async function access(ctx: Ctx, { p }: Declarative): Promise<void> {
   const on = await accessOnServer(ctx);
   hold(on.rls && on.forced && on.policy && on.usage && on.select && !on.insert, `on the server after the apply: ${JSON.stringify(on)}`);
 
+  if (ctx.broken) {
+    manageAccess(p, false);
+    p.edit("chant.config.ts", "\n        access: true,", "");
+    await p.commit("access off");
+  }
   await ctx.db.exec(`GRANT INSERT ON ${ctx.db.name}.orders TO ${reader(ctx)}`);
   const drift = await p.yodel(["plan", p.env, "--json"]);
   const byHand = (parse<AccessPlan>(drift).access?.changes ?? []).filter((c) => c.byHand);
   hold(byHand.length === 1 && byHand[0]?.rule === "SQLPG297" && byHand[0].object.includes("orders"), `yodel plan does not call out the grant made by hand as revoked: ${JSON.stringify(parse<AccessPlan>(drift).access)}`);
   const text = await p.yodel(["plan", p.env]);
   hold(/Revoked by this apply, though no declaration revokes it[^\n]*\n\s+relation \S+orders FROM \S+: insert\n/.test(text.out), `yodel plan's text does not call out the revoke:\n${text.out.slice(-1200)}`);
-  await approvedApply(p, ctx.broken ? () => ctx.db.exec(`GRANT UPDATE ON ${ctx.db.name}.orders TO ${reader(ctx)}`) : undefined);
+  await approvedApply(p);
   const after = await accessOnServer(ctx);
   hold(!after.insert && after.select, `the grant made by hand was not revoked, or the declared one went with it: ${JSON.stringify(after)}`);
   const clean = await p.yodel(["plan", p.env, "--json"]);
