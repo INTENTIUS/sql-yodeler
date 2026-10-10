@@ -1,20 +1,14 @@
 /**
- * Postgres functions, procedures and triggers in a migration (#44).
+ * Postgres functions, procedures and triggers in a migration (#44): the
+ * objects of a Postgres build as chant's plan reads them, for lint.
  *
- * chant's `diffStatements` classifies a trigger created on a table that
- * already exists as SQLPG283 (metadata: SHARE ROW EXCLUSIVE on the table),
- * but labels the `CREATE TRIGGER` statement it writes for it SQLPG200
- * create, as if the table were new. A plan policy or a reviewer reading
- * `create` would take it for a statement that blocks nobody, so `yodel new`
- * gives those statements the change's rule and class.
+ * chant labels a trigger created on a table that already exists SQLPG283
+ * (metadata: SHARE ROW EXCLUSIVE on the table) itself, and one created
+ * with its table SQLPG200 create.
  */
 
-import type { SchemaStatements } from "@intentius/chant-lexicon-sql/migration-statements";
-import { PG_CLASSIFIER_RULES } from "@intentius/chant-lexicon-sql/postgres/plan/rules";
 import { pgSchemaFromBuildOutput } from "@intentius/chant-lexicon-sql/postgres/plan/schema";
 import type { BuildOutput } from "../chant/build.js";
-
-export const PG_TRIGGER = "Postgres::Trigger";
 
 /** A Postgres build's objects as chant's plan reads them: kind, schema-qualified names, a trigger's table and function. */
 export interface PgObject {
@@ -44,27 +38,4 @@ export function pgObjects(build: BuildOutput, defaultSchema = "public"): PgObjec
   } catch {
     return [];
   }
-}
-
-/**
- * The statements with each `CREATE TRIGGER` on a table `before` already
- * declares (and its `COMMENT ON TRIGGER`) labelled SQLPG283, the rule the
- * diff gave the change, in place of SQLPG200 create.
- */
-export function relabelTriggerCreates(statements: SchemaStatements, before: BuildOutput, after: BuildOutput): SchemaStatements {
-  if (statements.dialect !== "postgres") return statements;
-  const schema = statements.defaultSchema ?? "public";
-  const tables = new Set(pgObjects(before, schema).filter((o) => o.kind === "table").map((o) => o.qualified));
-  if (tables.size === 0) return statements;
-  const onExisting = new Set(
-    pgObjects(after, schema)
-      .filter((o) => o.kind === "trigger" && tables.has(String(o.fields.table)))
-      .map((o) => o.export),
-  );
-  if (onExisting.size === 0) return statements;
-  const rule = PG_CLASSIFIER_RULES.SQLPG283;
-  const steps = statements.steps.map((s) =>
-    s.kind === "statement" && s.type === PG_TRIGGER && s.rule === "SQLPG200" && s.class === "create" && onExisting.has(s.object) ? { ...s, rule: rule.id, class: rule.class } : s,
-  );
-  return { ...statements, steps };
 }

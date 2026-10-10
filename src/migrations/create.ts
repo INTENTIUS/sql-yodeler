@@ -16,7 +16,6 @@ import { MIGRATION_FORMAT, serializeDocument, type MigrationCheck, type Migratio
 import { MIGRATION_NAME, type Migration } from "./directory.js";
 import { asBackfill, BACKFILL_FILE, describeForm, PG_MIGRATION_OP, REBUILD_OP, type BackfillForm } from "../steps/kinds.js";
 import { backfillFormStep, backfillStep, describeFormSql } from "../steps/backfill.js";
-import { relabelTriggerCreates } from "./routines.js";
 
 export interface CreateMigrationOptions {
   /** The migration's name, the part of its id after the timestamp. */
@@ -155,7 +154,6 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
   } catch (e) {
     throw new YodelError(e instanceof Error ? e.message : String(e));
   }
-  statements = relabelTriggerCreates(statements, before, options.build);
   if (options.retain !== undefined) statements = { ...statements, steps: statements.steps.map((s) => withRetain(s, options.retain as string)) };
   if (options.backfill) {
     const step = "form" in options.backfill ? backfillFormStep(options.name, options.backfill.form) : backfillStep(options.name, options.backfill.file ?? BACKFILL_FILE);
