@@ -10,7 +10,11 @@ import type { BuildOutput } from "../src/chant/build.js";
 import { computeChecksum, createMigration, readMigrations, verifyChecksum, writeMigration, type CreatedMigration, type Migration } from "../src/migrations/index.js";
 import {
   asBackfill,
+  backfillFormStep,
   backfillProblems,
+  formProblems,
+  formTemplate,
+  keyRanges,
   backfillStep,
   backfillTemplate,
   planStep,
@@ -293,6 +297,59 @@ describe("a backfill step", () => {
     expect(sent).toEqual([]);
   });
 
+  it("checks a form: a table, a key and a batch size or a list, and SQL using their placeholders", () => {
+    expect(formProblems({ table: "t", key: "id", batchSize: 10, sql: "UPDATE t SET a = 1 WHERE id >= {from} AND id < {to}" })).toEqual([]);
+    expect(formProblems({ table: "t", batches: ["a", "b"], sql: ["UPDATE t SET a = 1 WHERE m = '{batch}'", "SELECT 1"] })).toEqual([]);
+    expect(formProblems({ table: "t", key: "id", batchSize: 10, sql: "UPDATE t SET a = 1" })).toEqual([expect.stringContaining("uses none of {from} and {to}")]);
+    expect(formProblems({ table: "t", key: "id", batchSize: 0, sql: "{from}" })).toEqual([expect.stringContaining("batchSize")]);
+    expect(formProblems({ table: "t", key: "id", batchSize: 5, batches: [1], sql: "{from}" })).toEqual([expect.stringContaining("not both")]);
+    expect(formProblems({ table: "t", sql: "{batch}" })).toEqual([expect.stringContaining('give "key" and "batchSize"')]);
+    expect(formProblems({ table: "t", batches: [1, 1], sql: "{batch}", colour: 1 }).join("; ")).toMatch(/"colour" is not a field.*lists a batch twice/);
+    expect(JSON.parse(formTemplate("fill"))).toMatchObject({ key: "id", batchSize: 100000, settings: { mutations_sync: "2" } });
+    expect(formTemplate("fill", "postgres")).toContain("UPDATE <schema>.<table>");
+  });
+
+  it("covers the key with ranges aligned to the batch size, so a rerun sees the same ones", () => {
+    expect(keyRanges(3n, 27n, 10).map((b) => b.id)).toEqual(["0-10", "10-20", "20-30"]);
+    expect(keyRanges(-5n, 4n, 10).map((b) => b.id)).toEqual(["-10-0", "0-10"]);
+    expect(keyRanges(10n, 10n, 10)[0]?.values).toEqual({ "{from}": "10", "{to}": "20" });
+  });
+
+  it("a form step is planned, described and run as a backfill: its ranges from the table's keys, a receipt each, and resumed after a failure", async () => {
+    const form = { table: "yodel_12.events", key: "id", batchSize: 10, sql: "ALTER TABLE yodel_12.events UPDATE k = 'x' WHERE id >= {from} AND id < {to}", settings: { mutations_sync: "2" } };
+    const step = backfillFormStep("fill", form);
+    expect(planStep(step)).toEqual({ run: "backfill", form });
+    expect(planStep({ ...step, options: { ...form, sql: "no placeholder" } })).toMatchObject({ run: "refused", reason: expect.stringContaining("uses none of") as unknown });
+    expect(step.detail).toContain("a data backfill of yodel_12.events by id, 10 a batch");
+    expect(step.detail).toContain("ALTER TABLE yodel_12.events UPDATE k = 'x' WHERE id >= {from} AND id < {to};");
+
+    const sent: Array<[string, unknown]> = [];
+    let failOn: string | undefined = "id >= 20";
+    const port = {
+      query: <Row>(sql: string, options?: { settings?: Record<string, string> }) => {
+        if (sql.startsWith("SELECT count() AS n")) return Promise.resolve([{ n: "25", lo: "3", hi: "27" }] as Row[]);
+        if (failOn && sql.includes(failOn)) return Promise.reject(new Error("forced"));
+        sent.push([sql, options?.settings]);
+        return Promise.resolve([] as Row[]);
+      },
+    };
+    const { map, store } = memoryReceipts();
+    const run = { environment: "e2e", projectDir: tempDir(true), migrationId: "20261009T1400-fill", dir: "/nowhere", port, receipts: store };
+    const failed = await runBackfill(form, run).catch((e: unknown) => e);
+    expect(failed).toBeInstanceOf(StepOpFailed);
+    expect((failed as StepOpFailed).summary).toEqual({ op: "backfill", table: "yodel_12.events", name: "backfill-fill", effects: 3, skipped: 0, ran: 2 });
+    expect(sent).toEqual([
+      ["ALTER TABLE yodel_12.events UPDATE k = 'x' WHERE id >= 0 AND id < 10", { mutations_sync: "2" }],
+      ["ALTER TABLE yodel_12.events UPDATE k = 'x' WHERE id >= 10 AND id < 20", { mutations_sync: "2" }],
+    ]);
+    expect([...map.keys()].sort()).toEqual(["20261009T1400-fill/range/0-10", "20261009T1400-fill/range/10-20"]);
+
+    failOn = undefined;
+    const { summary } = await runBackfill(form, run);
+    expect(summary).toMatchObject({ effects: 3, skipped: 2, ran: 1 });
+    expect(sent.map(([sql]) => sql).at(-1)).toBe("ALTER TABLE yodel_12.events UPDATE k = 'x' WHERE id >= 20 AND id < 30");
+  });
+
   it("the template on Postgres raises until written", () => {
     const t = backfillTemplate("fill", "postgres");
     expect(t).toContain("DO $$ BEGIN RAISE EXCEPTION 'write the backfill of fill for batch ${b}'; END $$");
@@ -393,6 +450,18 @@ describe("yodel apply with an Op step", () => {
   });
 });
 
+describe("yodel new --retain", () => {
+  it("writes retain into a rebuild step's options and declaration, and the step runs with it", () => {
+    const first = made(createMigration({ name: "events", build: build(BEFORE), now: at(0) }));
+    const previous: Migration = { id: first.id, dir: "/m", parent: null, checksum: first.document.checksum, document: first.document, files: first.files };
+    const m = made(createMigration({ name: "rekey", build: build(BEFORE.replace("ORDER BY (k, id)", "ORDER BY (id, k)")), previous, now: at(1), retain: "3d" }));
+    const [step] = m.document.steps as [MigrationStep];
+    expect(step).toMatchObject({ op: "ClickHouseRebuildOp", options: { retain: "3d" } });
+    expect(step.kind === "op" ? step.declaration : "").toMatch(/, retain: "3d" \}\);$/);
+    expect(planStep(step)).toMatchObject({ run: "rebuild", options: { retain: "3d" } });
+  });
+});
+
 describe("yodel new --backfill", () => {
   const saved = process.env.YODEL_E2E_CLICKHOUSE_URL;
   afterAll(() => {
@@ -431,5 +500,36 @@ describe("yodel new --backfill", () => {
     const gated = await yodel(at("new", "gated", "--backfill", "backfills/gated.ts"));
     expect(gated.code).toBe(1);
     expect(gated.err).toContain('phase "Ask" has a gate (g) outside an effect()');
+  }, 120_000);
+
+  it("with no file, writes the form's template at backfills/<name>.json, refuses it unwritten, then writes the form into the step", async () => {
+    process.env.YODEL_E2E_CLICKHOUSE_URL = "http://127.0.0.1:9";
+    const project = projectFrom("clickhouse");
+    dirs.push(project.dir);
+    const at = (...args: string[]) => [...args, "--dir", project.dir];
+    expect((await yodel(at("new", "events"))).code).toBe(0);
+
+    const template = await yodel(at("new", "fill", "--backfill"));
+    expect(template.code, template.err).toBe(0);
+    expect(template.out).toContain("Wrote a backfill form at backfills/fill.json");
+    const unwritten = await yodel(at("new", "fill", "--backfill", "--json"));
+    expect(unwritten.code).toBe(1);
+    expect(unwritten.err).toContain("is still the template");
+
+    writeFileSync(join(project.dir, "backfills", "fill.json"), JSON.stringify({ table: "t", key: "id", batchSize: 5, sql: "no placeholder" }));
+    const bad = await yodel(at("new", "fill", "--backfill"));
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("uses none of {from} and {to}");
+
+    const form = { table: "shop.events", batches: ["202601", "202602"], sql: "ALTER TABLE shop.events UPDATE k = 'x' WHERE toYYYYMM(ts) = {batch}", settings: { mutations_sync: "2" } };
+    writeFileSync(join(project.dir, "backfills", "fill.json"), JSON.stringify(form));
+    const written = await yodel(at("new", "fill", "--backfill"));
+    expect(written.code, written.err).toBe(0);
+    expect(written.out).toContain("This migration ends with a backfill of shop.events, 2 batches (202601, 202602). Each batch runs:\n    ALTER TABLE shop.events UPDATE k = 'x' WHERE toYYYYMM(ts) = {batch};");
+    const [, fill] = readMigrations(join(project.dir, "migrations")) as [Migration, Migration];
+    expect(fill.files.extra).toBeUndefined();
+    expect(verifyChecksum(fill).ok).toBe(true);
+    expect(planStep(fill.document.steps[0] as MigrationStep)).toEqual({ run: "backfill", form });
+    expect(fill.files.sql).toContain("-- backfill (fill): a backfill of shop.events, 2 batches (202601, 202602), not a statement; each batch runs:");
   }, 120_000);
 });

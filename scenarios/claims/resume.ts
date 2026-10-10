@@ -3,37 +3,43 @@ import { endpoints, clickhouseAt } from "../lib/db.js";
 import { Project } from "../lib/project.js";
 import { addColumn, addColumnByHand, addTable, createTableByHand, forgetMigration, insertEvents, mainTable } from "../lib/schema.js";
 
-const FAIL = "YODEL_34_FAIL_AT";
+/** A backfill_log row that lets the last batch run: until it is there, the last batch fails. */
+const GO = 999999;
 
 /**
- * The backfill module: one effect() per batch, each filling the batch's rows
- * and logging the batch in backfill_log. The batch whose index
- * YODEL_34_FAIL_AT names fails: on ClickHouse before it changes anything, on
- * Postgres after its UPDATE and INSERT, which its transaction rolls back.
+ * The backfill, written as yodel's form (backfills/note.json): each batch
+ * fills its rows and logs itself in backfill_log. On ClickHouse a batch is a
+ * month (the form's list), and the last one fails before it changes
+ * anything; on Postgres a batch is a range of ten ids (the form's key and
+ * batch size), and the last one fails after its UPDATE and INSERT, which its
+ * transaction rolls back. The last batch fails until backfill_log holds the
+ * GO row.
  */
-const backfill = (ctx: Ctx, batches: number[]) => {
+const backfillForm = (ctx: Ctx, batches: number[]) => {
   const db = ctx.db.name;
-  const statements =
-    ctx.dialect === "ch"
-      ? `...(i === failAt ? [activity("yodelSql", { sql: "SELECT throwIf(1, 'forced interruption')" }, "atMostOnce")] : []),
-    activity("yodelSql", { sql: \`ALTER TABLE ${db}.events UPDATE note = concat('n-', kind) WHERE toYYYYMM(ts) = \${String(b)}\`, settings: { mutations_sync: "2" } }, "atMostOnce"),
-    activity("yodelSql", { sql: \`INSERT INTO ${db}.backfill_log (batch) VALUES (\${String(b)})\` }, "atMostOnce"),`
-      : `activity("yodelSql", { sql: \`UPDATE ${db}.orders SET note = 'n-' || status WHERE id % ${String(batches.length)} = \${String(b)}\` }, "atMostOnce"),
-    activity("yodelSql", { sql: \`INSERT INTO ${db}.backfill_log (batch) VALUES (\${String(b)})\` }, "atMostOnce"),
-    ...(i === failAt ? [activity("yodelSql", { sql: "DO $$ BEGIN RAISE EXCEPTION 'forced interruption'; END $$" }, "atMostOnce")] : []),`;
-  return `import { EffectReceipt } from "@intentius/chant";
-import { Op, activity, effect, phase } from "@intentius/chant/op";
-
-const batches = ${JSON.stringify(batches)};
-const failAt = Number(process.env.${FAIL} ?? -1);
-
-const batch = (b: number, i: number) =>
-  effect(EffectReceipt(\`note-\${String(b)}\`, { effect: \`note/\${String(b)}\`, flavor: "existence" }), [
-    ${statements}
-  ]);
-
-export const op = Op({ name: "backfill-note", overview: "note from the row, a batch at a time", phases: [phase("Backfill", batches.map(batch))] });
-`;
+  const last = batches[batches.length - 1] ?? 0;
+  if (ctx.dialect === "ch") {
+    return {
+      table: `${db}.events`,
+      batches,
+      settings: { mutations_sync: "2" },
+      sql: [
+        `SELECT throwIf({batch} = ${String(last)} AND (SELECT count() FROM ${db}.backfill_log WHERE batch = ${String(GO)}) = 0, 'forced interruption')`,
+        `ALTER TABLE ${db}.events UPDATE note = concat('n-', kind) WHERE toYYYYMM(ts) = {batch}`,
+        `INSERT INTO ${db}.backfill_log (batch) VALUES ({batch})`,
+      ],
+    };
+  }
+  return {
+    table: `${db}.orders`,
+    key: "id",
+    batchSize: 10,
+    sql: [
+      `UPDATE ${db}.orders SET note = 'n-' || status WHERE id >= {from} AND id < {to}`,
+      `INSERT INTO ${db}.backfill_log (batch) VALUES ({from})`,
+      `DO $$ BEGIN IF {from} = ${String(last)} AND NOT EXISTS (SELECT 1 FROM ${db}.backfill_log WHERE batch = ${String(GO)}) THEN RAISE EXCEPTION 'forced interruption'; END IF; END $$`,
+    ],
+  };
 };
 
 /** Where the receipts are: chant's receipts table on ClickHouse; on Postgres, __chant_receipts in the history's schema. */
@@ -65,10 +71,11 @@ const backfillLog = (ctx: Ctx) =>
     : `import { table } from "@intentius/chant-lexicon-sql/postgres";\nimport { db } from "./schema.js";\n\nexport const backfillLog = table\`\n  CREATE TABLE \${db}.backfill_log (\n    batch integer NOT NULL\n  )\`;\n`;
 
 /**
- * A hand-written backfill is a step of its migration, one receipt per
- * batch. Interrupted at its last batch, the apply fails with the first
- * batches done (on Postgres, the last batch's own changes rolled back with
- * its transaction); the rerun skips every batch with a receipt and runs the
+ * A backfill written as yodel's form (no chant Op) is a step of its
+ * migration, one receipt per batch, and the plan shows its SQL.
+ * Interrupted at its last batch, the apply fails with the first batches
+ * done (on Postgres, the last batch's own changes rolled back with its
+ * transaction); the rerun skips every batch with a receipt and runs the
  * rest, so each batch ran exactly once (backfill_log has one row per batch,
  * and an INSERT run twice would leave two) and every row is filled.
  * BREAK: the receipts are deleted before the rerun, so it cannot resume.
@@ -85,19 +92,26 @@ export async function backfillPart(ctx: Ctx, p: Project): Promise<void> {
     rows = `SELECT count() FROM ${ctx.db.name}.events WHERE note != concat('n-', kind)`;
   } else {
     await ctx.db.exec(`INSERT INTO ${ctx.db.name}.orders (status, amount) SELECT CASE WHEN g % 2 = 0 THEN 'placed' ELSE 'paid' END, g FROM generate_series(1, 30) g`);
-    batches = [0, 1, 2];
+    // The ranges of ten ids yodel reads from the table: aligned to ten, from the smallest id to the largest.
+    const lo = Math.floor(Number(await ctx.db.scalar(`SELECT min(id) FROM ${ctx.db.name}.orders`)) / 10) * 10;
+    const hi = Number(await ctx.db.scalar(`SELECT max(id) FROM ${ctx.db.name}.orders`));
+    batches = [];
+    for (let from = lo; from <= hi; from += 10) batches.push(from);
+    if (batches.length < 2) throw new Error(`orders spans ${String(batches.length)} ranges of ten ids`);
     rows = `SELECT count(*) FROM ${ctx.db.name}.orders WHERE note IS DISTINCT FROM 'n-' || status`;
   }
 
   addColumn(p, "note");
   p.write("src/backfill_log.ts", backfillLog(ctx));
-  p.write("backfill.ts", backfill(ctx, batches));
-  const id = await p.newMigration("note", ["--backfill", "backfill.ts"]);
+  p.write("backfills/note.json", `${JSON.stringify(backfillForm(ctx, batches), null, 2)}\n`);
+  const id = await p.newMigration("note", ["--backfill"]);
   if (id === undefined) throw new Error("yodel new wrote no migration");
   await p.commit("note, with its backfill");
+  const plan = await p.yodel(["plan", p.env]);
+  hold(plan.out.includes(`backfill of ${ctx.db.name}.${mainTable(ctx)}`) && plan.out.includes(`INSERT INTO ${ctx.db.name}.backfill_log`), `yodel plan does not show the backfill's form and SQL:\n${plan.out}`);
 
   const last = batches.length - 1;
-  const failed = await p.stepsApply({ [FAIL]: String(last) });
+  const failed = await p.stepsApply();
   if (failed.code !== 1) throw new Error(`the interrupted backfill did not fail (exit ${String(failed.code)})`);
   const done = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.name}.backfill_log`);
   hold(done === last, `${String(done)} batches ran before the interruption, not ${String(last)}`);
@@ -105,14 +119,15 @@ export async function backfillPart(ctx: Ctx, p: Project): Promise<void> {
   hold(kept === last, `${String(kept)} receipts after the interruption, not ${String(last)}`);
 
   if (ctx.broken) await store.drop();
+  await ctx.db.exec(`INSERT INTO ${ctx.db.name}.backfill_log (batch) VALUES (${String(GO)})`);
   const resumed = await p.stepsApply();
   // Under BREAK the rerun runs every batch again, and finishes: the next part goes on from there.
   hold(resumed.code === 0, `the rerun did not finish (exit ${String(resumed.code)})`);
   await store.drop();
   const log =
     ctx.dialect === "ch"
-      ? await ctx.db.scalar(`SELECT groupArray(batch) FROM (SELECT batch FROM ${ctx.db.name}.backfill_log ORDER BY batch)`)
-      : `[${await ctx.db.scalar(`SELECT string_agg(batch::text, ',' ORDER BY batch) FROM ${ctx.db.name}.backfill_log`)}]`;
+      ? await ctx.db.scalar(`SELECT groupArray(batch) FROM (SELECT batch FROM ${ctx.db.name}.backfill_log WHERE batch != ${String(GO)} ORDER BY batch)`)
+      : `[${await ctx.db.scalar(`SELECT string_agg(batch::text, ',' ORDER BY batch) FROM ${ctx.db.name}.backfill_log WHERE batch <> ${String(GO)}`)}]`;
   hold(log === `[${batches.join(",")}]`, `the batches that ran, in order: ${log}; each should have run once: [${batches.join(",")}]`);
   const unfilled = await ctx.db.count(rows);
   hold(unfilled === 0, `${String(unfilled)} rows were not backfilled`);
@@ -182,7 +197,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const resume: Claim = {
   name: "resume",
-  says: "an interrupted apply resumes where it stopped: a hand-written backfill step from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
+  says: "an interrupted apply resumes where it stopped: a backfill step written as yodel's form (table, key, batch size, SQL) from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
   dialects: { ch: body, pg: body },
   parts: parts.map(([name]) => name),
 };

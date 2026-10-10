@@ -12,7 +12,7 @@
 import { describeServer } from "../server.js";
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
 import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
-import { asBackfill } from "../steps/kinds.js";
+import { asBackfill, asForm, describeForm } from "../steps/kinds.js";
 import { describeAccessSteps } from "../chant/access.js";
 import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
@@ -161,9 +161,11 @@ function pendingMarkdown(p: PendingView, withSql: boolean): string[] {
 /** An Op step: what makes it (the changes, or a backfill's module), then its detail and declaration (a backfill's module as written). */
 function opStepMarkdown({ index, step, source }: PendingView["steps"][number], runs: string): string[] {
   if (step.kind !== "op") return [];
-  const made = step.changes.length > 0 ? changes(step.changes) : (source?.file ?? asBackfill(step)?.options.file ?? "");
+  const backfill = asBackfill(step);
+  const form = backfill ? asForm(backfill.options) : undefined;
+  const made = step.changes.length > 0 ? changes(step.changes) : (source?.file ?? (form ? `a backfill of ${describeForm(form)}` : backfill && "file" in backfill.options ? backfill.options.file : ""));
   const what = made ? ` (${cell(made)})` : "";
-  const declaration = source ? fence(redact(source.text).replace(/\n+$/, ""), "ts") : fence(step.declaration, "ts");
+  const declaration = source ? fence(redact(source.text).replace(/\n+$/, ""), "ts") : form ? fence(redact(step.declaration), "json") : fence(step.declaration, "ts");
   return [
     `- step ${String(index)}, \`${step.name}\`: made by Op \`${step.op}\`${what}.${runs}`,
     "",

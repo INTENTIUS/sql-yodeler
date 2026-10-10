@@ -124,7 +124,8 @@ const viewOf = (m: Migration, done: readonly number[] = [], outOfOrder = false, 
   resumeAt,
   checks: m.document.checks ?? [],
   steps: m.document.steps.map((step, index) => {
-    const file = asBackfill(step)?.options.file;
+    const options = asBackfill(step)?.options;
+    const file = options && "file" in options ? options.file : undefined;
     const text = file === undefined ? undefined : m.files.extra?.[file];
     return { index, step, done: done.includes(index), refused: refused.find((r) => r.index === index)?.reason, ...(file !== undefined && text !== undefined ? { source: { file, text } } : {}) };
   }),

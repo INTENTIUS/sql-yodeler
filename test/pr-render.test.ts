@@ -3,6 +3,7 @@ import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-state
 import { commentMarker, COMMENT_LIMIT, planJsonVersioned, redact, renderPlanMarkdown, renderPlanText, subjectIn } from "../src/pr/render.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { decodeSubject } from "../src/versioned/explain.js";
+import { backfillFormStep } from "../src/steps/backfill.js";
 
 const DIGEST = `jcs1-sha256:${"c".repeat(64)}`;
 const OLD = `jcs1-sha256:${"d".repeat(64)}`;
@@ -59,6 +60,17 @@ const clickhousePlan = (over: Partial<VersionedPlan> = {}): VersionedPlan => ({
 });
 
 describe("the plan comment's markdown", () => {
+  it("shows a backfill written as a form: its table and batches, its SQL, and the form itself", () => {
+    const step = backfillFormStep("fill", { table: "yodel_16.events", key: "id", batchSize: 1000, sql: "ALTER TABLE yodel_16.events UPDATE note = 'x' WHERE id >= {from} AND id < {to}" }) as unknown as MigrationStep;
+    const plan = clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step, done: false }] }] });
+    const md = renderPlanMarkdown(plan);
+    expect(md).toContain("step 0, `fill`: made by Op `backfill` (a backfill of yodel_16.events by id, 1000 a batch). yodel apply runs it as this step.");
+    expect(md).toContain('  ```json\n  {\n    "table": "yodel_16.events",');
+    const text = renderPlanText(plan);
+    expect(text).toContain("a data backfill of yodel_16.events by id, 1000 a batch");
+    expect(text).toContain("       ALTER TABLE yodel_16.events UPDATE note = 'x' WHERE id >= {from} AND id < {to};");
+  });
+
   it("starts with the environment's marker and lists each statement with its rule and class", () => {
     const md = renderPlanMarkdown(clickhousePlan());
     expect(md.startsWith(`${commentMarker("prod")}\n`)).toBe(true);

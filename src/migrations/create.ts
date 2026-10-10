@@ -14,8 +14,8 @@ import type { BuildOutput } from "../chant/build.js";
 import { computeChecksum } from "./checksum.js";
 import { MIGRATION_FORMAT, serializeDocument, type MigrationCheck, type MigrationDocument, type MigrationFiles, type MigrationStep } from "./document.js";
 import { MIGRATION_NAME, type Migration } from "./directory.js";
-import { asBackfill, BACKFILL_FILE } from "../steps/kinds.js";
-import { backfillStep } from "../steps/backfill.js";
+import { asBackfill, BACKFILL_FILE, describeForm, PG_MIGRATION_OP, REBUILD_OP, type BackfillForm } from "../steps/kinds.js";
+import { backfillFormStep, backfillStep, describeFormSql } from "../steps/backfill.js";
 import { relabelTriggerCreates } from "./routines.js";
 
 export interface CreateMigrationOptions {
@@ -34,12 +34,18 @@ export interface CreateMigrationOptions {
   /** Postgres: the schema a bare name means. Default: chant's, `public`. */
   defaultSchema?: string;
   /**
-   * A backfill step to end the migration with (#12): the module's text,
-   * written into the migration's directory as `file` (default `backfill.ts`)
-   * and counted in its checksum. With one, a migration is made even when the
-   * build has no schema change.
+   * A backfill step to end the migration with (#12): a form, written as
+   * the step's options, or a module's text, written into the migration's
+   * directory as `file` (default `backfill.ts`) and counted in its checksum.
+   * With one, a migration is made even when the build has no schema change.
    */
-  backfill?: { text: string; file?: string };
+  backfill?: { text: string; file?: string } | { form: BackfillForm };
+  /**
+   * How long a `PostgresMigrationOp` step keeps the old column, or a
+   * `ClickHouseRebuildOp` step the old table, after the switch: written
+   * into each such step's options (`retain`).
+   */
+  retain?: string;
   /** Pre-migration checks (#52), written to `migration.json`. */
   checks?: MigrationCheck[];
 }
@@ -91,7 +97,10 @@ export const refusedSteps = (steps: readonly MigrationStep[]): Exclude<Migration
 
 function describeRefused(s: Exclude<MigrationStep, { kind: "statement" }>): string {
   const backfill = asBackfill(s);
-  if (backfill) return `a backfill: the Op ${backfill.options.file} exports, its effect() batches resumable from their receipts`;
+  if (backfill) {
+    if (!("file" in backfill.options)) return `a backfill of ${describeForm(backfill.options)}, its batches resumable from their receipts`;
+    return `a backfill: the Op ${backfill.options.file} exports, its effect() batches resumable from their receipts`;
+  }
   const rules = s.changes.map((c) => c.rule).join(", ");
   return s.kind === "op"
     ? `${s.op} for ${s.object} (${s.name}), ${rules}: not SQL; migration.json holds its declaration`
@@ -110,11 +119,21 @@ export function renderMigrationSql(doc: Pick<MigrationDocument, "id" | "parent" 
   const body = statements.steps
     .map((s) => {
       const backfill = asBackfill(s);
-      return backfill ? `-- ${backfill.object} (${backfill.name}): made by the Op ${backfill.options.file} exports, not a statement\n` : renderStatements({ ...statements, steps: [s] });
+      if (!backfill) return renderStatements({ ...statements, steps: [s] });
+      if ("file" in backfill.options) return `-- ${backfill.object} (${backfill.name}): made by the Op ${backfill.options.file} exports, not a statement\n`;
+      const sql = describeFormSql(backfill.options).split("\n").map((l) => `--   ${l}`);
+      return `-- ${backfill.object} (${backfill.name}): a backfill of ${describeForm(backfill.options)}, not a statement; each batch runs:\n${sql.join("\n")}\n`;
     })
     .join("\n")
     .replace(/\n+$/, "");
   return `${head.join("\n")}\n\n${body}\n`;
+}
+
+/** `step` with `retain` in its options (and its declaration) when it is a column migration or a rebuild. */
+function withRetain(step: MigrationStep, retain: string): MigrationStep {
+  if (step.kind !== "op" || ![PG_MIGRATION_OP, REBUILD_OP].includes(step.op)) return step;
+  const declaration = /\s*\}\);?\s*$/.test(step.declaration) ? step.declaration.replace(/\s*\}\)(;?)\s*$/, `, retain: ${JSON.stringify(retain)} })$1`) : step.declaration;
+  return { ...step, options: { ...step.options, retain }, declaration };
 }
 
 /**
@@ -137,9 +156,10 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
     throw new YodelError(e instanceof Error ? e.message : String(e));
   }
   statements = relabelTriggerCreates(statements, before, options.build);
+  if (options.retain !== undefined) statements = { ...statements, steps: statements.steps.map((s) => withRetain(s, options.retain as string)) };
   if (options.backfill) {
-    const file = options.backfill.file ?? BACKFILL_FILE;
-    statements = { ...statements, refused: true, steps: [...statements.steps, backfillStep(options.name, file) as unknown as MigrationStep] };
+    const step = "form" in options.backfill ? backfillFormStep(options.name, options.backfill.form) : backfillStep(options.name, options.backfill.file ?? BACKFILL_FILE);
+    statements = { ...statements, refused: true, steps: [...statements.steps, step as unknown as MigrationStep] };
   }
   if (statements.steps.length === 0) return { id: undefined, statements };
 
@@ -160,7 +180,7 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
     schema: options.build,
   };
   const sql = renderMigrationSql(unsigned, statements);
-  const extra = options.backfill ? { [options.backfill.file ?? BACKFILL_FILE]: options.backfill.text } : undefined;
+  const extra = options.backfill && "text" in options.backfill ? { [options.backfill.file ?? BACKFILL_FILE]: options.backfill.text } : undefined;
   const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned, extra }) };
   return { id, document, files: { sql, json: serializeDocument(document), ...(extra ? { extra } : {}) }, statements };
 }

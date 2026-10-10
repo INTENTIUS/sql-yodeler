@@ -20,7 +20,8 @@
  *   is in the plan digest the migrations Op's gate approved), so the Op has
  *   no gate and no Drop phase. The verification still runs before the swap,
  *   and a difference fails the step with nothing swapped. The old table is
- *   kept, `<table>__chant_old`, until its retention date (7 days).
+ *   kept, `<table>__chant_old`, until its retention date: the step's
+ *   `options.retain` (`yodel new --retain`) after the swap, else 7 days.
  * - It is built with `onFailure: "keep"`, so a step that failed or was
  *   killed part way keeps `<table>__chant_new` and `<table>__chant_dual` and
  *   resumes from the backfill's receipts on the next `yodel apply`: every
@@ -81,6 +82,7 @@ export async function rebuildOpConfig(options: RebuildOptions, ctx: { environmen
     env: ctx.environment,
     table: options.table,
     dualWrite: options.dualWrite,
+    ...(options.retain !== undefined ? { retain: options.retain } : {}),
     build: false,
     output: ctx.buildPath,
     path: ctx.projectDir,

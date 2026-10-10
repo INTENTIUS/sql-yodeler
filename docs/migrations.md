@@ -12,7 +12,7 @@ Each migration is a directory, `migrations/<YYYYMMDDTHHMM>-<name>/`, named by `y
 
 - `migration.sql`: the statements, each after a comment naming its object, the classifier's rule and the change's class. A step that is not SQL (a rebuild, a backfill, an expand-and-contract change, a manual step) appears as a comment only.
 - `migration.json`: the migration's id, its parent's id, its checksum, when it was written, its dialect, its steps (each statement with its SQL, rule and class, and each Op step with the Op's declaration and options), and the recorded schema: chant's build of the declared schema as it stood after this migration.
-- any file a step names: a backfill step's `backfill.ts`.
+- any file a step names: a backfill written as a chant Op, `backfill.ts`. A backfill written as a form has no file of its own; the form is in the step in `migration.json`.
 
 From the ClickHouse example:
 
@@ -45,7 +45,7 @@ No changes: the declared schema matches the newest migration's recorded schema (
 
 (From the Postgres example's run, just after it writes `rename-email`; `run.ts postgres --write` rewrites this quote with the README. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
 
-It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --backfill <file>` ends the migration with a backfill step ([Steps](steps.md#backfills)).
+It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Steps](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Steps](steps.md#postgres-postgresmigrationop)).
 
 ## The history table
 

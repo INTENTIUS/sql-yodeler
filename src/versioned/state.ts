@@ -164,7 +164,7 @@ export function classifySteps(m: Migration): Pick<PendingMigration, "opSteps" | 
     const wrongDialect = dialectRefusal(plan.run, m.document.dialect);
     if (plan.run === "refused") refusedSteps.push({ index, step, reason: plan.reason });
     else if (wrongDialect) refusedSteps.push({ index, step, reason: wrongDialect });
-    else if (plan.run === "backfill" && m.files.extra?.[plan.file] === undefined) {
+    else if (plan.run === "backfill" && plan.file !== undefined && m.files.extra?.[plan.file] === undefined) {
       refusedSteps.push({ index, step, reason: `a backfill step whose module ${plan.file} is not in ${m.id}'s directory` });
     } else opSteps.push({ index, step });
   });

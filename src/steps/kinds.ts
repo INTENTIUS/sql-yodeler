@@ -9,8 +9,10 @@
  *
  * - `ClickHouseRebuildOp`, the step `yodel new` writes for a ClickHouse sort
  *   key, engine or key-column change (`./rebuild.ts`);
- * - `backfill`, a data backfill the author writes as an Op of `effect()`
- *   steps in a module in the migration's directory (`./backfill.ts`);
+ * - `backfill`, a data backfill: written as a form in the step's options
+ *   (a table, a key and a batch size, or a list of batches, and the SQL of
+ *   one batch), or as an Op of `effect()` steps in a module in the
+ *   migration's directory (`./backfill.ts`);
  * - `PostgresMigrationOp`, the step `yodel new` writes for a Postgres column
  *   rename or type change across kinds (`./postgres-migration.ts`, #13).
  *
@@ -32,8 +34,30 @@ export const PG_MIGRATION_OP = "PostgresMigrationOp";
 type OpStep = Extract<MigrationStep, { kind: "op" }>;
 
 /**
+ * A backfill written as a form, yodel's own terms for the common case: the
+ * step's options in `migration.json`, which yodel turns into an Op of
+ * `effect()` batches, one receipt each.
+ *
+ * Batches are either ranges of an integer `key` of `table`, `batchSize`
+ * wide (`{from}` and `{to}` in the SQL, from inclusive, to exclusive, read
+ * from the table's smallest and largest key when the step runs), or the
+ * values `batches` lists (`{batch}` in the SQL). `sql` is one statement, or
+ * several run in order, for one batch.
+ */
+export interface BackfillForm {
+  table: string;
+  key?: string;
+  batchSize?: number;
+  batches?: Array<string | number>;
+  sql: string | string[];
+  /** Settings for each statement: ClickHouse query settings (`mutations_sync`), Postgres `set_config` for the batch's transaction. */
+  settings?: Record<string, string>;
+}
+
+/**
  * A backfill step in `migration.json`. chant's `OpStep` shape, so every
- * reader of steps sees an Op step:
+ * reader of steps sees an Op step. Its options are a {@link BackfillForm},
+ * or name the module that exports the Op:
  *
  *     { "kind": "op", "object": "backfill", "type": "Yodel::Backfill", "name": "<migration name>",
  *       "op": "backfill", "importPath": "./backfill.ts", "options": { "file": "backfill.ts" },
@@ -41,7 +65,7 @@ type OpStep = Extract<MigrationStep, { kind: "op" }>;
  */
 export interface BackfillStep extends Omit<OpStep, "op" | "options"> {
   op: typeof BACKFILL_OP;
-  options: { file: string };
+  options: { file: string } | BackfillForm;
 }
 
 export type DualWrite = { mode: "materialized-view"; cutoverColumn: string; cutoverDelay?: string } | { mode: "app" };
@@ -50,6 +74,8 @@ export interface RebuildOptions {
   name: string;
   table: string;
   dualWrite: DualWrite;
+  /** How long the old table is kept after the swap; default chant's (7 days). */
+  retain?: string;
 }
 
 /** A `PostgresMigrationOp` step's options: chant's `{ name, env, table, column }`, and what the author may add (`using`, `retain`, ...). */
@@ -70,10 +96,18 @@ export type StepPlan =
   | { run: "statement" }
   | { run: "rebuild"; options: RebuildOptions }
   | { run: "pgMigration"; options: PgMigrationOptions }
-  | { run: "backfill"; file: string }
+  | { run: "backfill"; file: string; form?: undefined }
+  | { run: "backfill"; form: BackfillForm; file?: undefined }
   | { run: "refused"; reason: string };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const optional = <T>(o: Record<string, unknown>, key: string, ok: (v: unknown) => v is T): T | undefined | null => {
+  const v = o[key];
+  if (v === undefined) return undefined;
+  return ok(v) ? v : null;
+};
+const isString = (v: unknown): v is string => typeof v === "string" && v !== "";
+const isPositiveInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
 
 /** The step as a backfill step, when it is one. */
 export const asBackfill = (step: MigrationStep | BackfillStep): BackfillStep | undefined =>
@@ -88,12 +122,66 @@ function backfillFile(options: unknown): string | undefined {
   return file;
 }
 
+/** The placeholders a form's SQL takes: `{from}` and `{to}` with a key, `{batch}` with a list. */
+export const formPlaceholders = (form: Pick<BackfillForm, "key">): string[] => (form.key !== undefined ? ["{from}", "{to}"] : ["{batch}"]);
+
+/** What is wrong with a backfill form, if anything. */
+export function formProblems(options: unknown): string[] {
+  if (!isRecord(options)) return ["a backfill form is an object"];
+  const o = options;
+  const problems: string[] = [];
+  const known = new Set(["table", "key", "batchSize", "batches", "sql", "settings"]);
+  for (const k of Object.keys(o)) if (!known.has(k)) problems.push(`"${k}" is not a field of a backfill (${[...known].join(", ")})`);
+  if (!isString(o.table)) problems.push(`"table" names the table the backfill fills, for example "shop.orders"`);
+  const sql = typeof o.sql === "string" ? [o.sql] : Array.isArray(o.sql) ? o.sql : undefined;
+  if (!sql || sql.length === 0 || !sql.every((x) => typeof x === "string" && x.trim() !== "")) problems.push(`"sql" is the SQL of one batch: a statement, or a list of them`);
+  const byKey = o.key !== undefined || o.batchSize !== undefined;
+  if (byKey && o.batches !== undefined) problems.push(`give "key" and "batchSize", or "batches", not both`);
+  else if (byKey) {
+    if (!isString(o.key)) problems.push(`"key" is an integer column of the table, the batches are ranges of it`);
+    if (!isPositiveInt(o.batchSize)) problems.push(`"batchSize" is how wide each range of the key is, a positive integer`);
+  } else if (o.batches !== undefined) {
+    if (!Array.isArray(o.batches) || o.batches.length === 0 || !o.batches.every((b) => typeof b === "string" || (typeof b === "number" && Number.isFinite(b)))) {
+      problems.push(`"batches" lists the batches, strings or numbers, for example ["202601", "202602"]`);
+    } else if (new Set(o.batches.map(String)).size !== o.batches.length) problems.push(`"batches" lists a batch twice`);
+  } else problems.push(`give "key" and "batchSize" (ranges of an integer key), or "batches" (a list)`);
+  if (o.settings !== undefined && !(isRecord(o.settings) && Object.values(o.settings).every((v) => typeof v === "string" || typeof v === "number"))) problems.push(`"settings" maps a setting's name to its value`);
+  if (sql && problems.length === 0) {
+    const want = formPlaceholders(o);
+    const text = sql.join("\n");
+    if (!want.some((p) => text.includes(p))) problems.push(`"sql" uses none of ${want.join(" and ")}, so every batch would run the same statement`);
+  }
+  return problems;
+}
+
+/** The step's options as a form, when they are one (no `file`). */
+export function asForm(options: unknown): BackfillForm | undefined {
+  if (!isRecord(options) || "file" in options) return undefined;
+  if (formProblems(options).length > 0) return undefined;
+  const o = options as unknown as BackfillForm;
+  return {
+    table: o.table,
+    ...(o.key !== undefined ? { key: o.key, batchSize: o.batchSize as number } : { batches: o.batches as Array<string | number> }),
+    sql: o.sql,
+    ...(o.settings ? { settings: Object.fromEntries(Object.entries(o.settings as Record<string, unknown>).map(([k, v]) => [k, String(v)])) } : {}),
+  };
+}
+
+/** One line saying how a form batches: `shop.orders by id, 10000 a batch` or `shop.orders, 3 batches`. */
+export function describeForm(form: BackfillForm): string {
+  return form.key !== undefined ? `${form.table} by ${form.key}, ${String(form.batchSize)} a batch` : `${form.table}, ${String(form.batches?.length ?? 0)} batch${form.batches?.length === 1 ? "" : "es"} (${(form.batches ?? []).join(", ")})`;
+}
+
 /** How `yodel apply` treats one step. */
 export function planStep(step: MigrationStep | BackfillStep): StepPlan {
   if (step.kind === "statement") return { run: "statement" };
   if (step.kind === "manual") return { run: "refused", reason: `a manual step for ${step.object} (${step.name}): no statement and no Op makes it; ${step.detail}` };
   const backfill = asBackfill(step);
   if (backfill) {
+    if (isRecord(backfill.options) && !("file" in backfill.options)) {
+      const form = asForm(backfill.options);
+      return form ? { run: "backfill", form } : { run: "refused", reason: `a backfill step whose form is not one yodel runs: ${formProblems(backfill.options).join("; ")}` };
+    }
     const file = backfillFile(backfill.options);
     return file ? { run: "backfill", file } : { run: "refused", reason: `a backfill step whose options.file is not a file in the migration's directory (${JSON.stringify(backfill.options)})` };
   }
@@ -114,19 +202,14 @@ export function planStep(step: MigrationStep | BackfillStep): StepPlan {
     if (dw.mode !== "materialized-view" || typeof dw.cutoverColumn !== "string") {
       return { run: "refused", reason: `${REBUILD_OP} for ${step.object} (${step.name}): dualWrite ${JSON.stringify(dw)} is not one yodel apply runs` };
     }
-    return { run: "rebuild", options: { name: o.name, table: o.table, dualWrite: dw as DualWrite } };
+    const retain = optional(o, "retain", isString);
+    if (retain === null) return { run: "refused", reason: `${REBUILD_OP} for ${step.object} (${step.name}): options.retain is ${JSON.stringify(o.retain)}, which is not a duration` };
+    return { run: "rebuild", options: { name: o.name, table: o.table, dualWrite: dw as DualWrite, ...(retain ? { retain } : {}) } };
   }
   if (step.op === PG_MIGRATION_OP) return planPgMigration(step);
   return { run: "refused", reason: `${step.op} for ${step.object} (${step.name}), not SQL: yodel apply does not run that Op` };
 }
 
-const optional = <T>(o: Record<string, unknown>, key: string, ok: (v: unknown) => v is T): T | undefined | null => {
-  const v = o[key];
-  if (v === undefined) return undefined;
-  return ok(v) ? v : null;
-};
-const isString = (v: unknown): v is string => typeof v === "string" && v !== "";
-const isPositiveInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v > 0;
 const isLag = (v: unknown): v is PgMigrationOptions["replicationLag"] => v === false || (isRecord(v) && Object.values(v).every((x) => typeof x === "string"));
 
 function planPgMigration(step: OpStep): StepPlan {
@@ -163,7 +246,10 @@ export function describeStep(step: MigrationStep | BackfillStep): string {
   if (step.kind === "statement") return `${step.rule} ${step.class}, ${step.name}`;
   if (step.kind === "manual") return `manual step for ${step.object} (${step.name})`;
   const backfill = asBackfill(step);
-  if (backfill) return `backfill ${backfill.options.file}`;
+  if (backfill) {
+    const form = asForm(backfill.options);
+    return form ? `backfill of ${describeForm(form)}` : `backfill ${"file" in backfill.options ? backfill.options.file : "(a form yodel does not run)"}`;
+  }
   return `${step.op} for ${step.object} (${step.name})`;
 }
 
@@ -178,7 +264,7 @@ export function stepSha(step: MigrationStep | BackfillStep, files?: Pick<Migrati
   if (step.kind === "statement") return `sha256:${hash.update(step.sql, "utf8").digest("hex")}`;
   hash.update(JSON.stringify(sortKeys(step)), "utf8");
   const backfill = asBackfill(step);
-  if (backfill) {
+  if (backfill && "file" in backfill.options) {
     const file = backfill.options.file;
     const text = files?.extra?.[file];
     hash.update(`\n${file} ${text === undefined ? "missing" : String(Buffer.byteLength(normalizeLineEndings(text), "utf8"))}\n${normalizeLineEndings(text ?? "")}`, "utf8");

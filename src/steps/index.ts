@@ -4,7 +4,7 @@
  *   planStep(step)            statement, rebuild, backfill, or refused (with why)
  *   stepSha(step, files)      the hash a step's history rows record
  *   runRebuild(...)           a ClickHouseRebuildOp step (./rebuild.ts)
- *   runBackfill(...)          a backfill step, an Op of effect() batches (./backfill.ts)
+ *   runBackfill(...)          a backfill step, a form or an Op of effect() batches (./backfill.ts)
  *   runPgMigration(...)       a PostgresMigrationOp step (./postgres-migration.ts)
  *   defaultStepRunner         what the versioned apply calls for an Op step
  */
@@ -68,12 +68,12 @@ export const defaultStepRunner: StepRunner = async (ctx) => {
         ? await serverReceipts({ clickhouse: ctx.endpoint }, ctx.environment)
         : undefined);
   if (!receipts) throw new YodelError("a backfill step needs a receipt store, and this environment has no server endpoint for one");
-  const { summary } = await runBackfill(ctx.plan.file, {
+  const { summary } = await runBackfill(ctx.plan.form ?? ctx.plan.file, {
     environment: ctx.environment,
     projectDir: ctx.projectDir,
     migrationId: ctx.migration.id,
     dir: ctx.migration.dir,
-    text: ctx.migration.files.extra?.[ctx.plan.file],
+    text: ctx.plan.file === undefined ? undefined : ctx.migration.files.extra?.[ctx.plan.file],
     ...(ctx.postgres ? { postgres: { client: ctx.postgres.client, timeouts: ctx.postgres.timeouts } } : { port: ctx.port }),
     receipts,
     log: ctx.log,

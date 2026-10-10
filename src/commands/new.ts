@@ -24,9 +24,9 @@ import {
   type CreatedMigration,
   type MigrationCheck,
 } from "../migrations/index.js";
-import { asBackfill, BACKFILL_FILE, backfillTemplate, loadBackfill, TEMPLATE_MARK } from "../steps/index.js";
+import { asBackfill, asForm, BACKFILL_FILE, backfillTemplate, describeForm, describeFormSql, formPath, formProblems, formTemplate, loadBackfill, PG_MIGRATION_OP, REBUILD_OP, TEMPLATE_MARK, type BackfillForm } from "../steps/index.js";
 
-const usage = "usage: yodel new <name> [--backfill <file>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
+const usage = "usage: yodel new <name> [--backfill [<file>]] [--retain <duration>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
 
 const help = `${usage}
 
@@ -43,16 +43,38 @@ ClickHouse sort-key change or a Postgres column rename, is an Op step:
 written to migration.json with its declaration, and to migration.sql as a
 comment only.
 
-A data backfill is a step too. --backfill <file> ends the migration with a
-backfill step: <file> (relative to the project directory) is a module
-exporting a chant Op whose every step is an effect() batch with its own
-receipt, running SQL with activity("yodelSql", { sql }). It is copied into
-the migration's directory as ${BACKFILL_FILE} and counts in its checksum.
-yodel apply runs it after the statements before it, and a run that fails or
-is stopped part way resumes at the first batch without a receipt. When
-<file> does not exist yet, a template is written there and no migration:
-write the batches, then run the same command again. With --backfill a
+A data backfill is a step too. --backfill ends the migration with a
+backfill step written from ${formPath("<name>")}, a form of four fields:
+
+  { "table": "shop.orders", "key": "id", "batchSize": 10000,
+    "sql": "UPDATE shop.orders SET country = 'NL' WHERE id >= {from} AND id < {to}" }
+
+Each range of the integer key, batchSize wide, is one batch: {from} and {to}
+in the SQL are its bounds (from inclusive, to exclusive), read from the
+table's smallest and largest key when the step runs. "batches": [...] in
+place of key and batchSize lists the batches instead, {batch} in the SQL.
+"sql" may be a list of statements, and "settings" sets query settings for
+each (ClickHouse: { "mutations_sync": "2" }). The form is written into the
+step in migration.json, so it counts in the checksum and the plan shows it.
+yodel apply runs the batches after the statements before the step, each
+with its own receipt, and a run that fails or is stopped part way resumes
+at the first batch without one. Make a batch safe to run twice (on
+Postgres each batch is one transaction with its receipt, so it is).
+
+When the form does not exist yet, a template is written there and no
+migration: fill it in, then run the same command again. With --backfill a
 migration is written even when the declared schema has not changed.
+--backfill <file> reads the form from <file> (relative to the project
+directory) instead; a <file> that is not .json is a module exporting a
+chant Op of effect() batches, for a backfill the form cannot say
+(docs/steps.md), copied into the migration's directory as ${BACKFILL_FILE}.
+
+--retain <duration> (7d, 12h, 0s) is how long a Postgres column rename or
+type change keeps the old column after the switch, or a ClickHouse rebuild
+the old table after the swap: written into each such step's options.
+Without it a Postgres step drops the old column in the same apply, right
+after the switch, and a rebuild keeps the old table for 7 days. To add it
+to a migration you just wrote, run yodel new <name> --replace --retain 7d.
 
 --check <sql> adds a pre-migration check to migration.json: a read-only
 query that must return no rows. yodel apply runs it against the environment
@@ -70,14 +92,17 @@ have not applied: refused when the migration is applied in an environment
 --env names (each one is read), and it says so when git already tracks it.
 
 Options:
-  --backfill <file>  end the migration with a backfill step running <file>
-  --check <sql>      a pre-migration check that must return no rows
-                     (repeatable; "<name>: <sql>" names it)
-  --replace          redo the newest migration, named <name>
-  --env <env>        with --replace: refuse if it is applied in <env>
-                     (repeatable)
-  --json             print what was written as JSON
-  -C, --dir <dir>    the project directory (default: the working directory)
+  --backfill [<file>]  end the migration with a backfill step written from
+                       ${formPath("<name>")} (or <file>)
+  --retain <duration>  how long a column rename or a rebuild keeps the old
+                       column or table
+  --check <sql>        a pre-migration check that must return no rows
+                       (repeatable; "<name>: <sql>" names it)
+  --replace            redo the newest migration, named <name>
+  --env <env>          with --replace: refuse if it is applied in <env>
+                       (repeatable)
+  --json               print what was written as JSON
+  -C, --dir <dir>      the project directory (default: the working directory)
 
 Exit codes:
   0  a migration was written, or the declared schema has no change from the
@@ -93,20 +118,28 @@ interface NewArgs {
   name: string;
   json: boolean;
   dir: string;
+  /** The file --backfill names; "" for the default form. */
   backfill: string | undefined;
+  retain: string | undefined;
   replace: boolean;
   envs: string[];
   checks: MigrationCheck[];
 }
 
+/** A bare --backfill (last, or followed by another option) as --backfill="", the default form. */
+const bareBackfill = (args: string[]): string[] => args.map((a, i) => (a === "--backfill" && (i === args.length - 1 || (args[i + 1] ?? "").startsWith("-")) ? "--backfill=" : a));
+
+/** A duration chant takes: whole numbers of ms, s, m, h or d, as 7d or 1d12h. */
+const DURATION = /^(\d+(ms|s|m|h|d))+$/;
+
 function parseNewArgs(args: string[]): NewArgs {
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({
-      args,
+      args: bareBackfill(args),
       allowPositionals: true,
       strict: true,
-      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, backfill: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
+      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, backfill: { type: "string" }, retain: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
     });
   } catch (e) {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
@@ -115,11 +148,14 @@ function parseNewArgs(args: string[]): NewArgs {
   if (name === undefined || rest.length > 0) throw new YodelError(usage);
   if (parsed.values.env !== undefined && parsed.values.replace !== true) throw new YodelError(`--env goes with --replace\n${usage}`);
   migrationId(name, new Date()); // a bad name fails before anything is built
+  const retain = typeof parsed.values.retain === "string" ? parsed.values.retain : undefined;
+  if (retain !== undefined && !DURATION.test(retain)) throw new YodelError(`--retain takes a duration such as 7d, 12h or 0s, got ${JSON.stringify(retain)}\n${usage}`);
   return {
     name,
     json: parsed.values.json === true,
     dir: typeof parsed.values.dir === "string" ? parsed.values.dir : process.cwd(),
     backfill: typeof parsed.values.backfill === "string" ? parsed.values.backfill : undefined,
+    retain,
     replace: parsed.values.replace === true,
     envs: Array.isArray(parsed.values.env) ? parsed.values.env.filter((e): e is string => typeof e === "string") : [],
     checks: parseChecks(parsed.values.check),
@@ -149,7 +185,7 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
           checksum: made.document.checksum,
           dialect: made.document.dialect,
           statements: statementCount,
-          ops: refused.filter((s) => s.kind === "op").map((s) => ({ op: s.op, object: s.object, name: s.name, rules: s.changes.map((c) => c.rule) })),
+          ops: refused.filter((s) => s.kind === "op").map((s) => ({ op: s.op, object: s.object, name: s.name, rules: s.changes.map((c) => c.rule), ...(typeof s.options.retain === "string" ? { retain: s.options.retain } : {}) })),
           manual: refused.filter((s) => s.kind === "manual").map((s) => ({ object: s.object, name: s.name, rules: s.changes.map((c) => c.rule), detail: s.detail })),
           hints: made.document.hints,
           checks: made.document.checks ?? [],
@@ -173,13 +209,19 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
   for (const s of refused) {
     const rules = s.changes.map((c) => c.rule).join(", ");
     const backfill = asBackfill(s);
-    if (backfill) {
+    const form = backfill ? asForm(backfill.options) : undefined;
+    if (form) {
+      lines.push(`  This migration ends with a backfill of ${describeForm(form)}. Each batch runs:`);
+      lines.push(...describeFormSql(form).split("\n").map((l) => `    ${l}`));
+      lines.push(`    yodel apply runs the batches after the statements before it, each with its own receipt, and resumes from them after a failure.`);
+    } else if (backfill && "file" in backfill.options) {
       lines.push(`  This migration ends with a backfill step: the Op ${backfill.options.file} exports, copied into the migration's directory.`);
       lines.push(`    yodel apply runs its effect() batches after the statements before it, resuming from their receipts after a failure.`);
     } else if (s.kind === "op") {
       lines.push(`  This migration contains an Op step: ${s.op} for ${s.object} (${s.name}), ${rules}.`);
       lines.push(`    It is not SQL. migration.json holds the Op's declaration:`);
       lines.push(`    ${s.declaration}`);
+      lines.push(...retention(s.op, s.options, made.document.id.slice(made.document.id.indexOf("-") + 1)).map((l) => `    ${l}`));
     } else {
       lines.push(`  This migration contains a manual step: ${s.object} (${s.name}), ${rules}. No statement and no Op makes it:`);
       lines.push(`    ${s.detail}`);
@@ -191,6 +233,35 @@ function report(io: Io, json: boolean, made: CreatedMigration, path: string, pro
   io.out(`${lines.join("\n")}\n`);
 }
 
+/** What a column migration or a rebuild step keeps after its switch, and for how long. */
+function retention(op: string, options: Record<string, unknown>, name: string): string[] {
+  const retain = typeof options.retain === "string" ? options.retain : undefined;
+  if (op === PG_MIGRATION_OP) {
+    return retain !== undefined
+      ? [`The old column is kept for ${retain} after the switch (retain), so readers of it keep working until then.`]
+      : [
+          `No retain: the old column is dropped in the same yodel apply, right after the switch, so anything still reading it breaks then.`,
+          `To keep it while readers move over: yodel new ${name} --replace --retain 7d`,
+        ];
+  }
+  if (op === REBUILD_OP && retain !== undefined) return [`The old table is kept as ${typeof options.table === "string" ? options.table : "<table>"}__chant_old for ${retain} after the swap (retain).`];
+  return [];
+}
+
+/** Reads and checks a backfill form; throws naming what is wrong. */
+function readForm(path: string, text: string): BackfillForm {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw new YodelError(`${path}: not JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const problems = formProblems(parsed);
+  const form = problems.length === 0 ? asForm(parsed) : undefined;
+  if (!form) throw new YodelError(`${path}: ${problems.join("; ")}`);
+  return form;
+}
+
 /** `yodel new <name>`; the exit codes are in `help`. */
 export const newCommand: Command = {
   name: "new",
@@ -198,23 +269,34 @@ export const newCommand: Command = {
   implemented: true,
   run: (args, io) =>
     guarded("new", io, args, help, async () => {
-      const { name, json, dir, backfill: backfillArg, replace, envs, checks } = parseNewArgs(args);
+      const { name, json, dir, backfill: backfillArg, retain, replace, envs, checks } = parseNewArgs(args);
       const project = await loadProject(dir);
-      let backfill: { text: string } | undefined;
+      let backfill: { text: string } | { form: BackfillForm } | undefined;
       if (backfillArg !== undefined) {
-        const path = resolve(project.dir, backfillArg);
+        const file = backfillArg === "" ? formPath(name) : backfillArg;
+        const isForm = file.endsWith(".json");
+        const path = resolve(project.dir, file);
+        const again = `yodel new ${name} --backfill${backfillArg === "" ? "" : ` ${backfillArg}`}`;
         if (!existsSync(path)) {
           mkdirSync(dirname(path), { recursive: true });
-          writeFileSync(path, backfillTemplate(name, project.dialect));
+          writeFileSync(path, isForm ? formTemplate(name, project.dialect) : backfillTemplate(name, project.dialect));
           const where = relative(project.dir, path) || path;
           if (json) io.out(`${JSON.stringify({ written: false, template: path }, null, 2)}\n`);
-          else io.out(`Wrote a backfill template at ${where}. Write its batches, then run yodel new ${name} --backfill ${backfillArg} again. No migration written.\n`);
+          else if (isForm) {
+            io.out(
+              `Wrote a backfill form at ${where}: the table, its integer key and how many keys a batch takes, and the SQL of one batch with {from} and {to} (or "batches": [...] and {batch}). ` +
+                `Fill it in, then run ${again} again. No migration written.\n`,
+            );
+          } else io.out(`Wrote a backfill template at ${where}. Write its batches, then run ${again} again. No migration written.\n`);
           return 0;
         }
         const text = readFileSync(path, "utf8");
-        if (text.includes(TEMPLATE_MARK)) throw new YodelError(`${path} is still the template; write its batches' SQL first`);
-        await loadBackfill(path, text);
-        backfill = { text };
+        if (text.includes(TEMPLATE_MARK)) throw new YodelError(`${path} is still the template; write ${isForm ? "the table, the key and one batch's SQL" : "its batches' SQL"} first`);
+        if (isForm) backfill = { form: readForm(path, text) };
+        else {
+          await loadBackfill(path, text);
+          backfill = { text };
+        }
       }
       const migrationsDir = join(project.dir, MIGRATIONS_DIR);
       const ordered = readMigrations(migrationsDir);
@@ -226,7 +308,7 @@ export const newCommand: Command = {
       const build = await buildSchema(project);
       let made: ReturnType<typeof createMigration>;
       try {
-        made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}), ...(checks.length > 0 ? { checks } : {}) });
+        made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}), ...(retain !== undefined ? { retain } : {}), ...(checks.length > 0 ? { checks } : {}) });
       } finally {
         build.dispose();
       }
@@ -241,6 +323,9 @@ export const newCommand: Command = {
         if (json) io.out(`${JSON.stringify({ written: false, parent: previous?.id ?? null, dialect: project.dialect, hints: made.statements.hints }, null, 2)}\n`);
         else io.out(`No changes: the declared schema matches ${from}. Nothing written.\n`);
         return 0;
+      }
+      if (retain !== undefined && !made.statements.steps.some((st) => st.kind === "op" && [PG_MIGRATION_OP, REBUILD_OP].includes(st.op))) {
+        io.err(`yodel new: warning: --retain ${retain} is for a Postgres column rename or type change, or a ClickHouse rebuild, and ${made.id} has none\n`);
       }
       if (replaced) {
         // Moved aside first and removed only once the new one is written, so a failure leaves the old one in place.
