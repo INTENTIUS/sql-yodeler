@@ -20,6 +20,8 @@ export interface LiveImport {
   files: GeneratedFile[];
   /** What the import left out or could not carry, as chant reports it. */
   warnings: string[];
+  /** Live objects left out as another tool's (`<database>.<name>`), which a plan then shows as undeclared. */
+  leftOut: string[];
 }
 
 /** The objects an import read, as `<type> <name>` lines for people. */
@@ -49,8 +51,31 @@ export async function importLive(project: Project, env: Environment, processEnv:
   } catch (e) {
     throw new YodelError(`reading ${env.name}'s live schema failed: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const ir: TemplateIR = { resources: exported.resources, parameters: exported.parameters ?? [] };
+  const warnings = [...(exported.warnings ?? [])];
+  const leftOut: string[] = [];
+  const resources = project.dialect === "clickhouse" ? await withoutRunnerTables(exported.resources, warnings, leftOut) : exported.resources;
+  const ir: TemplateIR = { resources, parameters: exported.parameters ?? [] };
   const { sqlTemplateGenerator } = await import("@intentius/chant-lexicon-sql/import-generator");
   const files = ir.resources.length === 0 ? [] : sqlTemplateGenerator.generate(ir);
-  return { ir, files, warnings: exported.warnings ?? [] };
+  return { ir, files, warnings, leftOut };
+}
+
+/**
+ * ClickHouse: leaves out a table another migration runner keeps its history
+ * in (golang-migrate's and dbmate's `schema_migrations`, goose's
+ * `goose_db_version`, ...), with the warning chant's Postgres import gives
+ * for the same table (#17). chant's ClickHouse import adopts them; declaring
+ * one would have chant change what that tool owns. The names are chant's own
+ * list, `FOREIGN_TABLES`.
+ */
+export async function withoutRunnerTables(resources: TemplateIR["resources"], warnings: string[], leftOut: string[] = []): Promise<TemplateIR["resources"]> {
+  const { FOREIGN_TABLES } = await import("@intentius/chant-lexicon-sql/postgres/live/catalog");
+  return resources.filter((r) => {
+    const p = r.properties as { database?: string; name?: string };
+    const tool = r.type === "ClickHouse::Table" && p.name !== undefined && Object.hasOwn(FOREIGN_TABLES, p.name) ? FOREIGN_TABLES[p.name] : undefined;
+    if (tool === undefined) return true;
+    leftOut.push(`${p.database ? `${p.database}.` : ""}${String(p.name)}`);
+    warnings.push(`${p.database ? `${p.database}.` : ""}${String(p.name)} is kept by ${tool}; left out, since declaring it would have chant change what that tool owns`);
+    return false;
+  });
 }
