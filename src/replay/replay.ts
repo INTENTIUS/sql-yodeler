@@ -118,7 +118,7 @@ export async function replayMigrations(ordered: readonly Migration[], driver: Re
     if (options.reset !== true) {
       throw new YodelError(
         `refused: the replay needs a fresh database, and ${driver.where} already holds ${occupied.join(", ")}. ` +
-          `Point the replay at a throwaway emulator (chant emulator up --lexicon sql), or pass reset to drop ${occupied.length === 1 ? "it" : "them"} first. Nothing was run.`,
+          `Point the replay at a throwaway emulator (chant emulator up --lexicon sql), or pass --reset to drop ${occupied.length === 1 ? "it" : "them"} first. Nothing was run.`,
         NOT_FRESH,
       );
     }

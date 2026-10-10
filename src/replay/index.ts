@@ -19,10 +19,12 @@ import type { StepRunner } from "../steps/index.js";
 import type { ClickHousePort } from "../history/index.js";
 import { clickhouseReplay } from "./clickhouse.js";
 import { postgresReplay } from "./postgres.js";
+import { refuseShared, sharedProfiles } from "./shared.js";
 import { replayMigrations, type ReplayDriver, type ReplayOptions, type ReplayResult } from "./replay.js";
 
 export * from "./replay.js";
 export * from "./report.js";
+export * from "./shared.js";
 export { clickhouseDatabases, clickhouseReplay } from "./clickhouse.js";
 export { postgresReplay, postgresSchemas } from "./postgres.js";
 
@@ -32,6 +34,8 @@ export interface ReplayHistoryOptions extends ReplayOptions {
   port?: ClickHousePort;
   /** Runs a ClickHouseRebuildOp or PostgresMigrationOp step. Default: chant's local executor, as apply runs it. */
   runStep?: StepRunner;
+  /** Other profiles on the same server whose databases or schemas the replay may empty (`--reset-shared`). */
+  resetShared?: readonly string[];
 }
 
 /** The dialect's driver for `env`. */
@@ -60,6 +64,7 @@ export async function replayHistory(project: Project, env: Environment, options:
   const ordered = readMigrations(migrationsDir(project));
   const driver = await openReplay(project, env, ordered, options);
   try {
+    refuseShared(env, await sharedProfiles(project, env, driver.scope, options.processEnv), options.resetShared ?? [], project.dialect);
     return await replayMigrations(ordered, driver, options);
   } finally {
     await driver.close();
