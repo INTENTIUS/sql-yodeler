@@ -146,7 +146,7 @@ describe("yodel lint (the command)", () => {
     expect(unknown.err).toContain("no such migration");
     const reset = await yodel(p.at("--reset"));
     expect(reset.code).toBe(1);
-    expect(reset.err).toContain("--reset and --keep go with --replay <env>");
+    expect(reset.err).toContain("--reset, --reset-shared and --keep go with --replay <env>");
     const unknownEnv = await yodel(p.at("--replay", "nowhere"));
     expect(unknownEnv.code).toBe(1);
     expect(unknownEnv.err).toContain('no environment "nowhere"');

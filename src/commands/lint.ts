@@ -8,7 +8,7 @@ import { LINT_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, rende
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
-const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--keep]] [--json] [--dir <project>] [--update-checksum <id>]... [--rules]";
+const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json] [--dir <project>] [--update-checksum <id>]... [--rules]";
 
 const help = `${usage}
 
@@ -65,6 +65,11 @@ Options:
   --reset                 with --replay: drop those databases or schemas
                           first when they exist. Destructive: never against a
                           server whose data matters
+  --reset-shared <profile>
+                          with --replay: replay even though <profile> binds
+                          the same server and names one of those databases or
+                          schemas, which the replay then empties (repeatable).
+                          Refused without it, --reset or not
   --keep                  with --replay: leave the replayed database in place
   --rules                 list the rules and their levels, and exit
   --json                  print the findings as JSON
@@ -74,7 +79,8 @@ Exit codes:
   0  no errors (warnings and silenced findings do not fail)
   3  at least one error (a replay that differs counts)
   4  --replay: the target already holds what the history names, and --reset
-     was not given; nothing was run
+     was not given, or another profile binds the same server and names one
+     of them and --reset-shared does not name it; nothing was run
   1  lint could not run: a bad config, an unknown migration for
      --update-checksum, a server that does not answer (--env)
 `;
@@ -83,6 +89,7 @@ interface LintArgs {
   env: string | undefined;
   replay: string | undefined;
   reset: boolean;
+  resetShared: string[];
   keep: boolean;
   json: boolean;
   dir: string;
@@ -101,6 +108,7 @@ function parseLintArgs(args: string[]): LintArgs {
         env: { type: "string" },
         replay: { type: "string" },
         reset: { type: "boolean" },
+        "reset-shared": { type: "string", multiple: true },
         keep: { type: "boolean" },
         json: { type: "boolean" },
         dir: { type: "string", short: "C" },
@@ -114,11 +122,13 @@ function parseLintArgs(args: string[]): LintArgs {
   const v = parsed.values;
   const update = v["update-checksum"];
   const replay = typeof v.replay === "string" ? v.replay : undefined;
-  if (replay === undefined && (v.reset === true || v.keep === true)) throw new YodelError(`--reset and --keep go with --replay <env>\n${usage}`);
+  const resetShared = Array.isArray(v["reset-shared"]) ? v["reset-shared"].filter((r): r is string => typeof r === "string") : [];
+  if (replay === undefined && (v.reset === true || v.keep === true || resetShared.length > 0)) throw new YodelError(`--reset, --reset-shared and --keep go with --replay <env>\n${usage}`);
   return {
     env: typeof v.env === "string" ? v.env : undefined,
     replay,
     reset: v.reset === true,
+    resetShared,
     keep: v.keep === true,
     json: v.json === true,
     dir: typeof v.dir === "string" ? v.dir : process.cwd(),
@@ -190,7 +200,7 @@ export const lint: Command = {
         const env = resolveEnvironment(project, a.replay);
         if (scanMigrations(dir).ordered) {
           // A target that is not fresh throws here, exit 4, before anything is linted or run.
-          replay = await replayHistory(project, env, { reset: a.reset, keep: a.keep, log: (l) => { io.err(`replay: ${l}\n`); } });
+          replay = await replayHistory(project, env, { reset: a.reset, resetShared: a.resetShared, keep: a.keep, log: (l) => { io.err(`replay: ${l}\n`); } });
           options.rules = [...projectRules, replayRule(replay)];
         } else {
           io.err(`yodel lint: the migrations directory is not one chain, so it is not replayed; fix the findings below first\n`);
