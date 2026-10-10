@@ -18,7 +18,10 @@ async function handMade(claim: Ctx, exec?: (sql: string) => Promise<void>): Prom
     // A dictionary and a function (#46), and access control: a role, a user with a password (the environment's), a row policy and grants.
     const { reader: role, svc, fn } = chNames(ctx);
     await ctx.db.exec(`CREATE DICTIONARY ${n}.daily_n (day Date, n UInt64 DEFAULT 0) PRIMARY KEY day SOURCE(CLICKHOUSE(TABLE 'daily' DB '${n}')) LAYOUT(COMPLEX_KEY_HASHED()) LIFETIME(300)`);
-    await ctx.db.exec(`CREATE FUNCTION ${fn} AS (x, k) -> x * k`);
+    // A view calls the function, and ClickHouse stores the function's body in place of the call, so chant's import adopts the function by its body.
+    // A function belongs to no database and the import reads every one on the server, so the body names the database: another run's function never matches this view.
+    await ctx.db.exec(`CREATE FUNCTION ${fn} AS (x, k) -> concat('${n}:', toString(x * k))`);
+    await ctx.db.exec(`CREATE VIEW ${n}.scaled AS SELECT id, ${fn}(id, 2) AS doubled FROM ${n}.events`);
     await ctx.db.exec(`CREATE ROLE ${role} SETTINGS max_threads = 4`);
     await ctx.db.exec(`CREATE USER ${svc} IDENTIFIED BY 'yodel-claims-only'`);
     await ctx.db.exec(`GRANT SELECT ON ${n}.events TO ${role}`);
@@ -69,8 +72,6 @@ async function adopted(ctx: Ctx, s: Adoption): Promise<NonNullable<Adoption["don
   await handMade(ctx);
   const before = { comment: await comment(ctx), rows: await rows(ctx) };
   const p = await Project.create(ctx, { noSource: true });
-  // A function belongs to no database, and ClickHouse writes a call to one into what calls it as its body, so chant's import adopts only the functions the profile names.
-  if (ctx.dialect === "ch") p.edit("chant.config.ts", "databases: [", `importFunctions: ["${chNames(ctx).fn}"], databases: [`);
   if (s.access !== undefined) manageAccess(p, s.access);
   const init = await p.yodel(["init", "--from", p.env, "--json"]);
   const doc = parse<InitDoc>(init);
@@ -137,7 +138,7 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
 /**
  * `yodel init --from <env>` adopts a database made by hand (on Postgres,
  * with a trigger function and a trigger; on ClickHouse, with a dictionary
- * and a function the profile's importFunctions names): it writes the declarations and a
+ * and a function a view calls): it writes the declarations and a
  * baseline migration, records the baseline applied without running it (the objects keep their data and stay as they were),
  * and then yodel plan shows no change and yodel apply has nothing to do.
  * BREAK: one adopted declaration is edited after init (a column's type),

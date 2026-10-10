@@ -9,7 +9,7 @@ claims: [topology, declarative, approval]
 `@intentius/sql-yodeler` is on npm. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import:
 
 ```sh
-npm install @intentius/sql-yodeler @intentius/chant@0.120.0 @intentius/chant-lexicon-sql@0.120.0
+npm install @intentius/sql-yodeler @intentius/chant@0.121.0 @intentius/chant-lexicon-sql@0.121.0
 npx yodel --version
 ```
 
