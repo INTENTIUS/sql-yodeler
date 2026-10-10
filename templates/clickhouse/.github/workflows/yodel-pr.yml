@@ -22,24 +22,19 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    container: node:22-bookworm
     services:
       replay-clickhouse:
         image: clickhouse/clickhouse-server:26.8.15.10
         env:
           CLICKHOUSE_SKIP_USER_SETUP: '1'
-        ports:
-          - '8123:8123'
         options: --health-cmd "clickhouse-client --query 'SELECT 1'" --health-interval 2s --health-timeout 5s --health-retries 45
     env:
-      REPLAY_CLICKHOUSE_URL: http://localhost:8123
+      REPLAY_CLICKHOUSE_URL: http://replay-clickhouse:8123
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: '0'
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: npm
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
@@ -49,7 +44,7 @@ jobs:
       - name: yodel lint
         run: yodel lint
       - name: Wait for the replay server (replay-clickhouse)
-        run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "localhost", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("localhost:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
+        run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "replay-clickhouse", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-clickhouse:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
       - name: yodel lint --replay
         run: yodel lint --replay replay --reset
   plan-dev:

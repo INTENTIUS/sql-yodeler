@@ -78,6 +78,7 @@ GitHub Actions:
 - Repository secrets: the readers' variables and the URLs.
 - Environments `dev` and `prod`, each limited to the `main` branch, holding that environment's URL and writer variables. Pull request jobs cannot read an environment's secrets.
 - The workflows set their own token permissions: `contents: read`, and `pull-requests: write` on the pull request workflow for the comment.
+- The lint job runs in a `node:22-bookworm` container and reaches its replay server by the service's name, so it needs no free port on the runner; a self-hosted runner needs Docker.
 
 Forgejo Actions:
 
