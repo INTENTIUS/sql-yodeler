@@ -12,13 +12,17 @@ SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant),
 npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
 cd my-schema && npm install && git init -b main && git add -A && git commit -m "chore: a new yodel project"
 npx chant emulator up --lexicon sql            # ClickHouse and Postgres in Docker
-export DEV_CLICKHOUSE_READER_USER=default DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
+curl -s http://127.0.0.1:8123 --data-binary "CREATE USER IF NOT EXISTS reader IDENTIFIED WITH no_password SETTINGS readonly = 1"
+curl -s http://127.0.0.1:8123 --data-binary "GRANT SELECT, SHOW ON *.* TO reader"
+export DEV_CLICKHOUSE_READER_USER=reader DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
 npx yodel new init && npx yodel lint
 git add -A && git commit -m "feat: the first migration"
-npx yodel apply dev                            # stops at the approval
+YODEL_CREDENTIALS=writer npx yodel apply dev   # stops at the approval
 npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
-npx yodel apply dev
+YODEL_CREDENTIALS=writer npx yodel apply dev
 ```
+
+yodel refuses an environment whose reader and writer are one user, so dev reads with a read-only user, `reader`, and applies with the emulator's `default` user, picked by `YODEL_CREDENTIALS=writer`. The template's `just up` makes the reader and prints these variables for a `.env` file, and `just apply` sets the writer.
 
 For Postgres, use `templates/postgres` with `--param name=app-schema --param schema=app`.
 
