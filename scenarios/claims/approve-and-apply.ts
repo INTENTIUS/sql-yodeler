@@ -1,6 +1,7 @@
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
-import { Project } from "../lib/project.js";
+import { parse, Project } from "../lib/project.js";
 import { addColumn, addTable, createTableByHand, mainTable, needsVersioned } from "../lib/schema.js";
 
 /**
@@ -121,13 +122,82 @@ async function policyPart(ctx: Ctx, p: Project): Promise<void> {
   hold(recorded === 1, `the history records the override in ${String(recorded)} of ${id}'s started rows`);
 }
 
+/** The parts of `yodel report --json` the audit part reads. */
+interface ReportDoc {
+  audit: Array<{ kind: string; migration?: string; digest?: string; by?: string; source: { ledger?: string; op?: string; gate?: string } }>;
+  gaps: Array<{ kind: string; detail: string }>;
+  auditFile?: { missing: Array<{ kind: string; digest?: string }> };
+}
+
+/** Removes the approvals of `digest` from the gate's ledger file on the project's chant/lifecycle branch, as someone editing the branch would. */
+async function removeApprovals(ctx: Ctx, p: Project, file: string, gate: string, digest: string): Promise<number> {
+  const wt = join(ctx.work, "lifecycle");
+  await p.git("worktree", "add", "-q", wt, "chant/lifecycle");
+  try {
+    const lines = readFileSync(join(wt, file), "utf8").split("\n");
+    const kept = lines.filter((l) => {
+      if (!l.trim()) return true;
+      const r = JSON.parse(l) as { kind?: string; gate?: string; planDigest?: string };
+      return !((r.kind ?? "resolution") === "resolution" && r.gate === gate && r.planDigest === digest);
+    });
+    writeFileSync(join(wt, file), kept.join("\n"));
+    await p.git("-C", wt, "commit", "-qam", `remove the approval of ${digest}`);
+    return lines.length - kept.length;
+  } finally {
+    await p.git("worktree", "remove", "--force", wt);
+  }
+}
+
+/**
+ * The audit log (#57): yodel report derives it from the history and chant's
+ * gate ledger. After the parts above, each migration the history records
+ * applied has an applied entry and an approved entry for the same digest,
+ * there is no gap, and the audit.jsonl written then passes --check.
+ * BREAK: the approval of the newest applied digest is removed from the
+ * ledger before --check, which then names the missing entry and the
+ * migration applied with no approval.
+ */
+async function auditPart(ctx: Ctx, p: Project): Promise<void> {
+  // Under BREAK the earlier parts may have left migrations pending.
+  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+  // Before the break: a failure here is not the break being caught.
+  const must: (cond: boolean, what: string) => asserts cond = ctx.broken ? (cond, what) => { if (!cond) throw new Error(what); } : hold;
+  const file = join(ctx.work, "audit.jsonl");
+  const first = await p.yodel(["report", p.env, "--json", "--audit", file]);
+  const doc = parse<ReportDoc>(first);
+  must(first.code === 0 && doc.gaps.length === 0, `yodel report exited ${String(first.code)} with gaps: ${doc.gaps.map((g) => g.detail).join("; ")}`);
+  const appliedIds = await ctx.db.count(`SELECT count(DISTINCT migration_id) FROM ${ctx.db.history}.history WHERE kind = 'migration' AND status = 'succeeded'`);
+  const applied = doc.audit.filter((e) => e.kind === "applied");
+  must(appliedIds > 0 && applied.length === appliedIds, `the audit log has ${String(applied.length)} applied entries; the history records ${String(appliedIds)} migrations applied`);
+  for (const a of applied) {
+    must(doc.audit.some((e) => e.kind === "approved" && e.digest === a.digest), `${String(a.migration)} was applied under ${String(a.digest)}, and the audit log has no approval of it`);
+  }
+  must(doc.audit.some((e) => e.kind === "approval-requested"), "the audit log has no approval-requested entry, though the apply stopped at the gate");
+  must(readFileSync(file, "utf8").trim().split("\n").length === doc.audit.length, "audit.jsonl does not hold every entry yodel report printed");
+
+  if (ctx.broken) {
+    const newest = applied.at(-1);
+    const approval = doc.audit.find((e) => e.kind === "approved" && e.digest === newest?.digest);
+    if (!approval?.source.ledger || !approval.source.gate || !newest?.digest) throw new Error("no approval to remove");
+    const removed = await removeApprovals(ctx, p, approval.source.ledger, approval.source.gate, newest.digest);
+    if (removed === 0) throw new Error(`no approval line of ${newest.digest} in ${approval.source.ledger}`);
+  }
+  const check = await p.yodel(["report", p.env, "--json", "--audit", file, "--check"]);
+  const checked = parse<ReportDoc>(check);
+  const missing = checked.auditFile?.missing ?? [];
+  hold(
+    check.code === 0 && missing.length === 0 && checked.gaps.length === 0,
+    `yodel report --check exited ${String(check.code)}: ${String(missing.length)} entries missing (${missing.map((m) => `${m.kind} ${m.digest ?? ""}`).join(", ")}); gaps: ${checked.gaps.map((g) => g.detail).join("; ")}`,
+  );
+}
+
 /**
  * Both parts on one project. Under BREAK each part breaks its own property,
  * and the run is caught only when every part catches it.
  */
 async function body(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx);
-  const parts = [approvalPart, preCheckPart, policyPart];
+  const parts = [approvalPart, preCheckPart, policyPart, auditPart];
   const caught: string[] = [];
   for (const part of parts) {
     try {
@@ -144,6 +214,6 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const approveAndApply: Claim = {
   name: "approve-and-apply",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule unless an override is recorded for that digest",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed",
   dialects: { ch: body, pg: body },
 };

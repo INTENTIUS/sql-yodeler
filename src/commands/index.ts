@@ -10,6 +10,7 @@ import { override } from "./override.js";
 import { plan } from "./plan.js";
 import { rebase } from "./rebase.js";
 import { repair } from "./repair.js";
+import { report } from "./report.js";
 import { status } from "./status.js";
 
 /** Every verb, in the order `yodel --help` lists them. */
@@ -22,6 +23,7 @@ export const commands: readonly Command[] = [
   newCommand,
   lint,
   status,
+  report,
   drift,
   rebase,
   repair,

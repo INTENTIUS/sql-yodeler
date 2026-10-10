@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/report.schema.json",
+  "title": "yodel report [<env>...] --json",
+  "description": "Version 1. Every environment's migrations side by side, the audit log derived from each environment's history table and chant's gate ledger, and the gaps those sources show. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "generatedAt", "project", "dialect", "migrations", "environments", "audit", "gaps"],
+  "properties": {
+    "version": { "const": 1 },
+    "generatedAt": { "type": "string", "description": "When the report was read, ISO 8601 UTC." },
+    "project": { "type": "string", "description": "The project directory." },
+    "dialect": { "enum": ["clickhouse", "postgres"] },
+    "migrations": { "type": "array", "items": { "type": "string" }, "description": "The migrations in chain order, then any an environment applied that the directory no longer has." },
+    "environments": { "type": "array", "items": { "$ref": "#/$defs/environment" } },
+    "audit": { "type": "array", "items": { "$ref": "#/$defs/entry" }, "description": "Every environment's audit entries, oldest first." },
+    "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } },
+    "auditFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "appended", "missing"],
+      "description": "With --audit: the file, how many entries were appended (0 with --check), and the entries of the file the sources no longer give.",
+      "properties": {
+        "path": { "type": "string" },
+        "appended": { "type": "integer", "minimum": 0 },
+        "missing": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+      }
+    }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "notes", "migrations"],
+      "properties": {
+        "name": { "type": "string" },
+        "history": { "type": "string", "description": "<database>.history" },
+        "op": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "gate"],
+          "properties": { "name": { "type": "string" }, "gate": { "type": "string" } }
+        },
+        "error": { "type": "string", "description": "Why the environment could not be read." },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "migrations": { "type": "array", "items": { "$ref": "#/$defs/migration" } }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "state", "inDirectory"],
+      "properties": {
+        "id": { "type": "string" },
+        "state": { "enum": ["applied", "pending", "failed", "started"] },
+        "inDirectory": { "type": "boolean" },
+        "at": { "type": "string" },
+        "by": { "type": "string" },
+        "digest": { "type": "string" },
+        "approvedBy": { "type": "string" },
+        "approvedAt": { "type": "string" }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "at", "environment", "kind", "source"],
+      "description": "One audit entry; audit.jsonl holds one per line.",
+      "properties": {
+        "id": { "type": "string", "description": "A hash of the entry and its source: the same sources give the same id." },
+        "at": { "type": "string" },
+        "environment": { "type": "string" },
+        "kind": { "enum": ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired"] },
+        "by": { "type": "string" },
+        "migration": { "type": "string" },
+        "digest": { "type": "string" },
+        "detail": { "type": "string" },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["ledger", "op", "gate"],
+              "properties": { "ledger": { "type": "string" }, "op": { "type": "string" }, "gate": { "type": "string" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["history", "seq", "run"],
+              "properties": { "history": { "type": "string" }, "seq": { "type": "integer", "minimum": 1 }, "run": { "type": "string" } }
+            }
+          ]
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "kind", "detail"],
+      "properties": {
+        "environment": { "type": "string" },
+        "kind": { "enum": ["history-row", "approval"] },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}
