@@ -69,7 +69,7 @@ interface Serial {
   arm(): Promise<void>;
   /** Whether the first apply is held mid-run. */
   firstIn(): Promise<boolean>;
-  /** Whether both applies are past reading the history (each about to send, or sending, the same statements): only possible with no lock. */
+  /** Whether both applies are held mid-run at once (each about to send, or sending, the same statements): only possible with no lock. */
   bothIn(): Promise<boolean>;
   release(): Promise<void>;
   /** The history's highest seq. */
@@ -110,17 +110,18 @@ function postgresSerial(ctx: Ctx): Serial {
  * ClickHouse: the project reaches its server (a replica of a scratch
  * cluster with Keeper) through a proxy here, which, once armed, holds back
  * every write to the history until it is released. The first apply's first
- * row waits there, after it has read the history; a second apply that read
- * it too (only possible with no lock) counts as both in.
+ * row waits there, under the lock. A second apply held there too (only
+ * possible with no lock) counts as both in. Reads of the history are no
+ * such signal: two of them were counted before the second apply reached the
+ * lock, so the first was let go and the second took a free lock, recording
+ * no wait.
  */
 async function clickhouseSerial(ctx: Ctx, server: ClickHouseEndpoint): Promise<Serial & { url: string; close(): Promise<void> }> {
   let armed = false;
-  let reads = 0;
   let held = 0;
   let open: (() => void) | undefined;
   let gate = Promise.resolve();
   const historyWrite = new RegExp(String.raw`INSERT INTO\s+\S*${ctx.db.history}\S*\.\S*history\b`, "i");
-  const historyRead = new RegExp(String.raw`FROM\s+\S*${ctx.db.history}\S*\.\S*history\s+ORDER BY seq`, "i");
   const proxy: Server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
@@ -129,7 +130,6 @@ async function clickhouseSerial(ctx: Ctx, server: ClickHouseEndpoint): Promise<S
         const body = Buffer.concat(chunks);
         const url = new URL(req.url ?? "/", "http://proxy");
         const sql = `${url.searchParams.get("query") ?? ""}\n${body.toString("utf8")}`;
-        if (armed && historyRead.test(sql)) reads += 1;
         if (armed && historyWrite.test(sql)) {
           held += 1;
           await gate;
@@ -154,14 +154,13 @@ async function clickhouseSerial(ctx: Ctx, server: ClickHouseEndpoint): Promise<S
   return {
     url,
     arm() {
-      reads = 0;
       held = 0;
       gate = new Promise<void>((ok) => (open = ok));
       armed = true;
       return Promise.resolve();
     },
     firstIn: () => Promise.resolve(held >= 1),
-    bothIn: () => Promise.resolve(reads >= 2),
+    bothIn: () => Promise.resolve(held >= 2),
     release() {
       armed = false;
       open?.();
@@ -264,7 +263,7 @@ async function serialPart(ctx: Ctx, p: Project, s: Serial): Promise<void> {
     let seen = "";
     while (Date.now() < deadline) {
       if (/lock: held by /.test(said)) seen = "an apply waiting for the lock";
-      else if (await s.bothIn()) seen = "both applies past reading the history";
+      else if (await s.bothIn()) seen = "both applies held mid-run";
       if (seen) break;
       await new Promise((r) => setTimeout(r, 100));
     }
