@@ -1,4 +1,4 @@
-import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../lib/access.js";
 
@@ -139,16 +139,19 @@ async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
  * On Postgres, the access part first (it decides whether init manages
  * access), then the adoption's own checks; ClickHouse has the latter alone.
  */
+const parts: ReadonlyArray<PartEntry<Adoption>> = [
+  ["access", accessPart, ["pg"]],
+  ["init", initPart],
+];
+
 async function body(ctx: Ctx): Promise<void> {
-  const s: Adoption = {};
-  if (ctx.dialect === "pg") await runParts(ctx, s, [["access", accessPart], ["init", initPart]] as const);
-  else await runParts(ctx, s, [["init", initPart]] as const);
+  await runParts(ctx, {}, parts);
 }
 
 export const adopt: Claim = {
   name: "adopt",
   says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too",
   dialects: { ch: body, pg: body },
-  // access is Postgres's alone: BREAK=access runs with --dialect pg.
-  parts: ["access", "init"],
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };
