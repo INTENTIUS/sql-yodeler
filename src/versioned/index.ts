@@ -15,7 +15,9 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "../project.js";
-import { MIGRATIONS_DIR } from "../migrations/index.js";
+import { MIGRATIONS_DIR, MigrationDirectoryError, readMigrations } from "../migrations/index.js";
+import { YodelError } from "../project.js";
+import { EXIT_REFUSED } from "../exit.js";
 import type { Migration } from "../migrations/index.js";
 import { currentDigest, inspect, integrityRefusal, stepRefusal, type VersionedEnv } from "./engine.js";
 import type { StatusReport } from "./report.js";
@@ -31,6 +33,22 @@ export * from "./state.js";
 
 /** The project's migrations directory. */
 export const migrationsDir = (project: Project): string => join(project.dir, MIGRATIONS_DIR);
+
+/** Why nothing can be applied while the migrations directory has a problem (a fork, a missing parent, a cycle, an unreadable migration). */
+export const BROKEN_CHAIN = "the migrations directory is not one unbroken chain; nothing can be applied until it is";
+
+/**
+ * The migrations in chain order, for apply and status. A directory problem is
+ * a refusal (exit 4), as yodel plan reports it: nothing is applied.
+ */
+export function readChain(project: Project): Migration[] {
+  try {
+    return readMigrations(migrationsDir(project));
+  } catch (e) {
+    if (e instanceof MigrationDirectoryError) throw new YodelError(`refused: ${BROKEN_CHAIN}:\n${e.problems.map((p) => `  ${p.message}`).join("\n")}`, EXIT_REFUSED);
+    throw e;
+  }
+}
 
 /**
  * Whether `yodel apply` takes the versioned path: the project has a

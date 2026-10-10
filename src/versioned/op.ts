@@ -23,7 +23,7 @@
  * puts a `yodel` that runs itself first on the child's PATH.
  */
 
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -148,6 +148,34 @@ export function yodelShim(): { dir: string; dispose: () => void } {
   return { dir, dispose: () => { rmSync(dir, { recursive: true, force: true }); } };
 }
 
+/**
+ * Where `yodel apply --execute` (the Op's Apply step) writes its exit code,
+ * so the outer `yodel apply` exits with it (5 for the lock, 4 for a refusal)
+ * rather than with `chant run`'s 1.
+ */
+export const STEP_EXIT_ENV = "YODEL_STEP_EXIT_FILE";
+
+/** Records an Op step's exit code where the outer `yodel apply` reads it. Never fails the step. */
+export function recordStepExit(code: number, env: NodeJS.ProcessEnv = process.env): void {
+  const file = env[STEP_EXIT_ENV];
+  if (!file) return;
+  try {
+    writeFileSync(file, `${String(code)}\n`);
+  } catch {
+    // The outer run then reports chant run's own exit.
+  }
+}
+
+/** The exit code the Op's Apply step recorded, when it ran. */
+export function readStepExit(file: string): number | undefined {
+  try {
+    const n = Number(readFileSync(file, "utf8").trim());
+    return Number.isInteger(n) ? n : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Runs the migrations Op with `chant run`, with this yodel on PATH and `--allow-out-of-order` passed through. */
 export async function runMigrateOp(
   project: Project,
@@ -159,8 +187,10 @@ export async function runMigrateOp(
     const base = options.env ?? process.env;
     // The approved digest only ever comes from the gate, never from the caller's environment.
     const rest = Object.fromEntries(Object.entries(base).filter(([k]) => k !== APPROVED_PLAN_ENV && k !== ALLOW_OUT_OF_ORDER_ENV));
+    const exitFile = join(shim.dir, "step-exit");
     const env: NodeJS.ProcessEnv = {
       ...rest,
+      [STEP_EXIT_ENV]: exitFile,
       PATH: [shim.dir, base.PATH ?? ""].filter(Boolean).join(delimiter),
       ...(options.allowOutOfOrder ? { [ALLOW_OUT_OF_ORDER_ENV]: "1" } : {}),
     };
@@ -169,7 +199,9 @@ export async function runMigrateOp(
       env,
       ...(options.onOutput ? { onStdout: options.onOutput, onStderr: options.onOutput } : {}),
     });
-    return readApplyRun(result.code, `${result.stdout}\n${result.stderr}`);
+    const run = readApplyRun(result.code, `${result.stdout}\n${result.stderr}`);
+    const stepExit = readStepExit(exitFile);
+    return stepExit === undefined ? run : { ...run, stepExit };
   } finally {
     shim.dispose();
   }

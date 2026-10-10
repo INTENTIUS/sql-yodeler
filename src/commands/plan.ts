@@ -52,15 +52,17 @@ Options:
 
 Exit codes:
   0  every change can be made in place, or there is none; versioned: apply
-     would run (or has nothing to do)
+     would run (or has nothing to do). Pending migrations still exit 0: plan
+     reports, and a CI job that posts it should not fail because a pull
+     request adds a migration; yodel status exits 3 for them
   2  a change needs its own Op: a ClickHouse rebuild, a Postgres expand and
      contract (declarative); versioned: a pending migration has an Op or
      manual step apply does not run yet
   4  versioned: apply would refuse: a checksum mismatch, an applied migration
-     gone from the directory, an out-of-order migration
+     gone from the directory, an out-of-order migration, a fork or another
+     problem in the migrations directory
   1  no plan could be made: a bad config, an unknown environment, a declaration
-     chant cannot build, a malformed migrations directory, a server it cannot
-     read, a comment the forge refused
+     chant cannot build, a server it cannot read, a comment the forge refused
 `;
 
 interface PlanArgs {

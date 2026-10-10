@@ -5,7 +5,7 @@ import { loadProject, resolveEnvironment, YodelError, type Environment, type Pro
 import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
-import { readMigrations, type Migration } from "../migrations/index.js";
+import type { Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
 import { declarativeTopologyRefusal } from "../config/settings.js";
@@ -20,7 +20,8 @@ import {
   verifyApproval,
   hasMigrations,
   inspect,
-  migrationsDir,
+  readChain,
+  recordStepExit,
   closeVersioned,
   openVersioned,
   renderStatus,
@@ -170,8 +171,8 @@ export const apply: Command = {
   name: "apply",
   summary: "bring an environment to the declared schema or the pending migrations",
   implemented: true,
-  run: (args, io) =>
-    guarded("apply", io, args, help, async () => {
+  run: async (args, io) => {
+    const code = await guarded("apply", io, args, help, async () => {
       const a = parseApplyArgs(args);
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
@@ -182,11 +183,14 @@ export const apply: Command = {
       const refusal = project.dialect === "clickhouse" ? declarativeTopologyRefusal(project, env.name) : undefined;
       if (refusal) throw refusal;
       return declarativeApply(project, env, a, io);
-    }),
+    });
+    if (args.includes("--execute")) recordStepExit(code);
+    return code;
+  },
 };
 
 async function versionedApply(project: Project, env: Environment, a: ApplyArgs, io: Io): Promise<number> {
-  const ordered = readMigrations(migrationsDir(project));
+  const ordered = readChain(project);
   const venv = await openVersioned(project, env);
   try {
     return await versionedApplyWith(project, env, a, io, ordered, venv);
@@ -259,12 +263,14 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
 
   const after = await statusReport(venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
   if (run.status === "failed") {
+    // The Apply step's own code (5 for the lock, 4 for a refusal) is what a script retries or stops on; chant run reports any failed step as 1.
+    const code = run.stepExit !== undefined && run.stepExit !== 0 ? run.stepExit : 1;
     if (!a.json) {
-      io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})\n`);
+      io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})${run.stepExit ? `: its Apply step, yodel apply ${env.name} --execute, exited ${String(run.stepExit)}` : ""}\n`);
       io.out(`\n${renderStatus(after)}`);
     }
-    if (a.json) io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "failed", op: op.name, exitCode: run.code }, null, 2)}\n`);
-    return 1;
+    if (a.json) io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "failed", op: op.name, exitCode: code, chantExitCode: run.code }, null, 2)}\n`);
+    return code;
   }
   if (a.json) {
     io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "applied", op: op.name, appliedNow: report.status.pending.map((p) => p.id) }, null, 2)}\n`);

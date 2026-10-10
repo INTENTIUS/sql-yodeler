@@ -16,8 +16,11 @@ import { YodelError, type Environment, type Project, type SqlDialect } from "../
 import { scanMigrations, type Migration } from "../migrations/index.js";
 import { describeTopology } from "../history/index.js";
 import { asBackfill } from "../steps/kinds.js";
+import { EXIT_REFUSED } from "../exit.js";
 import {
+  BROKEN_CHAIN,
   findMigrateOp,
+  inspect,
   gitLedger,
   migrateOpExample,
   migrationsDir,
@@ -123,14 +126,14 @@ export async function collectVersionedPlan(project: Project, env: Environment, o
   const problems = scan.problems.map((p) => p.message);
   const base = { environment: env.name, dialect: project.dialect, problems, notes: [] as string[] };
 
-  if (!scan.ordered) {
-    return { ...base, appliedCount: 0, pending: [], refusal: { exitCode: 1, message: "the migrations directory is not one unbroken chain; nothing can be applied until it is" } };
-  }
-  const ordered = scan.ordered;
-
   const venv = options.venv ?? (await openVersioned(project, env, options.processEnv));
   try {
-    return await collectWith(project, env, options, venv, ordered, base, problems);
+    if (!scan.ordered) {
+      // Nothing can be planned, but the history still says what is applied.
+      const { status } = await inspect(venv, [], { sync: false });
+      return { ...base, appliedCount: status.applied.length, pending: [], refusal: { exitCode: EXIT_REFUSED, message: BROKEN_CHAIN } };
+    }
+    return await collectWith(project, env, options, venv, scan.ordered, base, problems);
   } finally {
     if (!options.venv) await closeVersioned(venv);
   }
