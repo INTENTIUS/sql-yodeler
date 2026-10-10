@@ -47,6 +47,8 @@ Before each build (`yodel plan`, `yodel new`, `yodel apply`, `yodel drift`), yod
 
 Commit the generated file. A build that yodel does not start, such as `chant build` or an Op run outside yodel, reads the committed copy.
 
+Keep a `file` source's DDL out of the schema build. chant's build reads every `.sql` file in the directory it builds, and an ApplyOp's diff builds the project root unless `chant.config.ts` sets `sourceDir`. A DDL file there would declare each object a second time, beside the generated file. Set `sourceDir: "src"` in `chant.config.ts`, or start the file with a `-- chant-discovery-skip` line.
+
 On Postgres, yodel reads `CREATE SCHEMA`, `TABLE`, `INDEX`, `VIEW`, `MATERIALIZED VIEW`, `SEQUENCE`, `TYPE ... AS ENUM`, `DOMAIN` and `EXTENSION`, with `COMMENT ON` for those. ORMs print foreign keys as `ALTER TABLE <t> ADD CONSTRAINT ... FOREIGN KEY ...`; yodel folds each `ALTER TABLE ... ADD` of a table constraint into `<t>`'s `CREATE TABLE`, where a declaration holds it. `BEGIN` and `COMMIT` are skipped. On ClickHouse, it reads `CREATE DATABASE`, `TABLE`, `VIEW` and `MATERIALIZED VIEW`.
 
 Any other statement is an error that names it, and nothing is built. Leaving it out would leave part of the ORM's schema unmanaged without saying so.

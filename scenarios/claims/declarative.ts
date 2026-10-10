@@ -155,7 +155,8 @@ function addOrmColumn(p: Project, column: string): void {
 async function orm(ctx: Ctx): Promise<void> {
   await ctx.db.reset();
   const p = await Project.create(ctx, { ops: "declarative", name: "orm" });
-  p.write("db/orm.sql", ormDdl(ctx));
+  // Marked so a build of the project root (the ApplyOp's diff) does not read the DDL as well as the declarations yodel writes from it.
+  p.write("db/orm.sql", `-- chant-discovery-skip: yodel reads this into src/orm.generated.ts\n${ormDdl(ctx)}`);
   p.write(
     "yodel.config.ts",
     `import { defineConfig } from "@intentius/sql-yodeler";\n\nexport default defineConfig({\n  sources: { orm: { command: "cat db/orm.sql", schema: "${ctx.db.name}" } },\n});\n`,
