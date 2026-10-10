@@ -8,8 +8,22 @@ import { register } from "tsx/esm/api";
 register();
 const { main } = await import("./cli.js");
 
+const terminal = process.stdin.isTTY && process.stderr.isTTY;
 const code = await main(process.argv.slice(2), {
   out: (text) => process.stdout.write(text),
   err: (text) => process.stderr.write(text),
+  ...(terminal
+    ? {
+        ask: async (question: string) => {
+          const { createInterface } = await import("node:readline/promises");
+          const rl = createInterface({ input: process.stdin, output: process.stderr });
+          try {
+            return await rl.question(question);
+          } finally {
+            rl.close();
+          }
+        },
+      }
+    : {}),
 });
 process.exitCode = code;

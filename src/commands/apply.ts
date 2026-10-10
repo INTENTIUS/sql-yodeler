@@ -5,6 +5,7 @@ import { loadProject, resolveEnvironment, YodelError, type Environment, type Pro
 import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
+import { runnable } from "../chant/runnable.js";
 import type { Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
@@ -70,7 +71,9 @@ Two paths, chosen by the project:
   environment (chant run <op>), whose gate is bound to the plan digest: the
   pending migrations' checksums, the topology, the history and the live
   schema. A run that stops at the gate prints the chant approve command;
-  approve, then run yodel apply again. If anything the digest covers changes after
+  approve, then run yodel apply again. At a terminal, yodel approve <env>
+  approves the same plan without the digest to copy: yodel approve <env>,
+  then yodel apply <env>. If anything the digest covers changes after
   approval, the gate asks again.
 
   A migration that failed part way resumes at the statement that failed; a
@@ -256,7 +259,13 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (stale && !a.json) io.out(`\n${stale.line}\n`);
     if (!a.json) {
       io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
-      if (run.approve) io.out(`Approve it with:\n  ${run.approve}\nthen run yodel apply ${env.name} again.\n`);
+      if (run.approve) {
+        io.out(
+          `Approve it with:\n  ${runnable(run.approve, project.dir)}\n` +
+            `or, at a terminal, with ${runnable(`yodel approve ${env.name}`, project.dir)}, which shows the plan and asks you first;\n` +
+            `then run ${runnable(`yodel apply ${env.name}`, project.dir)} again.\n`,
+        );
+      }
     }
     return emit({ status: "gated", op: op.name, gate: op.gate, ...(stale ? { moved: stale.moved } : {}), ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, GATED);
   }
@@ -308,7 +317,7 @@ async function declarativeApply(project: Project, env: Environment, a: ApplyArgs
     if (run.status === "gated") {
       if (!json) {
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan.\n`);
-        if (run.approve) io.out(`Approve it with:\n  ${run.approve}\nthen run yodel apply ${env.name} again.\n`);
+        if (run.approve) io.out(`Approve it with:\n  ${runnable(run.approve, project.dir)}\nthen run ${runnable(`yodel apply ${env.name}`, project.dir)} again.\n`);
       }
       return report({ status: "gated", gate: op.gate, ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before) }, GATED);
     }

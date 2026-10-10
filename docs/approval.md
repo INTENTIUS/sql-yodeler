@@ -56,7 +56,8 @@ Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.
 
 Plan digest: jcs1-sha256:a9948d55a9e2c9dc97e6465bb7990df66afa63e5a3b9ff1b16618731fc9f3fc3
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:a9948d55a9e2c9dc97e6465bb7990df66afa63e5a3b9ff1b16618731fc9f3fc3
+  npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:a9948d55a9e2c9dc97e6465bb7990df66afa63e5a3b9ff1b16618731fc9f3fc3
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first.
 
 Not approved yet. Approving binds exactly this digest; if anything it covers changes before the apply runs, the gate asks again and nothing is applied.
 ```
@@ -173,7 +174,8 @@ Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.
 
 Plan digest: jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
+  npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first.
 
 The newest approval of approve-migrate-dev, by yodel at 2026-10-09T23:07:05.748Z, is for jcs1-sha256:4a61386905e697a530a2ffd63f09217788ce839fa9f420efeceda30af5cdf3b0, not this plan; it does not hold.
 What moved: history changed: applied since: 20261009T2306-fill-country (by yodel@example at 2026-10-09 23:07:09.365519); pending migrations changed: new pending migration: 20261009T2307-add-source.
@@ -210,8 +212,9 @@ Nothing was applied. The approval of jcs1-sha256:fbc46f608b6a0f31519da1be81442b9
 
 migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:18d1e99be58218a055e7f40f69c4f1b1aec4f36bb04bb3757037ade9e3d43af8).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:18d1e99be58218a055e7f40f69c4f1b1aec4f36bb04bb3757037ade9e3d43af8
-then run yodel apply dev again.
+  npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:18d1e99be58218a055e7f40f69c4f1b1aec4f36bb04bb3757037ade9e3d43af8
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first;
+then run npx yodel apply dev again.
 [exit 3]
 ```
 
@@ -227,7 +230,8 @@ Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodel_18_history.
 
 Plan digest: jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
+  npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first.
 
 The newest approval of approve-migrate-dev, by yodel at 2026-10-09T23:07:13.775Z, is for this plan's digest, but approval was asked for again after it at 2026-10-09T23:07:16.240Z (a run holding jcs1-sha256:18d1e99be58218a055e7f40f69c4f1b1aec4f36bb04bb3757037ade9e3d43af8), so it does not hold; approve this plan again.
 ```
@@ -244,8 +248,9 @@ Nothing was applied. The approval of jcs1-sha256:fbc46f608b6a0f31519da1be81442b9
 
 migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
-then run yodel apply dev again.
+  npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:fbc46f608b6a0f31519da1be81442b9353ff5afbfc362d0e82de57803bae5bfb
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first;
+then run npx yodel apply dev again.
 [exit 3]
 ```
 
