@@ -9,7 +9,7 @@ claims: []
 ```sh
 npx yodel docs                       # writes schema-docs/index.html and schema-docs/erd.md
 npx yodel docs --out site/schema     # somewhere else
-npx yodel docs --migration 20261010T0531-baseline   # the schema that migration recorded
+npx yodel docs --migration 20261010T1723-baseline   # the schema that migration recorded
 ```
 
 `schema-docs/index.html` lists every database or schema, table, view, materialized view and index, with:
@@ -42,7 +42,7 @@ erDiagram
   }
 </pre>
 
-The [Postgres example](../examples/postgres/README.md) declares a schema, a table and two indexes. [Its reference](../examples/postgres/schema-docs/index.html) shows the primary key, the check constraint, both indexes, and the history, the column rename as an expand-and-contract step included.
+The [Postgres example](../examples/postgres/README.md) declares a schema, a table and three indexes. [Its reference](../examples/postgres/schema-docs/index.html) shows the primary key, the check constraint, the indexes, and the history, the column rename as an expand-and-contract step included.
 
 <!-- erd: postgres -->
 <pre class="mermaid">

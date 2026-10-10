@@ -191,7 +191,7 @@ The `sql` lexicon's schema checks, the ones `chant lint` runs over a build, run 
 A finding is reported once, in the migration whose recorded schema first has it: the parent's recorded schema is checked too, and what it already had is left out. It is placed at the migration's first step on the object it names, so a `-- yodel:allow SQLPG101 <reason>` line above that step silences it. In the Postgres example, the first migration's `customer_email` column and the later rename's `email` are each reported where they appear:
 
 ```text
-20261010T0531-baseline
+20261010T1723-baseline
   warning  SQLPG112: step 2: orders.customer_email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
 ```
 
@@ -369,7 +369,7 @@ import { defineTests, expectError, expectRows, expectValue } from "@intentius/sq
 export default defineTests([
   {
     name: "fill-country fills the country of each event in the months it covers",
-    at: "20261010T0528-events-by-id",
+    at: "20261010T1722-events-by-id",
     seed: ["INSERT INTO shop.events (id, kind, at) VALUES (1, 'view', '2026-06-03 10:00:00')"],
     expect: [expectRows("SELECT id, country FROM shop.events ORDER BY id", [[1, "FR"]])],
   },
