@@ -35,6 +35,27 @@
         },
         "notice": {
           "type": "string"
+        },
+        "waited": {
+          "description": "The run waited for another apply's lock (--lock-wait): for how long, who held it when the run first found it held, and where.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ms",
+            "heldBy",
+            "where"
+          ],
+          "properties": {
+            "ms": {
+              "type": "integer"
+            },
+            "heldBy": {
+              "type": "string"
+            },
+            "where": {
+              "type": "string"
+            }
+          }
         }
       }
     },
@@ -51,16 +72,21 @@
           "const": "versioned"
         },
         "status": {
-          "description": "planned (--plan, something pending), unchanged, refused, denied (a policy rule denies the plan, with no override), gated (waiting at the Op's gate for a person's approval), failed, applied.",
+          "description": "planned (--plan, something pending), unchanged, refused, denied (a policy rule denies the plan, with no override), stood-down (--stand-down: a newer commit's apply applies this environment, so this one applied nothing), gated (waiting at the Op's gate for a person's approval), failed, applied.",
           "enum": [
             "planned",
             "unchanged",
             "refused",
             "denied",
+            "stood-down",
             "gated",
             "failed",
             "applied"
           ]
+        },
+        "stoodDown": {
+          "description": "stood-down: why, in one line.",
+          "type": "string"
         },
         "preChecks": {
           "description": "The first pending migration's checks, when one failed before the gate.",
@@ -173,7 +199,15 @@
           "type": "string"
         },
         "status": {
-          "const": "applied"
+          "description": "applied, or stood-down (--stand-down: a newer commit came while the step waited for the lock, and it applied nothing).",
+          "enum": [
+            "applied",
+            "stood-down"
+          ]
+        },
+        "stoodDown": {
+          "description": "stood-down: why, in one line.",
+          "type": "string"
         },
         "planDigest": {
           "description": "The digest the gate approved.",

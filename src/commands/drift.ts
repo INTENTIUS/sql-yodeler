@@ -18,8 +18,8 @@ import {
   type DriftAgainst,
 } from "../chant/drift.js";
 import { buildSchema, type BuildOutput } from "../chant/build.js";
-import { probeServer, softly } from "../server.js";
-import type { Environment, Project } from "../project.js";
+import { probeServer, softly, type ServerInfo } from "../server.js";
+import type { Environment, Project, SqlDialect } from "../project.js";
 import { describeHolders, describeMs, isLockTimeout, lockHolders, lockTimeoutOptions } from "../versioned/postgres/waits.js";
 import { DEFAULT_PG_TIMEOUTS } from "../versioned/postgres/executor.js";
 import { closeVersioned, hasMigrations, inspect, openVersioned, readChain } from "../versioned/index.js";
@@ -202,6 +202,24 @@ function describeAction(a: IssueAction, target: ForgeRepo): string {
   return `${a.action} the tracking issue ${issue} on ${where}`;
 }
 
+/** The document `yodel drift --json` prints (schemas/drift.schema.json): the drift, and what the run made of it. */
+export function driftJson(
+  result: Drift,
+  parts: { dialect: SqlDialect; server?: ServerInfo | undefined; drifted: boolean; fingerprint: string; issue?: IssueAction | undefined; issueError?: string | undefined },
+): Record<string, unknown> {
+  const action = parts.issue;
+  const issue = action && "issue" in action ? { action: action.action, number: action.issue.number, ...(action.issue.url ? { url: action.issue.url } : {}) } : action ? { action: action.action } : undefined;
+  return {
+    ...result,
+    dialect: parts.dialect,
+    ...(parts.server ? { server: parts.server } : {}),
+    drifted: parts.drifted,
+    fingerprint: parts.fingerprint,
+    ...(issue ? { issue } : {}),
+    ...(parts.issueError ? { issueError: parts.issueError } : {}),
+  };
+}
+
 /** `yodel drift <env>`; the exit codes are in `help`. */
 export const drift: Command = {
   name: "drift",
@@ -269,8 +287,7 @@ export const drift: Command = {
           issueError = e instanceof Error ? e.message : String(e);
           io.err(`yodel drift: the tracking issue could not be written: ${issueError}\n`);
         }
-        const issueDoc = action && "issue" in action ? { action: action.action, number: action.issue.number, ...(action.issue.url ? { url: action.issue.url } : {}) } : action ? { action: action.action } : undefined;
-        if (a.json) io.out(`${JSON.stringify({ ...result, dialect: project.dialect, ...(server ? { server } : {}), drifted: code === 2, fingerprint, ...(issueDoc ? { issue: issueDoc } : {}), ...(issueError ? { issueError } : {}) }, null, 2)}\n`);
+        if (a.json) io.out(`${JSON.stringify(driftJson(result, { dialect: project.dialect, server, drifted: code === 2, fingerprint, issue: action, issueError }), null, 2)}\n`);
         else io.out(renderDrift(result, server));
         // The watch runs yodel drift on a schedule: drift found goes to the webhook yodel.config.ts notify names (#61), with the fingerprint so a receiver can tell a repeat.
         await sendEvent(project.yodel?.config.notify, eventFromDrift({ ...result, drifted: code === 2, fingerprint }), { io, verb: "drift" });

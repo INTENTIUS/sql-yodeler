@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, PLAN_NEEDS_OP } from "../chant/plan.js";
 import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
@@ -41,6 +41,9 @@ import {
   type MigrateOpRef,
   type VersionedEnv,
 } from "../versioned/index.js";
+import type { ExecuteResult } from "../versioned/engine.js";
+import type { StatusReport } from "../versioned/report.js";
+import type { RuleResult } from "../versioned/policy.js";
 
 /** When the gate's newest approval does not hold: what moved since (or that approval was asked for again), in one line. */
 async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered: readonly Migration[], op: MigrateOpRef, digest: string | undefined) {
@@ -61,6 +64,37 @@ async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered:
   } catch {
     return undefined;
   }
+}
+
+/** What a versioned run did, beyond the status it reports. */
+export type VersionedOutcome =
+  | { status: "planned" | "unchanged" }
+  | { status: "refused"; preChecks?: { migration: string; checks: CheckOutcome[] } }
+  | { status: "denied"; policy: RuleResult[] }
+  | { status: "stood-down"; stoodDown: string; op?: string }
+  | { status: "gated"; op: string; gate: string; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; gatePlanDigest?: string }
+  | { status: "failed"; op: string; exitCode: number; chantExitCode: number }
+  | { status: "applied"; op: string; appliedNow: string[] };
+
+/** What a declarative run (the ApplyOp) did; `plan` is the plan before the run. */
+export type DeclarativeOutcome = { plan: Record<string, unknown> } & (
+  | { status: "refused" | "unchanged" | "applied" }
+  | { status: "gated"; gate: string; approve?: string; planDigest?: string }
+  | { status: "failed"; exitCode: number }
+  | { status: "incomplete"; remaining: Record<string, unknown> }
+);
+
+/** The parts of a `yodel apply --json` document, by path. */
+export type ApplyDoc =
+  | { mode: "versioned"; report: StatusReport; outcome: VersionedOutcome }
+  | { mode: "execute"; environment: string; planDigest: string; result: ExecuteResult }
+  | { mode: "declarative"; environment: string; dialect: SqlDialect; server?: ServerInfo | undefined; op: string; outcome: DeclarativeOutcome };
+
+/** The document `yodel apply --json` prints (schemas/apply.schema.json). */
+export function applyJson(doc: ApplyDoc): Record<string, unknown> {
+  if (doc.mode === "versioned") return { ...statusJson(doc.report), mode: "versioned", ...doc.outcome };
+  if (doc.mode === "execute") return { environment: doc.environment, status: doc.result.stoodDown ? "stood-down" : "applied", planDigest: doc.planDigest, ...doc.result };
+  return { environment: doc.environment, dialect: doc.dialect, ...(doc.server ? { server: doc.server } : {}), op: doc.op, ...doc.outcome };
 }
 
 const usage = "usage: yodel apply <env> [--json] [--dir <project>] [--op <name>] [--allow-out-of-order] [--plan] [--lock-wait <duration>] [--stand-down]";
@@ -289,14 +323,14 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
           }
         : {}),
     });
-    if (a.json) io.out(`${JSON.stringify({ environment: env.name, status: result.stoodDown ? "stood-down" : "applied", planDigest: approved, ...result }, null, 2)}\n`);
+    if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "execute", environment: env.name, planDigest: approved, result }), null, 2)}\n`);
     else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
     return 0;
   }
 
   const report = await statusReport(venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
-  const emit = (doc: Record<string, unknown>, code: number) => {
-    outcome.doc = { ...statusJson(report), mode: "versioned", ...doc };
+  const emit = (doc: VersionedOutcome, code: number) => {
+    outcome.doc = applyJson({ mode: "versioned", report, outcome: doc });
     if (a.json) io.out(`${JSON.stringify(outcome.doc, null, 2)}\n`);
     return code;
   };
@@ -384,7 +418,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})${run.stepExit ? `: its Apply step, yodel apply ${env.name} --execute, exited ${String(run.stepExit)}` : ""}\n`);
       io.out(`\n${renderStatus(after)}`);
     }
-    outcome.doc = { ...statusJson(after), mode: "versioned", status: "failed", op: op.name, exitCode: code, chantExitCode: run.code };
+    outcome.doc = applyJson({ mode: "versioned", report: after, outcome: { status: "failed", op: op.name, exitCode: code, chantExitCode: run.code } });
     if (a.json) io.out(`${JSON.stringify(outcome.doc, null, 2)}\n`);
     return code;
   }
@@ -395,7 +429,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     return emit({ status: "stood-down", stoodDown: stoodLate, op: op.name }, 0);
   }
   if (a.json) {
-    io.out(`${JSON.stringify({ ...statusJson(after), mode: "versioned", status: "applied", op: op.name, appliedNow: report.status.pending.map((p) => p.id) }, null, 2)}\n`);
+    io.out(`${JSON.stringify(applyJson({ mode: "versioned", report: after, outcome: { status: "applied", op: op.name, appliedNow: report.status.pending.map((p) => p.id) } }), null, 2)}\n`);
   } else {
     io.out(`\nApplied: ${report.status.pending.map((p) => p.id).join(", ")}.\n`);
   }
@@ -406,8 +440,8 @@ async function declarativeApply(project: Project, env: Environment, a: ApplyArgs
   const op = await findApplyOp(project, env, a.op);
   let server: ServerInfo | undefined;
   let printed: Record<string, unknown> | undefined;
-  const report = (doc: Record<string, unknown>, code: number) => {
-    printed = { environment: env.name, dialect: project.dialect, ...(server ? { server } : {}), op: op.name, ...doc };
+  const report = (doc: DeclarativeOutcome, code: number) => {
+    printed = applyJson({ mode: "declarative", environment: env.name, dialect: project.dialect, server, op: op.name, outcome: doc });
     if (a.json) io.out(`${JSON.stringify(printed, null, 2)}\n`);
     return code;
   };
@@ -422,7 +456,7 @@ async function declarativeRun(
   a: ApplyArgs,
   io: Io,
   op: Awaited<ReturnType<typeof findApplyOp>>,
-  report: (doc: Record<string, unknown>, code: number) => number,
+  report: (doc: DeclarativeOutcome, code: number) => number,
   setServer: (s: ServerInfo | undefined) => void,
 ): Promise<number> {
   const json = a.json;
