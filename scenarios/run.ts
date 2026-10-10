@@ -95,7 +95,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { affected, changedSince, readClaimPaths, reasons, unknownClaims } from "./affected.js";
 import { claims } from "./claims/index.js";
-import type { Dialect } from "./lib/claim.js";
+import { partRunsOn, type Dialect } from "./lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "./lib/db.js";
 import { killGroup } from "./lib/exec.js";
 import { mergeRecord, readRecord, type ClaimsRecord, type RecordRow } from "./record.js";
@@ -160,7 +160,7 @@ if (opt.list) {
   for (const c of claims) {
     if (opt.affected && !named.includes(c.name)) continue;
     const ds = (Object.entries(c.dialects) as Array<[Dialect, unknown]>).map(([d, b]) => (typeof b === "function" ? d : `${d}(${(b as { needs: string }).needs})`));
-    process.stdout.write(`${c.name.padEnd(18)} ${ds.join(",").padEnd(16)} ${c.says}${c.parts ? ` (parts: ${c.parts.join(", ")})` : ""}\n`);
+    process.stdout.write(`${c.name.padEnd(18)} ${ds.join(",").padEnd(16)} ${c.says}${c.parts ? ` (parts: ${c.parts.map((n) => (c.partDialects?.[n] ? `${n} [${c.partDialects[n].join(",")}]` : n)).join(", ")})` : ""}\n`);
   }
   process.exit(0);
 }
@@ -233,6 +233,8 @@ const say = (line: string) => {
 for (const c of selected) {
   for (const [d, body] of Object.entries(c.dialects) as Array<[Dialect, unknown]>) {
     if (opt.dialect && opt.dialect !== d) continue;
+    // BREAK=<part> for a part that runs on other dialects only: nothing to break here.
+    if (breakPart !== undefined && !partRunsOn(c, breakPart, d)) continue;
     if (typeof body !== "function") {
       const line = `CLAIM name=${c.name} dialect=${d} verdict=pending needs=${(body as { needs: string }).needs}`;
       for (const m of modes) verdicts.set(key(c.name, d, m), parseLine(line));

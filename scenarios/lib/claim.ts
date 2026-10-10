@@ -12,7 +12,8 @@
  * A claim of several parts runs them in order with {@link runParts}, each
  * a function of its own. Under BREAK=1 every part breaks its own property
  * and the run is caught only when each part caught its own break; under
- * BREAK=<part> that part alone is broken and the others must hold.
+ * BREAK=<part> that part alone is broken and the others must hold. A part
+ * may run on some dialects only (its entry names them).
  */
 
 import type { Db } from "./db.js";
@@ -72,9 +73,25 @@ export interface Claim {
   stallMinutes?: number;
   /** The parts {@link runParts} runs, in order; BREAK=<part> breaks one of them alone. */
   parts?: readonly string[];
+  /** The parts that run on some dialects only, and those dialects ({@link partDialects}); a part not named runs on every dialect the claim does. */
+  partDialects?: Readonly<Record<string, readonly Dialect[]>>;
 }
 
 export type Part<S> = (ctx: Ctx, state: S) => Promise<void>;
+
+/** A part as {@link runParts} takes it: its name, its function, and the dialects it runs on when not all of the claim's. */
+export type PartEntry<S> = readonly [name: string, part: Part<S>, dialects?: readonly Dialect[]];
+
+/** The names of `parts`, for {@link Claim.parts}. */
+export const partNames = (parts: ReadonlyArray<PartEntry<never>>): string[] => parts.map(([name]) => name);
+
+/** The parts of `parts` that run on some dialects only, for {@link Claim.partDialects}. */
+export function partDialects(parts: ReadonlyArray<PartEntry<never>>): Record<string, readonly Dialect[]> {
+  return Object.fromEntries(parts.flatMap(([name, , dialects]) => (dialects ? [[name, dialects] as const] : [])));
+}
+
+/** Whether `claim`'s part `part` runs on `dialect`. */
+export const partRunsOn = (claim: Pick<Claim, "partDialects">, part: string, dialect: Dialect): boolean => claim.partDialects?.[part]?.includes(dialect) ?? true;
 
 /**
  * Runs a claim's parts in order on one state (a project, a cluster), each
@@ -87,12 +104,14 @@ export type Part<S> = (ctx: Ctx, state: S) => Promise<void>;
  * The run is caught when every broken part caught its break; otherwise it
  * fails, naming the part that held with its property broken.
  */
-export async function runParts<S>(ctx: Ctx, state: S, parts: ReadonlyArray<readonly [string, Part<S>]>): Promise<void> {
-  const names = parts.map(([n]) => n);
-  if (ctx.breaking !== undefined && !names.includes(ctx.breaking)) throw new Error(`BREAK=${ctx.breaking}: ${ctx.claim}'s parts are ${names.join(", ")}`);
+export async function runParts<S>(ctx: Ctx, state: S, parts: ReadonlyArray<PartEntry<S>>): Promise<void> {
+  // A part that runs on other dialects only is not this run's.
+  const here = parts.filter(([, , dialects]) => dialects === undefined || dialects.includes(ctx.dialect));
+  const names = here.map(([n]) => n);
+  if (ctx.breaking !== undefined && !names.includes(ctx.breaking)) throw new Error(`BREAK=${ctx.breaking}: ${ctx.claim}'s parts on ${dialectName[ctx.dialect]} are ${names.join(", ")}`);
   const caught: string[] = [];
   const held: string[] = [];
-  for (const [name, part] of parts) {
+  for (const [name, part] of here) {
     const broken = ctx.broken && (ctx.breaking === undefined || ctx.breaking === name);
     ctx.log(`part ${name}${broken ? " (broken)" : ""}`);
     try {

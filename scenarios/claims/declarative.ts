@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
-import { parts } from "../lib/parts.js";
 import { declareRoutines, insertedStatus, replaceFunctionByHand, routinesOnServer } from "../lib/routines.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 
@@ -26,7 +25,7 @@ export async function declared(ctx: Ctx): Promise<Project> {
  * BREAK: the source changes again between the approval and the apply, so
  * the approval no longer covers the plan and the column is not added.
  */
-async function column(ctx: Ctx, p: Project): Promise<void> {
+async function column(ctx: Ctx, { p }: Declarative): Promise<void> {
   addColumn(p, "note");
   const plan = await p.yodel(["plan", p.env, "--json"]);
   const planned = parse<{ changes: unknown[] }>(plan);
@@ -50,7 +49,7 @@ async function column(ctx: Ctx, p: Project): Promise<void> {
  * BREAK: the function is replaced by hand after the apply, so the server
  * no longer holds what is declared and the plan is not empty.
  */
-async function routines(ctx: Ctx, p: Project): Promise<void> {
+async function routines(ctx: Ctx, { p }: Declarative): Promise<void> {
   declareRoutines(p);
   const plan = await p.yodel(["plan", p.env, "--json"]);
   const rules = parse<{ changes: Array<{ object: string; rule: string }> }>(plan).changes.map((c) => `${c.object.split(" ")[0] ?? ""} ${c.rule}`);
@@ -71,15 +70,6 @@ async function routines(ctx: Ctx, p: Project): Promise<void> {
   hold(after.code === 0 && left.length === 0, `yodel plan after the routines applied is not empty: ${left.join(", ")}`);
 }
 
-/** The src/ declarations, applied once: a column added, and on Postgres the routines (#44), each its own part. */
-async function declaredPart(ctx: Ctx): Promise<void> {
-  const p = await declared(ctx);
-  await parts(ctx, [
-    ["column", () => column(ctx, p)],
-    ...(ctx.dialect === "pg" ? ([["routines", () => routines(ctx, p)]] as const) : []),
-  ]);
-}
-
 /** The ORM's DDL, scenarios/fixtures/<dialect>/orm/schema.sql: customers and invoices. */
 const ormDdl = (ctx: Ctx): string => readFileSync(fileURLToPath(new URL(`../fixtures/${ctx.dialect === "ch" ? "clickhouse" : "postgres"}/orm/schema.sql`, import.meta.url)), "utf8");
 
@@ -98,10 +88,12 @@ function addOrmColumn(p: Project, column: string): void {
  * beside src/, so the first apply creates the ORM's tables behind the gate,
  * a model change (a column added to customers) is one change in yodel plan
  * and is applied once approved, and the plan is then empty.
+ * It runs on its own database: the one the src/ parts used is emptied first.
  * BREAK: the ORM's DDL changes again between the approval and the apply,
  * so the approval no longer covers the plan and the column is not added.
  */
-async function ormPart(ctx: Ctx): Promise<void> {
+async function orm(ctx: Ctx): Promise<void> {
+  await ctx.db.reset();
   const p = await Project.create(ctx, { ops: "declarative", name: "orm" });
   p.write("db/orm.sql", ormDdl(ctx));
   p.write(
@@ -130,32 +122,26 @@ async function ormPart(ctx: Ctx): Promise<void> {
   hold(after.code === 0 && parse<{ changes: unknown[] }>(after).changes.length === 0, `yodel plan after the apply is not empty: ${after.out.slice(0, 600)}`);
 }
 
-/**
- * Each part on its own database (emptied between them). Under BREAK each
- * breaks its own property, and the run is caught only when both catch it.
- */
+/** The project the src/ parts run on: declarative, applied once. */
+interface Declarative {
+  p: Project;
+}
+
+/** The parts, in order: the src/ declarations, a column added and on Postgres the routines (#44), on one project; then an ORM's DDL (#67) on a project of its own. */
+const parts: ReadonlyArray<PartEntry<Declarative>> = [
+  ["column", column],
+  ["routines", routines, ["pg"]],
+  ["orm", orm],
+];
+
 async function body(ctx: Ctx): Promise<void> {
-  const caught: string[] = [];
-  const list: Array<[string, () => Promise<void>]> = [
-    ["declared", () => declaredPart(ctx)],
-    ["orm", () => ormPart(ctx)],
-  ];
-  for (const [name, part] of list) {
-    await ctx.db.reset();
-    try {
-      await part();
-    } catch (e) {
-      if (!(ctx.broken && e instanceof Violation)) throw e;
-      ctx.log(`${name} caught: ${e.message}`);
-      caught.push(e.message);
-    }
-  }
-  if (ctx.broken && caught.length === list.length) throw new Violation(caught.join("; "));
-  if (ctx.broken) ctx.log(`only ${String(caught.length)} of the ${String(list.length)} parts caught their break`);
+  await runParts(ctx, { p: await declared(ctx) }, parts);
 }
 
 export const declarative: Claim = {
   name: "declarative",
   says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
   dialects: { ch: body, pg: body },
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };

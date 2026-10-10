@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { clickhouseQuery, type ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
 import { startKeeperCluster } from "../../test/e2e/keeper-cluster.js";
-import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { postgresSession } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { parse, Project } from "../lib/project.js";
@@ -19,7 +19,7 @@ import { addColumn, mainTable } from "../lib/schema.js";
  * timeout.
  * BREAK: the other session keeps its lock for the whole apply.
  */
-async function retryPart(ctx: Ctx, p: Project): Promise<void> {
+async function retryPart(ctx: Ctx, { p }: LockRetry): Promise<void> {
   addColumn(p, "note");
   const id = await p.newMigration("add-note");
   if (id === undefined) throw new Error("yodel new wrote no migration");
@@ -226,7 +226,7 @@ const doc = (ran: Ran): ExecuteDoc => {
  * BREAK: both run a build of yodel with the lock taken out; the history
  * shows each statement started twice.
  */
-async function serialPart(ctx: Ctx, p: Project, s: Serial): Promise<void> {
+async function serialPart(ctx: Ctx, { p, s }: LockRetry): Promise<void> {
   addColumn(p, "serial");
   const id = await p.newMigration("add-serial");
   if (id === undefined) throw new Error("yodel new wrote no migration");
@@ -305,31 +305,21 @@ async function created(ctx: Ctx, p: Project): Promise<Project> {
   return p;
 }
 
-/**
- * Each part on its own: under BREAK each breaks its own property, and the
- * run is caught only when every part catches it.
- */
-async function parts(ctx: Ctx, list: Array<[string, () => Promise<void>]>): Promise<void> {
-  const caught: string[] = [];
-  for (const [name, part] of list) {
-    try {
-      await part();
-    } catch (e) {
-      if (!(ctx.broken && e instanceof Violation)) throw e;
-      ctx.log(`${name} caught: ${e.message}`);
-      caught.push(e.message);
-    }
-  }
-  if (ctx.broken && caught.length === list.length) throw new Violation(caught.join("; "));
-  if (ctx.broken) ctx.log(`only ${String(caught.length)} of the ${String(list.length)} parts caught their break`);
+/** What the parts share: the project, its first migration applied, and the dialect's way to hold an apply mid-run. */
+interface LockRetry {
+  p: Project;
+  s: Serial;
 }
+
+/** The parts, in order, on one project: on Postgres the lock_timeout retry, then on both dialects two applies at once. */
+const parts: ReadonlyArray<PartEntry<LockRetry>> = [
+  ["retry", retryPart, ["pg"]],
+  ["serial", serialPart],
+];
 
 async function postgresBody(ctx: Ctx): Promise<void> {
   const p = await created(ctx, await Project.create(ctx));
-  await parts(ctx, [
-    ["retry", () => retryPart(ctx, p)],
-    ["serial", () => serialPart(ctx, p, postgresSerial(ctx))],
-  ]);
+  await runParts(ctx, { p, s: postgresSerial(ctx) }, parts);
 }
 
 /** ClickHouse: the serial part on a scratch cluster with Keeper, so the lock is the KeeperMap row. */
@@ -342,7 +332,7 @@ async function clickhouseBody(ctx: Ctx): Promise<void> {
       p.edit("chant.config.ts", /url: process\.env\.YODEL_CLAIMS_CLICKHOUSE_URL \?\? "[^"]*"/, `url: "${s.url}"`);
       await p.commit("the server: a replica with Keeper, through the claim's proxy");
       await created(ctx, p);
-      await parts(ctx, [["serial", () => serialPart(ctx, p, s)]]);
+      await runParts(ctx, { p, s }, parts);
     } finally {
       await s.close();
     }
@@ -358,5 +348,7 @@ export const lockRetry: Claim = {
     "Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
   dialects: { ch: clickhouseBody, pg: postgresBody },
   shares: ["docker-cluster"],
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
   stallMinutes: 10,
 };

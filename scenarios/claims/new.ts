@@ -1,6 +1,5 @@
-import { hold, type Claim, type Ctx } from "../lib/claim.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { parse, Project } from "../lib/project.js";
-import { parts } from "../lib/parts.js";
 import { declareRoutines, insertedStatus, routinesOnServer } from "../lib/routines.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 
@@ -12,9 +11,13 @@ import { addColumn, mainTable } from "../lib/schema.js";
  * BREAK: the declared column is added after yodel new ran, so no migration
  * carries it.
  */
-type Offline = Record<string, string>;
+/** The project with its first migration applied, and the environment that points its profile at a closed port. */
+interface New {
+  p: Project;
+  offline: Record<string, string>;
+}
 
-async function column(ctx: Ctx, p: Project, offline: Offline): Promise<void> {
+async function column(ctx: Ctx, { p, offline }: New): Promise<void> {
   if (!ctx.broken) addColumn(p, "note");
   const second = await p.newMigration("add-note", [], offline);
   if (ctx.broken) addColumn(p, "note");
@@ -38,7 +41,7 @@ async function column(ctx: Ctx, p: Project, offline: Offline): Promise<void> {
  * BREAK: the routines are declared after yodel new ran, so no migration
  * carries them.
  */
-async function routines(ctx: Ctx, p: Project, offline: Offline): Promise<void> {
+async function routines(ctx: Ctx, { p, offline }: New): Promise<void> {
   if (!ctx.broken) declareRoutines(p);
   const id = await p.newMigration("routines", [], offline);
   if (ctx.broken) declareRoutines(p);
@@ -67,21 +70,25 @@ async function routines(ctx: Ctx, p: Project, offline: Offline): Promise<void> {
   declareRoutines(p);
 }
 
+/** The parts, in order, on one project: a column, then on Postgres the routines (#44). */
+const parts: ReadonlyArray<PartEntry<New>> = [
+  ["column", column],
+  ["routines", routines, ["pg"]],
+];
+
 async function body(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx);
   const offline = ctx.dialect === "ch" ? { YODEL_CLAIMS_CLICKHOUSE_URL: "http://127.0.0.1:9" } : { YODEL_CLAIMS_POSTGRES_URL: "postgres://127.0.0.1:9/postgres" };
   const first = await p.newMigration("create", [], offline);
   hold(first !== undefined, "yodel new wrote no first migration with no server to reach");
   await p.setupApply();
-
-  await parts(ctx, [
-    ["column", () => column(ctx, p, offline)],
-    ...(ctx.dialect === "pg" ? ([["routines", () => routines(ctx, p, offline)]] as const) : []),
-  ]);
+  await runParts(ctx, { p, offline }, parts);
 }
 
 export const newClaim: Claim = {
   name: "new",
   says: "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
   dialects: { ch: body, pg: body },
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };
