@@ -2,7 +2,8 @@ import type { Walkthrough } from "./run.js";
 
 /**
  * docs/getting-started.md: a project made from templates/clickhouse, taken to
- * a first applied migration and a second one on a local ClickHouse. It writes no README and keeps nothing; `run.ts getting-started
+ * a first applied migration, a second one and a drift report on a local
+ * ClickHouse. It writes no README and keeps nothing; `run.ts getting-started
  * --write` refreshes the page's quotes from it.
  *
  * It drops and creates databases `events` and `yodeler`, so point it at a
@@ -45,6 +46,7 @@ export const walkthrough: Walkthrough = {
   }),
   shown: () => [
     [url().replace(/\/+$/, ""), "http://127.0.0.1:8123"],
+    [new URL(url()).host, "127.0.0.1:8123"],
     ["<tmp>/clickhouse/my-schema", "<my-schema>"],
   ],
   sql,
@@ -63,38 +65,41 @@ export const walkthrough: Walkthrough = {
     // In place of npm install: the clone's node_modules, with this repo as @intentius/sql-yodeler.
     { run: "ln -s ../node_modules my-schema/node_modules", code: 0, hide: true },
     { run: "git init -q -b main && git add -A && git commit -q -m 'chore: a new yodel project'", cwd: dir, code: 0, hide: true },
-    { run: "npx yodel new init", cwd: dir, code: 0, expect: ["the first migration"], quote: "getting-started.md" },
-    { run: "npx yodel lint", cwd: dir, code: 0, expect: ["0 errors"], quote: "getting-started.md" },
+    { run: "npx yodel new init", cwd: dir, code: 0, expect: ["the first migration"], quote: "getting-started.md#first-migration" },
+    { run: "npx yodel lint", cwd: dir, code: 0, expect: ["0 errors"], quote: "getting-started.md#first-migration" },
     { run: "git add -A && git commit -q -m 'feat: the first migration'", cwd: dir, code: 0, hide: true },
-    { run: "npx yodel plan dev", cwd: dir, code: 0, expect: ["1 pending"], quote: "getting-started.md" },
+    { run: "npx yodel plan dev", cwd: dir, code: 0, expect: ["1 pending"], quote: "getting-started.md#plan" },
     { say: "" },
-    { run: "npx yodel apply dev", cwd: dir, code: 3, expect: ["is waiting at gate"], quote: "getting-started.md" },
+    { run: "npx yodel apply dev", cwd: dir, code: 3, expect: ["is waiting at gate"], quote: "getting-started.md#apply" },
     { say: "" },
     {
       run: 'npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"',
       cwd: dir,
       code: 0,
-      quote: "getting-started.md",
+      quote: "getting-started.md#approve",
     },
-    { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md" },
-    { run: "npx yodel status dev", cwd: dir, code: 0, quote: "getting-started.md" },
+    { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve" },
+    { run: "npx yodel status dev", cwd: dir, code: 0, quote: "getting-started.md#approve" },
     { say: "" },
     {
       edit: `${dir}/src/schema.ts`,
       from: "    at       DateTime\n",
       to: "    at       DateTime,\n    country  LowCardinality(String) DEFAULT ''\n",
     },
-    { run: "npx yodel new add-country", cwd: dir, code: 0, quote: "getting-started.md" },
-    { run: "npx yodel lint", cwd: dir, code: 0, expect: ["0 errors"], quote: "getting-started.md" },
+    { run: "npx yodel new add-country", cwd: dir, code: 0, quote: "getting-started.md#second-migration" },
+    { run: "npx yodel lint", cwd: dir, code: 0, expect: ["0 errors"], quote: "getting-started.md#second-migration" },
     { run: "git add -A && git commit -q -m 'feat: events.country'", cwd: dir, code: 0, hide: true },
-    { run: "npx yodel plan dev", cwd: dir, code: 0, expect: ["1 pending"], quote: "getting-started.md" },
+    { run: "npx yodel plan dev", cwd: dir, code: 0, expect: ["1 pending"], quote: "getting-started.md#plan-second" },
     { say: "" },
     {
       run: 'npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"',
       cwd: dir,
       code: 0,
-      quote: "getting-started.md",
+      quote: "getting-started.md#approve-second",
     },
-    { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md" },
+    { run: "npx yodel apply dev", cwd: dir, code: 0, expect: ["Applied: "], quote: "getting-started.md#approve-second" },
+    { say: "" },
+    { sql: "ALTER TABLE events.events MODIFY COLUMN country LowCardinality(String) DEFAULT 'US'" },
+    { run: "npx yodel drift dev", cwd: dir, code: 2, expect: ["Changed out of band"], quote: "getting-started.md#drift" },
   ],
 };

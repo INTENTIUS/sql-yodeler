@@ -18,7 +18,7 @@ const batch = (month: string) =>
     activity(
       "yodelSql",
       {
-        sql: `ALTER TABLE yodel_18_shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = ${month} AND country = ''`,
+        sql: `ALTER TABLE shop.events UPDATE country = ['DE', 'FR', 'US'][id % 3 + 1] WHERE toYYYYMM(at) = ${month} AND country = ''`,
         settings: { mutations_sync: "2" },
       },
       "atMostOnce",

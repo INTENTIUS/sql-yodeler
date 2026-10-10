@@ -8,7 +8,7 @@ SQL Yodeler is built on [chant](https://www.npmjs.com/package/@intentius/chant),
 
 - `chant init --from ...` makes a new project from a template.
 - `chant emulator up --lexicon sql` starts a local ClickHouse and Postgres in Docker.
-- `chant approve ...` approves a plan before `yodel apply` runs it.
+- `chant approve ...` approves a plan before `yodel apply` runs it (`yodel approve <env>` does the same at the terminal, without the chant names).
 
 The chant CLI is the npm package `@intentius/chant`. Before your project exists, run it as `npx @intentius/chant@latest` (with `@latest`, npx does not reuse an older copy it cached). Inside the project, `npm install` puts the version the project pins in `node_modules`, so `npx chant` works there. (Plain `npx chant` outside a project runs an unrelated package with the same name.)
 
@@ -81,9 +81,10 @@ The template gives each environment two users: a reader (the default, used by pl
 
 `yodel new` writes the next migration from the change in `src/` since the last one. The first one creates everything. `yodel lint` checks the migrations offline:
 
+<!-- quote: getting-started#first-migration -->
 ```console
 $ npx yodel new init
-Wrote migrations/20261010T0423-init/ (2 statements; the first migration)
+Wrote migrations/20261010T0527-init/ (2 statements; the first migration)
 $ npx yodel lint
 1 migration: 0 errors, 0 warnings, 0 silenced.
 ```
@@ -98,11 +99,12 @@ git add -A && git commit -m "feat: the first migration"
 
 `yodel plan` shows what `yodel apply` would run, and a digest of that plan:
 
+<!-- quote: getting-started#plan -->
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodeler.history (single (yodel.config.ts))): 0 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history (single (yodel.config.ts))): 0 applied, 1 pending
 
-20261010T0423-init
+20261010T0527-init
   0  statement  SQLCH200 create  events
        CREATE DATABASE events
          ENGINE = Atomic
@@ -117,89 +119,93 @@ Plan for dev (clickhouse, history yodeler.history (single (yodel.config.ts))): 0
          ORDER BY (kind, at)
          COMMENT 'One row per event [chant managed-by=chant]'
 
-Plan digest: jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
+Plan digest: jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first.
 
 Not approved yet. Approving binds exactly this digest; if anything it covers changes before the apply runs, the gate asks again and nothing is applied.
 ```
 
 `yodel apply` runs only a plan someone approved. The first run stops at the approval and prints the command that gives it (exit 3):
 
+<!-- quote: getting-started#apply -->
 ```console
 $ npx yodel apply dev
-Migrations in dev (history yodeler.history, topology single (yodel.config.ts))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied: none
 
 Pending (1):
-  20261010T0423-init
+  20261010T0527-init
 
-Plan digest: jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
+Plan digest: jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
 
 Running migrate-dev (<my-schema>/ops/migrate-dev.op.ts)
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   1.7s
+  ✓ shellCmd(cmd=yodel apply dev --digest)   1.8s
 [phase] Approve
   • gate:approve-migrate-dev()   skipped
 [phase] Apply
   • shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":{"kind":"step-output-ref","step":"plan","path":"stdout"}})   skipped
-Op "migrate-dev" is gated on "approve-migrate-dev" after 2.1s
-  plan    : jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
-  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
-  expires : 2026-10-12T04:24:00.368Z
+Op "migrate-dev" is gated on "approve-migrate-dev" after 2.3s
+  plan    : jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
+  approve : chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
+  expires : 2026-10-12T05:28:03.559Z
   warning : the pending fact was not pushed to the remote — no remote is configured for chant/lifecycle — the pending fact was recorded locally only. An operator elsewhere cannot approve it until it does.
 
-migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6).
+migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f).
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
-then run yodel apply dev again.
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first;
+then run npx yodel apply dev again.
 [exit 3]
 ```
 
 The warnings about a remote are expected: approvals live on a `chant/lifecycle` branch, and this repository has no remote to push it to.
 
-To approve, run the printed `chant approve` command with `npx` in front, or let `yodel apply dev --digest` fill in the digest, as here. The approval holds for this exact plan only. Then run `yodel apply` again:
+To approve, run `npx yodel approve dev`: it shows the plan and asks you to type `dev`. Or run the printed `npx chant approve ...` command, or let `yodel apply dev --digest` fill in the digest, as here, where no terminal was there to ask. The approval holds for this exact plan only. Then run `yodel apply` again:
 
+<!-- quote: getting-started#approve -->
 ```console
 $ npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
 warning: No remote is configured, so nothing was pushed. The resolution is recorded locally on chant/lifecycle. Until it reaches the remote, a run in another checkout will not see it.
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T04:24:02.719Z (local only — the push did not land)
-This approves the plan jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T05:28:06.009Z (local only — the push did not land)
+This approves the plan jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 $ npx yodel apply dev
-Migrations in dev (history yodeler.history, topology single (yodel.config.ts))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied: none
 
 Pending (1):
-  20261010T0423-init
+  20261010T0527-init
 
-Plan digest: jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6
+Plan digest: jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f
 
 Running migrate-dev (<my-schema>/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6, by yodel at 2026-10-10T04:24:02.719Z
-20261010T0423-init: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f, by yodel at 2026-10-10T05:28:06.009Z
+20261010T0527-init: applying
   statement 0: ok (SQLCH200 create, events)
   statement 1: ok (SQLCH200 create, events.events)
-20261010T0423-init: applied
+20261010T0527-init: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   853ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   968ms
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   180ms
-    [approved] yodel at 2026-10-10T04:24:02.719Z
+  ✓ gate:approve-migrate-dev()   217ms
+    [approved] yodel at 2026-10-10T05:28:06.009Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6"})   1.6s
-Op "migrate-dev" completed in 2.8s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f"})   1.9s
+Op "migrate-dev" completed in 3.3s
 
-Applied: 20261010T0423-init.
+Applied: 20261010T0527-init.
 $ npx yodel status dev
-Migrations in dev (history yodeler.history, topology single (yodel.config.ts))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied (1):
-  20261010T0423-init  2026-10-10 04:24:06.164732 by yodel@example
+  20261010T0527-init  2026-10-10 05:28:09.830429 by yodel@example
 
 Pending: none
 ```
@@ -215,9 +221,10 @@ Add a column to the table in `src/schema.ts`:
 
 Then write the migration, check it and commit it:
 
+<!-- quote: getting-started#second-migration -->
 ```console
 $ npx yodel new add-country
-Wrote migrations/20261010T0424-add-country/ (1 statement; follows 20261010T0423-init)
+Wrote migrations/20261010T0528-add-country/ (1 statement; follows 20261010T0527-init)
 $ npx yodel lint
 2 migrations: 0 errors, 0 warnings, 0 silenced.
 ```
@@ -228,59 +235,85 @@ git add -A && git commit -m "feat: events.country"
 
 The plan has the one new statement. The approval you gave for the first migration does not hold for this plan, and the plan says why:
 
+<!-- quote: getting-started#plan-second -->
 ```console
 $ npx yodel plan dev
-Plan for dev (clickhouse, history yodeler.history (single (yodel.config.ts))): 1 applied, 1 pending
+Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history (single (yodel.config.ts))): 1 applied, 1 pending
 
-20261010T0424-add-country
+20261010T0528-add-country
   0  statement  SQLCH201 metadata  events.events
        ALTER TABLE `events`.`events` ADD COLUMN country  LowCardinality(String) DEFAULT '' AFTER `at`
 
-Plan digest: jcs1-sha256:ec67a9919ba2f8584e1cff198c60281a448ee8902c8ddf8668e249684e0af362
+Plan digest: jcs1-sha256:8ea52627884166a46eeff8d26019cd3032ee229c4e71d4e24a9c5e0ad20747cf
 Approve it with:
-  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:ec67a9919ba2f8584e1cff198c60281a448ee8902c8ddf8668e249684e0af362
+  chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:8ea52627884166a46eeff8d26019cd3032ee229c4e71d4e24a9c5e0ad20747cf
+or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first.
 
-The newest approval of approve-migrate-dev, by yodel at 2026-10-10T04:24:02.719Z, is for jcs1-sha256:6a24eb53da32eb1409c060578e15403fee6bd16279497cadf5f2a05cebbddcc6, not this plan; it does not hold.
-What moved (as far as yodel can tell): history changed: applied since: 20261010T0423-init (by yodel@example at 2026-10-10 04:24:06.164732); pending migrations changed: committed to since approval: 20261010T0424-add-country (8a43a76 at 2026-10-09T22:24:09-06:00); live schema changed: no state yodel can rebuild from the history and git hashes to the approved digest with today's live schema, so an object in the environment's live schema (a table, view, index, dictionary, database or schema) changed since approval (or a part yodel cannot rebuild did).
+The newest approval of approve-migrate-dev, by yodel at 2026-10-10T05:28:06.009Z, is for jcs1-sha256:8963fe9ce6b484fda8290cca6f2d61acb0b9bb064c80041128ca2ad30358d08f, not this plan; it does not hold.
+What moved (as far as yodel can tell): history changed: applied since: 20261010T0527-init (by yodel@example at 2026-10-10 05:28:09.830429); pending migrations changed: committed to since approval: 20261010T0528-add-country (581017c at 2026-10-09T23:28:13-06:00); live schema changed: as expected after the history change above: applying a migration changes the live schema, and yodel cannot rebuild the live schema as it was at approval, so it cannot confirm that nothing else in it changed.
 ```
 
 Approve and apply as before:
 
+<!-- quote: getting-started#approve-second -->
 ```console
 $ npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply dev --digest)"
 warning: No remote is configured, so nothing was pushed. The resolution is recorded locally on chant/lifecycle. Until it reaches the remote, a run in another checkout will not see it.
-Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T04:24:12.207Z (local only — the push did not land)
-This approves the plan jcs1-sha256:ec67a9919ba2f8584e1cff198c60281a448ee8902c8ddf8668e249684e0af362, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T05:28:16.252Z (local only — the push did not land)
+This approves the plan jcs1-sha256:8ea52627884166a46eeff8d26019cd3032ee229c4e71d4e24a9c5e0ad20747cf, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 $ npx yodel apply dev
-Migrations in dev (history yodeler.history, topology single (yodel.config.ts))
+Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied (1):
-  20261010T0423-init  2026-10-10 04:24:06.164732 by yodel@example
+  20261010T0527-init  2026-10-10 05:28:09.830429 by yodel@example
 
 Pending (1):
-  20261010T0424-add-country
+  20261010T0528-add-country
 
-Plan digest: jcs1-sha256:ec67a9919ba2f8584e1cff198c60281a448ee8902c8ddf8668e249684e0af362
+Plan digest: jcs1-sha256:8ea52627884166a46eeff8d26019cd3032ee229c4e71d4e24a9c5e0ad20747cf
 
 Running migrate-dev (<my-schema>/ops/migrate-dev.op.ts)
 lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_path_prefix' config is not defined. (BAD_ARGUMENTS) (version 26.8.15.10 (official build))); the lock is a file on this machine, so cross-runner locking needs Keeper (and keeper_map_path_prefix)
-approval: migrate-dev / approve-migrate-dev for jcs1-sha256:ec67a9919ba2f8584e1cff198c60281a448ee8902c8ddf8668e249684e0af362, by yodel at 2026-10-10T04:24:12.207Z
-20261010T0424-add-country: applying
+approval: migrate-dev / approve-migrate-dev for jcs1-sha256:8ea52627884166a46eeff8d26019cd3032ee229c4e71d4e24a9c5e0ad20747cf, by yodel at 2026-10-10T05:28:16.252Z
+20261010T0528-add-country: applying
   statement 0: ok (SQLCH201 metadata, events.events)
-20261010T0424-add-country: applied
+20261010T0528-add-country: applied
 
 [phase] Plan
-  ✓ shellCmd(cmd=yodel apply dev --digest)   834ms
+  ✓ shellCmd(cmd=yodel apply dev --digest)   875ms
 [phase] Approve
-  ✓ gate:approve-migrate-dev()   174ms
-    [approved] yodel at 2026-10-10T04:24:12.207Z
+  ✓ gate:approve-migrate-dev()   194ms
+    [approved] yodel at 2026-10-10T05:28:16.252Z
 [phase] Apply
-  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:ec67a9919ba2f8584e1cff198c60281a448ee8902c8ddf8668e249684e0af362"})   932ms
-Op "migrate-dev" completed in 2.1s
+  ✓ shellCmd(cmd=yodel apply dev --execute, env={"YODEL_APPROVED_PLAN":"jcs1-sha256:8ea52627884166a46eeff8d26019cd3032ee229c4e71d4e24a9c5e0ad20747cf"})   1.0s
+Op "migrate-dev" completed in 2.2s
 
-Applied: 20261010T0424-add-country.
+Applied: 20261010T0528-add-country.
 ```
+
+## 7. Drift
+
+`yodel drift` compares what `src/` declares with the server, and reports anything changed by hand. Change a default on the server, as someone might by hand:
+
+```sql
+ALTER TABLE events.events MODIFY COLUMN country LowCardinality(String) DEFAULT 'US'
+```
+
+`yodel drift dev` reports it, and exits 2:
+
+<!-- quote: getting-started#drift -->
+```console
+$ npx yodel drift dev
+Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
+
+Changed out of band:
+  events (ClickHouse::Table)
+    column country default.expr: declared '', live 'US'
+[exit 2]
+```
+
+To put it right, change it back on the server, or declare the new default in `src/schema.ts` and write a migration for it.
 
 ## The same steps with just
 
@@ -318,5 +351,5 @@ If a Postgres of your own already listens on `127.0.0.1:5432` (Homebrew's, for e
 
 - Push the project and set up CI: the README the template wrote into `my-schema` lists the secrets and users each forge needs. From then on each change is a pull request: edit `src/schema.ts`, `npx yodel new <name>`, commit both. The pull request gets a plan comment, and a merge applies what was approved.
 - [The two workflows](workflows.md), [Migrations](migrations.md) and [Approval](approval.md) explain what you just ran.
-- [Drift](drift.md) reports a declared object changed by hand on the server.
+- [Drift](drift.md) has the scheduled drift check the pipelines run.
 - To take a database you already have into migrations, see [Starting a project](adoption.md#adopting-an-existing-database-yodel-init-from).

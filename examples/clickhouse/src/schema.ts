@@ -1,12 +1,12 @@
 import { database, table } from "@intentius/chant-lexicon-sql/clickhouse";
 
-export const yodel18ShopDb = database`
-  CREATE DATABASE yodel_18_shop
+export const shopDb = database`
+  CREATE DATABASE shop
   ENGINE = Atomic
   COMMENT 'The SQL Yodeler ClickHouse example'`;
 
 export const events = table`
-  CREATE TABLE ${yodel18ShopDb}.events
+  CREATE TABLE ${shopDb}.events
   (
       id UInt64,
       kind LowCardinality(String),

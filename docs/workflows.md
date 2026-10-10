@@ -8,10 +8,12 @@ No migration files. `yodel plan <env>` shows the classified change from the envi
 
 `yodel apply` plans, then runs the project's `ApplyOp` for the environment with `chant run`. From the ClickHouse example:
 
+<!-- quote: clickhouse#apply-op -->
 ```ts
-// ops/apply-dev.op.ts
 import { ApplyOp } from "@intentius/chant/op";
 
+// The declarative path: yodel apply dev plans src/ against dev and runs this
+// Op, behind a gate bound to the plan.
 export const { op } = ApplyOp({ name: "apply-dev", env: "dev", target: "clickhouse", gate: {} });
 ```
 
@@ -25,15 +27,16 @@ Without it the Op fails at its Build step (`npm error Missing script: "build"`).
 
 The run below is the ClickHouse example's first apply. The Op stops at its gate and `yodel apply` exits 3 with the command that approves this plan:
 
+<!-- quote: clickhouse#declarative-apply -->
 ```console
 $ npx yodel apply dev
 Plan for dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, sql.profiles.dev)
 
-shop (yodel_18_shop)
-  [create] object: yodel_18_shop
+shop (shop)
+  [create] object: shop
       SQLCH200 Create an object. A new database, table or view is created; nothing existing changes. https://clickhouse.com/docs/sql-reference/statements/create
-events (yodel_18_shop.events)
-  [create] object: yodel_18_shop.events
+events (shop.events)
+  [create] object: shop.events
       SQLCH200 Create an object. A new database, table or view is created; nothing existing changes. https://clickhouse.com/docs/sql-reference/statements/create
 
 2 create
@@ -51,34 +54,35 @@ sql — environment: dev
 --------------------------------------------------------------------------------
 
 MISSING (declared, provider reports not in cloud):
-  - events [queried http://192.168.14.189:8123 yodel_18_shop.events] [definition 4df0ec958ca149f9d5e482606258feb8ab4820f0dbff84efa26e4b94c1b657eb]
-  - shop [queried http://192.168.14.189:8123 yodel_18_shop] [definition 9753d576a549332582784b40e5a42ded207e362694a6c40ae17e65dfc511e4bc]
+  - events [queried http://127.0.0.1:8123 shop.events] [definition 9f20bfc4d4ef488a683af5646837a026beea36f8affb953ecfb1e118c3f4a21a]
+  - shop [queried http://127.0.0.1:8123 shop] [definition aecfb2aa109301003bbc1a7ee057c2bb2610d824e610588317907171ed70c610]
 [phase] Build
-  ✓ chantBuild(path=.)   848ms
+  ✓ chantBuild(path=.)   734ms
 [phase] Plan
-  ✓ lifecycleDiff(env=dev, live=true)   665ms
+  ✓ lifecycleDiff(env=dev, live=true)   706ms
     [outcome] Drift=true
 [phase] Approve
   • gate:approve-apply-dev()   skipped
 [phase] Apply
   • nativeApply(target=clickhouse, env=dev, output=dist/schema.json, deleteMode=never)   skipped
-Op "apply-dev" is gated on "approve-apply-dev" after 2.1s
+Op "apply-dev" is gated on "approve-apply-dev" after 1.9s
   Approve apply to dev (delete mode: never)
-  plan    : jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263
-  approve : chant approve apply-dev approve-apply-dev --plan jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263
-  expires : 2026-10-11T23:05:20.684Z
+  plan    : jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
+  approve : chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
+  expires : 2026-10-12T05:28:27.820Z
 
 apply-dev is waiting at gate "approve-apply-dev" for approval of this plan.
 Approve it with:
-  npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263
+  chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
 then run npx yodel apply dev again.
 [exit 3]
 ```
 
+<!-- quote: clickhouse#declarative-approve -->
 ```console
-$ npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263
-Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-09T23:05:22.351Z
-This approves the plan jcs1-sha256:9f3ff42832188c693979a158c11d5fe50bee60ebb0dc48162ed791178c2b1263, and only that plan. A run whose fresh plan differs refuses rather than applying it.
+$ npx chant approve apply-dev approve-apply-dev --plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8
+Gate "approve-apply-dev" on "apply-dev" resolved by yodel at 2026-10-10T05:28:29.503Z
+This approves the plan jcs1-sha256:02cfabc13e5ef7d0f1d089b4a5468afc3ed5140b9c2f04afad2203b470c933e8, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run apply-dev` and it walks through gate "approve-apply-dev".
 ```
 

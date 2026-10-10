@@ -42,10 +42,11 @@ replay             error
 
 Findings from the Postgres example. A CHECK constraint added in place:
 
+<!-- quote: postgres#pg-rewrite -->
 ```console
 $ npx yodel lint
-20261009T2308-coupons
-  error    pg-rewrite: step 1: SQLPG218 Add a CHECK constraint on yodel_18_shop.orders: blocks reads and writes on the table while it runs (ADD CONSTRAINT ... CHECK reads every row under ACCESS EXCLUSIVE. Declare it NOT VALID, then remove NOT VALID to validate it under SHARE UPDATE EXCLUSIVE (SQLPG220).)
+20261010T0532-coupons
+  error    pg-rewrite: step 1: SQLPG218 Add a CHECK constraint on shop.orders: blocks reads and writes on the table while it runs (ADD CONSTRAINT ... CHECK reads every row under ACCESS EXCLUSIVE. Declare it NOT VALID, then remove NOT VALID to validate it under SHARE UPDATE EXCLUSIVE (SQLPG220).)
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
@@ -56,14 +57,15 @@ A statement rule can be silenced for one statement, with a reason the history re
 
 an index built without `CONCURRENTLY`:
 
+<!-- quote: postgres#pg-lock -->
 ```console
 $ npx yodel lint
-20261009T2309-drop-coupon
-  silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
+20261010T0533-drop-coupon
+  silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
-20261009T2309-index-placed-at
-  error    pg-lock: step 0: SQLPG241 Create an index without CONCURRENTLY on yodel_18_shop.orders_placed_at_idx: builds an index without CONCURRENTLY: SHARE on the table, blocking every write until the build ends; declare the index CONCURRENTLY
+20261010T0533-index-placed-at
+  error    pg-lock: step 0: SQLPG241 Create an index without CONCURRENTLY on shop.orders_placed_at_idx: builds an index without CONCURRENTLY: SHARE on the table, blocking every write until the build ends; declare the index CONCURRENTLY
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
@@ -74,10 +76,11 @@ A statement rule can be silenced for one statement, with a reason the history re
 
 and a column dropped:
 
+<!-- quote: postgres#destructive -->
 ```console
 $ npx yodel lint
-20261009T2309-drop-coupon
-  error    destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
+20261010T0533-drop-coupon
+  error    destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
 
 A statement rule can be silenced for one statement, with a reason the history records when it applies:
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
@@ -108,22 +111,24 @@ A line above a statement in its `migration.sql` silences one of the classifier r
 
 The reason is required. For an Op step, the line goes above the step's comment. From the Postgres example:
 
+<!-- quote: postgres#silence-sql -->
 ```sql
--- yodel migration 20261009T2309-drop-coupon
--- parent: 20261009T2309-rename-email
+-- yodel migration 20261010T0533-drop-coupon
+-- parent: 20261010T0532-rename-email
 
--- orders (yodel_18_shop.orders): SQLPG204 metadata, destructive
+-- orders (shop.orders): SQLPG204 metadata, destructive
 -- yodel:allow destructive no order ever had a coupon; checked on dev
-ALTER TABLE yodel_18_shop.orders DROP COLUMN coupon;
+ALTER TABLE shop.orders DROP COLUMN coupon;
 ```
 
 The line is part of `migration.sql`, so it changes the migration's checksum, and lint says so. In the ClickHouse example, after silencing the rebuild:
 
+<!-- quote: clickhouse#checksum -->
 ```console
 $ npx yodel lint
-20261009T2305-events-by-id
-  error    checksum: 20261009T2305-events-by-id: its files hash to sha256:045a2d98251ff9e79f29d6da82772903c17bba7243617029f48c75c7582915ba, but migration.json records sha256:1046c16b090af747fdca0aad693a90bf8997eeef9d159f9efb1a84cb1b2f250e; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261009T2305-events-by-id; if it is, undo the edit, or record it with yodel repair 20261009T2305-events-by-id --reason ... <env>
-  silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds yodel_18_shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
+20261010T0528-events-by-id
+  error    checksum: 20261010T0528-events-by-id: its files hash to sha256:e6cb32f46db79611af518459f51b4e2a45a70784a7f7d7ee4b2ddedf796c2c10, but migration.json records sha256:54254e89d129da3f9617204d714e67294518a27832828572f42086dcb0927962; if it is not applied in any environment, record its new checksum with yodel lint --update-checksum 20261010T0528-events-by-id; if it is, undo the edit, or record it with yodel repair 20261010T0528-events-by-id --reason ... <env>
+  silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 
 3 migrations: 1 error, 0 warnings, 1 silenced.
@@ -132,11 +137,12 @@ $ npx yodel lint
 
 For a migration not applied anywhere yet, `--update-checksum <id>` (repeatable) writes the new checksum into its `migration.json` before linting:
 
+<!-- quote: postgres#update-checksum -->
 ```console
-$ npx yodel lint --update-checksum 20261009T2309-drop-coupon
-20261009T2309-drop-coupon: checksum sha256:b7008a8e51316135db56b86b4d89e3413f3a3f0b3a3248800463b63d56bcd222 is now sha256:038b4a7c927f0e279cbf839044f8a948bd821b4c02ba5c0e028f2a5959c613ee
-20261009T2309-drop-coupon
-  silenced destructive: step 0: SQLPG204 Drop a column on yodel_18_shop.orders: removes data that cannot be recovered
+$ npx yodel lint --update-checksum 20261010T0533-drop-coupon
+20261010T0533-drop-coupon: checksum sha256:ba19680b8db2c23fe9e84b445602a4d3dec2e1910923121636ce21fde6ab3bd2 is now sha256:4d629ea6b3b71520270b61696af81a22569982c02bc55adce08d0488d9de990e
+20261010T0533-drop-coupon
+  silenced destructive: step 0: SQLPG204 Drop a column on shop.orders: removes data that cannot be recovered
            reason: no order ever had a coupon; checked on dev
 
 5 migrations: 0 errors, 0 warnings, 1 silenced.
@@ -147,7 +153,7 @@ With `--env <env>` it refuses a migration that environment has applied. An appli
 `yodel apply` records each silence (step, rule, reason) in every history row the migration writes, in the `silences` column:
 
 ```sql
-SELECT kind, statement_index, status, silences FROM yodel_18_history.history WHERE migration_id LIKE '%drop-coupon' ORDER BY seq
+SELECT kind, statement_index, status, silences FROM yodeler.history WHERE migration_id LIKE '%drop-coupon' ORDER BY seq
 ```
 
 ```
@@ -172,28 +178,30 @@ A `yodel:allow` line that is malformed, names a rule that cannot be silenced, ha
 
 `<env>` should be a throwaway server: the emulator (`npx chant emulator up --lexicon sql`), or in CI a service container, as the starter templates' `replay` profile is. The databases or schemas the history names must not exist there yet; otherwise it runs nothing and exits 4:
 
+<!-- quote: clickhouse#replay-refused -->
 ```console
 $ npx yodel lint --replay replay
-yodel lint: refused: the replay needs a fresh database, and http://192.168.14.189:8123 (sql.profiles.replay) already holds yodel_18_shop. Point the replay at a throwaway emulator (chant emulator up --lexicon sql), or pass reset to drop it first. Nothing was run.
+yodel lint: refused: replay and dev are the same server (127.0.0.1:8123) and both name shop; the replay would drop dev's database, with or without --reset. Point replay at a throwaway server of its own (a second emulator on another port), or, to empty dev too, add --reset-shared dev. Nothing was run.
 [exit 4]
 ```
 
 `--reset` drops them first. Never point it at a server whose data matters. `--keep` leaves the replayed database in place to look at. Rebuild and `PostgresMigrationOp` steps run in the replay; backfills are skipped, since the replayed database has no data. The end of the ClickHouse example's run:
 
+<!-- quote: clickhouse#replay -->
 ```console
-$ npx yodel lint --replay replay --reset
+$ npx yodel lint --replay replay --reset --reset-shared dev
 ...
-Replay of 5 migrations (clickhouse) into http://192.168.14.189:8123 (sql.profiles.replay)
-  databases: yodel_18_shop (emptied first)
-  ok      20261009T2305-baseline (2 statements)
-  ok      20261009T2305-add-country (1 statement)
-  ok      20261009T2305-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (yodel_18_shop.events) (swapped))
-  ok      20261009T2306-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
-  ok      20261009T2307-add-source (1 statement)
+Replay of 5 migrations (clickhouse) into http://127.0.0.1:8123 (sql.profiles.replay)
+  databases: shop (emptied first)
+  ok      20261010T0528-baseline (2 statements)
+  ok      20261010T0528-add-country (1 statement)
+  ok      20261010T0528-events-by-id (0 statements; ran step 0: ClickHouseRebuildOp for events (shop.events) (swapped))
+  ok      20261010T0530-fill-country (0 statements; skipped step 0: backfill backfill.ts (moves data; the replayed database has none))
+  ok      20261010T0530-add-source (1 statement)
 Every migration replays to its recorded schema.
 
-20261009T2305-events-by-id
-  silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds yodel_18_shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
+20261010T0528-events-by-id
+  silenced ch-rebuild: step 0: ClickHouseRebuildOp rebuilds shop.events: every row is copied into a new table and swapped in, for SQLCH220 Change the sorting key (orderBy)
            reason: 600 rows; the copy takes seconds
 
 5 migrations: 0 errors, 0 warnings, 1 silenced.

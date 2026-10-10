@@ -13,9 +13,9 @@ import { databaseDdl, historyEngine } from "../../src/history/ddl.js";
 import { historyTopologyOf } from "../../src/config/settings.js";
 
 const statements = [
-  "CREATE DATABASE yodel_18_shop ENGINE = Atomic",
-  "CREATE TABLE yodel_18_shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at)",
-  "ALTER TABLE `yodel_18_shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`",
+  "CREATE DATABASE shop ENGINE = Atomic",
+  "CREATE TABLE shop.events (id UInt64, kind LowCardinality(String), at DateTime) ENGINE = MergeTree PARTITION BY toYYYYMM(at) ORDER BY (kind, at)",
+  "ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`",
 ];
 
 export function render(): string {

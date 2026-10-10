@@ -7,9 +7,10 @@ Exit codes: 0 no drift, 2 drift, 1 the drift could not be read, or a declared ob
 In the ClickHouse example, someone changes a column default by hand:
 
 ```sql
-ALTER TABLE yodel_18_shop.events MODIFY COLUMN source LowCardinality(String) DEFAULT 'app'
+ALTER TABLE shop.events MODIFY COLUMN source LowCardinality(String) DEFAULT 'app'
 ```
 
+<!-- quote: clickhouse#drift -->
 ```console
 $ npx yodel drift dev
 Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
@@ -22,6 +23,7 @@ Changed out of band:
 
 Put back, there is none:
 
+<!-- quote: clickhouse#no-drift -->
 ```console
 $ npx yodel drift dev
 Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
@@ -35,6 +37,7 @@ Drift compares with the declared schema in `src/`, so on the versioned path a ch
 
 `ops/watch-<env>.op.ts` declares the same check as a chant `WatchOp` with a cron schedule:
 
+<!-- quote: clickhouse#watch-op -->
 ```ts
 import { WatchOp } from "@intentius/chant/op";
 
@@ -46,6 +49,7 @@ export const { op } = WatchOp({ name: "watch-dev", env: "dev", schedule: "17 * *
 
 `npx chant run watch-dev` runs it once. It takes a snapshot, diffs declared against live, and reports:
 
+<!-- quote: clickhouse#watch-run -->
 ```console
 $ npx chant run watch-dev
 Snapshot saved to chant/lifecycle (sql(2))
@@ -62,11 +66,11 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
   - events (ClickHouse::Table)
       columns[4].default.expr: 'web' → 'app' [from: authored]
 [phase] Snapshot
-  ✓ lifecycleSnapshot(env=dev)   879ms
+  ✓ lifecycleSnapshot(env=dev)   908ms
 [phase] Diff
   ✓ lifecycleDiff(env=dev, live=true)   742ms
     [outcome] Drift=true
-Op "watch-dev" completed in 1.7s
+Op "watch-dev" completed in 1.8s
 ```
 
 `chant run` exits 0 when the watch completes, drift or not. The drift is the run's `Drift` outcome, in its run record on the local `chant/lifecycle` branch. The starter templates' `scripts/watch-outcome.ts` reads the newest record after `chant run` and exits 1 when the run failed or found drift, so a scheduled run that found drift shows red.

@@ -46,7 +46,7 @@ export default {
         url: process.env.DEV_POSTGRES_URL ?? "postgres://127.0.0.1:5432/postgres",
         user: { env: "DEV_POSTGRES_USER" },
         password: { env: "DEV_POSTGRES_PASSWORD" },
-        schemas: ["yodel_18_shop"],
+        schemas: ["shop"],
       },
     },
   },
@@ -91,11 +91,11 @@ export default defineConfig({
 
 The first one set wins. On ClickHouse, `yodel status <env>` and `yodel plan <env>` print the topology and where it came from (`topology single (default)`); Postgres has no topology, and they print none.
 
-The declarative path plans and applies through chant, which reads only `sql.profiles.<env>.topology`. So a topology set in `yodel.config.ts` alone is refused there, even `single`:
+The declarative path plans and applies through chant, which reads only `sql.profiles.<env>.topology`. So a topology set in `yodel.config.ts` alone is refused there unless it is `single`, which is what chant renders when its profile sets none:
 
 ```console
 $ yodel plan dev
-yodel plan: yodel.config.ts sets environments.dev.topology to single, but the declarative path plans and applies through chant, which reads sql.profiles.dev.topology (unset). Set sql.profiles.dev.topology to the same in chant.config.ts, or leave the topology to chant.config.ts.
+yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but the declarative path plans and applies through chant, which reads sql.profiles.dev.topology (unset, so a single node). Set sql.profiles.dev.topology to the same in chant.config.ts, or leave the topology to chant.config.ts.
 ```
 
 ## Environment variables
