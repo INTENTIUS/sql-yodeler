@@ -165,7 +165,7 @@ export default defineConfig({
 | the history's database (ClickHouse) or schema (Postgres) | `environments.<env>.history.database` | | `YODEL_HISTORY_DATABASE` | `yodeler` |
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
-| Postgres access control: row-level security, policies, roles, grants ([Access control](access.md)) | `environments.<env>.access` | `sql.profiles.<env>.access` | | off |
+| access control: Postgres row-level security, policies, roles, grants; ClickHouse users, roles, row policies, grants ([Access control](access.md)) | `environments.<env>.access` | `sql.profiles.<env>.access` | | off |
 | lint rule levels | `lint.rules` | | | each rule's own |
 | the apply pipeline's waves and their gates | `waves` | | | none: every environment waits for an approval |
 | a tenant set: one environment over many databases or schemas | `environments.<env>.tenants` | | | none |
@@ -188,7 +188,7 @@ $ yodel plan dev
 yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but the declarative path plans and applies through chant, which reads sql.profiles.dev.topology (unset, so a single node). Set sql.profiles.dev.topology to the same in chant.config.ts, or leave the topology to chant.config.ts.
 ```
 
-`access` is the same: the declarative apply and `yodel drift` run chant, which reads `sql.profiles.<env>.access`, so on the declarative path an `access` in `yodel.config.ts` that the profile does not say is refused. yodel's own commands (`yodel plan`, `yodel new`, `yodel init --from`, the versioned apply) use `yodel.config.ts`'s.
+`access` is the same: the declarative apply and `yodel drift` run chant, which reads `sql.profiles.<env>.access`, so on the declarative path an `access` in `yodel.config.ts` that the profile does not say is refused. yodel's own commands (`yodel plan`, `yodel new`, `yodel init --from`, the versioned apply) use `yodel.config.ts`'s. On ClickHouse, chant's apply has no access setting and makes every access declaration it is given, so the declarative path is refused instead where the environment does not manage access and `src/` declares a user, role, row policy or grant ([Access control](access.md#turn-it-on-per-environment)).
 
 ## Environment variables
 

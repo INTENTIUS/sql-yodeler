@@ -12,6 +12,8 @@
 import type { GeneratedFile } from "@intentius/chant/import/generator";
 import type { TemplateIR } from "@intentius/chant/import/parser";
 import { YodelError, type Environment, type Project } from "../project.js";
+import { environmentAccess } from "../config/settings.js";
+import { clickhouseAccessDeclarations } from "./clickhouse-access.js";
 
 export interface LiveImport {
   /** What the server holds, as chant's import IR: one resource per object. */
@@ -22,6 +24,8 @@ export interface LiveImport {
   warnings: string[];
   /** Live objects left out as another tool's (`<database>.<name>`), which a plan then shows as undeclared. */
   leftOut: string[];
+  /** ClickHouse, where the environment manages access (#46): the users, roles, row policies and grants adopted into `access.ts`, as `<kind> <name>`. */
+  access?: string[];
 }
 
 /** The objects an import read, as `<type> <name>` lines for people. */
@@ -57,6 +61,14 @@ export async function importLive(project: Project, env: Environment, processEnv:
   const ir: TemplateIR = { resources, parameters: exported.parameters ?? [] };
   const { sqlTemplateGenerator } = await import("@intentius/chant-lexicon-sql/import-generator");
   const files = ir.resources.length === 0 ? [] : sqlTemplateGenerator.generate(ir);
+  if (project.dialect === "clickhouse" && accessManaged(project, env.name)) {
+    const adopted = await clickhouseAccessDeclarations(project, env, ir, processEnv).catch((e: unknown) => {
+      throw new YodelError(`reading ${env.name}'s users, roles, row policies and grants failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    warnings.push(...adopted.warnings);
+    if (adopted.file) files.push(adopted.file);
+    return { ir, files, warnings, leftOut, access: adopted.objects };
+  }
   return { ir, files, warnings, leftOut };
 }
 
@@ -78,4 +90,10 @@ export async function withoutRunnerTables(resources: TemplateIR["resources"], wa
     warnings.push(`${p.database ? `${p.database}.` : ""}${String(p.name)} is kept by ${tool}; left out, since declaring it would have chant change what that tool owns`);
     return false;
   });
+}
+
+/** Whether environment `name` manages access: yodel.config.ts's `environments.<env>.access`, then the profile's, then off. */
+export function accessManaged(project: Pick<Project, "yodel" | "profileAccess">, name: string): boolean {
+  const chant = project.profileAccess?.[name];
+  return environmentAccess(project.yodel?.config.environments?.[name], chant !== undefined ? { access: chant } : undefined, name).access;
 }

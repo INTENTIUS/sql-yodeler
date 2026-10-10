@@ -6,7 +6,7 @@ import { loadProject, resolveEnvironment, YodelError, type Environment, type Pro
 import { declarativeAccessRefusal, declarativeTopologyRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
-import { accessReview, renderAccessReview } from "../chant/access.js";
+import { accessReview, clickhouseAccessRefusal, renderAccessReview } from "../chant/access.js";
 import { hasMigrations } from "../versioned/index.js";
 import { describeServer, probeServer } from "../server.js";
 import { runnable } from "../chant/runnable.js";
@@ -167,13 +167,15 @@ async function declarativePlan(project: Project, env: Environment, json: boolean
   const topology = project.dialect === "clickhouse" ? `, topology ${describeSettingsTopology(environmentSettings(project, env.name))}` : "";
   const build = await buildSchema(project);
   try {
+    const chRefusal = project.dialect === "clickhouse" ? clickhouseAccessRefusal(project, env.name, build.output) : undefined;
+    if (chRefusal) throw chRefusal;
     const result = await planEnvironment(project, env, build);
     const server = await probeServer(project, env);
-    const access = project.dialect === "postgres" ? await accessReview(project, env.name, result.diff.changes, build.output) : undefined;
-    if (json) io.out(`${JSON.stringify({ ...planJson(result), ...(access ? { access } : {}), ...(server ? { server } : {}) }, null, 2)}\n`);
+    const access = await accessReview(project, env.name, result.diff.changes, build.output);
+    if (json) io.out(`${JSON.stringify({ ...planJson(result), access, ...(server ? { server } : {}) }, null, 2)}\n`);
     else {
       const text = await renderPlan(result, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name}${topology})`);
-      const review = access ? renderAccessReview(access, env.name) : [];
+      const review = renderAccessReview(access, env.name);
       io.out(`${text}\n${review.length > 0 ? `\n${review.join("\n")}\n` : ""}`);
     }
     return planExitCode(result);

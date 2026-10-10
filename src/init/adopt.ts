@@ -127,7 +127,7 @@ async function adoptWith(project: Project, env: Environment, venv: VersionedEnv,
   if (live.ir.resources.length === 0) {
     throw new YodelError(`refused: ${env.name} holds no objects in its scope (sql.profiles.${env.name}); there is nothing to adopt. Declare a schema and run yodel new instead. Nothing was written.`, REFUSED);
   }
-  const objects = describeImported(live.ir);
+  const objects = [...describeImported(live.ir), ...(live.access ?? [])];
   log(`read ${String(objects.length)} object(s) from ${env.name}`);
 
   const journal = new Journal();

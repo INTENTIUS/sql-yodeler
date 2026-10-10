@@ -67,7 +67,7 @@
           }
         },
         "access": {
-          "description": "Postgres: whether access control is managed in the environment (environments.<env>.access in yodel.config.ts, else sql.profiles.<env>.access) and the plan's access changes. byHand marks a revoke of a privilege no declaration grants: one granted by hand (or whose declaration was deleted), which the apply takes away.",
+          "description": "Whether access control is managed in the environment (environments.<env>.access in yodel.config.ts, else sql.profiles.<env>.access) and the plan's access changes: on Postgres policies, row-level security, roles and privileges; on ClickHouse users, roles, row policies and grants. byHand marks a revoke of a privilege no declaration grants: one granted by hand (or whose declaration was deleted), which the apply takes away. On ClickHouse every revoke is one.",
           "type": "object",
           "additionalProperties": false,
           "required": ["managed", "source", "changes"],

@@ -22,7 +22,9 @@ import type { DeepDiffResult, DeepEntityDrift } from "@intentius/chant/lifecycle
 import { YodelError, type Environment, type Project } from "../project.js";
 import { lastJsonLine, runChant } from "./process.js";
 import { describeServer, type ServerInfo } from "../server.js";
-import type { BuildOutput } from "./build.js";
+import type { Build, BuildOutput } from "./build.js";
+import { CH_ACCESS_TYPES } from "./access.js";
+import { planEnvironment } from "./plan.js";
 
 /** The `lexicons.sql` section of `chant lifecycle diff --live --json`. */
 export interface SqlLiveDiff {
@@ -86,7 +88,9 @@ export interface RecordedSource {
 
 export async function writeRecordedSource(projectDir: string, schema: BuildOutput): Promise<RecordedSource> {
   const { sqlTemplateGenerator } = await import("@intentius/chant-lexicon-sql/import-generator");
-  const resources = schema.objects.map((o) => {
+  // chant's ClickHouse generator writes no user, role, row policy or grant (#46); those go in a file of their own, each its recorded DDL.
+  const access = schema.objects.filter((o) => CH_ACCESS_TYPES.has(o.type ?? ""));
+  const resources = schema.objects.filter((o) => !CH_ACCESS_TYPES.has(o.type ?? "")).map((o) => {
     const own = o as typeof o & { database?: unknown; schema?: unknown; name?: unknown };
     const where = typeof own.database === "string" ? { database: own.database } : typeof own.schema === "string" ? { schema: own.schema } : {};
     return { type: o.type ?? "", logicalId: o.export, properties: { ...where, name: typeof own.name === "string" ? own.name : o.export, ddl: o.ddl } };
@@ -101,11 +105,57 @@ export async function writeRecordedSource(projectDir: string, schema: BuildOutpu
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, f.content);
     }
+    if (access.length > 0) writeFileSync(join(dir, "access.ts"), recordedAccessSource(access));
   } catch (e) {
     dispose();
     throw new YodelError(`the recorded schema could not be written as declarations: ${e instanceof Error ? e.message : String(e)}`);
   }
   return { dir, dispose };
+}
+
+const CH_ACCESS_TAG: Readonly<Record<string, string>> = { "ClickHouse::User": "user", "ClickHouse::Role": "role", "ClickHouse::RowPolicy": "policy", "ClickHouse::Grant": "grant" };
+
+/** ClickHouse access objects of a recorded schema as declarations: each its DDL in its tag, names as text (the recorded DDL has them resolved). */
+export function recordedAccessSource(objects: ReadonlyArray<{ export: string; type?: string; ddl: string }>): string {
+  const tags = [...new Set(objects.map((o) => CH_ACCESS_TAG[o.type ?? ""] ?? ""))].filter(Boolean).sort();
+  const lines = [`import { ${tags.join(", ")} } from "@intentius/chant-lexicon-sql/clickhouse";`, ""];
+  for (const o of objects) lines.push(`export const ${o.export} = ${CH_ACCESS_TAG[o.type ?? ""] ?? "grant"}\`${o.ddl.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\`;`);
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * ClickHouse grants (#46), which `chant lifecycle diff` leaves unobserved (a
+ * grant is compared as part of its grantee's grants): yodel plans `build`
+ * against the environment and reads each `grants <grantee>` change as drift.
+ * A grant declared and not held is `absent`; one held and not declared
+ * (granted by hand, which the next apply revokes) is `changed`, declared
+ * nothing. A grantee the server does not have is gone. The grant
+ * declarations come off `unobserved`, since they were compared.
+ */
+export async function withClickHouseGrants(drift: Drift, project: Project, env: Environment, build: Build): Promise<Drift> {
+  const grants = build.output.objects.filter((o) => o.type === "ClickHouse::Grant");
+  if (grants.length === 0) return drift;
+  const plan = await planEnvironment(project, env, build);
+  const byGrantee = new Map<string, DeepEntityDrift>();
+  const missing: string[] = [];
+  for (const c of plan.diff.changes) {
+    if (!c.object.startsWith("grants ")) continue;
+    if (c.rule === "SQLCH200") {
+      missing.push(c.object);
+      continue;
+    }
+    if (c.rule !== "SQLCH273" && c.rule !== "SQLCH274") continue;
+    const e = byGrantee.get(c.object) ?? { name: c.object, type: "ClickHouse::Grant", changes: [] };
+    e.changes.push(c.rule === "SQLCH273" ? { path: c.field, kind: "absent", declared: c.after } : { path: c.field, kind: "changed", live: c.before });
+    byGrantee.set(c.object, e);
+  }
+  const compared = new Set(grants.map((o) => o.export));
+  return {
+    ...drift,
+    changed: [...drift.changed, ...byGrantee.values()],
+    missing: [...drift.missing, ...missing].sort(),
+    unobserved: drift.unobserved.filter((u) => !compared.has(u.name)),
+  };
 }
 
 /** Exit code: an owned object changed or is gone. */

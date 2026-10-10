@@ -29,10 +29,18 @@ export interface Plan {
 /** Exit code: the plan has a change that needs a rebuild (or expand-and-contract) Op. */
 export const PLAN_NEEDS_OP = 2;
 
-/** `2` when any change needs its own Op, `0` otherwise. */
+/**
+ * `2` when any change needs its own Op, or a live object in the declared
+ * databases could not be read (chant's `unreadable`, an object whose
+ * definition does not parse, #46): a plan that cannot say what it would do
+ * to it is not one to apply. `0` otherwise.
+ */
 export function planExitCode(plan: Plan): number {
-  return plan.refused.length > 0 ? PLAN_NEEDS_OP : 0;
+  return plan.refused.length > 0 || unreadableOf(plan).length > 0 ? PLAN_NEEDS_OP : 0;
 }
+
+/** The live objects a ClickHouse plan could not read, as chant names them. */
+export const unreadableOf = (plan: Plan): Array<{ object: string; type: string; reason: string }> => (plan.dialect === "clickhouse" ? ((plan.diff as SchemaDiff).unreadable ?? []) : []);
 
 /**
  * The changes to objects the build declares. A plan also lists live objects
@@ -42,12 +50,15 @@ export function planExitCode(plan: Plan): number {
  * undeclared one by its name alone. A privilege change (#45) is labelled by
  * its ACL entry (`relation app.t TO reader`); chant plans one only where the
  * environment manages access, always on a declared object, and the apply
- * makes it, so it is work too.
+ * makes it, so it is work too. So is a ClickHouse grantee's grants (#46),
+ * labelled `grants <grantee>`: chant reads only the grantees the build
+ * declares a grant to.
  */
 export function declaredChanges(plan: Plan, build: Build): ClassifiedChange[] {
   const exports = new Set(build.output.objects.map((o) => o.export));
   return plan.diff.changes.filter((c) => {
     if (PRIVILEGE_RULES.has(c.rule)) return true;
+    if (plan.dialect === "clickhouse" && c.object.startsWith("grants ")) return true;
     const at = c.object.indexOf(" (");
     return at > 0 && c.object.endsWith(")") && exports.has(c.object.slice(0, at));
   });

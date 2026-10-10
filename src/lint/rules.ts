@@ -11,9 +11,9 @@
  * - Statement rules, from the classes chant's classifier gives each step:
  *   `destructive`, `pg-rewrite`, `pg-lock`, `pg-signature`, `pg-access`,
  *   `pg-rls-not-forced` (a warning), `ch-mutation`, `ch-rebuild`,
- *   `data-dependent` (a warning: a statement that can fail on the rows
- *   already there, with the pre-check yodel apply runs first), and
- *   `naming` (the names a migration adds, against `lint.naming`).
+ *   `ch-access`, `data-dependent` (a warning: a statement that can fail
+ *   on the rows already there, with the pre-check yodel apply runs first),
+ *   and `naming` (the names a migration adds, against `lint.naming`).
  *   Errors by default; a line `-- yodel:allow <rule> <reason>` above the
  *   statement in `migration.sql` silences one for that statement, and the
  *   reason is recorded in the history when the migration applies.
@@ -68,6 +68,7 @@ export const LINT_RULES = {
   naming: { id: "naming", summary: "a table, column, index or constraint the migration adds breaks yodel.config.ts lint.naming", level: "error", silenceable: true, configurable: true },
   "ch-mutation": statement("ch-mutation", "ClickHouse: starts a mutation that rewrites existing parts in the background, with no rollback", "clickhouse"),
   "ch-rebuild": statement("ch-rebuild", "ClickHouse: a rebuild, every row copied into a new table and swapped in (ClickHouseRebuildOp)", "clickhouse"),
+  "ch-access": statement("ch-access", "ClickHouse: takes access away: a privilege or role revoked from a user or role (SQLCH274)", "clickhouse"),
   "refused-step": shape("refused-step", "a step yodel apply refuses to run: a manual step, or an Op step it does not run"),
   "migration-sql": shape("migration-sql", "migration.sql does not hold a statement as migration.json records it; apply runs migration.json's"),
   silence: shape("silence", "a yodel:allow line that is malformed, names a rule no statement can silence, has no reason, or silences nothing"),

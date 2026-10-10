@@ -166,6 +166,6 @@ describe("the declarative plan's access section", () => {
   });
 
   it("says when access is not managed", () => {
-    expect(renderAccessReview({ managed: false, source: "default", changes: [] }, "dev")).toEqual(["Access control: not managed in dev (off by default); policies, grants and roles are not planned."]);
+    expect(renderAccessReview({ managed: false, source: "default", changes: [] }, "dev")).toEqual(["Access control: not managed in dev (off by default); policies, grants, roles and users are not planned."]);
   });
 });

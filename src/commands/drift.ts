@@ -13,11 +13,16 @@ import {
   readDrift,
   renderDrift,
   renderDriftMarkdown,
+  withClickHouseGrants,
   writeRecordedSource,
   type Drift,
   type DriftAgainst,
 } from "../chant/drift.js";
-import { buildSchema, type BuildOutput } from "../chant/build.js";
+import { buildSchema, type Build, type BuildOutput } from "../chant/build.js";
+import { clickhouseAccessRefusal } from "../chant/access.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { probeServer, softly, type ServerInfo } from "../server.js";
 import type { Environment, Project, SqlDialect } from "../project.js";
 import { describeHolders, describeMs, isLockTimeout, lockHolders, lockTimeoutOptions } from "../versioned/postgres/waits.js";
@@ -73,6 +78,31 @@ export async function recordedSchema(project: Project, env: Environment): Promis
     return undefined;
   } finally {
     await closeVersioned(venv);
+  }
+}
+
+/** A recorded schema as a build file the planner reads, in a temporary directory its dispose removes. */
+function recordedBuild(schema: BuildOutput): Build {
+  const dir = mkdtempSync(join(tmpdir(), "yodel-recorded-"));
+  const path = join(dir, "schema.json");
+  writeFileSync(path, JSON.stringify(schema));
+  return { path, output: schema, dispose: () => { rmSync(dir, { recursive: true, force: true }); } };
+}
+
+/**
+ * ClickHouse access in a drift (#46): refused where the environment does
+ * not manage access and the compared schema declares some (chant would
+ * read it anyway), and the declared grants compared, which chant's
+ * lifecycle diff leaves unobserved.
+ */
+async function clickhouseAccess(project: Project, env: Environment, drift: Drift, recorded: BuildOutput | undefined): Promise<Drift> {
+  const build = recorded ? recordedBuild(recorded) : await buildSchema(project);
+  try {
+    const refusal = clickhouseAccessRefusal(project, env.name, build.output, recorded ? "the schema the history records" : "the declared schema");
+    if (refusal) throw refusal;
+    return await withClickHouseGrants(drift, project, env, build);
+  } finally {
+    build.dispose();
   }
 }
 
@@ -271,6 +301,7 @@ export const drift: Command = {
           result = await readDrift(project, env, chantEnv);
         }
         result.against = against;
+        if (project.dialect === "clickhouse" && (recorded || source === "src")) result = await clickhouseAccess(project, env, result, recorded);
         if (pg && result.unobserved.some((u) => isLockTimeout(u.detail) || isLockTimeout(u.reason))) result.lockWait = await lockWait(pg);
         const ofRecorded = recorded;
         const build = ofRecorded ? () => Promise.resolve({ output: ofRecorded, dispose: () => undefined }) : () => buildSchema(project);

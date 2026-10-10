@@ -13,6 +13,10 @@
  * - `ch-mutation`: a ClickHouse statement of class `rewrite`, or one that
  *   waits for its mutation (a column type or TTL change).
  * - `ch-rebuild`: a `ClickHouseRebuildOp` step.
+ * - `ch-access`: a ClickHouse statement that takes access away (#46): a
+ *   privilege or role revoked (SQLCH274). ClickHouse takes no `REVOKE`
+ *   declaration, so each one revokes what a grantee holds and no
+ *   declaration grants any more.
  * - `pg-rewrite`: a Postgres statement of class `rewrite` (ACCESS EXCLUSIVE
  *   for a rewrite or a full scan).
  * - `pg-lock`: a Postgres statement that blocks writes for a whole build or
@@ -136,6 +140,10 @@ export function stepFindings(dialect: Dialect, step: MigrationStep, context: Ste
     if (step.destructive) out.push({ rule: "destructive", message: `${what}: removes data that cannot be recovered` });
     if (dialect === "clickhouse" && (step.class === "rewrite" || step.waitsForMutation === true)) {
       out.push({ rule: "ch-mutation", message: `${what}: a mutation that rewrites existing parts in the background, with no rollback` });
+    }
+    if (dialect === "clickhouse") {
+      const away = takesAccessAway(step);
+      if (away) out.push({ rule: "ch-access", message: `${what}: ${away}, which changes what a user or role can do: ${step.sql.split("\n")[0] ?? ""}` });
     }
     if (dialect === "postgres") {
       if (step.class === "rewrite") {

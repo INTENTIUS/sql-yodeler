@@ -61,7 +61,7 @@
           }
         },
         "access": {
-          "description": "Postgres: the steps about access control (policies, row-level security, roles, grants, revokes, default privileges), each with its rule and class; takesAway says why one takes access away.",
+          "description": "The steps about access control (Postgres: policies, row-level security, roles, grants, revokes, default privileges; ClickHouse: users, roles, row policies, grants, revokes), each with its rule and class; takesAway says why one takes access away.",
           "type": "array",
           "items": {
             "type": "object",

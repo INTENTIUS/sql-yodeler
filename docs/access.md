@@ -4,7 +4,7 @@ claims: [declarative, adopt]
 
 # Access control
 
-On Postgres, who can read and write which rows is part of the schema. chant's sql lexicon declares it next to the tables it is about: row-level security on a table, policies, the roles the schema needs, grants and revokes, and default privileges. yodel plans and applies those declarations like the rest of the schema, shows them under review with their rules and classes, and adopts the ones a database already has.
+Who can read and write what is part of the schema. chant's sql lexicon declares it next to the tables it is about. On Postgres that is row-level security on a table, policies, the roles the schema needs, grants and revokes, and default privileges. On ClickHouse it is users, roles, row policies and grants ([ClickHouse](#clickhouse) below). yodel plans and applies those declarations like the rest of the schema, shows them under review with their rules and classes, and adopts the ones a database already has.
 
 ```ts
 import { grant, policy, role, table } from "@intentius/chant-lexicon-sql/postgres";
@@ -34,7 +34,7 @@ chant's page on access (`postgres-access` in the sql lexicon's docs) has the dec
 
 ## Turn it on per environment
 
-Access is off until an environment turns it on, so a project whose access is managed somewhere else sees no change. Set it in `yodel.config.ts`:
+Access is off until an environment turns it on, on either dialect, so a project whose access is managed somewhere else sees no change. Set it in `yodel.config.ts`:
 
 ```ts
 export default defineConfig({
@@ -55,7 +55,15 @@ yodel plan: yodel.config.ts sets environments.dev.access to true, but the declar
 
 With access off, the access declarations are left out of the plan (chant's hint counts them), the server's policies and privileges are not read, and a table is created without its `ROW LEVEL SECURITY` statements. With access on, the declared privileges are all the privileges on the declared objects: one granted by hand is revoked by the next apply.
 
+On ClickHouse the setting works differently on the declarative path, because chant's ClickHouse apply has no switch: it plans and applies every user, role, row policy and grant the build declares. So yodel does not need `sql.profiles.<env>.access` to agree there. Instead, where the environment does not manage access and `src/` declares any of them, `yodel plan`, `yodel apply` and `yodel drift` refuse rather than leave them out of the plan and have the apply make them:
+
+```text
+yodel plan: the declared schema declares access control (reader, clicksOnly, readEvents), but dev does not manage access (off by default). On ClickHouse the declarative apply and drift run chant, which plans every user, role, row policy and grant it is given, so yodel will not plan them away here and apply them there. Set environments.dev.access to true in yodel.config.ts, or move the access declarations out of the source directory.
+```
+
 ## What the schema owns and what the environment owns
+
+This section and the next three are about Postgres; ClickHouse has [its own](#clickhouse).
 
 The schema owns these, declared and kept as declared:
 
@@ -112,3 +120,72 @@ A wave with gate `on-destructive` waits on a `pg-access` step as it waits on a d
 ## Adopting a database
 
 With access on for the environment, `yodel init --from <env>` adopts each table's row-level security with the table, the policies, and the privileges as `grant` declarations. Each declaration is the `GRANT` or `REVOKE` that takes a new object's privileges to what the server holds, so the adoption plans as no change. Roles are the environment's and are not adopted; the grants name them as text. The baseline migration records the policies and grants with the rest, and nothing is sent to the server.
+
+## ClickHouse
+
+On ClickHouse the access declarations are `user`, `role`, `policy` (a row policy) and `grant`, from `@intentius/chant-lexicon-sql/clickhouse`:
+
+```ts
+import { grant, policy, role, user } from "@intentius/chant-lexicon-sql/clickhouse";
+import { events } from "./schema.js";
+
+export const reader = role`CREATE ROLE app_reader SETTINGS max_threads = 4`;
+export const dashboards = user`CREATE USER dashboards DEFAULT ROLE ${reader}`;
+
+export const clicksOnly = policy`CREATE ROW POLICY clicks ON ${events} FOR SELECT USING kind = 'click' TO ${reader}`;
+
+export const readEvents = grant`GRANT SELECT ON ${events} TO ${reader}`;
+export const dashboardsRead = grant`GRANT ${reader} TO ${dashboards}`;
+```
+
+chant's page on ClickHouse access (`clickhouse-access` in the sql lexicon's docs) has the full syntax and how each is compared.
+
+What the schema owns and what the environment owns:
+
+- A password is the environment's. `IDENTIFIED BY` is refused in a declaration. A user declared without `IDENTIFIED`, like `dashboards` above, is not created by chant: the apply reports it as not attempted and its grants as waiting on it until the environment creates the user with its password; from then on the apply keeps the rest of it (its default role, host, settings) as declared and leaves the password alone. A user declared with a method that holds no secret (`NOT IDENTIFIED`, `ssl_certificate`, `ldap`, `kerberos`, `http`, `ssh_key`) is created by chant.
+- Grants are compared per grantee. All the `grant` declarations naming a grantee are everything it holds: anything else it holds is revoked by the next apply, and there is no `REVOKE` declaration.
+- Users, roles and row policies are created and changed, never dropped. None of them carries chant's ownership marker, so a plan reads only the ones the build declares, and one made by hand is never seen.
+
+### Under review
+
+`yodel plan` and `yodel apply` on the declarative path end with the same access section as on Postgres. Every revoke on ClickHouse takes away something no declaration grants, so each one is called out:
+
+```text
+Access control (managed in dev, from yodel.config.ts): 1 change
+  SQLCH274 metadata  grants app_reader  grants.INSERT ON shop.events: INSERT ON shop.events -> nothing  (granted by hand)
+
+Revoked by this apply, though no declaration revokes it: privileges granted by hand (or whose declaration was deleted). The role loses it once the apply runs:
+  INSERT ON shop.events FROM app_reader
+To keep it, declare it with grant`...`.
+```
+
+`yodel drift` reports the same grant: chant's `lifecycle diff` reads users, roles and row policies but leaves grants unobserved, so yodel compares each declared grantee's grants itself and lists a grant held by hand, a declared grant that is missing, and a grantee that is gone.
+
+On the versioned path `yodel new` writes the access statements with their rules and classes, prints how many steps are about access and which take it away, and `yodel plan` and the pull request comment list the same under each pending migration.
+
+| Rule | Change | Class |
+|---|---|---|
+| SQLCH200 | A user, role or row policy created, or a grantee's first grants | create |
+| SQLCH270 | A role's settings changed (`ALTER ROLE`) | metadata |
+| SQLCH271 | A user's clause changed (one `ALTER USER` per clause) | metadata |
+| SQLCH272 | A row policy changed (`CREATE ROW POLICY OR REPLACE`) | metadata |
+| SQLCH273 | A privilege or role granted | metadata |
+| SQLCH274 | A privilege or role revoked | metadata |
+
+`ch-access` (an error, silenceable) flags a revoke, and a wave with gate `on-destructive` waits on it ([Lint](lint.md)).
+
+### Topology and replay
+
+None of these objects belongs to a database. In the `cluster` topology, and in `replicated` when it names a cluster, their statements are sent `ON CLUSTER` (`CREATE USER ... ON CLUSTER`, `GRANT ON CLUSTER ...`); inside a `Replicated` database alone they are sent to the node, since its log does not carry them ([Topology](topology.md)).
+
+`yodel lint --replay` empties the databases it replays into, and also drops the functions, users, roles and row policies the history declares, which outlive a database. A user the history declares without `IDENTIFIED` is the environment's to create, so the replay creates it with a random password before the first statement, and gives it its declared clauses before each migration is compared.
+
+### Adopting
+
+With access on for the environment, `yodel init --from <env>` writes `src/access.ts` beside the import's `schema.ts`:
+
+- every row policy on a table in the profile's `databases`;
+- each user or role holding a privilege in those databases, each role a policy applies to, and each user or role those roles are granted to, but not the server's `default` user;
+- for each of them, its `CREATE USER` (without its authentication) or `CREATE ROLE`, and all of its grants as `grant` declarations, not only those in the databases, since a grantee's grants are compared as a whole.
+
+A grantee with a partial revoke (`REVOKE` in `SHOW GRANTS`) cannot be declared and is left out with a warning. The baseline records the grants with the rest, and nothing is sent to the server. With access off, init adopts the databases, tables, views, dictionaries and functions alone.
