@@ -193,8 +193,12 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply)`);
+  if (value.apply !== undefined && typeof value.apply !== "boolean") throw new YodelError(`${where}.apply: true (the default) or false`);
+  if (value.apply === false && value.resume !== undefined) {
+    throw new YodelError(`${where}: resume starts again the apply pipeline's waves, which apply: false leaves out; remove ci.resume, or ci.apply`);
+  }
   const login = value.login === undefined ? undefined : loginProblem(value.login, `${where}.login`);
   if (login) throw new YodelError(login);
   const resume = value.resume;
@@ -229,6 +233,12 @@ export function checkYodelConfig(value: unknown, path: string, profiles?: readon
   }
   if (value.policy !== undefined) checkPolicy(value.policy, `${path}: policy`, profiles);
   if (value.waves !== undefined) checkWaves(value.waves, `${path}: waves`, profiles);
+  if (isRecord(value.ci) && value.ci.apply === false && Array.isArray(value.waves)) {
+    const i = value.waves.findIndex((w) => isRecord(w) && w.approval === "pr-review");
+    if (i >= 0) {
+      throw new YodelError(`${path}: waves[${String(i)}].approval: pr-review records each pull request's plans for the apply pipeline, which ci.apply: false leaves out; remove waves[${String(i)}].approval, or ci.apply`);
+    }
+  }
   if (value.lint !== undefined && !isRecord(value.lint)) throw new YodelError(`${path}: lint: expected an object`);
   if (value.environments !== undefined) {
     if (!isRecord(value.environments)) throw new YodelError(`${path}: environments: expected an object keyed by environment`);

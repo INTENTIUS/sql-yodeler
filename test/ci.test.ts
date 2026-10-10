@@ -169,6 +169,46 @@ describe("yodel ci", () => {
     }
   });
 
+  it("with ci.apply: false, renders the pull request checks and the watches on each forge, and no apply pipeline (#175)", async () => {
+    const dir = project('{ forges: ["github", "gitlab", "forgejo"], apply: false }');
+    // The template's rendered pipelines out of the way, so the render shows every file it writes.
+    for (const f of [".github", ".forgejo", ".gitlab", ".gitlab-ci.yml", "yodel-waves.json"]) rmSync(join(dir, f), { recursive: true, force: true });
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    const rendered = wrote.out.trim().split("\n").map((l) => l.replace(/^wrote /, "")).sort();
+    expect(rendered).toEqual([
+      ".forgejo/workflows/watch-dev.yml",
+      ".forgejo/workflows/watch-prod.yml",
+      ".forgejo/workflows/yodel-pr.yml",
+      ".github/workflows/watch-dev.yml",
+      ".github/workflows/watch-prod.yml",
+      ".github/workflows/yodel-pr.yml",
+      ".gitlab-ci.yml",
+      ".gitlab/yodel-watch.gitlab-ci.yml",
+    ]);
+    // No file in the project names a writer.
+    for (const f of rendered) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/WRITER|writer:/);
+    const gitlab = parseYAMLDocument(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as { stages: string[]; include: Array<{ local: string }> };
+    expect(gitlab.stages).toEqual(["review", "ops"]);
+    expect(gitlab.include).toEqual([{ local: ".gitlab/yodel-watch.gitlab-ci.yml" }]);
+    const pr = parseYAMLDocument(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
+    expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-prod"]);
+    expect(pr.jobs["plan-prod"]?.steps.some((st) => st.run === "yodel config check prod dev --write-probe")).toBe(true);
+    const check = await yodel(["ci", "--check", "--dir", dir]);
+    expect(check.code, check.err).toBe(0);
+    expect(check.out).toBe("8 CI files are up to date\n");
+  });
+
+  it("refuses ci.apply: false with a pr-review wave or with ci.resume, naming the setting (#175)", () => {
+    expect(() => checkYodelConfig({ ci: { apply: false }, waves: [{ env: "dev", gate: "always" }, { env: "prod", gate: "always", approval: "pr-review" }] }, "yodel.config.ts")).toThrow(
+      /waves\[1\]\.approval: pr-review .* remove waves\[1\]\.approval, or ci\.apply/,
+    );
+    expect(() => checkYodelConfig({ ci: { apply: false, resume: { schedule: "*/10 * * * *" } } }, "yodel.config.ts")).toThrow(/remove ci\.resume, or ci\.apply/);
+    expect(() => checkYodelConfig({ ci: { apply: "no" } }, "yodel.config.ts")).toThrow(/ci\.apply: true \(the default\) or false/);
+    expect(checkYodelConfig({ ci: { apply: false }, waves: [{ env: "dev", gate: "always", approval: "sealed" }] }, "yodel.config.ts").ci).toEqual({ apply: false });
+    expect(checkYodelConfig({ ci: { apply: true, resume: { schedule: "*/10 * * * *" } } }, "yodel.config.ts").ci).toMatchObject({ apply: true });
+  });
+
   it("checks ci.resume's schedule", () => {
     expect(() => checkYodelConfig({ ci: { resume: { schedule: "every ten minutes" } } }, "yodel.config.ts")).toThrow(/ci\.resume: \{ schedule \} with a five-field cron/);
     expect(() => checkYodelConfig({ ci: { resume: { schedule: "*/10 * * * *", by: "me" } } }, "yodel.config.ts")).toThrow(/ci\.resume/);

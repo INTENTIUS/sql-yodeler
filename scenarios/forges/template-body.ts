@@ -58,6 +58,10 @@
  * - write-probe (#50, #59): a pull request's plan job tries a write and is
  *   refused. BREAK: for that pull request the reader's secrets hold the
  *   writer, so the write goes through and the probe fails the job.
+ * - apply-off (#175): a pull request that sets `ci: { apply: false }`,
+ *   renders again and deletes the apply pipeline's files gets lint (with
+ *   `yodel ci --check`) and the plan comment, green. BREAK: the apply files
+ *   are deleted without the setting, so `yodel ci --check` fails the lint job.
  * - image (#66; forges where it runs): a pull request with yodel.config.ts
  *   `ci.image`, the CI image pinned by its digest, runs its jobs in that
  *   image with nothing installed, and the plan job comments. BREAK: no
@@ -177,6 +181,7 @@ export function templateParts(features: TemplateFeatures): Array<PartEntry<State
     ["lint-blocks", lintBlocksPart],
     ["annotations", annotationsPart],
     ["write-probe", writeProbePart],
+    ["apply-off", applyOffPart],
     ...(features.image ? [["image", imagePart] as PartEntry<State>] : []),
     ...(features.commandToken ? [["command-token", commandTokenPart] as PartEntry<State>] : []),
     ["watch", watchPart],
@@ -259,8 +264,8 @@ async function setup(ctx: Ctx, forge: Forge, notify: { part?: NotifyPart | undef
   const projectChant = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { dependencies: Record<string, string> }).dependencies["@intentius/chant"];
   const chantApart = minor(yodelChant) !== minor(projectChant);
   if (chantApart) ctx.log(`the installed yodel takes @intentius/chant ${yodelChant ?? "?"}, the template pins ${projectChant ?? "?"}`);
-  if (chantApart || !existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !renderJs().includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !renderJs().includes("code.forgejo.org/forgejo/upload-artifact")) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129) or no Forgejo report upload that works on Forgejo yet, or takes another chant minor than the template pins: this checkout's, packed and committed with the project.
+  if (chantApart || !existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !renderJs().includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !renderJs().includes("code.forgejo.org/forgejo/upload-artifact") || !renderJs().includes("rendersApply")) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129), no Forgejo report upload that works on Forgejo or no ci.apply (#175) yet, or takes another chant minor than the template pins: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
@@ -763,6 +768,47 @@ async function writeProbePart(ctx: Ctx, s: State): Promise<void> {
   const wrote = pr.checks.log.includes("dev: the credentials this process holds can write");
   hold(refused && !wrote, wrote ? "the pull request's plan job holds credentials that can write (yodel config check dev --write-probe failed it)" : "the pull request's plan job did not show that it cannot write (yodel config check dev --write-probe)");
   hold(pr.checks.ok, `the write-probe part's pull request ended ${pr.checks.status}`);
+}
+
+// ── apply-off (#175) ──────────────────────────────────────────────────────────
+
+/** The apply pipeline's files on every forge, as yodel ci renders them with apply on. */
+const applyFiles = (dir: string): string[] => [
+  "yodel-waves.json",
+  ".gitlab/yodel-apply.gitlab-ci.yml",
+  ...[".github/workflows", ".forgejo/workflows"].flatMap((d) => (existsSync(join(dir, d)) ? readdirSync(join(dir, d)).filter((f) => f.startsWith("yodel-apply")).map((f) => `${d}/${f}`) : [])),
+];
+
+/**
+ * Lint and plan on pull requests only: a pull request sets `ci: { apply:
+ * false }` (and drops dev's pr-review approval, which needs the apply
+ * pipeline), renders again and deletes the apply files, which yodel ci no
+ * longer writes. Its lint job's `yodel ci --check` passes, and the plan
+ * comment is posted. The pull request stays open. BREAK: the apply files
+ * are deleted without the setting, so --check finds them missing and fails
+ * the lint job.
+ */
+async function applyOffPart(ctx: Ctx, s: State): Promise<void> {
+  if (ctx.broken) ctx.log("BREAK (apply-off): the apply pipeline's files deleted without ci.apply: false");
+  const pr = await branchPr(s, "apply-off", "ci: lint and plan on pull requests only", async () => {
+    if (!ctx.broken) {
+      const path = join(s.dir, "yodel.config.ts");
+      const text = readFileSync(path, "utf8")
+        .replace(/^( {4}\{ env: "dev", gate: "always"), approval: "[^"]*"( \},)$/m, "$1$2")
+        .replace(/^( {2}ci: \{ .*?)( \},)$/m, "$1, apply: false$2");
+      if (!text.includes("apply: false")) throw new Error("could not set ci.apply: false in yodel.config.ts");
+      writeFileSync(path, text);
+      await s.sh("npm", ["run", "ci"]);
+    }
+    const gone = applyFiles(s.dir).filter((f) => existsSync(join(s.dir, f)));
+    if (!gone.includes("yodel-waves.json")) throw new Error("main has no yodel-waves.json to delete");
+    for (const f of gone) rmSync(join(s.dir, f));
+    if (!ctx.broken) await s.sh("npx", ["yodel", "ci", "--check"]);
+  });
+  const comment = (await s.repo.comments(pr.id)).find((c) => c.startsWith("<!-- yodel:plan env=dev -->"));
+  const lintFailed = pr.checks.failed ? pr.checks.failed.includes("lint") : !pr.checks.ok;
+  hold(!lintFailed && pr.checks.ok, `the pull request with ci.apply: false and no apply pipeline ended ${pr.checks.status}${pr.checks.failed ? ` (failed jobs: ${pr.checks.failed.join(", ")})` : ""}`);
+  hold(comment !== undefined, "the pull request with ci.apply: false got no plan comment");
 }
 
 // ── image (#66) ───────────────────────────────────────────────────────────────

@@ -41,6 +41,11 @@ yodel.config.ts ci:
            (actions: write), Forgejo the CHANT_FORGE_TOKEN secret
            (write:repository), GitLab a pipeline schedule you create, with
            GITLAB_TOKEN (api scope, Developer)
+  apply    false: no apply pipeline (no yodel-waves.json, yodel-apply or
+           yodel-apply-plans, no GitLab apply stages). The pull request
+           checks and the watches remain, all with readers; --check does
+           not expect the apply files. Refused with a pr-review wave or
+           resume, which need the apply pipeline
 
 Options:
   --check          write nothing; exit 1 naming each file that differs from

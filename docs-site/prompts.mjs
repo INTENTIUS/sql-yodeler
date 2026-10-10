@@ -57,6 +57,12 @@ export const pagePrompts = {
 		`An apply was refused or is waiting for approval. Following ${pageUrl('approval')}, read the job log and \`npx yodel plan <env>\` with the reader's credentials, and tell me what the plan would run, what moved since the last approval, and the approve command.`,
 		neverLine,
 	].join('\n'),
+	'lint-and-plan': [
+		`Set up SQL Yodeler's pull request checks without its apply pipeline, following ${pageUrl('lint-and-plan')}: set \`ci: { apply: false }\` in yodel.config.ts, run \`npm run ci\`, delete the apply files it no longer writes, and check that \`npx yodel ci --check\` passes.`,
+		'List the readers\' secrets the forge needs in the pull request description, and add no writer\'s secret.',
+		'Open a pull request with the result.',
+		neverLine,
+	].join('\n'),
 	migrations: [
 		`\`yodel lint\` reports a fork on this branch. Following ${pageUrl('migrations')} (Forks and yodel rebase), run \`npx yodel rebase\` with \`--env\` for each environment I name, so a migration that ran is never moved, then \`npx yodel lint\`, and push the branch.`,
 		neverLine,
