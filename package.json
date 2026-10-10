@@ -41,6 +41,7 @@
     "claims": "npm run build && tsx scenarios/run.ts",
     "release": "bash scripts/release.sh",
     "workflows": "tsx .github/src/render.ts",
+    "templates:check": "tsx scripts/templates-check.ts",
     "claims:page": "tsx scenarios/status-page.ts",
     "bench": "npm run build && tsx bench/run.ts"
   },
