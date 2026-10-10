@@ -56,7 +56,32 @@ export interface EnvironmentConfig {
    * Default: `YODEL_LOCK_WAIT`, then 0 (give up at once).
    */
   lockWait?: number;
+  /**
+   * A tenant set (#56): the environment is many targets with one schema,
+   * each a ClickHouse database or a Postgres schema of the profile's server.
+   * The profile names one database (ClickHouse `databases`) or schema
+   * (Postgres `schemas`), the template the migrations are written against;
+   * each tenant gets them with that name replaced by its own. A tenant is
+   * named `<env>/<tenant>` (`yodel apply prod/acme`), keeps a history of its
+   * own (`<history database>_<tenant>`), and its wave applies to every
+   * tenant behind one gate. See {@link TenantSet}.
+   */
+  tenants?: TenantSet;
 }
+
+/**
+ * The tenants of an environment: a list of names, a file of them (one per
+ * line, or a JSON array), or a read-only SQL query whose first column lists
+ * them, run on the environment's server with its profile (its reader
+ * outside an apply job).
+ *
+ * ```ts
+ * tenants: ["acme", "globex"]
+ * tenants: { file: "tenants.txt" }
+ * tenants: { query: "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'tenant_%'" }
+ * ```
+ */
+export type TenantSet = string[] | { file: string } | { query: string };
 
 /** When an environment's wave waits for an approval (chant's wave gate policy). */
 export type WaveGate = "always" | "on-destructive" | "never";
@@ -93,6 +118,14 @@ export interface WaveConfig {
    * change cannot drop its own.
    */
   requires?: string | false;
+  /**
+   * A tenant set's wave (#56): split it into a deciding job, which plans
+   * every tenant and decides the gate once over all of them, and this many
+   * share jobs, each applying a slice of the tenants. A share job refuses
+   * (exit 4), naming it, a tenant whose plan moved since the decision, and
+   * applies the rest. Default 1: one job plans, decides and applies.
+   */
+  shares?: number;
 }
 
 /** A forge `yodel ci` renders pipelines for. */

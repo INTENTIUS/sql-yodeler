@@ -4,7 +4,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync
 import { join } from "node:path";
 import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { applyPipelines, type Wave, type WaveGate } from "../../src/ci/render.js";
+import { applyPipelines, withTenants, type Wave, type WaveGate } from "../../src/ci/render.js";
 import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
@@ -50,14 +50,26 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   gate, or none needed by the wave's policy, and shows no gap. BREAK:
  *   yodel built to look for approvals on the migrations Op's gate alone, so
  *   the migrations the waves applied are gaps.
+ * - tenants (#56): a third environment is a tenant set of three schemas
+ *   (Postgres) or databases (ClickHouse) on the staging server, its wave
+ *   split into a deciding job and two share jobs. The wave waits once, on
+ *   one approval of the set digest, with nothing applied; approved, every
+ *   tenant gets every migration, each in its own history, and `yodel
+ *   status` counts them up to date. A tenant whose plan moved after the
+ *   decision (a table made by hand) is refused by its share job, named,
+ *   exit 4, while the others in the share apply; `yodel status` and `yodel
+ *   report` show it behind. BREAK: the wave is rendered with the first
+ *   tenant alone, so the others never get the migrations.
  */
 
-const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report"] as const;
+const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants"] as const;
 type Part = (typeof PARTS)[number];
 
 interface Envs {
   staging: string;
   prod: string;
+  /** A tenant set on the staging server (#56): its tenants are {@link tenantNames}. */
+  tenants: string;
 }
 
 interface State {
@@ -80,10 +92,12 @@ function breaks(ctx: Ctx, part: Part): boolean {
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean } = {}): Promise<void> {
   const { p } = st;
-  const ws: readonly Wave[] = options.allNever ? waves.map((w): Wave => ({ ...w, gate: "never" })) : waves;
   p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true));
+  // A tenant set's wave has a run per tenant, as yodel ci renders it.
+  let ws: readonly Wave[] = await withTenants(p.dir, options.allNever ? waves.map((w): Wave => ({ ...w, gate: "never" })) : waves);
+  if (options.firstTenantOnly) ws = ws.map((w) => (w.targets ? { ...w, targets: w.targets.slice(0, 1), shares: 1 } : w));
   const files = await applyPipelines(p.dir, { dialect: p.ctx.dialect === "ch" ? "clickhouse" : "postgres", names: ws.map((w) => w.env), replay: false, waves: ws });
   for (const f of files) {
     let content = f.content;
@@ -135,6 +149,15 @@ function approveCommand(result: JobResult | undefined): string {
 
 const job = (st: State, k: number, env: keyof Envs) => `wave-${String(k)}-${st.envs[env]}`;
 
+/** Runs one job of the rendered workflow, whatever its needs. */
+async function runJob(st: State, name: string): Promise<JobResult> {
+  const doc = parseYAMLDocument(st.p.read(".github/workflows/yodel-apply.yml")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
+  const command = doc.jobs[name]?.steps.map((s) => s.run ?? "").find((r) => r.startsWith("chant run wave "));
+  if (!command) throw new Error(`the workflow has no job ${name} running chant run wave`);
+  const ran = await run("chant", command.split(" ").slice(1), { cwd: st.p.dir, env: st.p.envFor(), timeoutMs: 600_000 });
+  return { ok: ran.code === 0, code: ran.code, out: `${ran.out}\n${ran.err}` };
+}
+
 // ── The project ──────────────────────────────────────────────────────────────
 
 function yodelConfig(st: State, waves: readonly Wave[], noRequires = false): string {
@@ -144,9 +167,10 @@ function yodelConfig(st: State, waves: readonly Wave[], noRequires = false): str
 export default {
   environments: {
 ${ENV_KEYS.map((k) => `    "${st.envs[k]}": { history: { database: "${history}" } },`).join("\n")}
+    "${st.envs.tenants}": { history: { database: "${history}" }, tenants: ${JSON.stringify(tenantNames(st.p.ctx))} },
   },
   waves: [
-${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i > 0 ? ", requires: false" : ""} },`).join("\n")}
+${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i > 0 ? ", requires: false" : ""}${w.shares ? `, shares: ${String(w.shares)}` : ""} },`).join("\n")}
   ],
 } satisfies YodelConfig;
 `;
@@ -208,9 +232,22 @@ async function prodServer(ctx: Ctx): Promise<{ url: string; close: () => Promise
   }
 }
 
+/** The tenant set's tenants: three schemas or databases beside the claim's own on the staging server. */
+const tenantNames = (ctx: Ctx): string[] => ["t1", "t2", "t3"].map((t) => `${ctx.db.name}_${t}`);
+
+/** Drops the tenants and their histories. */
+async function dropTenants(ctx: Ctx): Promise<void> {
+  for (const t of tenantNames(ctx)) {
+    for (const name of [t, `${ctx.db.history}_${t}`]) {
+      if (ctx.dialect === "ch") await clickhouseAt(endpoints.clickhouse, `DROP DATABASE IF EXISTS ${name} SYNC`);
+      else await postgresQuery(`DROP SCHEMA IF EXISTS ${name} CASCADE`);
+    }
+  }
+}
+
 async function setup(ctx: Ctx, prodUrl: string): Promise<State> {
   const p = await Project.create(ctx, { ops: "none" });
-  const envs: Envs = { staging: `${ctx.env}-staging`, prod: `${ctx.env}-prod` };
+  const envs: Envs = { staging: `${ctx.env}-staging`, prod: `${ctx.env}-prod`, tenants: `${ctx.env}-tenants` };
   const db = ctx.db.name;
   const profile = (url: string) =>
     ctx.dialect === "ch"
@@ -228,12 +265,13 @@ export default {
     profiles: {
       "${envs.staging}": ${profile(ctx.dialect === "ch" ? endpoints.clickhouse : endpoints.postgres)},
       "${envs.prod}": ${profile(prodUrl)},
+      "${envs.tenants}": ${profile(ctx.dialect === "ch" ? endpoints.clickhouse : endpoints.postgres)},
     },
   },
 } satisfies ChantConfig;
 `,
   );
-  for (const env of [envs.staging, envs.prod]) p.write(`ops/migrate-${env}.op.ts`, migrateOp(env));
+  for (const env of [envs.staging, envs.prod, envs.tenants]) p.write(`ops/migrate-${env}.op.ts`, migrateOp(env));
   const table = mainTable(ctx);
   const ask = async (env: keyof Envs, sql: { ch: string; pg: string }): Promise<number> => {
     if (ctx.dialect === "ch") return Number((await clickhouseAt(env === "staging" ? endpoints.clickhouse : prodUrl, sql.ch)).trim() || "0");
@@ -434,6 +472,76 @@ async function report(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   hold(ran.code === 0 && doc.gaps.length === 0, `yodel report shows gaps after the waves applied (exit ${String(ran.code)}): ${doc.gaps.map((g) => g.detail).join("; ")}`);
 }
 
+/** Whether `table` (default the main table) has `column` (or exists, without one) in tenant `t`. */
+async function onTenant(ctx: Ctx, t: string, column?: string, table = mainTable(ctx)): Promise<boolean> {
+  const sql =
+    ctx.dialect === "ch"
+      ? column
+        ? `SELECT count() FROM system.columns WHERE database = '${t}' AND table = '${table}' AND name = '${column}'`
+        : `SELECT count() FROM system.tables WHERE database = '${t}' AND name = '${table}'`
+      : column
+        ? `SELECT count(*) FROM information_schema.columns WHERE table_schema = '${t}' AND table_name = '${table}' AND column_name = '${column}'`
+        : `SELECT count(*) FROM information_schema.tables WHERE table_schema = '${t}' AND table_name = '${table}'`;
+  if (ctx.dialect === "ch") return Number((await clickhouseAt(endpoints.clickhouse, sql)).trim() || "0") === 1;
+  return Number(Object.values((await postgresQuery(sql))[0] ?? {})[0] ?? 0) === 1;
+}
+
+async function tenants(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+  const names = tenantNames(ctx);
+  const [t1, t2, t3] = names as [string, string, string];
+  const set = st.envs.tenants;
+  const tenantWave: Wave = { env: set, gate: "always", shares: 2 };
+  if (broken) ctx.log("BREAK: the tenant set's wave is rendered with its first tenant alone");
+  await render(st, [{ env: st.envs.staging, gate: "never" }, tenantWave], { firstTenantOnly: broken });
+  await st.p.commit("the waves: staging never, a tenant set always, in two shares");
+  const decide = `wave-2-${set}-decide`;
+
+  // One gate for the whole set: the deciding job waits, nothing applied anywhere.
+  const first = await pipeline(st);
+  hold(first.get(job(st, 1, "staging"))?.ok === true, "staging's wave did not run before the tenant set's");
+  const waiting = broken ? first.get(`wave-2-${set}`) : first.get(decide);
+  hold(waiting?.code === 3, `the tenant set's wave did not wait for an approval (exit ${String(waiting?.code)})`);
+  for (const t of names) hold(!(await onTenant(ctx, t)), `${t} got the migrations before the wave was approved`);
+  const approve = approveCommand(waiting);
+  hold((waiting.out.match(/chant approve \S+ \S+ --plan/g) ?? []).length === 1, "the tenant set's wave asked for more than one approval");
+  await st.p.approve(approve);
+  const applied = await pipeline(st, first);
+  for (const t of names) hold(await onTenant(ctx, t), `${t} does not have the migrations after the tenant set's wave was approved`);
+  hold([...applied.values()].every((r) => r.ok), `a job of the approved tenant wave failed: ${[...applied].filter(([, r]) => !r.ok).map(([n, r]) => `${n} exit ${String(r.code)}`).join(", ")}`);
+
+  // Each tenant has its own history, and yodel status counts them.
+  const status = await st.p.yodel(["status", set, "--json"]);
+  const doc = parse<{ tenants: Array<{ environment: string; history: string }>; upToDate: number; total: number }>(status);
+  hold(status.code === 0 && doc.upToDate === 3 && doc.total === 3, `yodel status ${set} does not count 3 of 3 tenants up to date (exit ${String(status.code)}, ${String(doc.upToDate)} of ${String(doc.total)})`);
+  hold(new Set(doc.tenants.map((t) => t.history)).size === 3, "the tenants do not each have a history of their own");
+
+  // A migration decided for every tenant; then t2's plan moves before its share applies.
+  addColumn(st.p, "tenanted");
+  await migrate(st, "add-tenanted", "feat: a column for every tenant");
+  const second = await pipeline(st);
+  const waits = second.get(decide);
+  hold(waits?.code === 3, `the tenant set's wave did not wait for the new column (exit ${String(waits?.code)})`);
+  await st.p.approve(approveCommand(waits));
+  hold((await runJob(st, decide)).ok, "the approved tenant wave's deciding job did not decide");
+  await (ctx.dialect === "ch"
+    ? clickhouseAt(endpoints.clickhouse, `CREATE TABLE ${t2}.by_hand (id UInt64) ENGINE = MergeTree ORDER BY id`)
+    : postgresQuery(`CREATE TABLE ${t2}.by_hand (id bigint)`));
+  // The tenants sorted, cut in two: share 1 is t1 and t2, share 2 is t3.
+  const share1 = await runJob(st, `wave-2-${set}-share-1`);
+  const share2 = await runJob(st, `wave-2-${set}-share-2`);
+  hold(share1.code === 4 && share1.out.includes(`${set}/${t2}: its plan moved`), `share 1 did not refuse ${t2}, whose plan moved since the decision, with exit 4 (exit ${String(share1.code)})`);
+  hold(!(await onTenant(ctx, t2, "tenanted")), `${t2} applied a plan that moved since the decision`);
+  hold(share2.ok && (await onTenant(ctx, t1, "tenanted")) && (await onTenant(ctx, t3, "tenanted")), "the tenants whose plans did not move did not apply");
+  const behind = parse<{ upToDate: number; tenants: Array<{ environment: string; pending: unknown[] }> }>(await st.p.yodel(["status", set, "--json"]));
+  hold(behind.upToDate === 2 && behind.tenants.find((t) => t.environment === `${set}/${t2}`)?.pending.length === 1, `yodel status ${set} does not show ${t2} alone behind`);
+  const report = parse<{ environments: Array<{ name: string; migrations: Array<{ state: string }> }> }>(await st.p.yodel(["report", set, "--json"]));
+  hold(
+    report.environments.map((e) => e.name).join(",") === names.map((t) => `${set}/${t}`).join(",") &&
+      report.environments.find((e) => e.name === `${set}/${t2}`)?.migrations.some((m) => m.state === "pending") === true,
+    `yodel report ${set} does not show a column per tenant with ${t2} behind`,
+  );
+}
+
 const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {
   "gate-policy": gatePolicy,
   "wave-order": waveOrder,
@@ -441,10 +549,12 @@ const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>>
   promotion,
   "yodel-approve": yodelApprove,
   report,
+  tenants,
 };
 
 async function body(ctx: Ctx): Promise<void> {
   const prod = await prodServer(ctx);
+  await dropTenants(ctx);
   const caught: string[] = [];
   const held: string[] = [];
   try {
@@ -466,6 +576,7 @@ async function body(ctx: Ctx): Promise<void> {
     }
   } finally {
     await prod.close();
+    await dropTenants(ctx);
   }
   if (held.length > 0) throw new Error(`break=not-caught: ${held.join(", ")} held with the property broken`);
   if (caught.length > 0) throw new Violation(caught.join("; "));

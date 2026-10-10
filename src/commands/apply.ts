@@ -285,6 +285,9 @@ export const apply: Command = {
       const a = parseApplyArgs(args);
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
+      if (!env.tenant && project.yodel?.config.environments?.[env.name]?.tenants) {
+        throw new YodelError(`${env.name} is a tenant set (yodel.config.ts environments.${env.name}.tenants): apply a tenant, yodel apply ${env.name}/<tenant>, or every tenant through ${env.name}'s wave in the apply pipeline`);
+      }
       if (hasMigrations(project)) return versionedApply(project, env, a, io);
       if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down") || a.wavePlan !== undefined || a.waveApply !== undefined) {
         throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
@@ -373,7 +376,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     );
     // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
     const forecast = await forecastWave(process.cwd(), a.spec, plan);
-    if (forecast.waits) {
+    if (forecast?.waits) {
       io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}). Approve it with yodel approve ${env.name}, or: ${forecast.approve}\n`);
       outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve: forecast.approve };
     }

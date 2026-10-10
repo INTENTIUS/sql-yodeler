@@ -98,11 +98,13 @@ src/commands/plan.ts                   adopt declarative pr-comment template tem
 src/pr/                                pr-comment drift template template-github template-gitlab
 
 # yodel report and the audit log (#57).
-src/commands/report.ts                 approval
-src/report/                            approval
+src/commands/report.ts                 approval waves
+src/report/                            approval waves
 
 # The apply pipeline's waves.
 src/waves/                             waves template template-github template-gitlab
+# Tenant sets (#56): only a target named <env>/<tenant> runs them, and only the waves claim names one.
+src/tenants/                           waves
 
 # yodel drift, which the templates' watch runs (--issue).
 src/commands/drift.ts                  drift template template-github template-gitlab

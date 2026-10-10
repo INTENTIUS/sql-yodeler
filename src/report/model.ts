@@ -11,6 +11,7 @@ import type { Migration } from "../migrations/index.js";
 import { resolveEnvironment, type Project } from "../project.js";
 import { closeVersioned, findMigrateOp, gitLedger, openVersioned, type MigrateOpRef } from "../versioned/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
+import { baseEnvironment } from "../tenants/target.js";
 import { approvalOf, byTime, deriveAudit, isoTime, type AuditEntry, type AuditGap, type LedgerInput, type WaveLedgerInput } from "./audit.js";
 
 export const REPORT_VERSION = 1;
@@ -125,7 +126,7 @@ export async function collectReport(project: Project, chain: readonly Migration[
 
     // The apply pipeline's waves (#87): their gates are on the waves' op's ledger, not the migrations Op's.
     let waves: WaveLedgerInput | undefined;
-    const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === name) + 1;
+    const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === baseEnvironment(name)) + 1;
     if (port && (k > 0 || rows.some((r) => r.kind === "migration" && r.note.includes('"wave"')))) {
       try {
         const { waveGateName } = await import("@intentius/chant/gated-waves");

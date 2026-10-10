@@ -19,6 +19,7 @@ import { EXIT_REFUSED } from "../exit.js";
 import type { Migration } from "../migrations/index.js";
 import { resolveEnvironment, YodelError, type Project } from "../project.js";
 import { closeVersioned, inspect, openVersioned } from "../versioned/engine.js";
+import { splitTarget, tenantTarget } from "../tenants/target.js";
 import type { PendingMigration } from "../versioned/state.js";
 
 /** The environment `env` requires in `config`: `requires`, else the wave before; undefined for none. */
@@ -30,16 +31,23 @@ export function requiredIn(config: YodelConfig | undefined, env: string): string
   return wave.requires ?? waves[i - 1]?.env;
 }
 
-/** Each required environment and where the requirement comes from: the working tree, the base commit, or both. */
+/**
+ * Each required environment and where the requirement comes from: the
+ * working tree, the base commit, or both. A tenant (#56) requires what its
+ * environment requires: the same tenant when that environment has a tenant
+ * set too, else the environment.
+ */
 export async function requiredEnvironments(project: Project, env: string): Promise<Array<{ env: string; from: string }>> {
   const out = new Map<string, string[]>();
+  const { env: base, tenant } = splitTarget(env);
   const add = (e: string | undefined, from: string) => {
-    if (e && e !== env) out.set(e, [...(out.get(e) ?? []), from]);
+    const target = e && tenant !== undefined && project.yodel?.config.environments?.[e]?.tenants ? tenantTarget(e, tenant) : e;
+    if (target && target !== env) out.set(target, [...(out.get(target) ?? []), from]);
   };
-  add(requiredIn(project.yodel?.config, env), "yodel.config.ts");
+  add(requiredIn(project.yodel?.config, base), "yodel.config.ts");
   try {
     const at = await loadYodelConfigAtBase(project.dir);
-    add(requiredIn(at.config, env), `yodel.config.ts at ${at.sha.slice(0, 12)}`);
+    add(requiredIn(at.config, base), `yodel.config.ts at ${at.sha.slice(0, 12)}`);
   } catch {
     // No git, or no base commit (a repository's first commit): the working tree's requirement alone.
   }
