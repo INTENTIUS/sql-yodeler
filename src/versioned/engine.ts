@@ -277,6 +277,12 @@ export interface ExecuteOptions {
   standDown?: () => Promise<string | undefined>;
   /** How long to sleep between tries for a held lock. Default 1 s. */
   lockPollMs?: number;
+  /**
+   * Asked once {@link approve} passed: fields every migration's `started`
+   * row adds to its note, such as the wave decision that let the run
+   * through (`wave`, ../waves/index.ts).
+   */
+  runNote?: () => Record<string, unknown> | undefined;
 }
 
 /** How long a run waited for the lock, and who held it. */
@@ -407,8 +413,8 @@ async function applyMigration(
   const m = p.migration;
   const silences = options.silences?.(m) ?? "[]";
   const base = { migration_id: m.id, parent: m.parent ?? "", checksum: p.checksum, silences };
-  // The started row's note: the policy overrides the run relied on (#53), and the checks' outcomes (#52).
-  const noted: Record<string, unknown> = overrides.length > 0 ? { policy: { overrides } } : {};
+  // The started row's note: the policy overrides the run relied on (#53), the checks' outcomes (#52), and what the run adds (a wave's decision, #87).
+  const noted: Record<string, unknown> = { ...(overrides.length > 0 ? { policy: { overrides } } : {}), ...(options.runNote?.() ?? {}) };
   let checksNote = Object.keys(noted).length > 0 ? JSON.stringify(noted) : "";
   if (checksDue(p)) {
     const outcomes = await runChecks(venv.driver, m);

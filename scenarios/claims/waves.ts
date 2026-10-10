@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { applyPipelines, type Wave, type WaveGate } from "../../templates/postgres/scripts/ci.js";
 import { hold, Violation, type Claim, type Ctx } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
-import { run } from "../lib/exec.js";
-import { Project } from "../lib/project.js";
+import { run, type Ran } from "../lib/exec.js";
+import { parse, Project } from "../lib/project.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 
 /**
@@ -38,9 +40,19 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   prod shows it has not run on staging; once staging has applied it, prod
  *   applies it. BREAK: the requirement is removed (`requires: false`), so the
  *   column reaches prod first.
+ * - yodel-approve (#87): with staging's wave waiting, `yodel approve
+ *   <staging>` at a terminal (the answer typed is the environment's name)
+ *   approves the wave's gate for its set digest, and the wave job run again
+ *   applies, then prod's. BREAK: yodel built to approve the migrations Op's
+ *   gate, as before waves, so the wave still waits.
+ * - report (#87): after the waves above applied, `yodel report` of both
+ *   environments finds every applied migration's approval, on the wave's
+ *   gate, or none needed by the wave's policy, and shows no gap. BREAK:
+ *   yodel built to look for approvals on the migrations Op's gate alone, so
+ *   the migrations the waves applied are gaps.
  */
 
-const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion"] as const;
+const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report"] as const;
 type Part = (typeof PARTS)[number];
 
 interface Envs {
@@ -349,11 +361,86 @@ async function promotion(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   hold((await st.columnOn("staging", "promo")) && (await st.columnOn("prod", "promo")), "the column is not on both servers after the pipeline");
 }
 
+/**
+ * A copy of the project's yodel at `<work>/<name>`, with `patch` applied to
+ * one file of its build (a part's broken build), and `ask.mjs` beside it:
+ * yodel's CLI with a terminal that answers every question with argv[2].
+ */
+function yodelBuild(ctx: Ctx, p: Project, name: string, patch?: { file: string; from: string; to: string }): { ask: (answer: string, args: string[]) => Promise<Ran> } {
+  const root = join(ctx.work, name);
+  if (!existsSync(root)) {
+    const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
+    mkdirSync(root, { recursive: true });
+    cpSync(join(pkg, "dist"), join(root, "dist"), { recursive: true });
+    copyFileSync(join(pkg, "package.json"), join(root, "package.json"));
+    symlinkSync(p.path("node_modules"), join(root, "node_modules"));
+    if (patch) {
+      const file = join(root, "dist", patch.file);
+      const text = readFileSync(file, "utf8");
+      if (!text.includes(patch.from)) throw new Error(`${patch.from} is not in ${file}; the broken build cannot be made`);
+      writeFileSync(file, text.replace(patch.from, patch.to));
+    }
+    writeFileSync(
+      join(root, "ask.mjs"),
+      `import { register } from "tsx/esm/api";
+register();
+const { main } = await import("./dist/cli.js");
+const [answer, ...args] = process.argv.slice(2);
+process.exitCode = await main(args, {
+  out: (t) => process.stdout.write(t),
+  err: (t) => process.stderr.write(t),
+  ask: async (q) => { process.stderr.write(q + answer + "\\n"); return answer; },
+});
+`,
+    );
+  }
+  return {
+    ask: (answer, args) => run("node", [join(root, "ask.mjs"), answer, ...args], { cwd: p.dir, env: p.envFor(), timeoutMs: 600_000 }),
+  };
+}
+
+async function yodelApprove(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+  await render(st, waves(st, "always", "never"));
+  await st.p.commit("the waves: staging always, prod never");
+  addColumn(st.p, "memo");
+  await migrate(st, "add-memo", "feat: a memo column");
+  const ran = await pipeline(st);
+  const staging = ran.get(job(st, 1, "staging"));
+  hold(staging?.code === 3, `staging did not wait under always (exit ${String(staging?.code)})`);
+  const yodel = broken
+    ? yodelBuild(ctx, st.p, "yodel-approves-the-migrations-gate", { file: "commands/approve.js", from: "if ((project.yodel?.config.waves ?? []).some((w) => w.env === env.name)) {", to: "if (false) {" })
+    : yodelBuild(ctx, st.p, "yodel");
+  if (broken) ctx.log("BREAK: yodel approve built to approve the migrations Op's gate");
+  const approved = await yodel.ask(st.envs.staging, ["approve", st.envs.staging]);
+  if (approved.code !== 0) throw new Error(`yodel approve ${st.envs.staging} exited ${String(approved.code)}:\n${approved.out}\n${approved.err}`);
+  const again = await pipeline(st, ran);
+  hold(again.get(job(st, 1, "staging"))?.ok === true, `after yodel approve ${st.envs.staging}, staging's wave still did not apply (exit ${String(again.get(job(st, 1, "staging"))?.code)})`);
+  hold(again.get(job(st, 2, "prod"))?.ok === true && (await st.columnOn("staging", "memo")) && (await st.columnOn("prod", "memo")), "after yodel approve, the column is not on both servers");
+}
+
+interface ReportDoc {
+  gaps: Array<{ environment: string; detail: string }>;
+  audit: Array<{ kind: string; environment: string; migration?: string; wave?: { status: string } }>;
+}
+
+async function report(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+  const yodel = broken ? yodelBuild(ctx, st.p, "yodel-reads-the-migrations-gate", { file: "report/audit.js", from: "const wave = a.wave;", to: "const wave = undefined;" }) : undefined;
+  if (broken) ctx.log("BREAK: yodel report built to look for approvals on the migrations Op's gate alone");
+  const args = ["report", st.envs.staging, st.envs.prod, "--json"];
+  const ran = yodel ? await yodel.ask("", args) : await st.p.yodel(args);
+  const doc = parse<ReportDoc>(ran);
+  const approvedByWave = doc.audit.filter((e) => e.kind === "applied" && e.wave?.status === "approved");
+  if (!broken && approvedByWave.length === 0) throw new Error("no applied migration records a wave's approval; the report part has nothing to read");
+  hold(ran.code === 0 && doc.gaps.length === 0, `yodel report shows gaps after the waves applied (exit ${String(ran.code)}): ${doc.gaps.map((g) => g.detail).join("; ")}`);
+}
+
 const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {
   "gate-policy": gatePolicy,
   "wave-order": waveOrder,
   "approval-at-base": approvalAtBase,
   promotion,
+  "yodel-approve": yodelApprove,
+  report,
 };
 
 async function body(ctx: Ctx): Promise<void> {

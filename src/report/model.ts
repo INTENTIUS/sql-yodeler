@@ -10,7 +10,8 @@ import { deriveState, type HistoryRow } from "../history/index.js";
 import type { Migration } from "../migrations/index.js";
 import { resolveEnvironment, type Project } from "../project.js";
 import { closeVersioned, findMigrateOp, gitLedger, openVersioned, type MigrateOpRef } from "../versioned/index.js";
-import { byTime, deriveAudit, isoTime, type AuditEntry, type AuditGap, type LedgerInput } from "./audit.js";
+import { WAVES_PIPELINE } from "../waves/record.js";
+import { approvalOf, byTime, deriveAudit, isoTime, type AuditEntry, type AuditGap, type LedgerInput, type WaveLedgerInput } from "./audit.js";
 
 export const REPORT_VERSION = 1;
 
@@ -122,12 +123,24 @@ export async function collectReport(project: Project, chain: readonly Migration[
       env.notes.push(env.op ? `chant's gate ledger could not be read (${firstLine(e)}); approvals are not shown and not checked` : `no migrations Op for ${name} (${firstLine(e)}); approvals are not shown and not checked`);
     }
 
-    const derived = deriveAudit({ environment: name, history: env.history ?? "history", rows, ledger, sameDigest: samePlanDigest });
+    // The apply pipeline's waves (#87): their gates are on the waves' op's ledger, not the migrations Op's.
+    let waves: WaveLedgerInput | undefined;
+    const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === name) + 1;
+    if (port && (k > 0 || rows.some((r) => r.kind === "migration" && r.note.includes('"wave"')))) {
+      try {
+        const { waveGateName } = await import("@intentius/chant/gated-waves");
+        const lines = await port.read(WAVES_PIPELINE);
+        waves = { op: WAVES_PIPELINE, path: gateLedgerPath(WAVES_PIPELINE), ...(k > 0 ? { gate: waveGateName(WAVES_PIPELINE, k) } : {}), pending: lines.pending, resolutions: lines.resolutions };
+      } catch (e) {
+        env.notes.push(`the waves' gate ledger could not be read (${firstLine(e)}); wave approvals are not shown and not checked`);
+      }
+    }
+
+    const derived = deriveAudit({ environment: name, history: env.history ?? "history", rows, ledger, waves, sameDigest: samePlanDigest });
     audit.push(...derived.entries);
     gaps.push(...derived.gaps);
 
     const state = deriveState(rows);
-    const approvals = derived.entries.filter((e) => e.kind === "approved");
     const listed = [...chain.map((m) => m.id), ...state.migrations.map((m) => m.id).filter((id) => !known.has(id))];
     for (const id of state.migrations.map((m) => m.id)) {
       if (!known.has(id) && !extra.includes(id)) extra.push(id);
@@ -138,7 +151,12 @@ export async function collectReport(project: Project, chain: readonly Migration[
         env.migrations.push({ id, state: "pending", inDirectory: true });
         continue;
       }
-      const approval = rec.planDigest ? approvals.filter((a) => samePlanDigest(a.digest, rec.planDigest)).at(-1) : undefined;
+      const appliedEntry = derived.entries.filter((e) => e.kind === "applied" && e.migration === id).at(-1);
+      const approval = appliedEntry
+        ? approvalOf(appliedEntry, derived.entries, samePlanDigest)
+        : rec.planDigest
+          ? derived.entries.filter((a) => a.kind === "approved" && samePlanDigest(a.digest, rec.planDigest)).at(-1)
+          : undefined;
       env.migrations.push({
         id,
         state: rec.status === "succeeded" ? "applied" : rec.status,

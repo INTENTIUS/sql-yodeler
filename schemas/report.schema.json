@@ -75,6 +75,13 @@
         "migration": { "type": "string" },
         "digest": { "type": "string" },
         "detail": { "type": "string" },
+        "wave": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gate", "digest", "status"],
+          "description": "On an applied entry a wave of the apply pipeline applied: the wave's gate, its set digest, and whether the wave was approved or its policy at the base needed no approval.",
+          "properties": { "gate": { "type": "string" }, "digest": { "type": "string" }, "status": { "enum": ["approved", "not-required"] } }
+        },
         "source": {
           "oneOf": [
             {
