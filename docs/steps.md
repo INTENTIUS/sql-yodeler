@@ -276,7 +276,7 @@ Wrote migrations/20261010T0532-rename-email/ (0 statements; follows 20261010T053
 --   export const { op } = PostgresMigrationOp({ name: "migrate-shop-orders-email", env: "<env>", table: "shop.orders", column: "email" });
 ```
 
-The step is chant's expand-and-contract Op, built from the migration's recorded schema: Plan, Expand (add the new column), Dual write (a trigger keeps both columns written), Backfill (in batches, each receipt committed with its batch in `<schema>.__chant_receipts`), Carry over (indexes and constraints), Verify (every row's new column equals the expression over the old, and no NULL where NOT NULL is declared; a difference fails the step with nothing switched), Switch, Retain, Contract (drop the old column and the trigger). Its two gates are left out; the migration's approval covers them.
+The step is chant's expand-and-contract Op, built from the migration's recorded schema: Plan, Expand (add the new column), Dual write (a trigger keeps both columns written), Backfill (in batches, each receipt committed with its batch in `<schema>.__chant_receipts`), Carry over (indexes and constraints), Verify (every row's new column equals the expression over the old, and no NULL where NOT NULL is declared; a difference fails the step with nothing switched), Switch, Retain, Contract (drop the old column and the trigger, once its retention date has passed). yodel builds it with `gates: "outer"`, so the Op has neither of its two gates and the migration's approval covers the switch and the contract, and with `onFailure: "keep"`, so a failure drops nothing the step made.
 
 <!-- quote: postgres#rename-apply -->
 ```console
@@ -294,7 +294,7 @@ approval: migrate-dev / approve-migrate-dev for jcs1-sha256:935527e15a4311e97553
 
 `retainUntil` and `dropped` in the note: with no `retain` in the step's options the old column is kept for no time, and the contract drops it in the same run, as the recorded schema says it is gone. A step with `options.retain` set keeps the old column that long and succeeds with it kept; dropping it after that date is `chant run` of the Op's declaration in `migration.json`.
 
-A `PostgresMigrationOp` step that failed or was stopped resumes on the next apply: each phase reads the server again and does what is left. To start over instead, drop the new column, its trigger and function (named in their comments).
+A `PostgresMigrationOp` step that failed or was stopped keeps the new column, its trigger and the receipts of the batches it filled, and resumes on the next apply: each phase reads the server again and does what is left, and the backfill skips every batch with a receipt (the note's `skipped`). To start over instead, drop the new column, its trigger and function (named in their comments).
 
 The expand adds the new column at the end of the table, and no `ALTER` moves it, so the live column order differs from the declared one. `yodel drift` compares Postgres columns by name, so the order is not drift: declare the renamed column where the old one was.
 

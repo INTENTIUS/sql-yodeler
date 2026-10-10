@@ -257,14 +257,17 @@ describe("a PostgresMigrationOp step", () => {
     expect(classifySteps(pg).opSteps).toHaveLength(1);
   });
 
-  it("runs chant's Op without its gates and its onFailure, the contract in the same run unless the step sets retain", async () => {
+  it("runs chant's Op with gates: \"outer\" and onFailure: \"keep\", the contract in the same run unless the step sets retain", async () => {
     const config = await pgMigrationOpConfig({ name: "migrate-users-login", table: "app.users", column: "login" }, { environment: "e2e", projectDir: "/p", buildPath: "/tmp/s.json", lockTimeoutMs: 1000 });
     const steps = config.phases.flatMap((p) => p.steps);
     expect(steps.some((s) => s.kind === "gate")).toBe(false);
     expect(config.onFailure).toBeUndefined();
     expect(config.phases.map((p) => p.name)).toEqual(["Plan", "Expand", "Dual write", "Backfill", "Carry over", "Verify", "Switch", "Retain", "Contract"]);
     const args = (steps[0] as { args: Record<string, unknown> }).args;
-    expect(args).toMatchObject({ table: "app.users", column: "login", buildPath: "/tmp/s.json", environment: "e2e", retain: STEP_RETAIN, lockTimeoutMs: 1000, cwd: "/p" });
+    expect(args).toMatchObject({ table: "app.users", column: "login", buildPath: "/tmp/s.json", environment: "e2e", retain: STEP_RETAIN, lockTimeoutMs: 1000, cwd: "/p", keepOnFailure: true });
+    expect(steps.every((s) => s.kind === "activity" && s.args?.keepOnFailure === true)).toBe(true);
+    const contract = steps[steps.length - 1];
+    expect(contract).toEqual({ kind: "activity", fn: "postgresMigrationContract", args });
     const kept = await pgMigrationOpConfig({ name: "m", table: "app.users", column: "login", retain: "3d", lockTimeoutMs: 50 }, { environment: "e2e", projectDir: "/p", buildPath: "/b", lockTimeoutMs: 1000 });
     expect((kept.phases[0]?.steps[0] as { args: Record<string, unknown> }).args).toMatchObject({ retain: "3d", lockTimeoutMs: 50 });
   });

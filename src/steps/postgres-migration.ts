@@ -15,36 +15,42 @@
  *
  * - The declaration is the migration's recorded schema (`migration.json`'s
  *   `schema`), written to a temporary build file, not a fresh `chant build`.
- * - Its two gates (before the switch, before the contract) are left out. The
- *   approval is the migration's: the step and its options are in the
- *   migration's checksum, so in the plan digest the migrations Op's gate
- *   approved. The verification still runs before the switch, and a
+ * - It is built with `gates: "outer"`: the approval is the migration's (the
+ *   step and its options are in the migration's checksum, so in the plan
+ *   digest the migrations Op's gate approved), so the Op has neither of its
+ *   gates (before the switch, before the contract) and no Contract phase of
+ *   its own. The verification still runs before the switch, and a
  *   difference (a row whose new column is not the expression over the old,
  *   a NULL where NOT NULL is declared) fails the step with nothing switched.
- * - The old column's retention is the step's `options.retain` when it sets
- *   one, else none (`0s`): the contract drops the old column (and a rename's
- *   trigger) in the same run, right after the switch, as the migration's
- *   recorded schema says it is gone. A step that sets `retain` keeps the old
- *   column that long; the step succeeds with it kept, its note says until
- *   when, and dropping it after the date is `chant run` of the Op's
- *   declaration (in `migration.json`), whose contract is convergent.
- * - Its onFailure (which drops what the expand added) is left out, so a step
- *   that failed or was stopped resumes on the next `yodel apply`. Every
- *   phase of the Op re-reads the server and does what is left of it: the
- *   expand finds the new column there and adds nothing, the dual write finds
- *   its trigger, the backfill skips every batch whose receipt is in
- *   `<schema>.__chant_receipts` (each receipt commits with its batch, so a
- *   batch is never filled twice), the carry over builds only the indexes and
- *   constraints not yet built (an INVALID one it left is built again), the
- *   verification runs again over every row, and a switch that already ran is
- *   not run again. To start over instead, drop the new column, its trigger
- *   and function (chant's working objects, named in their comments).
+ * - After the Retain phase the step runs the lexicon's contract activity
+ *   (`postgresMigrationContract`, the Op's own Contract step, with the same
+ *   arguments), under the same approval. It drops the old column (and a
+ *   rename's trigger) only once its retention date has passed. The
+ *   retention is the step's `options.retain` when it sets one, else none
+ *   (`0s`): the contract drops the old column in the same run, right after
+ *   the switch, as the migration's recorded schema says it is gone. A step
+ *   that sets `retain` keeps the old column that long; the step succeeds
+ *   with it kept, its note says until when, and dropping it after the date
+ *   is `chant run` of the Op's declaration (in `migration.json`), whose
+ *   contract is convergent.
+ * - It is built with `onFailure: "keep"`, so a step that failed or was
+ *   stopped keeps what the expand added and resumes on the next `yodel
+ *   apply`. Every phase of the Op re-reads the server and does what is left
+ *   of it: the expand finds the new column there and adds nothing, the dual
+ *   write finds its trigger, the backfill skips every batch whose receipt
+ *   is in `<schema>.__chant_receipts` (each receipt commits with its batch,
+ *   so a batch is never filled twice), the carry over builds only the
+ *   indexes and constraints not yet built (an INVALID one it left is built
+ *   again), the verification runs again over every row, and a switch that
+ *   already ran is not run again. To start over instead, drop the new
+ *   column, its trigger and function (chant's working objects, named in
+ *   their comments; a refusal says so).
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { OpConfig, PhaseDefinition } from "@intentius/chant/op/types";
+import type { ActivityStep, OpConfig } from "@intentius/chant/op/types";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
 import type { PgMigrationOptions } from "./kinds.js";
@@ -53,9 +59,15 @@ import { runOp, StepOpFailed, type RunOpOptions } from "./run.js";
 /** The retention a step runs with when its options set none: the contract runs in the same apply. */
 export const STEP_RETAIN = "0s";
 
-/** `PostgresMigrationOp`'s phases as a step runs them: no gates, no onFailure. */
-export function pgStepPhases(config: OpConfig): PhaseDefinition[] {
-  return config.phases.map((p) => ({ ...p, steps: p.steps.filter((s) => s.kind !== "gate") })).filter((p) => p.steps.length > 0);
+/**
+ * The Op's Contract step for a config built with `gates: "outer"`: the
+ * lexicon's contract activity with the Retain step's arguments. It drops the
+ * old column only once its retention date has passed.
+ */
+export function contractPhase(config: OpConfig): OpConfig["phases"][number] {
+  const retain = config.phases.flatMap((p) => p.steps).find((s): s is ActivityStep => s.kind === "activity" && s.fn === "postgresMigrationRetain");
+  if (!retain) throw new Error(`PostgresMigrationOp "${config.name}" has no Retain step`);
+  return { name: "Contract", steps: [{ kind: "activity", fn: "postgresMigrationContract", ...(retain.args ? { args: retain.args } : {}) }] };
 }
 
 /** The Op a step runs. `buildPath` is the recorded schema's file; `projectDir` holds chant.config.ts. */
@@ -76,11 +88,11 @@ export async function pgMigrationOpConfig(options: PgMigrationOptions, ctx: { en
     build: false,
     output: ctx.buildPath,
     path: ctx.projectDir,
+    gates: "outer",
+    onFailure: "keep",
   });
-  const full = (op as unknown as { props: OpConfig }).props;
-  const rest: OpConfig = { ...full, phases: pgStepPhases(full) };
-  delete rest.onFailure;
-  return rest;
+  const config = (op as unknown as { props: OpConfig }).props;
+  return { ...config, phases: [...config.phases, contractPhase(config)] };
 }
 
 export interface PgMigrationSummary {
