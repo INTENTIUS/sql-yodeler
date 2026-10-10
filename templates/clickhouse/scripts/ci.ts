@@ -28,8 +28,13 @@
  *   stands down (YODEL_STAND_DOWN), since the newer commit's apply applies
  *   the same environment.
  * - watch-<env>: the environment's WatchOp on its own schedule, rendered by
- *   chant's generateOpsPipeline, with the reader's credentials. The job fails
- *   when the run found drift (scripts/watch-outcome.ts).
+ *   chant's generateOpsPipeline, with the reader's credentials. After the
+ *   Op, `yodel drift <env> --issue` compares the server with the schema the
+ *   newest applied migration records (so a migration waiting at its gate is
+ *   not drift), keeps one tracking issue for the environment (opened on
+ *   drift, updated while it changes, closed when it is gone), and fails the
+ *   job on drift. The issue is written with the job's token on GitHub
+ *   (issues: write) and Forgejo, and with GITLAB_TOKEN on GitLab.
  *
  * The scheduled watch never pushes. Its first phase (chant lifecycle
  * snapshot) commits a snapshot to chant/lifecycle and tries to push it; the
@@ -136,8 +141,8 @@ export const APPLY_LOCK: Record<string, string> = { YODEL_LOCK_WAIT: "10m", YODE
 /** The watch reads; it never pushes. See the comment at the top. */
 export const NO_PUSH = "git remote set-url --push origin no-push://the-drift-watch-only-reads";
 
-/** After the watch's `chant run`: exit 1 when that run found drift (scripts/watch-outcome.ts). */
-export const watchOutcome = (op: string): string => `tsx scripts/watch-outcome.ts ${op}`;
+/** After the watch's `chant run`: drift against the history, the environment's tracking issue, and exit 2 on drift. */
+export const watchDrift = (env: string): string => `yodel drift ${env} --issue`;
 
 /**
  * The replay check: `yodel lint --replay replay --reset` replays every
@@ -466,7 +471,8 @@ export function gitlabPipeline({ dialect, names: envs, replay }: Environments): 
     "# writer is in the variables' settings (Settings > CI/CD > Variables):",
     ...variables,
     "#   GITLAB_TOKEN: a project access token with the api scope (Reporter), for",
-    "#     the plan comment; CI_JOB_TOKEN cannot write merge request notes.",
+    "#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN",
+    "#     cannot write merge request notes or issues.",
     "# The jobs that hold no writer read with the reader: chant.config.ts picks",
     "# the writer only under YODEL_CREDENTIALS=writer, which only the apply jobs set.",
   ];
@@ -487,9 +493,14 @@ interface OpsPipelineResult {
  * writer's only under its environment, which the watch does not declare), and
  * `NAME: $NAME` there would refer to itself.
  */
-export function watchSpec(env: string, dialect: Dialect, forge: Forge): { name: string; variables?: Record<string, string> } {
+export function watchSpec(env: string, dialect: Dialect, forge: Forge): { name: string; variables?: Record<string, string>; permissions?: Record<string, string> } {
   if (forge === "gitlab") return { name: `watch-${env}` };
-  return { name: `watch-${env}`, variables: secrets(readerVariables(env, dialect)) };
+  // The job's token, for the tracking issue: GitHub grants it issues: write here, Forgejo's can write already.
+  return {
+    name: `watch-${env}`,
+    variables: { ...secrets(readerVariables(env, dialect)), GITHUB_TOKEN: "${{ github.token }}" },
+    ...(forge === "github" ? { permissions: { issues: "write" } } : {}),
+  };
 }
 
 export async function watchPipelines(dir: string, { dialect, names: envs }: Environments): Promise<RenderedFile[]> {
@@ -516,12 +527,12 @@ export async function watchPipelines(dir: string, { dialect, names: envs }: Envi
       out.push({ path: at, content: `${HEADER.join("\n")}\n${file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`}` });
     }
   };
-  // `chant run` exits 0 when a watch finds drift; the last line fails the job then.
+  // `chant run` exits 0 when a watch finds drift; the last line, yodel drift, fails the job then.
   for (const forge of ["github", "forgejo"] as const) {
-    for (const env of envs) await emit(forge, [watchSpec(env, dialect, forge)], [watchOutcome(`watch-${env}`)]);
+    for (const env of envs) await emit(forge, [watchSpec(env, dialect, forge)], [watchDrift(env)]);
   }
-  // GitLab: one file for every watch, so the last line names the job's own Op.
-  await emit("gitlab", envs.map((env) => watchSpec(env, dialect, "gitlab")), [watchOutcome('"$CI_JOB_NAME"')]);
+  // GitLab: one file for every watch, so the last line takes the environment from the job's own name.
+  await emit("gitlab", envs.map((env) => watchSpec(env, dialect, "gitlab")), [watchDrift('"${CI_JOB_NAME#watch-}"')]);
   return out;
 }
 

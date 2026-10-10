@@ -17,7 +17,8 @@
 #   PROD_POSTGRES_WRITER_USER, PROD_POSTGRES_WRITER_PASSWORD: protected, masked,
 #     environment scope "prod": only apply-prod declares that environment.
 #   GITLAB_TOKEN: a project access token with the api scope (Reporter), for
-#     the plan comment; CI_JOB_TOKEN cannot write merge request notes.
+#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN
+#     cannot write merge request notes or issues.
 # The jobs that hold no writer read with the reader: chant.config.ts picks
 # the writer only under YODEL_CREDENTIALS=writer, which only the apply jobs set.
 workflow:

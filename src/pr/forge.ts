@@ -80,11 +80,18 @@ const DEFAULT_TOKEN_ENV: Record<ForgeKind, string[]> = {
   forgejo: ["FORGEJO_TOKEN", "GITHUB_TOKEN"],
 };
 
-/** Resolves the target from flags and the environment, or says what is missing. */
-export function resolveForgeTarget(flags: ForgeFlags, env: NodeJS.ProcessEnv): ForgeTarget {
+/** Where a job writes on its forge, without a pull request: the repository, the API and the token. */
+export type ForgeRepo = Omit<ForgeTarget, "pr">;
+
+/**
+ * Resolves the repository, API and token from flags and the environment;
+ * `pr` also the pull (merge) request. `what` names the option that needs
+ * them, for messages (`--comment`, `--issue`).
+ */
+function resolve(flags: ForgeFlags, env: NodeJS.ProcessEnv, what: string, withPr: boolean): ForgeTarget | ForgeRepo {
   if (flags.forge !== undefined && !FORGES.includes(flags.forge as ForgeKind)) throw new YodelError(`--forge must be one of ${FORGES.join(", ")}, got ${JSON.stringify(flags.forge)}`);
   const forge = (flags.forge as ForgeKind | undefined) ?? detectForge(env);
-  if (!forge) throw new YodelError("--comment cannot tell the forge: not a GitHub Actions, GitLab CI or Forgejo Actions job; pass --forge github|gitlab|forgejo with --repo, --pr and --api-url");
+  if (!forge) throw new YodelError(`${what} cannot tell the forge: not a GitHub Actions, GitLab CI or Forgejo Actions job; pass --forge github|gitlab|forgejo with --repo${withPr ? ", --pr" : ""} and --api-url`);
 
   const pick = (...names: string[]) => names.map((n) => env[n]).find((v) => v !== undefined && v !== "");
   let repo = flags.repo;
@@ -97,7 +104,7 @@ export function resolveForgeTarget(flags: ForgeFlags, env: NodeJS.ProcessEnv): F
   } else {
     const p = forge === "forgejo" ? "FORGEJO_" : "GITHUB_";
     repo ??= pick(`${p}REPOSITORY`, "GITHUB_REPOSITORY");
-    pr ??= prFromEvent(pick(`${p}EVENT_PATH`, "GITHUB_EVENT_PATH"), pick(`${p}REF`, "GITHUB_REF"));
+    if (withPr) pr ??= prFromEvent(pick(`${p}EVENT_PATH`, "GITHUB_EVENT_PATH"), pick(`${p}REF`, "GITHUB_REF"));
     apiUrl ??= pick(`${p}API_URL`, "GITHUB_API_URL");
     if (!apiUrl && forge === "forgejo") {
       const server = pick("FORGEJO_SERVER_URL", "GITHUB_SERVER_URL");
@@ -108,7 +115,7 @@ export function resolveForgeTarget(flags: ForgeFlags, env: NodeJS.ProcessEnv): F
 
   const missing: string[] = [];
   if (!repo) missing.push(forge === "gitlab" ? "the project (--repo, or CI_PROJECT_ID)" : "the repository (--repo owner/name, or GITHUB_REPOSITORY)");
-  if (pr === undefined || !Number.isInteger(pr) || pr <= 0) {
+  if (withPr && (pr === undefined || !Number.isInteger(pr) || pr <= 0)) {
     missing.push(forge === "gitlab" ? "the merge request (--pr, or CI_MERGE_REQUEST_IID in a merge request pipeline)" : "the pull request (--pr, or a pull_request event)");
   }
   if (!apiUrl) missing.push(forge === "gitlab" ? "the API URL (--api-url, or CI_API_V4_URL)" : "the API URL (--api-url, or FORGEJO_API_URL / GITHUB_API_URL)");
@@ -116,6 +123,17 @@ export function resolveForgeTarget(flags: ForgeFlags, env: NodeJS.ProcessEnv): F
   const tokenEnv = names.find((n) => env[n]) ?? names[0] ?? "";
   const token = env[tokenEnv] ?? "";
   if (!token) missing.push(`a token (${names.join(" or ")} is not set${flags.tokenEnv ? "" : "; name another variable with --token-env"})`);
-  if (missing.length > 0) throw new YodelError(`--comment on ${forge} needs ${missing.join(", ")}`);
-  return { forge, repo: repo as string, pr: pr as number, apiUrl: (apiUrl as string).replace(/\/+$/, ""), token, tokenEnv };
+  if (missing.length > 0) throw new YodelError(`${what} on ${forge} needs ${missing.join(", ")}`);
+  const base = { forge, repo: repo as string, apiUrl: (apiUrl as string).replace(/\/+$/, ""), token, tokenEnv };
+  return withPr ? { ...base, pr: pr as number } : base;
+}
+
+/** Resolves the target from flags and the environment, or says what is missing. */
+export function resolveForgeTarget(flags: ForgeFlags, env: NodeJS.ProcessEnv): ForgeTarget {
+  return resolve(flags, env, "--comment", true) as ForgeTarget;
+}
+
+/** The repository a job writes to (`yodel drift --issue`), from flags and the environment, or says what is missing. */
+export function resolveForgeRepo(flags: Omit<ForgeFlags, "pr">, env: NodeJS.ProcessEnv, what = "--issue"): ForgeRepo {
+  return resolve(flags, env, what, false);
 }

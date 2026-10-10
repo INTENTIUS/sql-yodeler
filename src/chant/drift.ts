@@ -14,11 +14,15 @@
  * what the project declares, and only touches what carries its marker.
  */
 
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { LiveDiffResult, UnobservedResource } from "@intentius/chant/lifecycle/live-diff";
 import type { DeepDiffResult, DeepEntityDrift } from "@intentius/chant/lifecycle/deep-diff";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { lastJsonLine, runChant } from "./process.js";
 import { describeServer, type ServerInfo } from "../server.js";
+import type { BuildOutput } from "./build.js";
 
 /** The `lexicons.sql` section of `chant lifecycle diff --live --json`. */
 export interface SqlLiveDiff {
@@ -38,6 +42,70 @@ export interface Drift {
   lockWait?: string | undefined;
   /** Each changed table's declared column names, by position, so `columns[3]` reads as the column's name (#19). */
   columns?: Record<string, string[]>;
+  /** What the server was compared with (#49): `src/`, or the schema the newest applied migration records. */
+  against?: DriftAgainst;
+}
+
+/**
+ * The declaration drift compares the server with: the project's `src/`,
+ * or the recorded schema of the newest migration the environment's history
+ * records as applied (`migration` null when none is applied yet).
+ */
+export type DriftAgainst = { source: "src" } | { source: "history"; migration: string | null };
+
+/**
+ * A stable fingerprint of the drift: the environment and what drifted
+ * (each changed object's changes, declared and live, and the objects gone),
+ * order-free, so two reads of the same drift give the same one and a
+ * tracking issue updated with it changes only when the drift does. Objects
+ * that could not be read are not drift and are left out.
+ */
+export function driftFingerprint(drift: Drift): string {
+  const changed = drift.changed
+    .map((e) => ({
+      name: e.name,
+      type: e.type,
+      changes: e.changes.map((c) => ({ path: c.path, kind: c.kind, declared: c.declared ?? null, live: c.live ?? null })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const subject = JSON.stringify({ environment: drift.environment, changed, missing: [...drift.missing].sort() });
+  return `sha256:${createHash("sha256").update(subject, "utf8").digest("hex")}`;
+}
+
+/**
+ * The recorded schema as declarations chant can build: one file, written
+ * by the sql lexicon's import generator from each object's DDL, each named
+ * by its export as the build named it. Written under the project directory,
+ * so the generated imports resolve from the project's node_modules, in a
+ * directory {@link RecordedSource.dispose} removes.
+ */
+export interface RecordedSource {
+  dir: string;
+  dispose: () => void;
+}
+
+export async function writeRecordedSource(projectDir: string, schema: BuildOutput): Promise<RecordedSource> {
+  const { sqlTemplateGenerator } = await import("@intentius/chant-lexicon-sql/import-generator");
+  const resources = schema.objects.map((o) => {
+    const own = o as typeof o & { database?: unknown; schema?: unknown; name?: unknown };
+    const where = typeof own.database === "string" ? { database: own.database } : typeof own.schema === "string" ? { schema: own.schema } : {};
+    return { type: o.type ?? "", logicalId: o.export, properties: { ...where, name: typeof own.name === "string" ? own.name : o.export, ddl: o.ddl } };
+  });
+  const dir = mkdtempSync(join(projectDir, ".yodel-recorded-"));
+  const dispose = () => {
+    rmSync(dir, { recursive: true, force: true });
+  };
+  try {
+    for (const f of resources.length === 0 ? [] : sqlTemplateGenerator.generate({ resources, parameters: [] })) {
+      const path = join(dir, f.path);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, f.content);
+    }
+  } catch (e) {
+    dispose();
+    throw new YodelError(`the recorded schema could not be written as declarations: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return { dir, dispose };
 }
 
 /** Exit code: an owned object changed or is gone. */
@@ -74,8 +142,8 @@ export function driftFromLifecycle(environment: string, doc: unknown): Drift {
 }
 
 /** Runs `chant lifecycle diff <env> --live --json` in the project and reads the drift from it. */
-export async function readDrift(project: Project, env: Environment, options: { env?: NodeJS.ProcessEnv } = {}): Promise<Drift> {
-  const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json"], {
+export async function readDrift(project: Project, env: Environment, options: { env?: NodeJS.ProcessEnv; src?: string } = {}): Promise<Drift> {
+  const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json", ...(options.src ? ["--src", options.src] : [])], {
     cwd: project.dir,
     ...(options.env ? { env: options.env } : {}),
   });
@@ -132,9 +200,20 @@ export function describePath(path: string, columns: readonly string[] | undefine
 
 const show = (v: unknown) => (v === undefined ? "(none)" : typeof v === "string" ? v : JSON.stringify(v));
 
+/** What the server was compared with, in words. */
+export function describeAgainst(against: DriftAgainst | undefined): string | undefined {
+  if (!against) return undefined;
+  if (against.source === "src") return "Compared with the declared schema in src/.";
+  return against.migration
+    ? `Compared with the schema ${against.migration} records, the newest migration the history records as applied.`
+    : "No migration is applied yet, so the history records no schema to compare with.";
+}
+
 /** The drift as text. */
 export function renderDrift(drift: Drift, server?: ServerInfo): string {
   const lines: string[] = [`Drift in ${drift.environment}${server ? ` (${describeServer(server)})` : ""}`, ""];
+  const against = describeAgainst(drift.against);
+  if (against) lines.push(against, "");
   if (drift.changed.length === 0 && drift.missing.length === 0) {
     lines.push(drift.unobserved.length > 0 ? "No drift in the declared objects that could be read." : "No drift: every declared object matches the server.");
   }
@@ -158,5 +237,43 @@ export function renderDrift(drift: Drift, server?: ServerInfo): string {
     for (const u of drift.unobserved) lines.push(`  ${u.name}: ${u.reason}${u.detail ? ` (${u.detail})` : ""}`);
     if (drift.lockWait) lines.push("", `The read ${drift.lockWait}.`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+const code = (v: unknown) => `\`${show(v).replace(/`/g, "'")}\``;
+
+/**
+ * The drift as markdown, for the tracking issue: the environment and
+ * server, what it was compared with, each changed object with its changes,
+ * the objects gone, the run that found it, and the fingerprint.
+ */
+export function renderDriftMarkdown(drift: Drift, server: ServerInfo | undefined, extra: { fingerprint: string; run?: string }): string {
+  const lines: string[] = [`**${drift.environment}**${server ? ` (${describeServer(server)})` : ""} has drifted: declared objects were changed out of band, or are gone.`, ""];
+  const against = describeAgainst(drift.against);
+  if (against) lines.push(against, "");
+  if (drift.changed.length > 0) {
+    lines.push("Changed out of band:", "");
+    for (const e of drift.changed) {
+      lines.push(`- \`${e.name}\` (${e.type})`);
+      for (const c of e.changes) {
+        const path = describePath(c.path, drift.columns?.[e.name]);
+        lines.push(c.kind === "absent" ? `  - ${path}: declared ${code(c.declared)}, absent live` : `  - ${path}: declared ${code(c.declared)}, live ${code(c.live)}`);
+      }
+    }
+    lines.push("");
+  }
+  if (drift.missing.length > 0) {
+    lines.push("Gone (declared, not on the server):", "");
+    for (const name of drift.missing) lines.push(`- \`${name}\``);
+    lines.push("");
+  }
+  if (drift.unobserved.length > 0) {
+    lines.push("Could not be read, so their state is unknown:", "");
+    for (const u of drift.unobserved) lines.push(`- \`${u.name}\`: ${u.reason}`);
+    lines.push("");
+  }
+  lines.push(`Run \`yodel drift ${drift.environment}\` to see it again. yodel closes this issue when the drift is gone.`);
+  if (extra.run) lines.push("", `Found by ${extra.run}`);
+  lines.push("", `<sub>drift fingerprint ${extra.fingerprint}</sub>`);
   return `${lines.join("\n")}\n`;
 }

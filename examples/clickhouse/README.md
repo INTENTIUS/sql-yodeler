@@ -1312,7 +1312,7 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
 Op "watch-dev" completed in 1.8s
 ```
 
-`chant run` exits 0 when the watch completes, drift or not; the drift is the run's `Drift` outcome. The starter templates' `scripts/watch-outcome.ts` turns it into a failed CI job. Put the default back:
+`chant run` exits 0 when the watch completes, drift or not; the drift is the run's `Drift` outcome. The starter templates' watch jobs run `yodel drift <env> --issue` after it, which fails the job on drift and keeps a tracking issue. Put the default back:
 
 ```sql
 ALTER TABLE shop.events MODIFY COLUMN source LowCardinality(String) DEFAULT 'web'

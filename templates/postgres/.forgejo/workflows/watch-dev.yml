@@ -19,6 +19,7 @@ jobs:
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
       DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
+      GITHUB_TOKEN: '${{ github.token }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
       - run: npm ci
@@ -28,4 +29,4 @@ jobs:
       - run: chant run watch-dev
         env:
           GITHUB_TOKEN: '${{ github.token }}'
-      - run: tsx scripts/watch-outcome.ts watch-dev
+      - run: yodel drift dev --issue

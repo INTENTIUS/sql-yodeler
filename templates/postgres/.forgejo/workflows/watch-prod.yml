@@ -19,6 +19,7 @@ jobs:
       PROD_POSTGRES_URL: '${{ secrets.PROD_POSTGRES_URL }}'
       PROD_POSTGRES_READER_USER: '${{ secrets.PROD_POSTGRES_READER_USER }}'
       PROD_POSTGRES_READER_PASSWORD: '${{ secrets.PROD_POSTGRES_READER_PASSWORD }}'
+      GITHUB_TOKEN: '${{ github.token }}'
     steps:
       - uses: https://code.forgejo.org/actions/checkout@v7
       - run: npm ci
@@ -28,4 +29,4 @@ jobs:
       - run: chant run watch-prod
         env:
           GITHUB_TOKEN: '${{ github.token }}'
-      - run: tsx scripts/watch-outcome.ts watch-prod
+      - run: yodel drift prod --issue

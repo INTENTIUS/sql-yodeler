@@ -12,7 +12,7 @@
  */
 
 import type { Ctx } from "../lib/claim.js";
-import type { Forge, ForgeRepo, ForgeRun } from "./forge.js";
+import type { Forge, ForgeIssue, ForgeRepo, ForgeRun } from "./forge.js";
 
 export const forgejo = {
   url: (process.env.YODEL_CLAIMS_FORGEJO_URL ?? "http://localhost:3300").replace(/\/+$/, ""),
@@ -70,13 +70,19 @@ async function printLogs(ctx: Ctx, repo: string, runId: number): Promise<void> {
   }
 }
 
-/** Waits for the newest run of `event` on `sha` to finish; prints its failed jobs' logs. */
-async function waitRun(ctx: Ctx, repo: string, sha: string, event: string): Promise<ForgeRun> {
+/** The highest run id on `sha` so far, so a wait for the next run of a workflow already run there skips the old ones. */
+async function lastRunId(repo: string, sha: string): Promise<number> {
+  const { json } = await api<{ workflow_runs?: RunDoc[] }>("GET", `/repos/${repo}/actions/runs?head_sha=${sha}`);
+  return Math.max(0, ...(json.workflow_runs ?? []).map((r) => r.id));
+}
+
+/** Waits for the newest run of `event` on `sha` (with an id above `after`) to finish; prints its failed jobs' logs. */
+async function waitRun(ctx: Ctx, repo: string, sha: string, event: string, after = 0): Promise<ForgeRun> {
   const deadline = Date.now() + 20 * 60_000;
   let last = "";
   for (;;) {
     const { json } = await api<{ workflow_runs?: RunDoc[] }>("GET", `/repos/${repo}/actions/runs?head_sha=${sha}`);
-    const runs = (json.workflow_runs ?? []).filter((r) => r.event === event || (event === "workflow_dispatch" && r.event === "")).sort((a, b) => b.id - a.id);
+    const runs = (json.workflow_runs ?? []).filter((r) => r.id > after && (r.event === event || (event === "workflow_dispatch" && r.event === ""))).sort((a, b) => b.id - a.id);
     const r = runs[0];
     const state = r ? `run ${String(r.id)} ${r.status}` : "no run yet";
     if (state !== last) ctx.log(`${event} on ${sha.slice(0, 8)}: ${state}`);
@@ -130,6 +136,16 @@ export function forgejoForge(): Forge {
           if (merged.status >= 300) throw new Error(`merging: ${String(merged.status)} ${JSON.stringify(merged.json)}`);
           const { json: branch } = await api<{ commit: { id: string } }>("GET", `/repos/${repo}/branches/main`);
           return branch.commit.id;
+        },
+        async watch(sha) {
+          const after = await lastRunId(repo, sha);
+          const dispatched = await api("POST", `/repos/${repo}/actions/workflows/watch-dev.yml/dispatches`, { ref: "main" });
+          if (dispatched.status >= 300) throw new Error(`dispatching watch-dev: ${String(dispatched.status)} ${JSON.stringify(dispatched.json)}`);
+          return waitRun(ctx, repo, sha, "workflow_dispatch", after);
+        },
+        async issues(): Promise<ForgeIssue[]> {
+          const { json } = await api<Array<{ number: number; title: string; body: string; state: string }>>("GET", `/repos/${repo}/issues?state=all&type=issues&limit=50`);
+          return json.map((i) => ({ number: i.number, title: i.title, body: i.body, open: i.state === "open" }));
         },
       };
     },

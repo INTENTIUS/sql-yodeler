@@ -29,7 +29,7 @@ import { dockerSerializer } from "@intentius/chant-lexicon-docker";
 import { publishedPort, uniqueContainerName } from "@intentius/chant-lexicon-sql/core/container";
 import { endpoints } from "../lib/db.js";
 import { run } from "../lib/exec.js";
-import { NODE_IMAGE, type Forge, type ForgeRepo, type ForgeRun } from "./forge.js";
+import { NODE_IMAGE, type Forge, type ForgeIssue, type ForgeRepo, type ForgeRun } from "./forge.js";
 import { MOCK_PORT, MOCK_SERVICE, mockGithubEntities } from "./github.compose.js";
 
 const USER = "yodel34";
@@ -83,8 +83,11 @@ export function githubForge(): Forge {
       writeFileSync(secretFile, Object.entries({ ...secrets, GITHUB_TOKEN: token }).map(([k, v]) => `${k}=${v}`).join("\n") + "\n", { mode: 0o600 });
 
       let n = 0;
-      /** act on a fresh clone of `sha` (as branch `branch`), running `workflow` for `event`. */
-      const act = async (event: string, workflow: string, branch: string, sha: string, payload: Record<string, unknown>): Promise<ForgeRun> => {
+      /**
+       * act on a fresh clone of `sha` (as branch `branch`), running `workflow` for `event`.
+       * `apiHost`: how the job reaches the mock's API; a job in a container (the watch) is not on the host's localhost.
+       */
+      const act = async (event: string, workflow: string, branch: string, sha: string, payload: Record<string, unknown>, apiHost = "localhost"): Promise<ForgeRun> => {
         n += 1;
         const dir = join(ctx.work, `act-${String(n)}`);
         const git = async (...args: string[]) => {
@@ -108,7 +111,7 @@ export function githubForge(): Forge {
             "--rm",
             "--github-instance", `localhost:${port}`,
             ...ACTIONS.flatMap((a) => ["--replace-ghe-action-with-github-com", a]),
-            "--env", `GITHUB_API_URL=http://localhost:${port}/api/v3`,
+            "--env", `GITHUB_API_URL=http://${apiHost}:${port}/api/v3`,
             "--env", "GITHUB_SERVER_URL=https://github.com",
             "--secret-file", secretFile,
           ],
@@ -137,6 +140,12 @@ export function githubForge(): Forge {
         },
         async merge(id) {
           return (await api<{ sha: string }>("PUT", `/repos/${USER}/${name}/pulls/${String(id)}/merge`, {})).sha;
+        },
+        // The watch job runs in a container, which reaches the mock on the Docker host.
+        watch: (sha) => act("workflow_dispatch", "watch-dev.yml", "main", sha, { ref: "refs/heads/main", inputs: {} }, "host.docker.internal"),
+        async issues(): Promise<ForgeIssue[]> {
+          const list = await api<Array<{ number: number; title: string; body: string; state: string }>>("GET", `/repos/${USER}/${name}/issues?state=all&per_page=100`);
+          return list.map((i) => ({ number: i.number, title: i.title, body: i.body, open: i.state === "open" }));
         },
       };
     },

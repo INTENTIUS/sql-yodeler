@@ -4,9 +4,14 @@ claims: [drift]
 
 # Drift
 
-Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the objects `src/` declares with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported.
+Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the declared objects with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported.
 
-Exit codes: 0 no drift, 2 drift, 1 the drift could not be read, or a declared object could not be read (its state is then unknown, not clean). `--json` prints the report as JSON.
+What the server is compared with (`--against`):
+
+- `history`, the default when the project has migrations: the schema recorded by the newest migration the environment's history records as applied (`migration.json`'s `schema`). A migration merged but not applied yet, waiting at its gate or refused, is not drift; a change made by hand is. With no migration applied yet there is no recorded schema, and nothing is reported.
+- `src`, the default without migrations: the declared schema in `src/`.
+
+Exit codes: 0 no drift, 2 drift, 1 the drift could not be read, or a declared object could not be read (its state is then unknown, not clean). `--json` prints the report as JSON, with what it was compared with (`against`) and a `fingerprint` of the drift: a hash of the environment and what drifted, the same for the same drift, which the tracking issue uses to tell an unchanged drift from a new one.
 
 In the ClickHouse example, someone changes a column default by hand:
 
@@ -35,7 +40,7 @@ Drift in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123)
 No drift: every declared object matches the server.
 ```
 
-Drift compares with the declared schema in `src/`, so on the versioned path a change in `src/` whose migration has not been applied yet shows as drift too. Run it against an environment that is up to date with the branch it runs from, as the scheduled watch on `main` is after each apply. The output quoted here is from the examples' runs.
+The output quoted here is from the examples' runs.
 
 ## On a schedule: the WatchOp
 
@@ -77,8 +82,19 @@ PROPERTY DRIFT (declared vs live; baseline shown where one exists):
 Op "watch-dev" completed in 1.8s
 ```
 
-`chant run` exits 0 when the watch completes, drift or not. The drift is the run's `Drift` outcome, in its run record on the local `chant/lifecycle` branch. The starter templates' `scripts/watch-outcome.ts` reads the newest record after `chant run` and exits 1 when the run failed or found drift, so a scheduled run that found drift shows red.
+`chant run` exits 0 when the watch completes, drift or not. The drift is the run's `Drift` outcome, in its run record on the local `chant/lifecycle` branch. The WatchOp compares with `src/`, so in the starter templates' watch job it is followed by `yodel drift <env> --issue`, which compares with the history, fails the job on drift, and keeps the tracking issue below.
 
-The starter templates render a scheduled pipeline per watch for each forge (`npm run ci` writes them from `ops/`): a GitHub Actions or Forgejo Actions workflow on the watch's cron, and a GitLab CI job run by a pipeline schedule you create with the cron the file notes (GitLab keeps no cron in the file). The job reads with the reader's credentials and never pushes: its snapshot and run record stay in the job, so a read-only CI token is enough.
+The starter templates render a scheduled pipeline per watch for each forge (`npm run ci` writes them from `ops/`): a GitHub Actions or Forgejo Actions workflow on the watch's cron, and a GitLab CI job run by a pipeline schedule you create with the cron the file notes (GitLab keeps no cron in the file). The job reads with the reader's credentials and never pushes: its snapshot and run record stay in the job. Its token writes only issues: GitHub's job token gets `issues: write`, Forgejo's can write already, and GitLab uses `GITLAB_TOKEN`, the project access token the plan comment uses.
+
+## The tracking issue
+
+`yodel drift <env> --issue` keeps one issue for the project and environment on the forge, found again by a marker in its body (`<!-- yodel:drift project=<dir> env=<env> -->`, where `<dir>` is the project's directory in its repository, `.` at the root):
+
+- drift found and no issue open: it opens one, titled with the environment and the objects (`Drift in dev: events, daily`), its body the report as markdown, what it was compared with, the CI run that found it and the fingerprint;
+- drift found and the issue open: it updates the issue when the fingerprint changed, and leaves it when it did not;
+- no drift: it comments that the drift is gone and closes the issue. Drift found again later opens a new one;
+- the drift could not be read, or a declared object could not be (exit 1): it leaves the issue as it is, and says so.
+
+The forge, repository and token come from the CI job's environment, as for `yodel plan --comment` ([Approval](approval.md)): `GITHUB_TOKEN` on GitHub Actions, `GITLAB_TOKEN` on GitLab CI, `FORGEJO_TOKEN` or `GITHUB_TOKEN` on Forgejo Actions. `--forge`, `--repo`, `--api-url` and `--token-env` set them outside CI. `yodel drift` prints what it did to the issue on stderr, and `--json` adds it as `issue` (`opened`, `updated`, `unchanged`, `closed`, `none` or `left`, with the number and link). An issue the forge refuses fails the run with exit 1 unless it found drift (exit 2).
 
 The Postgres example's drift and watch are in [its section 8](../examples/postgres/README.md#8-drift).

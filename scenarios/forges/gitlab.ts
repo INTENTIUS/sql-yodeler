@@ -26,7 +26,7 @@ import { uniqueContainerName } from "@intentius/chant-lexicon-sql/core/container
 import type { Ctx } from "../lib/claim.js";
 import { endpoints } from "../lib/db.js";
 import { run } from "../lib/exec.js";
-import type { Forge, ForgeRepo, ForgeRun } from "./forge.js";
+import type { Forge, ForgeIssue, ForgeRepo, ForgeRun } from "./forge.js";
 import { gitlabRunnerEntities } from "./gitlab.compose.js";
 
 export const gitlab = {
@@ -136,13 +136,13 @@ export function gitlabForge(): Forge {
           ctx.log(`job ${job.name} (${job.status}), its last lines:\n${part.trimEnd().split("\n").slice(-30).join("\n")}`);
         }
       };
-      /** Waits for the newest pipeline of `source` on `sha` to finish. */
-      const waitPipeline = async (sha: string, source: string): Promise<ForgeRun> => {
+      /** Waits for the newest pipeline of `source` on `sha` (with an id above `after`) to finish. */
+      const waitPipeline = async (sha: string, source: string, after = 0): Promise<ForgeRun> => {
         const deadline = Date.now() + 30 * 60_000;
         let last = "";
         for (;;) {
           const list = await must<Pipeline[]>("GET", `/projects/${pid}/pipelines?sha=${sha}&source=${source}`);
-          const p = list.sort((a, b) => b.id - a.id)[0];
+          const p = list.filter((x) => x.id > after).sort((a, b) => b.id - a.id)[0];
           const state = p ? `pipeline ${String(p.id)} ${p.status}` : "no pipeline yet";
           if (state !== last) ctx.log(`${source} on ${sha.slice(0, 8)}: ${state}`);
           else process.stdout.write(".\n");
@@ -157,6 +157,8 @@ export function gitlabForge(): Forge {
         }
       };
 
+      // The watch's pipeline schedule, made on first use, as the template's watch file says: CHANT_SCHEDULED_OP names the Op.
+      let schedule: number | undefined;
       return {
         remote: `${gitlab.url.replace("://", `://oauth2:${encodeURIComponent(gitlab.token)}@`)}/${me.username}/${path}.git`,
         pushed: (sha) => waitPipeline(sha, "push"),
@@ -186,6 +188,21 @@ export function gitlabForge(): Forge {
         },
         async comments(id) {
           return (await must<Array<{ body: string }>>("GET", `/projects/${pid}/merge_requests/${String(id)}/notes?per_page=100&sort=asc`)).map((n) => n.body);
+        },
+        async watch(sha) {
+          if (schedule === undefined) {
+            const made = await must<{ id: number }>("POST", `/projects/${pid}/pipeline_schedules`, { description: "watch-dev", ref: "main", cron: "17 * * * *", active: true });
+            schedule = made.id;
+            await must("POST", `/projects/${pid}/pipeline_schedules/${String(schedule)}/variables`, { key: "CHANT_SCHEDULED_OP", value: "watch-dev" });
+          }
+          const before = await must<Pipeline[]>("GET", `/projects/${pid}/pipelines?sha=${sha}&source=schedule`);
+          const after = Math.max(0, ...before.map((p) => p.id));
+          await must("POST", `/projects/${pid}/pipeline_schedules/${String(schedule)}/play`);
+          return waitPipeline(sha, "schedule", after);
+        },
+        async issues(): Promise<ForgeIssue[]> {
+          const list = await must<Array<{ iid: number; title: string; description: string | null; state: string }>>("GET", `/projects/${pid}/issues?state=all&per_page=100`);
+          return list.map((i) => ({ number: i.iid, title: i.title, body: i.description ?? "", open: i.state === "opened" }));
         },
         async merge(id) {
           // Mergeable once GitLab has checked the merge request.

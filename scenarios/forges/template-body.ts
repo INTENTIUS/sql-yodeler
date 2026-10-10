@@ -59,9 +59,14 @@ async function users(ctx: Ctx): Promise<void> {
  * it. A pull request adding a column gets lint (with the replay into the
  * job's own server) and the plan comment, both green; the comment's
  * approve command, run and pushed, lets the apply after the merge add the
- * column. The server is checked directly each time.
+ * column. The server is checked directly each time. Then the drift watch
+ * (#49), run as its schedule would: with a change made by hand on the
+ * server it fails and opens one tracking issue naming the environment and
+ * the object; with a second change it updates that issue; with both put
+ * back it passes and closes it.
  * BREAK: the pull request is merged without approving its digest, so the
- * apply after the merge applies nothing.
+ * apply after the merge applies nothing; and the server is not changed by
+ * hand, so the watch opens no issue.
  */
 export function templateBody(makeForge: () => Forge): Body {
   return async (ctx: Ctx): Promise<void> => {
@@ -189,7 +194,35 @@ async function flow(ctx: Ctx, forge: Forge): Promise<void> {
   // 3. Approve from the comment (not under BREAK), merge, and the apply adds the column.
   await sh("git", ["checkout", "-q", "main"]);
   if (!ctx.broken) await approve(cmd);
-  const after = await repo.pushed(await repo.merge(pr.id));
+  const merged = await repo.merge(pr.id);
+  const after = await repo.pushed(merged);
   hold(after.ok, `the apply after the merge ended ${after.status}`);
   hold(await ctx.db.columnExists(table, "note"), `${ctx.db.name}.${table}.note is not on the server after the merge's apply`);
+
+  // 4. The drift watch's tracking issue: opened, updated, closed.
+  const n = ctx.db.name;
+  const [byHand, byHandAgain, undo] =
+    d === "ch"
+      ? [[`ALTER TABLE ${n}.events MODIFY TTL at + INTERVAL 30 DAY`], [`ALTER TABLE ${n}.events MODIFY COLUMN kind LowCardinality(String) DEFAULT 'by hand'`], [`ALTER TABLE ${n}.events REMOVE TTL`, `ALTER TABLE ${n}.events MODIFY COLUMN kind REMOVE DEFAULT`]]
+      : [[`ALTER TABLE ${n}.events ALTER COLUMN at SET DEFAULT '2000-01-01'`], [`ALTER TABLE ${n}.events ALTER COLUMN kind DROP NOT NULL`], [`ALTER TABLE ${n}.events ALTER COLUMN at SET DEFAULT now()`, `ALTER TABLE ${n}.events ALTER COLUMN kind SET NOT NULL`]];
+  const secondObject = /column kind/;
+  const tracking = async () => (await repo.issues()).filter((i) => i.body.includes("<!-- yodel:drift ") && i.body.includes("env=dev"));
+  if (!ctx.broken) for (const sql of byHand) await ctx.db.exec(sql);
+  const found = await repo.watch(merged);
+  hold(!found.ok, `the drift watch ended ${found.status} with dev changed by hand`);
+  const opened = await tracking();
+  hold(opened.length === 1 && opened[0]?.open === true, `the drift watch did not open one tracking issue: ${JSON.stringify(opened.map((i) => ({ n: i.number, open: i.open, title: i.title })))}`);
+  const issue = opened[0];
+  hold(/^Drift in dev: .*events/.test(issue.title) && issue.body.includes("`events`"), `the tracking issue does not name dev and events: ${issue.title}`);
+  for (const sql of byHandAgain) await ctx.db.exec(sql);
+  const again = await repo.watch(merged);
+  hold(!again.ok, `the drift watch ended ${again.status} with dev still changed`);
+  const updated = await tracking();
+  hold(updated.length === 1 && updated[0]?.number === issue.number && updated[0].open, `the second watch did not keep the one issue #${String(issue.number)} open: ${JSON.stringify(updated.map((i) => ({ n: i.number, open: i.open })))}`);
+  hold(secondObject.test(updated[0].body), `the tracking issue was not updated with the second change: ${updated[0].body.slice(0, 600)}`);
+  for (const sql of undo) await ctx.db.exec(sql);
+  const clean = await repo.watch(merged);
+  hold(clean.ok, `the drift watch ended ${clean.status} with dev put back`);
+  const closed = await tracking();
+  hold(closed.length === 1 && closed[0]?.number === issue.number && !closed[0].open, `the watch did not close #${String(issue.number)} once dev was put back: ${JSON.stringify(closed.map((i) => ({ n: i.number, open: i.open })))}`);
 }
