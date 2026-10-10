@@ -206,8 +206,24 @@ export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
  * holds.
  */
 function withoutExpectations(ctx: Ctx, p: Project): string[] {
+  ctx.log("BREAK: yodel built without its expectations");
+  return patchedYodel(ctx, p, "yodel-without-expectations", (text) => text.replace(/export function expectationFailure\(e, outcome\) \{/, "$& return undefined;"));
+}
+
+/**
+ * ClickHouse's break of the test part: yodel test built to leave a
+ * rebuild's partition receipts to the server's shared receipts table, as
+ * before #112, instead of each case's own store.
+ */
+function sharedRebuildReceipts(ctx: Ctx, p: Project): string[] {
+  ctx.log("BREAK: yodel test built to keep the rebuild's receipts in the server's shared receipts table");
+  return patchedYodel(ctx, p, "yodel-shared-rebuild-receipts", (text) => text.replace("await driver.opStep(m, i, { receipts })", "await driver.opStep(m, i)"));
+}
+
+/** A copy of the project's yodel with dist/testing/run.js patched; the command that runs it. */
+function patchedYodel(ctx: Ctx, p: Project, name: string, patch: (text: string) => string): string[] {
   const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
-  const root = join(ctx.work, "yodel-without-expectations");
+  const root = join(ctx.work, name);
   mkdirSync(root, { recursive: true });
   cpSync(join(pkg, "dist"), join(root, "dist"), { recursive: true });
   cpSync(join(pkg, "schemas"), join(root, "schemas"), { recursive: true });
@@ -215,10 +231,9 @@ function withoutExpectations(ctx: Ctx, p: Project): string[] {
   symlinkSync(p.path("node_modules"), join(root, "node_modules"));
   const file = join(root, "dist", "testing", "run.js");
   const text = readFileSync(file, "utf8");
-  const patched = text.replace(/export function expectationFailure\(e, outcome\) \{/, "$& return undefined;");
-  if (patched === text) throw new Error(`expectationFailure is not in ${file}; the broken build cannot take it out`);
+  const patched = patch(text);
+  if (patched === text) throw new Error(`${file} did not take the patch; the broken build cannot be made`);
   writeFileSync(file, patched);
-  ctx.log("BREAK: yodel built without its expectations");
   return ["node", join(root, "dist", "bin.js")];
 }
 
@@ -239,8 +254,17 @@ interface TestDoc {
  * with one failure, and leaves no database behind. Then, with the
  * migrations applied to the environment, yodel test refuses it (exit 4),
  * since it has a history, and the table stays.
- * BREAK: yodel is built with its expectations taken out, so the case that
- * should fail holds.
+ *
+ * On ClickHouse the chain ends with a sort-key change, a ClickHouseRebuildOp
+ * step (#112), and two more cases seed different rows after label, before
+ * the same rebuild: each sees its own rows, every one, after it, and the
+ * run writes no rebuild receipt to the server's receipts table, since each
+ * case keeps its receipts to itself.
+ *
+ * BREAK: on Postgres, yodel is built with its expectations taken out, so
+ * the case that should fail holds. On ClickHouse, yodel test is built to
+ * leave the rebuild's receipts to the server's shared table, so the run
+ * writes them there.
  */
 export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
   const { p } = s;
@@ -251,6 +275,22 @@ export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
   if (at === undefined || label === undefined) throw new Error(`the revert part left no note-and-audit and label migrations: ${ids.join(", ")}`);
   const db = ctx.db.name;
   const ch = ctx.dialect === "ch";
+  if (ch) {
+    // The same rebuild after label for every case (#112).
+    p.edit("src/schema.ts", "ORDER BY (kind, ts)", "ORDER BY (ts, kind)");
+    const rekey = await p.newMigration("rekey");
+    if (rekey === undefined) throw new Error("yodel new wrote no migration for the sort-key change");
+    const steps = p.migration(rekey).steps;
+    if (!steps.some((st) => st.kind === "op" && st.op === "ClickHouseRebuildOp")) throw new Error(`the sort-key change is not a ClickHouseRebuildOp step: ${JSON.stringify(steps)}`);
+  }
+  // Rows in two monthly partitions, different in each case.
+  const rows = (ids: number[]) => `INSERT INTO ${db}.events (id, kind, ts) VALUES ${ids.map((id, i) => `(${String(id)}, 'k', now() - toIntervalDay(${String(i % 2 === 0 ? 0 : 35)}))`).join(", ")}`;
+  const rebuildCases = (ids: number[], n: number) => ({
+    name: `the rebuild copies case ${String(n)}'s rows`,
+    at: label,
+    seed: [rows(ids)],
+    expect: [{ kind: "rows", sql: `SELECT id FROM ${db}.events ORDER BY id`, rows: ids.map((id) => [id]) }],
+  });
   const seed = ch ? `INSERT INTO ${db}.events (id, kind, ts) VALUES (1, 'view', now()), (2, 'click', now())` : `INSERT INTO ${db}.orders (amount) VALUES (1), (2)`;
   const cases = [
     { name: "label is filled from the row", at, seed: [seed], expect: [{ kind: "value", sql: ch ? `SELECT count() FROM ${db}.events WHERE label = kind` : `SELECT count(*) FROM ${db}.orders WHERE label = status`, value: 2 }] },
@@ -259,11 +299,18 @@ export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
       expect: [ch ? { kind: "error", sql: `INSERT INTO ${db}.events (id, kind, ts) VALUES ('not a number', 'view', now())` } : { kind: "error", sql: `INSERT INTO ${db}.orders (status) VALUES ('placed')`, match: "amount" }],
     },
     { name: "label stays empty after the migration", at, seed: [seed], expect: [{ kind: "value", sql: ch ? `SELECT count() FROM ${db}.events WHERE label = ''` : `SELECT count(*) FROM ${db}.orders WHERE label IS NULL`, value: 2 }] },
+    ...(ch ? [rebuildCases([10, 11, 12], 1), rebuildCases([20, 21, 22, 23, 24], 2)] : []),
   ];
   p.write("tests/label.test.ts", `export default ${JSON.stringify(cases, null, 2)};\n`);
   await p.commit("tests of the label migration");
   const junit = join(ctx.work, "yodel-test.xml");
-  const bin = ctx.broken ? { bin: withoutExpectations(ctx, p) } : {};
+  const bin = ctx.broken ? { bin: ch ? sharedRebuildReceipts(ctx, p) : withoutExpectations(ctx, p) } : {};
+  // The rebuild's receipts the run writes to the server's table, if any: their effects name the claim's table.
+  const since = ch ? await ctx.db.scalar("SELECT toString(now64(3))") : "";
+  const serverReceipts = async () =>
+    (await ctx.db.count("SELECT count() FROM system.tables WHERE database = 'chant_receipts' AND name = 'receipts'")) === 0
+      ? 0
+      : ctx.db.count(`SELECT count() FROM chant_receipts.receipts WHERE startsWith(effect, 'rebuild/${db}.events/') AND written_at >= toDateTime64('${since}', 3)`);
 
   const ran = await p.yodel(["test", "--env", p.env, "--json", "--junit", junit], { timeoutMs: 600_000, ...bin });
   const doc = parse<TestDoc>(ran);
@@ -272,6 +319,14 @@ export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
   if (filled?.status === "error" || by.get("the table refuses a row it cannot hold")?.status === "error") throw new Error(`a case could not run: ${JSON.stringify(doc.cases)}`);
   hold(filled?.status === "passed" && filled.after.includes(label), `the label case did not pass after running ${label}: ${JSON.stringify(filled)}`);
   hold(by.get("the table refuses a row it cannot hold")?.status === "passed", `the refused-row case did not pass: ${JSON.stringify(by.get("the table refuses a row it cannot hold"))}`);
+  if (ch) {
+    for (const n of [1, 2]) {
+      const c = by.get(`the rebuild copies case ${String(n)}'s rows`);
+      hold(c?.status === "passed", `case ${String(n)} did not see every row it seeded after the rebuild: ${JSON.stringify(c)}`);
+    }
+    const written = await serverReceipts();
+    hold(written === 0, `yodel test wrote ${String(written)} rebuild receipt(s) to the server's chant_receipts.receipts, where the cases share them`);
+  }
   const wrong = by.get("label stays empty after the migration");
   hold(ran.code === 3 && wrong?.status === "failed" && doc.summary?.failed === 1, `yodel test exited ${String(ran.code)} and the case that says label stays empty ${String(wrong?.status)}: an assertion that should fail held`);
   hold(readFileSync(junit, "utf8").includes('failures="1"'), `${junit} does not record the one failure`);

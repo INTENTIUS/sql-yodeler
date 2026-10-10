@@ -253,7 +253,7 @@ Each case runs on a database of its own, built on `--env`'s server (default the 
 1. the databases (or schemas) the history names are emptied;
 2. the migrations up to `at` are replayed the way the replay check replays them: statements, rebuild and `PostgresMigrationOp` steps, no backfills. Without `at`, that is every migration, and the case tests the schema the newest one leaves: a view's rows, a function's result, a constraint;
 3. the `seed` statements run;
-4. the migrations after `at`, up to `through` (default: the newest), run with every step, backfills included. A backfill's receipts are kept in memory for that case only;
+4. the migrations after `at`, up to `through` (default: the newest), run with every step, backfills included. The receipts of a backfill's batches and of a ClickHouse rebuild's partitions are kept in memory for that case only, so nothing is written to the server's receipts table and no case skips work another case did;
 5. each expectation is checked, all of them even after one fails. `expectRows(sql, rows)` wants exactly those rows in that order, `expectValue(sql, value)` the first column of the first row, and `expectError(sql, match?)` a statement that fails, with a message that contains `match` (or matches it, for a pattern). Values compare as text, so `1` and `"1"` are equal and a date compares as its ISO string. The helpers only build plain objects (`{ kind: "rows", sql, rows }`, and so on), so a test file can write those objects itself and import only the `TestCase` type.
 
 A checkpoint isn't part of the chain the cases build, as in the replay. Nothing is written to a history. At the end the databases are emptied again, unless you pass `--keep`.

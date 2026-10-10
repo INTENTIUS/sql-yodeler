@@ -22,7 +22,7 @@ import { environmentSettings } from "../config/settings.js";
 import { httpPort, type ClickHousePort } from "../history/index.js";
 import type { Migration } from "../migrations/index.js";
 import { renderForEnvironment } from "../topology/render.js";
-import { defaultStepRunner, planStep, type StepRunner } from "../steps/index.js";
+import { defaultStepRunner, planStep, type RebuildReceiptStore, type StepRunner } from "../steps/index.js";
 import type { OpStepOutcome, ReplayChange, ReplayDriver } from "./replay.js";
 
 const SYSTEM = new Set(["system", "information_schema", "INFORMATION_SCHEMA"]);
@@ -96,12 +96,12 @@ export async function clickhouseReplay(project: Project, env: Environment, order
       await port.query(renderForEnvironment(step.sql, topology), step.waitsForMutation ? { settings: { mutations_sync: "2" } } : {});
     },
 
-    async opStep(m: Migration, index: number): Promise<OpStepOutcome> {
+    async opStep(m: Migration, index: number, opts: { receipts?: RebuildReceiptStore } = {}): Promise<OpStepOutcome> {
       const step = m.document.steps[index];
       if (!step) return { refused: `${m.id} has no step ${String(index)}` };
       const plan = planStep(step);
       if (plan.run !== "rebuild") return { refused: plan.run === "refused" ? plan.reason : `step ${String(index)} is not one the replay runs` };
-      const { summary } = await runStep({ environment: env.name, projectDir: project.dir, port, endpoint, migration: m, index, plan, log: (line) => { log(`  ${line}`); } });
+      const { summary } = await runStep({ environment: env.name, projectDir: project.dir, port, endpoint, migration: m, index, plan, log: (line) => { log(`  ${line}`); }, ...(opts.receipts ? { rebuildReceipts: opts.receipts } : {}) });
       const s = summary as { swapped?: boolean } | undefined;
       return { ran: true, ...(s?.swapped !== undefined ? { note: s.swapped ? "swapped" : "not swapped" } : {}) };
     },

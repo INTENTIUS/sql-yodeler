@@ -41,6 +41,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OpConfig } from "@intentius/chant/op/types";
+import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import type { StepRecord } from "@intentius/chant/op/local-executor";
 import type { Topology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
@@ -140,6 +141,11 @@ export function summarize(summary: RebuildSummary, fn: string, result: unknown):
   }
 }
 
+/** Where a rebuild's backfill keeps its partition receipts: a receipt store that also reads every receipt under an address prefix at once. */
+export interface RebuildReceiptStore extends ReceiptStore {
+  readAll(prefix: string): Promise<Map<string, string>>;
+}
+
 export interface RunRebuildOptions extends Omit<RunOpOptions, "activities" | "cwd"> {
   projectDir: string;
   /** The migration's recorded schema: the `chant build` output after it. */
@@ -149,6 +155,8 @@ export interface RunRebuildOptions extends Omit<RunOpOptions, "activities" | "cw
   log?: (line: string) => void;
   /** The chant config the rebuild activities bind with (see {@link rebuildChantConfig}). Default: they load chant.config.ts. */
   config?: ProjectConfig | undefined;
+  /** The backfill's partition receipts. Default: the lexicon's store on the server, `chant_receipts.receipts`. */
+  receipts?: RebuildReceiptStore | undefined;
 }
 
 /** Runs a rebuild step to the end. The summary is filled in as the activities return, so a failure still says how far it got. */
@@ -161,7 +169,7 @@ export async function runRebuild(options: RebuildOptions, run: RunRebuildOptions
     const lexicon = run.activities ?? ((await import("@intentius/chant-lexicon-sql/op/activities")) as unknown as Record<string, ActivityFn>);
     const wrapped: Record<string, ActivityFn> = {};
     // A rebuild activity takes its config as a third argument (chant's ClickHouseRebuildDeps).
-    const deps = run.config ? { config: run.config } : undefined;
+    const deps = run.config || run.receipts ? { ...(run.config ? { config: run.config } : {}), ...(run.receipts ? { backfill: { receipts: run.receipts } } : {}) } : undefined;
     const summarized: readonly string[] = SUMMARIZED;
     for (const fn of Object.keys(lexicon).filter((f) => f.startsWith("clickhouseRebuild") && (deps !== undefined || summarized.includes(f)))) {
       const inner = lexicon[fn] as ((args: Record<string, unknown>, signal?: AbortSignal, deps?: unknown) => Promise<unknown>) | undefined;

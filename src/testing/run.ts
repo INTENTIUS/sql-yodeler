@@ -13,8 +13,12 @@
  *    find no rows;
  * 3. the `seed` statements run;
  * 4. the migrations after `at`, up to `through`, run with every step,
- *    backfills included (their receipts kept in memory, for this case
- *    alone);
+ *    backfills included.
+ *
+ * A case's receipts, a backfill's batches and a ClickHouse rebuild's
+ * partitions, are kept in memory for that case alone (#112): nothing is
+ * written to the server's receipts table, and no case skips work because
+ * another case did it, or a run before this one.
  * 5. each expectation is checked, every one even after one fails.
  *
  * A checkpoint (#63) is left out of the chain, as the replay leaves it out.
@@ -29,14 +33,13 @@
 
 import { relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { EXIT_REFUSED } from "../exit.js";
 import { environmentSettings } from "../config/settings.js";
 import { isCheckpoint, readMigrations, type Migration } from "../migrations/index.js";
 import { migrationsDir } from "../versioned/index.js";
 import { httpPort } from "../history/index.js";
-import { asBackfill, defaultStepRunner, planStep, type StepRunner } from "../steps/index.js";
+import { asBackfill, defaultStepRunner, planStep, type RebuildReceiptStore, type StepRunner } from "../steps/index.js";
 import type { BackfillStep } from "../steps/kinds.js";
 import { NOT_FRESH, openReplay, refuseShared, sharedProfiles, type ReplayDriver } from "../replay/index.js";
 import type { Expectation, TestCase } from "./define.js";
@@ -149,11 +152,31 @@ export function expectationFailure(e: Expectation, outcome: Outcome): string | u
   return show(rows) === show(e.rows) ? undefined : `${sql} returned ${show(rows)}; expected ${show(e.rows)}`;
 }
 
-/** A receipt store for one case: a backfill's batches each run once in it, and nothing outlives the case. */
-export function memoryReceipts(): ReceiptStore {
+/**
+ * A receipt store for one case: a backfill's batches and a rebuild's
+ * partitions each run once in it, and nothing outlives the case.
+ *
+ * It keeps each receipt under its effect. A rebuild reads its receipts with
+ * `readAll(prefix)` and looks each up by address, the effect after the
+ * store's identity (`<stack>/<env>/`); the identity is the part of the
+ * prefix before the effects it asks for.
+ */
+export function memoryReceipts(): RebuildReceiptStore {
   const kept = new Map<string, string>();
   return {
     read: (r) => Promise.resolve(kept.get(r.effect)),
+    readAll: (prefix) => {
+      const out = new Map<string, string>();
+      for (const [effect, expectation] of kept) {
+        for (let i = 0; i < prefix.length; i++) {
+          if ((i === 0 || prefix[i - 1] === "/") && effect.startsWith(prefix.slice(i))) {
+            out.set(prefix.slice(0, i) + effect, expectation);
+            break;
+          }
+        }
+      }
+      return Promise.resolve(out);
+    },
     write: (r, expectation) => {
       kept.set(r.effect, expectation);
       return Promise.resolve();
@@ -261,7 +284,7 @@ export async function runTests(project: Project, env: Environment, files: readon
     started = true;
     const s = session;
     const results: CaseResult[] = [];
-    const runMigration = async (m: Migration, backfills: boolean, receipts: ReceiptStore) => {
+    const runMigration = async (m: Migration, backfills: boolean, receipts: RebuildReceiptStore) => {
       for (const [i, step] of m.document.steps.entries()) {
         const st = step as typeof step | BackfillStep;
         if (st.kind === "statement") {
@@ -278,7 +301,7 @@ export async function runTests(project: Project, env: Environment, files: readon
         }
         const plan = planStep(st);
         if (plan.run === "refused") throw new Error(`${m.id} step ${String(i)} cannot run here: ${plan.reason}`);
-        const outcome = await driver.opStep(m, i);
+        const outcome = await driver.opStep(m, i, { receipts });
         if ("refused" in outcome) throw new Error(`${m.id} step ${String(i)} cannot run here: ${outcome.refused}`);
       }
     };

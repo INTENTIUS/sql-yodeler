@@ -40,6 +40,7 @@ import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-state
 import { YodelError, type SqlDialect } from "../project.js";
 import { isCheckpoint, type Migration } from "../migrations/index.js";
 import { asBackfill, describeStep, planStep, type BackfillStep } from "../steps/kinds.js";
+import type { RebuildReceiptStore } from "../steps/rebuild.js";
 
 /** Exit code: the target is not fresh and `reset` was not given; nothing was run. */
 export const NOT_FRESH = 4;
@@ -65,8 +66,8 @@ export interface ReplayDriver {
   clear(): Promise<void>;
   /** Sends one statement step of `m`, as apply sends it. Throws the server's error. */
   statement(m: Migration, index: number, step: StatementStep): Promise<void>;
-  /** Runs an Op step that is neither a backfill nor refused by {@link planStep}; or says why it cannot. */
-  opStep(m: Migration, index: number): Promise<OpStepOutcome>;
+  /** Runs an Op step that is neither a backfill nor refused by {@link planStep}; or says why it cannot. `receipts` keeps a rebuild's partition receipts instead of the server. */
+  opStep(m: Migration, index: number, options?: { receipts?: RebuildReceiptStore }): Promise<OpStepOutcome>;
   /** The replayed database against `m`'s recorded schema. Empty when they match. */
   compare(m: Migration): Promise<ReplayChange[]>;
   close(): Promise<void>;

@@ -16,7 +16,7 @@ import type { Migration } from "../migrations/index.js";
 import { YodelError } from "../project.js";
 import { runBackfill, serverReceipts, type PgBackfillServer } from "./backfill.js";
 import type { StepPlan } from "./kinds.js";
-import { rebuildChantConfig, runRebuild } from "./rebuild.js";
+import { rebuildChantConfig, runRebuild, type RebuildReceiptStore } from "./rebuild.js";
 import { runPgMigration } from "./postgres-migration.js";
 
 export * from "./kinds.js";
@@ -44,6 +44,8 @@ export interface StepContext {
   log: (line: string) => void;
   /** A backfill's receipt store; default the sql lexicon's on the server. */
   receipts?: ReceiptStore | undefined;
+  /** A rebuild's partition receipts; default the sql lexicon's on the server (`chant_receipts.receipts`). `yodel test` keeps each case's apart (#112). */
+  rebuildReceipts?: RebuildReceiptStore | undefined;
 }
 
 /** Runs one Op step to the end and returns the summary its history row records. Throws `StepOpFailed` when it stops part way. */
@@ -52,7 +54,7 @@ export type StepRunner = (ctx: StepContext) => Promise<{ summary: unknown }>;
 export const defaultStepRunner: StepRunner = async (ctx) => {
   if (ctx.plan.run === "rebuild") {
     const config = await rebuildChantConfig(ctx.projectDir, ctx.environment);
-    const { summary } = await runRebuild(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, log: ctx.log, config });
+    const { summary } = await runRebuild(ctx.plan.options, { environment: ctx.environment, projectDir: ctx.projectDir, schema: ctx.migration.document.schema, log: ctx.log, config, ...(ctx.rebuildReceipts ? { receipts: ctx.rebuildReceipts } : {}) });
     return { summary };
   }
   if (ctx.plan.run === "pgMigration") {
