@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "recorded": "2026-10-10T08:23:34.390Z",
-  "commit": "6897d81",
+  "recorded": "2026-10-10T08:29:37.785Z",
+  "commit": "3762652",
   "dirty": false,
   "rows": [
     {
@@ -12,11 +12,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 8,
-        "break": 5
+        "plain": 9,
+        "break": 4
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
@@ -27,41 +27,41 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 8,
+        "plain": 9,
         "break": 4
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "new",
       "dialect": "ch",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
         "plain": 12,
-        "break": 8
+        "break": 7
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "new",
       "dialect": "pg",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 9,
-        "break": 7
+        "plain": 21,
+        "break": 9
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
@@ -127,31 +127,31 @@
     {
       "claim": "approval",
       "dialect": "ch",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 76,
-        "break": 81
+        "plain": 65,
+        "break": 86
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "approval",
       "dialect": "pg",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 79,
-        "break": 80
+        "plain": 88,
+        "break": 86
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
@@ -262,31 +262,31 @@
     {
       "claim": "declarative",
       "dialect": "ch",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations and for an ORM's exported DDL",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 87,
-        "break": 88
+        "plain": 94,
+        "break": 92
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
       "claim": "declarative",
       "dialect": "pg",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations and for an ORM's exported DDL",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers too) and for an ORM's exported DDL",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 92,
-        "break": 77
+        "plain": 113,
+        "break": 91
       },
-      "recorded": "2026-10-10T08:23:34.390Z",
-      "commit": "6897d81",
+      "recorded": "2026-10-10T08:29:37.785Z",
+      "commit": "3762652",
       "dirty": false
     },
     {
