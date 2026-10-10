@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sql-yodeler-example-clickhouse: schema</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1f23;--muted:#5d6470;--bg:#fff;--line:#d8dce3;--code:#f3f5f8;--link:#1f5fbf}
+@media (prefers-color-scheme:dark){:root{--fg:#e6e8eb;--muted:#a3a9b3;--bg:#16181c;--line:#353a42;--code:#22262c;--link:#7fb0ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.6rem;margin:0 0 4px}h2{margin-top:2.2rem;border-bottom:1px solid var(--line);padding-bottom:4px}
+h3{margin:2rem 0 .3rem}h4{margin:1rem 0 .3rem;font-size:.95rem}
+.muted,.kind{color:var(--muted)}.kind{font-weight:400;font-size:.85rem;margin-left:.5rem}
+a{color:var(--link)}code,pre{font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:1px 4px}pre{padding:8px 10px;overflow-x:auto;white-space:pre}
+table{border-collapse:collapse;width:100%;margin:.4rem 0;display:block;overflow-x:auto}
+th,td{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}th{font-weight:600}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:.5rem 0}dt{color:var(--muted)}dd{margin:0}dd pre{margin:0}
+ul.toc{columns:2 260px;padding-left:1.2rem}details{margin:.5rem 0}summary{cursor:pointer;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>sql-yodeler-example-clickhouse</h1>
+<p class="muted">ClickHouse, 2 objects, from chant build of the declared schema. Written by <code>yodel docs</code>.</p>
+<h2>Objects</h2>
+<ul class="toc">
+<li><a href="#o-shopDb">shop</a> <span class="muted">Database</span></li>
+<li><a href="#o-events">shop.events</a> <span class="muted">Table</span></li>
+</ul>
+<h2>Entity relationships</h2>
+<p class="muted">Mermaid source; erd.md next to this file renders it on GitHub, GitLab and Forgejo.</p>
+<pre>erDiagram
+  shop_events[&quot;shop.events&quot;] {
+    UInt64 id PK
+    LowCardinality(String) kind PK
+    DateTime at
+    LowCardinality(String) country
+    LowCardinality(String) source
+  }
+</pre>
+<h2>Reference</h2>
+<section id="o-shopDb">
+<h3>shop<span class="kind">ClickHouse::Database, export shopDb</span></h3>
+<p>The SQL Yodeler ClickHouse example</p>
+<dl>
+<dt>Engine</dt><dd><code>Atomic</code></dd>
+</dl>
+<h4>History</h4>
+<table><thead><tr><th>Migration</th><th>Step</th></tr></thead><tbody>
+<tr><td><code>20261010T0528-baseline</code></td><td><code>SQLCH200 create: CREATE DATABASE shop
+  ENGINE = Atomic
+  COMMENT 'The SQL Yodeler ClickHouse example [chant managed-by=chant]'</code></td></tr>
+</tbody></table>
+<details><summary>DDL</summary><pre>CREATE DATABASE shop
+  ENGINE = Atomic
+  COMMENT 'The SQL Yodeler ClickHouse example'</pre></details>
+</section>
+<section id="o-events">
+<h3>shop.events<span class="kind">ClickHouse::Table, export events</span></h3>
+<dl>
+<dt>Engine</dt><dd><code>MergeTree</code></dd>
+<dt>ORDER BY</dt><dd><code>(kind, id)</code></dd>
+<dt>PARTITION BY</dt><dd><code>toYYYYMM(at)</code></dd>
+</dl>
+<table><thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Key</th><th>Default</th><th>Comment</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td><code>UInt64</code></td><td>no</td><td>PK</td><td></td><td></td></tr>
+<tr><td><code>kind</code></td><td><code>LowCardinality(String)</code></td><td>no</td><td>PK</td><td></td><td></td></tr>
+<tr><td><code>at</code></td><td><code>DateTime</code></td><td>no</td><td></td><td></td><td></td></tr>
+<tr><td><code>country</code></td><td><code>LowCardinality(String)</code></td><td>no</td><td></td><td>DEFAULT ''</td><td></td></tr>
+<tr><td><code>source</code></td><td><code>LowCardinality(String)</code></td><td>no</td><td></td><td>DEFAULT 'web'</td><td></td></tr>
+</tbody></table>
+<h4>History</h4>
+<table><thead><tr><th>Migration</th><th>Step</th></tr></thead><tbody>
+<tr><td><code>20261010T0528-baseline</code></td><td><code>SQLCH200 create: CREATE TABLE shop.events
+  (
+      id UInt64,
+      kind LowCardinality(String),
+      at DateTime
+  )
+  ENGINE = MergeTree
+  PARTITION BY toYYYYMM(at)
+  ORDER BY (kind, at) COMMENT '[chant managed-by=chant]'</code></td></tr>
+<tr><td><code>20261010T0528-add-country</code></td><td><code>SQLCH201 metadata: ALTER TABLE `shop`.`events` ADD COLUMN country LowCardinality(String) DEFAULT '' AFTER `at`</code></td></tr>
+<tr><td><code>20261010T0528-events-by-id</code></td><td><code>ClickHouseRebuildOp step (SQLCH220 orderBy)</code></td></tr>
+<tr><td><code>20261010T0530-add-source</code></td><td><code>SQLCH201 metadata: ALTER TABLE `shop`.`events` ADD COLUMN source LowCardinality(String) DEFAULT 'web' AFTER `country`</code></td></tr>
+</tbody></table>
+<details><summary>DDL</summary><pre>CREATE TABLE shop.events
+  (
+      id UInt64,
+      kind LowCardinality(String),
+      at DateTime,
+      country LowCardinality(String) DEFAULT '',
+      source LowCardinality(String) DEFAULT 'web'
+  )
+  ENGINE = MergeTree
+  PARTITION BY toYYYYMM(at)
+  ORDER BY (kind, id)</pre></details>
+</section>
+</main>
+</body>
+</html>

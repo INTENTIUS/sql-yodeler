@@ -20,7 +20,7 @@ describe("the claims behind each docs page", () => {
 
   it("every page names at least one claim, except the ones that describe no behaviour", () => {
     const none = docsPages(join(repoRoot, "docs")).filter((p) => frontMatter(p.text).claims?.length === 0).map((p) => p.file);
-    expect(none.sort()).toEqual(["README.md", "agents.md", "claims.md", "glossary.md"]);
+    expect(none.sort()).toEqual(["README.md", "agents.md", "claims.md", "glossary.md", "schema-docs.md"]);
   });
 
   describe("the check, on a fixture record", () => {
