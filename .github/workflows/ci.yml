@@ -24,6 +24,8 @@ jobs:
       - run: npm run build
       - run: npx yodel --version
       - run: npm run check
+      - name: The templates work with the published yodel
+        run: npm run templates:check
   docs-site:
     runs-on: ubuntu-latest
     timeout-minutes: 10

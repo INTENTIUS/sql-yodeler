@@ -17,5 +17,5 @@
     // package; in this repository that is the source (tsx reads these paths).
     "paths": { "@intentius/sql-yodeler": ["./src/index.ts"] }
   },
-  "include": ["src", "test", "scenarios", "examples/walkthrough", "vitest.config.ts"]
+  "include": ["src", "test", "scenarios", "scripts", "examples/walkthrough", "vitest.config.ts"]
 }

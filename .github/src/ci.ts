@@ -18,6 +18,10 @@ export const workflow = new Workflow({
         new Step({ run: "npm run build" }),
         new Step({ run: "npx yodel --version" }),
         new Step({ run: "npm run check" }),
+        // Each template made into a project with the yodel its range resolves
+        // to on npm (#131): in this repository the templates see ./src, so a
+        // template that needs unreleased yodel fails here and nowhere else.
+        new Step({ name: "The templates work with the published yodel", run: "npm run templates:check" }),
       ],
     }),
     // The build pages.yml publishes from main, so a page that would fail it
