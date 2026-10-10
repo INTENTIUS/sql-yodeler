@@ -13,7 +13,7 @@ npm install @intentius/sql-yodeler @intentius/chant@0.120.0 @intentius/chant-lex
 npx yodel --version
 ```
 
-No token is needed, on your machine or in CI. A project made from a starter template has all three in its `package.json` already, so `npm install` there is enough; [Your first migration](getting-started.md) goes from there. The starter templates' `package.json` names `^0.4.0`. While the version is 0.x, a caret range stays within one minor version, so moving to the next minor release means changing the range (`npm install @intentius/sql-yodeler@0.5`).
+No token is needed, on your machine or in CI. A project made from a starter template has all three in its `package.json` already, so `npm install` there is enough; [Your first migration](getting-started.md) goes from there. The starter templates' `package.json` names `^0.5.0`. While the version is 0.x, a caret range stays within one minor version, so moving to the next minor release means changing the range (`npm install @intentius/sql-yodeler@0.6`).
 
 To try a commit that is not released yet, from git or from a clone, see [CONTRIBUTING.md](../CONTRIBUTING.md#running-an-unreleased-yodel-in-a-project).
 
