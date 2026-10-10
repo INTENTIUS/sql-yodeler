@@ -16,6 +16,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Steps](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, and manual steps |
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
+| [Reports and the audit log](audit.md) | `yodel report`: every environment's migrations side by side, the audit log derived from the history and the gate ledger, its gaps, `audit.jsonl` and the HTML run view |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
 | [Set up with a coding agent](agents.md) | the prompt to hand a coding agent, the steps it follows to add SQL Yodeler to a repository, and what it leaves to people |
@@ -45,6 +46,7 @@ Commands:
   new       write the next migration from the declared schema
   lint      check the migrations against the lint rules
   status    list applied, pending and out-of-order migrations
+  report    each environment's migrations side by side, and the audit log
   drift     report declared objects changed out of band or gone
   rebase    move a migration onto a new parent and recompute its schema
   repair    record a new checksum for an applied migration, with a reason

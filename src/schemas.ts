@@ -29,6 +29,7 @@ export const COMMAND_SCHEMAS = {
   lint: "lint",
   "lint --rules": "lint-rules",
   status: "status",
+  report: "report",
   drift: "drift",
   rebase: "rebase",
   repair: "repair",
