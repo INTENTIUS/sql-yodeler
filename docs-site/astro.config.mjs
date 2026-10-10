@@ -19,6 +19,9 @@ export default defineConfig({
 			description: 'Schema management and migrations for ClickHouse and Postgres, on chant\'s sql lexicon.',
 			social: [{ icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/@intentius/sql-yodeler' }],
 			sidebar: sidebar(),
+			// The title gets a "Copy page as Markdown" button, an llms.txt pointer
+			// and, on a task page, its prompt for a coding agent.
+			components: { PageTitle: './src/components/PageTitle.astro' },
 		}),
 	],
 });

@@ -10,6 +10,7 @@
 
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { pagePrompts } from './prompts.mjs';
 
 export const base = '/sql-yodeler';
 
@@ -75,6 +76,15 @@ function tagline() {
 		.replace(/`([^`]+)`/g, '<code>$1</code>');
 }
 
+/** Each page's one-line description, from the second column of docs/README.md's table, by slug. */
+export function descriptions() {
+	const out = {};
+	for (const m of read(new URL('README.md', docsDir)).matchAll(/^\|\s*\[[^\]]+\]\(([\w-]+)\.md\)\s*\|\s*(.+?)\s*\|\s*$/gm)) {
+		out[m[1].toLowerCase()] = m[2].replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+	}
+	return out;
+}
+
 /** The sidebar: docs/README.md's table order, then the pages it does not list, under "For contributors". */
 export function sidebar() {
 	const files = docFiles();
@@ -95,9 +105,17 @@ export function writePages() {
 	const slugs = new Set(files.map((f) => f.slug));
 	rmSync(outDir, { recursive: true, force: true });
 	mkdirSync(outDir, { recursive: true });
+	const described = descriptions();
+	const order = sidebar().flatMap((i) => (i.items ? i.items.map((j) => j.slug) : [i.slug]));
 	for (const { file, slug } of files) {
 		const { title, body } = splitTitle(read(new URL(file, docsDir)), file);
-		writeFileSync(`${outDir}${slug}.md`, frontmatter({ title }) + rewriteLinks(body, slugs));
+		const fields = {
+			title,
+			...(described[slug] ? { description: described[slug] } : {}),
+			...(pagePrompts[slug] ? { prompt: pagePrompts[slug] } : {}),
+			rank: order.indexOf(slug),
+		};
+		writeFileSync(`${outDir}${slug}.md`, frontmatter(fields) + rewriteLinks(body, slugs));
 	}
 	const first = sidebar()[0];
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');
@@ -106,6 +124,7 @@ title: ${JSON.stringify(index.title)}
 head:
   - tag: title
     content: ${JSON.stringify(`${index.title}: schema management and migrations for ClickHouse and Postgres`)}
+description: "What SQL Yodeler is, the docs pages, and the yodel commands with their exit codes"
 template: splash
 hero:
   tagline: ${JSON.stringify(tagline())}

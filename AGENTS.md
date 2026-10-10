@@ -1,6 +1,6 @@
 # Working on SQL Yodeler
 
-Rules for anyone, person or agent, who changes this repo. Building from a clone, the tests against a server, the walkthroughs and the claims are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Rules for anyone, person or agent, who changes this repo. Building from a clone, the tests against a server, the walkthroughs and the claims are in [CONTRIBUTING.md](CONTRIBUTING.md). A coding agent setting SQL Yodeler up in another repository follows [docs/agents.md](docs/agents.md) instead.
 
 ## Git and pull requests
 
