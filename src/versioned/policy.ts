@@ -24,6 +24,7 @@ import { EXIT_REFUSED } from "../exit.js";
 import { silencesOf } from "../lint/index.js";
 import type { MigrateOpRef } from "./op.js";
 import type { PendingMigration } from "./state.js";
+import type { RevertPlan } from "./revert.js";
 import { sameDigest } from "./digest.js";
 
 /** The gate an override of `rule` is recorded as an approval of. */
@@ -75,6 +76,40 @@ export function policyPlan(environment: string, dialect: SqlDialect, toApply: re
       }),
       silences: silencesOf(p.migration).map(({ step, rule, reason }) => ({ step, rule, reason })),
     })),
+  };
+}
+
+/**
+ * The plan a rule sees for a revert (#97): the migration reverted is the one
+ * entry of `pending`, its steps the revert's statements in the order they
+ * run (a hand-written revert step's first), and `revert` says it is one. A
+ * rule that refuses drops refuses a revert that drops what the migration
+ * added.
+ */
+export function policyRevertPlan(environment: string, dialect: SqlDialect, plan: RevertPlan, now: Date = new Date()): PolicyPlan {
+  return {
+    environment,
+    dialect,
+    now: now.toISOString(),
+    revert: { id: plan.migration.id, to: plan.to },
+    pending: [
+      {
+        id: plan.migration.id,
+        checksum: plan.checksum,
+        outOfOrder: false,
+        steps: plan.statements.map(({ source, step }, index): PolicyStep => ({
+          index,
+          kind: "statement",
+          object: step.object,
+          name: source === "step" ? `${step.name} (${plan.step?.file ?? "the revert step"})` : step.name,
+          classes: [step.class],
+          destructive: step.destructive === true,
+          rules: [step.rule],
+          sql: step.sql,
+        })),
+        silences: [],
+      },
+    ],
   };
 }
 
@@ -148,15 +183,17 @@ export function withOverrides(results: readonly RuleResult[], overrides: readonl
   });
 }
 
-/** The refusal for the rules that deny the plan with no override, or `undefined`. */
-export function policyRefusal(results: readonly RuleResult[], environment: string, digest: string | undefined, when: string): YodelError | undefined {
+/** The refusal for the rules that deny the plan with no override, or `undefined`. `revert`: the plan is the revert of that migration (with that hand-written step, as given). */
+export function policyRefusal(results: readonly RuleResult[], environment: string, digest: string | undefined, when: string, revert?: { id: string; step?: string | undefined }): YodelError | undefined {
   const denied = results.filter((r) => r.outcome === "denied");
   if (denied.length === 0) return undefined;
   const lines = denied.flatMap((r) => [`  ${r.id}${r.description ? ` (${r.description})` : ""}:`, ...r.reasons.map((x) => `    ${x}`)]);
   const ids = denied.map((r) => r.id).join(", ");
+  const what = revert ? `the revert of ${revert.id}` : "this plan";
+  const target = revert ? ` --revert ${revert.id}${revert.step !== undefined ? ` --step ${revert.step}` : ""}` : "";
   return new YodelError(
-    `refused by policy ${when}: ${denied.length === 1 ? "rule" : "rules"} ${ids} ${denied.length === 1 ? "denies" : "deny"} this plan${digest ? ` (${digest})` : ""}. Nothing was applied:\n${lines.join("\n")}\n` +
-      `To run it anyway, someone policy.overriders lists records why, for exactly this plan: ${denied.map((r) => `yodel override ${environment} --rule ${r.id} --reason "<why>"`).join("; ")}`,
+    `refused by policy ${when}: ${denied.length === 1 ? "rule" : "rules"} ${ids} ${denied.length === 1 ? "denies" : "deny"} ${what}${digest ? ` (${digest})` : ""}. Nothing was ${revert ? "reverted" : "applied"}:\n${lines.join("\n")}\n` +
+      `To run it anyway, someone policy.overriders lists records why, for exactly this plan: ${denied.map((r) => `yodel override ${environment}${target} --rule ${r.id} --reason "<why>"`).join("; ")}`,
     EXIT_REFUSED,
   );
 }
@@ -172,11 +209,36 @@ export async function judgePlan(input: {
   now?: Date;
 }): Promise<RuleResult[]> {
   if (!input.policy || input.toApply.length === 0) return [];
-  const results = evaluatePolicy(input.policy, policyPlan(input.environment, input.dialect, input.toApply, input.now));
-  if (!input.digest || !results.some((r) => r.outcome === "denied")) return results;
-  const at = await input.ledger();
+  return judgePolicyPlan(input.policy, policyPlan(input.environment, input.dialect, input.toApply, input.now), input.digest, input.ledger);
+}
+
+/** The rules over `plan`, with the overrides on the ledger for `digest` marking the denials they answer. */
+async function judgePolicyPlan(policy: PolicyConfig, plan: PolicyPlan, digest: string | undefined, ledger: () => Promise<{ port: GateLedgerPort; op: MigrateOpRef } | undefined>): Promise<RuleResult[]> {
+  const results = evaluatePolicy(policy, plan);
+  if (!digest || !results.some((r) => r.outcome === "denied")) return results;
+  const at = await ledger();
   if (!at) return results;
-  return withOverrides(results, await readOverrides(at.port, at.op, input.digest, input.policy.overriders));
+  return withOverrides(results, await readOverrides(at.port, at.op, digest, policy.overriders));
+}
+
+/**
+ * The policy over a revert (#97), as `yodel revert` judges it before the
+ * gate and its Apply step again under the lock: the rules over
+ * {@link policyRevertPlan}, and the overrides recorded for the revert's own
+ * digest (`yodel override <env> --revert <id>`). Empty when the config
+ * declares no policy, or the revert has no statement.
+ */
+export async function judgeRevert(input: {
+  policy: PolicyConfig | undefined;
+  environment: string;
+  dialect: SqlDialect;
+  plan: RevertPlan;
+  digest: string | undefined;
+  ledger: () => Promise<{ port: GateLedgerPort; op: MigrateOpRef } | undefined>;
+  now?: Date;
+}): Promise<RuleResult[]> {
+  if (!input.policy || input.plan.statements.length === 0) return [];
+  return judgePolicyPlan(input.policy, policyRevertPlan(input.environment, input.dialect, input.plan, input.now), input.digest, input.ledger);
 }
 
 /** One line per rule, for text output. */

@@ -41,6 +41,7 @@ import { HistoryRecorder, MIGRATION_ROW, newRunContext, statementSha, withLock, 
 import { acquireWaiting, inspect, type VersionedEnv } from "./engine.js";
 import { sameDigest } from "./digest.js";
 import type { VersionedStatus } from "./state.js";
+import type { PolicyOverride } from "./policy.js";
 
 /** The migration `yodel apply --digest` and `--execute` revert instead of applying, set by `yodel revert` for its Op run. */
 export const REVERT_ENV = "YODEL_REVERT";
@@ -245,6 +246,12 @@ export interface ExecuteRevertOptions {
   approvedDigest: string;
   /** Checks the approval for the digest computed under the lock; throws to refuse. */
   approve: (digest: string) => Promise<unknown>;
+  /**
+   * Judges the policy (#53, #97) over the revert for the digest computed
+   * under the lock; throws to refuse. Resolves to the overrides it relied
+   * on, which the `reverted` row records. Absent: no policy.
+   */
+  policy?: (digest: string, plan: RevertPlan) => Promise<PolicyOverride[]>;
   log: (line: string) => void;
   processEnv?: NodeJS.ProcessEnv;
   lockWaitMs?: number;
@@ -266,6 +273,8 @@ export async function executeRevert(venv: VersionedEnv, ordered: readonly Migrat
       throw new YodelError(`refused: the revert's plan moved since it was approved (approved ${options.approvedDigest}, now ${digest}). Nothing was reverted; run yodel revert ${venv.environment} ${options.id} again and approve the new plan.`, 1);
     }
     await options.approve(digest);
+    // The policy, judged again under the lock for the digest computed here: a denial with no override for it refuses.
+    const overrides = options.policy ? await options.policy(digest, plan) : [];
     const m = plan.migration;
     const recorder = new HistoryRecorder(venv.store, newRunContext(options.approvedDigest, options.processEnv), state.maxSeq);
     const base = { migration_id: m.id, parent: m.parent ?? "", checksum: plan.checksum, silences: "[]" };
@@ -289,7 +298,10 @@ export async function executeRevert(venv: VersionedEnv, ordered: readonly Migrat
       }
       options.log(`  statement ${String(i)}: ok (${s.source === "step" ? `the revert step ${plan.step?.file ?? ""}` : `${s.step.rule} ${s.step.class}, ${s.step.name}`})`);
     }
-    const note = JSON.stringify({ revert: { to: plan.to, statements: plan.statements.length, ...(plan.step ? { step: plan.step.file, stepSha: plan.step.sha } : {}) } });
+    const note = JSON.stringify({
+      revert: { to: plan.to, statements: plan.statements.length, ...(plan.step ? { step: plan.step.file, stepSha: plan.step.sha } : {}) },
+      ...(overrides.length > 0 ? { policy: { overrides } } : {}),
+    });
     await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "reverted", note });
     options.log(`${m.id}: reverted`);
     return plan;

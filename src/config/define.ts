@@ -200,8 +200,10 @@ export interface PolicyPlan {
   dialect: "clickhouse" | "postgres";
   /** When the plan is evaluated, ISO 8601 in UTC. */
   now: string;
-  /** The migrations the run would apply, in order. */
+  /** The migrations the run would apply, in order. For a revert, the one migration reverted, its steps the revert's statements. */
   pending: PolicyMigration[];
+  /** Present when the plan is a revert (`yodel revert`): the migration undone and the one it goes back to (null: an empty schema). */
+  revert?: { id: string; to: string | null };
 }
 
 export interface PolicyMigration {

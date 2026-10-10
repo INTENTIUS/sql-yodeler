@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://intentius.io/sql-yodeler/schemas/v1/revert.schema.json",
   "title": "yodel revert <env> <id> --json",
-  "description": "Version 1. The revert of a migration: the statements that take the schema from its recorded schema back to its parent's (a hand-written revert step's first), the digest its gate binds, and what happened: planned (--dry-run), gated (waiting for approval), reverted, or failed. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "description": "Version 1. The revert of a migration: the statements that take the schema from its recorded schema back to its parent's (a hand-written revert step's first), the digest its gate binds, and what happened: planned (--dry-run), denied by a policy rule, gated (waiting for approval), reverted, or failed. Within a version, fields are only added; a reader ignores fields it does not know.",
   "type": "object",
   "additionalProperties": false,
   "required": ["environment", "migration", "to", "planDigest", "statements", "dataSteps", "status"],
@@ -35,7 +35,31 @@
       "required": ["file", "sha", "statements"],
       "properties": { "file": { "type": "string" }, "sha": { "type": "string" }, "statements": { "type": "integer", "minimum": 1 } }
     },
-    "status": { "enum": ["planned", "gated", "reverted", "failed"] },
+    "status": { "enum": ["planned", "denied", "gated", "reverted", "failed"] },
+    "policy": {
+      "description": "Each policy rule's outcome over the revert, the policy as the base commit has it; denied when a rule denies the revert and no override is recorded for its digest.",
+      "$ref": "common.schema.json#/$defs/policy"
+    },
+    "wave": {
+      "description": "When yodel.config.ts waves names the environment: the wave's gate policy at the base commit, the revert's statements it counts as destructive, and whether it asks for an approval of the revert. The revert waits at the migrations Op's gate either way.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "base", "destructiveSteps", "policyWaits"],
+      "properties": {
+        "gate": { "enum": ["always", "on-destructive", "never"] },
+        "base": { "type": "string" },
+        "destructiveSteps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["migration", "step", "what", "why"],
+            "properties": { "migration": { "type": "string" }, "step": { "type": "integer", "minimum": 0 }, "what": { "type": "string" }, "why": { "type": "string" } }
+          }
+        },
+        "policyWaits": { "type": "boolean" }
+      }
+    },
     "op": { "type": "string" },
     "gate": { "type": "string" },
     "approve": { "description": "The chant approve command that approves this revert.", "type": "string" },

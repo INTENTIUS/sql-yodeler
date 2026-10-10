@@ -1,7 +1,7 @@
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
-import { parse, Project } from "../lib/project.js";
+import { hold, runParts, Violation, type Claim, type Ctx } from "../lib/claim.js";
+import { parse, parseOr, Project } from "../lib/project.js";
 import { addColumn, addTable, createTableByHand, mainTable, needsVersioned } from "../lib/schema.js";
 
 /**
@@ -89,7 +89,7 @@ export async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
  * BREAK: the policy is read from the change itself (YODEL_BASE=HEAD), where
  * the rule is gone, so the drop is not refused.
  */
-export async function policyPart(ctx: Ctx, p: Project): Promise<void> {
+async function policyOverApply(ctx: Ctx, p: Project): Promise<void> {
   // A table to drop, applied first. Under BREAK an earlier part may have left migrations pending too.
   addTable(p, "scratch");
   if ((await p.newMigration("add-scratch")) === undefined) throw new Error("yodel new wrote no migration for the scratch table");
@@ -127,6 +127,102 @@ export async function policyPart(ctx: Ctx, p: Project): Promise<void> {
   hold(await gone(), "the dropped object is still there after the overridden apply");
   const recorded = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}' AND status = 'started' AND note LIKE '%no-drops%TICKET-7%'`);
   hold(recorded === 1, `the history records the override in ${String(recorded)} of ${id}'s started rows`);
+}
+
+/** The rule the policy part's config declares: drops refused in this environment, a dropped column (destructive) too. */
+const noDrops = (p: Project): string =>
+  `export default {\n  policy: {\n    overriders: ["alice"],\n    rules: [{ id: "no-drops", environments: [${JSON.stringify(p.env)}], refuse: { classes: ["drop"], destructive: true } }],\n  },\n};\n`;
+
+/**
+ * Under BREAK, yodel with the policy over a revert taken out: the project's
+ * yodel copied, its judgeRevert made to judge nothing, before the gate and
+ * under the lock alike.
+ */
+function withoutRevertPolicy(ctx: Ctx, p: Project): string[] {
+  const pkg = realpathSync(p.path("node_modules", "@intentius", "sql-yodeler"));
+  const root = join(ctx.work, "yodel-without-revert-policy");
+  mkdirSync(root, { recursive: true });
+  cpSync(join(pkg, "dist"), join(root, "dist"), { recursive: true });
+  copyFileSync(join(pkg, "package.json"), join(root, "package.json"));
+  symlinkSync(p.path("node_modules"), join(root, "node_modules"));
+  const file = join(root, "dist", "versioned", "policy.js");
+  const text = readFileSync(file, "utf8");
+  const patched = text.replace(/export async function judgeRevert\(input\) \{/, "$& return [];");
+  if (patched === text) throw new Error(`judgeRevert is not in ${file}; the broken build cannot take it out`);
+  writeFileSync(file, patched);
+  ctx.log("BREAK: yodel built without the policy over a revert");
+  return ["node", join(root, "dist", "bin.js")];
+}
+
+/**
+ * Policy over a revert (#97): the base commit's policy refuses drops here.
+ * A table is added and applied; yodel revert of that migration, which
+ * drops the table, is denied before the gate (exit 4) naming the rule, and
+ * the table stays. An override recorded with yodel override --revert for
+ * the revert's digest lets it through the policy: the revert stops at the
+ * gate, runs once approved, the table is gone, and the reverted row
+ * records the override. The migration is then deleted, as after any revert.
+ * BREAK: yodel is built without the policy over a revert, so the revert is
+ * not denied and stops at the gate instead.
+ */
+async function policyOverRevert(ctx: Ctx, p: Project): Promise<void> {
+  // Under BREAK the half before may have left the drop pending, which the base's policy (no rule) lets through.
+  if ((await p.approvedApply([], { YODEL_BASE: "HEAD" })).ran.code !== 0) throw new Error("the earlier migrations did not apply");
+  p.write("yodel.config.ts", noDrops(p));
+  addTable(p, "undo_me");
+  const id = await p.newMigration("add-undo-me");
+  if (id === undefined) throw new Error("yodel new wrote no migration for the table");
+  await p.commit("a table, and the rule that refuses drops again");
+  await p.setupApply();
+  // A commit on top, so the base (the first parent) is the one that has the rule.
+  await p.git("commit", "-q", "--allow-empty", "-m", `revert ${id}`);
+  const there = () => ctx.db.tableExists("undo_me");
+  if (!(await there())) throw new Error("the table to revert is not on the server");
+  const bin = ctx.broken ? { bin: withoutRevertPolicy(ctx, p) } : {};
+  const revert = () => p.yodel(["revert", p.env, id, "--json"], { timeoutMs: 600_000, ...bin });
+
+  const denied = await revert();
+  const doc = parseOr<{ status?: string; policy?: Array<{ id: string; outcome: string }> }>(denied, {});
+  hold(denied.code === 4 && doc.status === "denied" && doc.policy?.some((r) => r.id === "no-drops" && r.outcome === "denied") === true, `yodel revert of a migration that added a table, under the no-drops rule, exited ${String(denied.code)}, status ${String(doc.status)}, not denied by no-drops`);
+  hold(await there(), "the table is gone though the policy denied its revert");
+
+  const over = await p.yodel(["override", p.env, "--revert", id, "--rule", "no-drops", "--reason", "added by mistake in TICKET-8", "--by", "alice"]);
+  if (over.code !== 0) throw new Error(`yodel override --revert exited ${String(over.code)}: ${over.err.slice(-400)}`);
+  const gated = await revert();
+  const gatedDoc = parseOr<{ status?: string; approve?: string }>(gated, {});
+  hold(gated.code === 3 && gatedDoc.status === "gated", `yodel revert with the override for its digest exited ${String(gated.code)}, status ${String(gatedDoc.status)}, not at the gate`);
+  await p.approve(gatedDoc.approve);
+  const ran = await revert();
+  hold(ran.code === 0, `yodel revert after the approval exited ${String(ran.code)}`);
+  hold(!(await there()), "the table is still there after the overridden revert");
+  const recorded = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}' AND status = 'reverted' AND note LIKE '%no-drops%TICKET-8%'`);
+  hold(recorded === 1, `the history records the override in ${String(recorded)} of ${id}'s reverted rows`);
+
+  // As after any revert: the migration deleted (it would apply again), the table no longer declared.
+  p.removeMigration(id);
+  rmSync(p.path("src", "undo_me.ts"));
+  await p.commit(`delete ${id}, reverted`);
+}
+
+/**
+ * The policy (#53, #73, #97), over an apply and over a revert. Each half
+ * breaks its own property under BREAK, and the part is caught only when
+ * both caught theirs.
+ */
+export async function policyPart(ctx: Ctx, p: Project): Promise<void> {
+  const caught: string[] = [];
+  for (const [name, half] of [["apply", policyOverApply], ["revert", policyOverRevert]] as const) {
+    try {
+      await half(ctx, p);
+    } catch (e) {
+      if (!(ctx.broken && e instanceof Violation)) throw e;
+      ctx.log(`policy over ${name} caught its break: ${e.message}`);
+      caught.push(`over ${name}: ${e.message}`);
+      continue;
+    }
+    if (ctx.broken) ctx.log(`policy over ${name} held with its property broken`);
+  }
+  if (caught.length === 2) throw new Violation(caught.join("; "));
 }
 
 /** The parts of `yodel report --json` the audit part reads. */
@@ -250,7 +346,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const approval: Claim = {
   name: "approval",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; an approval is refused once the migration changed after it, and nothing is applied",
   dialects: { ch: body, pg: body },
   parts: parts.map(([name]) => name),
 };
