@@ -12,5 +12,7 @@ export default {
   environments: {
     dev: { topology: "single", history: { database: "{{chant:history_database}}" } },
     prod: { topology: "single", history: { database: "{{chant:history_database}}" } },
+    // The lint job's throwaway server (chant.config.ts), with the same history database.
+    replay: { topology: "single", history: { database: "{{chant:history_database}}" } },
   },
 } satisfies YodelConfig;

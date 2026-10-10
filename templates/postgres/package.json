@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "ci": "tsx scripts/ci.ts",
-    "ci:check": "tsx scripts/ci.ts --check"
+    "ci:check": "tsx scripts/ci.ts --check",
+    "replay": "tsx scripts/ci.ts --replay"
   },
   "dependencies": {
     "@intentius/chant": "0.114.1",

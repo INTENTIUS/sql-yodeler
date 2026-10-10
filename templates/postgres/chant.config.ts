@@ -40,12 +40,14 @@ export default {
     profiles: {
       dev: postgres("dev", "postgres://127.0.0.1:5432/postgres"),
       prod: postgres("prod", "postgres://db.example.com:5432/app"),
-      // Not an environment: the throwaway server the pull request's lint job
-      // starts for `yodel lint --replay replay --reset`, which drops and
-      // replays {{chant:schema}} there. Never point it at a server whose data
-      // matters. Locally: `chant emulator up --lexicon sql`.
+      // Not an environment: the throwaway server for `yodel lint --replay
+      // replay --reset`, which drops and replays {{chant:schema}} there. The
+      // pull request's lint job starts one as a service; on your machine
+      // `npm run replay` starts one with Docker and sets REPLAY_POSTGRES_URL.
+      // Never dev's server (the emulator on 5432): it holds {{chant:schema}}
+      // too, and --reset would drop it. Without REPLAY_POSTGRES_URL it names no server.
       replay: {
-        url: process.env.REPLAY_POSTGRES_URL ?? "postgres://127.0.0.1:5432/postgres",
+        url: process.env.REPLAY_POSTGRES_URL ?? "postgres://replay.invalid:5432/postgres",
         user: { env: "REPLAY_POSTGRES_USER" },
         password: { env: "REPLAY_POSTGRES_PASSWORD" },
         schemas: ["{{chant:schema}}"],
