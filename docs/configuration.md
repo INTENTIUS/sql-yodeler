@@ -19,11 +19,7 @@ A commit that is not released yet installs from git:
 npm install github:INTENTIUS/sql-yodeler#main
 ```
 
-npm clones the commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin; `package-lock.json` pins the commit. The repository is private, so the install, and every `npm ci` after it, needs read access to it. On your machine, `gh auth setup-git` or an SSH key that GitHub accepts is enough. The lockfile records the dependency as `git+ssh://git@github.com/INTENTIUS/sql-yodeler.git#<commit>`; when SSH fails, npm retries over HTTPS, so an HTTPS token works too. In CI, give the job a token that can read `INTENTIUS/sql-yodeler` (a GitHub Actions job's own `GITHUB_TOKEN` cannot read another private repository) and set it before `npm ci`. The templates' pipelines do this when a `SQL_YODELER_TOKEN` secret is set:
-
-```sh
-git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
-```
+npm clones the commit, installs its dev dependencies and runs its `prepare` script, which builds `dist/` and the `yodel` bin; `package-lock.json` pins the commit. The repository is public, so this needs no token.
 
 ### From a clone
 

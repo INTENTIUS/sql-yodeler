@@ -4,7 +4,7 @@
 // page under src/content/docs/ (gitignored, never committed): the first
 // heading becomes the title, links between docs pages become site links, and
 // links into the rest of the repository (examples, source files) become their
-// plain text, because the repository is private. The landing page is the
+// plain text. The landing page is the
 // README's intro over docs/README.md, and the sidebar follows the order of
 // docs/README.md's table, then any page the table does not list.
 

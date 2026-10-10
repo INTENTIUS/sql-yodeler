@@ -18,7 +18,7 @@ Rules for anyone, person or agent, who changes this repo.
 
 The workflows in `.github/workflows/` are rendered, not written by hand: each is declared in TypeScript in `.github/src/<name>.ts` with `@intentius/chant-lexicon-github`. Edit the declaration, run `npm run workflows`, and commit both; `npm run check` fails when a rendered file differs from its declaration (`test/workflows.test.ts`).
 
-The scenario claims (`npm run claims`, `scenarios/`) run on every pull request in `.github/workflows/claims.yml`. GitHub cannot mark a check required on this private repo, so the rule is written here instead: a pull request is merged only when both `check` and `claims` are green.
+The scenario claims (`npm run claims`, `scenarios/`) run on every pull request in `.github/workflows/claims.yml`. Both are required checks on `main`: a pull request is merged only when `check` and `claims` are green.
 
 ## chant
 
@@ -37,7 +37,7 @@ The docs, READMEs and issues describe what SQL Yodeler does. They do not compare
 
 ## Releasing
 
-`@intentius/sql-yodeler` is published to npm by `.github/workflows/publish.yml` when a `v<version>` tag is pushed. Nobody runs `npm publish` by hand. The workflow checks that the tag matches `package.json`, runs `npm ci`, `build` and `check`, and publishes with npm trusted publishing: npm trusts the workflow by its file name, `publish.yml`, so there is no npm token, and renaming the file breaks publishing until the trusted publisher on npmjs.com is changed too. The repository is private, so npm makes no provenance attestation. After the publish, a smoke job installs `@intentius/sql-yodeler@<version>` from the registry into an empty directory, retrying until the registry serves it, and checks that `npx yodel --version` prints the version.
+`@intentius/sql-yodeler` is published to npm by `.github/workflows/publish.yml` when a `v<version>` tag is pushed. Nobody runs `npm publish` by hand. The workflow checks that the tag matches `package.json`, runs `npm ci`, `build` and `check`, and publishes with npm trusted publishing: npm trusts the workflow by its file name, `publish.yml`, so there is no npm token, and renaming the file breaks publishing until the trusted publisher on npmjs.com is changed too. npm attaches a provenance attestation that links the release to the workflow run. After the publish, a smoke job installs `@intentius/sql-yodeler@<version>` from the registry into an empty directory, retrying until the registry serves it, and checks that `npx yodel --version` prints the version.
 
 A release takes two runs of `npm run release` (`scripts/release.sh`, which needs `gh` signed in):
 

@@ -59,7 +59,6 @@ jobs:
       - run: npm run check
       - name: npm publish
         env:
-          NPM_CONFIG_PROVENANCE: 'false'
           VERSION: '${{ steps.version.outputs.version }}'
         run: |
           # A rerun after a publish that went through publishes nothing.

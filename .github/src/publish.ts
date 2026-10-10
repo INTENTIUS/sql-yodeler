@@ -49,11 +49,6 @@ echo "version=$version" >> "$GITHUB_OUTPUT"
     new Step({
       name: "npm publish",
       env: {
-        // npm generates provenance by default under trusted publishing, but
-        // only for a public source repository: this one is private, so there
-        // is none. Saying so keeps npm from trying. Drop this once the
-        // repository is public.
-        NPM_CONFIG_PROVENANCE: "false",
         VERSION: "${{ steps.version.outputs.version }}",
       },
       run: `# A rerun after a publish that went through publishes nothing.
