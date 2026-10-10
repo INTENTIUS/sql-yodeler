@@ -32,6 +32,10 @@
  * in one transaction, under `lock_timeout`, retried on a lock timeout
  * (`./postgres/executor.ts`).
  *
+ * A migration's pre-migration checks (#52, `./checks.ts`) run under the
+ * lock just before its first statement; one that fails refuses (exit 4)
+ * with a `failed` migration row naming it, and nothing of it is sent.
+ *
  * Manual steps, and Op steps apply does not run (a rebuild in app mode, a
  * step of the other dialect), are refused before anything runs (exit 2).
  */
@@ -68,6 +72,7 @@ import type { VersionedDriver } from "./driver.js";
 import { openPostgres, type PgConnect } from "./postgres/driver.js";
 import { compareHistory, outOfOrder, type PendingMigration, type VersionedStatus } from "./state.js";
 import { digestSubject, planDigest, sameDigest, type LiveScope } from "./digest.js";
+import { checksDue, checksRefusal, failedChecks, runChecks } from "./checks.js";
 
 /** Exit code: a checksum mismatch, an applied migration gone from the directory, or an out-of-order migration without `--allow-out-of-order`. */
 export const REFUSED = 4;
@@ -305,8 +310,21 @@ async function applyMigration(
   const m = p.migration;
   const silences = options.silences?.(m) ?? "[]";
   const base = { migration_id: m.id, parent: m.parent ?? "", checksum: p.checksum, silences };
+  let checksNote = "";
+  if (checksDue(p)) {
+    const outcomes = await runChecks(venv.driver, m);
+    checksNote = JSON.stringify({ checks: outcomes });
+    const refusal = checksRefusal(m, outcomes, "under the lock, before its first statement");
+    if (refusal) {
+      const failed = failedChecks(m, outcomes);
+      await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "failed", error: failed.join("; "), note: checksNote });
+      for (const f of failed) options.log(`${m.id}: ${f}`);
+      throw refusal;
+    }
+    for (const o of outcomes) options.log(`${m.id}: check ${o.name} passed (${o.detail})`);
+  }
   options.log(`${m.id}: ${p.partWay ? `resuming at statement ${String(p.partWay.resumeAt)}` : "applying"}${p.outOfOrder ? " (out of order, allowed)" : ""}`);
-  await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "started" });
+  await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "started", ...(checksNote ? { note: checksNote } : {}) });
 
   for (const [i, step] of m.document.steps.entries()) {
     if (statementDone(rec, i)) {

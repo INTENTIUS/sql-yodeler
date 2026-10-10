@@ -13,6 +13,7 @@ import { describeServer } from "../server.js";
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
 import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
 import { asBackfill } from "../steps/kinds.js";
+import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
 
 /** The marker that identifies one environment's plan comment. */
@@ -80,6 +81,7 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
       else lines.push(...step.detail.split("\n").map((l) => `       ${l}`));
       if (step.kind !== "statement") lines.push(`       ${why ? `yodel apply refuses it: ${why}` : "yodel apply runs it as this step"}`);
     }
+    for (const c of p.checks ?? []) lines.push(`  check ${c.name} (${describeExpect(c)}, before the first statement):`, ...redact(c.sql).split("\n").map((l) => `       ${l}`));
   }
   if (plan.pending.length === 0 && !plan.refusal) lines.push("", "Nothing pending: every migration is applied.");
   if (plan.problems.length > 0) lines.push("", `Integrity problems (${String(plan.problems.length)}):`, ...plan.problems.map((p) => `  ${p}`));
@@ -106,6 +108,11 @@ function pendingMarkdown(p: PendingView, withSql: boolean): string[] {
   for (const { index, step, done } of p.steps) {
     const { rule, cls } = stepRule(step);
     out.push(`| ${String(index)} | ${step.kind === "statement" ? "statement" : `**${cell(stepKind(step))}**`}${done ? " (done)" : ""} | ${cell(rule)} | ${cell(cls)} | \`${cell(step.name)}\` |`);
+  }
+  const checks = p.checks ?? [];
+  if (checks.length > 0) {
+    out.push("", `Pre-migration checks (${String(checks.length)}), run before the first statement; one that fails refuses the apply:`, "", "| Check | Must | Query |", "|---|---|---|");
+    for (const c of checks) out.push(`| \`${cell(c.name)}\` | ${cell(describeExpect(c).replace(/^returns/, "return"))} | \`${cell(redact(c.sql)).replace(/`/g, "'")}\` |`);
   }
   const statements = p.steps.filter((s) => s.step.kind === "statement");
   if (withSql && statements.length > 0) {
@@ -200,6 +207,7 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
       id: p.id,
       outOfOrder: p.outOfOrder,
       ...(p.resumeAt !== undefined ? { resumeAt: p.resumeAt } : {}),
+      ...(p.checks && p.checks.length > 0 ? { checks: p.checks } : {}),
       steps: p.steps.map(({ index, step, done, refused }) => ({
         index,
         kind: step.kind,

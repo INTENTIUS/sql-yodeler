@@ -25,6 +25,7 @@ import { describeSettingsTopology } from "../config/settings.js";
 import { softly } from "../server.js";
 
 export * from "./approval.js";
+export * from "./checks.js";
 export * from "./digest.js";
 export * from "./engine.js";
 export * from "./op.js";

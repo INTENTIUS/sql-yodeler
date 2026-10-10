@@ -28,6 +28,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { dirname, join } from "node:path";
 import { YodelError } from "../project.js";
 import { verifyChecksum, type ChecksumCheck } from "./checksum.js";
+import { checksProblem } from "./checks.js";
 import { MIGRATION_JSON, MIGRATION_SQL, type MigrationDocument, type MigrationFiles } from "./document.js";
 
 /** Where a project keeps its migrations, relative to the project directory. */
@@ -128,6 +129,8 @@ function readOne(dir: string, id: string): Migration | MigrationProblem {
   if (typeof doc.checksum !== "string") return bad("no checksum");
   if (!Array.isArray(doc.steps)) return bad("no steps");
   if (!isRecord(doc.schema)) return bad("no recorded schema");
+  const checks = checksProblem(doc.checks);
+  if (checks) return bad(checks);
   if (doc.id !== id) {
     return { kind: "id-mismatch", id, recorded: doc.id, message: `${id}/${MIGRATION_JSON} records id ${doc.id}; a migration's id is its directory's name` };
   }

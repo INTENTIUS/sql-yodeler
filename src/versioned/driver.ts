@@ -35,6 +35,13 @@ export interface VersionedDriver {
   acquireLock(holder: string): Promise<Lock>;
   /** A fingerprint of the live schema in the environment's scope, the history left out. */
   liveFingerprint(): Promise<string>;
+  /**
+   * Runs a pre-migration check's query (#52) read-only and returns its rows:
+   * ClickHouse with `readonly = 2` and the migration's default database,
+   * Postgres in a `READ ONLY` transaction with `search_path` set to the
+   * migration's default schema, rolled back.
+   */
+  readCheck(sql: string, where: { defaultDatabase?: string | undefined; defaultSchema?: string | undefined }): Promise<Array<Record<string, unknown>>>;
   /** Sends one statement and writes its `succeeded` row through `run`; throws with the server's message when it fails. */
   runStatement(step: StatementStep, run: StatementRun): Promise<void>;
   /** What an Op step's runner gets from the dialect: the ClickHouse port and endpoint; the Postgres lock timeout, and the connection, timeouts and receipts schema a backfill uses. */

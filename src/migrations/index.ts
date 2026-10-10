@@ -15,6 +15,7 @@
  * `./checksum.ts`, the ordering rules in `./directory.ts`.
  */
 
+export * from "./checks.js";
 export * from "./checksum.js";
 export * from "./create.js";
 export * from "./directory.js";

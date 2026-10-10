@@ -12,7 +12,7 @@ import { diffStatements, renderStatements, type DiffStatementsOptions, type Sche
 import { YodelError } from "../project.js";
 import type { BuildOutput } from "../chant/build.js";
 import { computeChecksum } from "./checksum.js";
-import { MIGRATION_FORMAT, serializeDocument, type MigrationDocument, type MigrationFiles, type MigrationStep } from "./document.js";
+import { MIGRATION_FORMAT, serializeDocument, type MigrationCheck, type MigrationDocument, type MigrationFiles, type MigrationStep } from "./document.js";
 import { MIGRATION_NAME, type Migration } from "./directory.js";
 import { asBackfill, BACKFILL_FILE } from "../steps/kinds.js";
 import { backfillStep } from "../steps/backfill.js";
@@ -39,6 +39,8 @@ export interface CreateMigrationOptions {
    * build has no schema change.
    */
   backfill?: { text: string; file?: string };
+  /** Pre-migration checks (#52), written to `migration.json`. */
+  checks?: MigrationCheck[];
 }
 
 export interface CreatedMigration {
@@ -151,6 +153,7 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
     ...(statements.major !== undefined ? { major: statements.major } : {}),
     refused: statements.refused,
     hints: statements.hints,
+    ...(options.checks && options.checks.length > 0 ? { checks: options.checks } : {}),
     steps: statements.steps,
     schema: options.build,
   };
