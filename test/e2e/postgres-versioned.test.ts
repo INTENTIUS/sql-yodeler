@@ -196,6 +196,10 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
       expect(refused.code, refused.err).toBe(5);
       expect(refused.err).toMatch(new RegExp(String.raw`another apply holds the lock \(Postgres advisory lock .* ${HISTORY}\): owner someone else, pid \d+`));
       expect(refused.err).toMatch(/pg_terminate_backend\(\d+\)/);
+      // yodel apply itself, which runs that step through the Op, exits 5 too (#13), not chant run's 1.
+      const outer = await yodel(at("apply", "e2e", "--json"));
+      expect(outer.code, outer.err).toBe(5);
+      expect((json(outer) as StatusDoc & { exitCode: number }).exitCode).toBe(5);
     } finally {
       await holder.end();
     }

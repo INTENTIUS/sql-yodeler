@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "./command.js";
 import { commands } from "./commands/index.js";
 import { version } from "./version.js";
+import { EXIT_CODES, PLAN_PENDING_NOTE } from "./exit.js";
 
 export function help(list: readonly Command[] = commands): string {
   const width = Math.max(...list.map((c) => c.name.length));
@@ -21,7 +22,25 @@ export function help(list: readonly Command[] = commands): string {
     "  -h, --help     show this help",
     "  -v, --version  print the version",
     "",
+    "Exit codes (yodel <command> --help lists a command's own):",
+    ...EXIT_CODES.map(([code, meaning]) => wrap(`  ${String(code)}  ${meaning}`, "     ")),
+    wrap(`  ${PLAN_PENDING_NOTE}`, "  "),
+    "",
   ].join("\n");
+}
+
+/** Wraps `line` at 80 columns, continuing with `indent`. */
+export function wrap(line: string, indent: string, width = 80): string {
+  const out: string[] = [];
+  let current = "";
+  for (const word of line.split(/(?<=\S) (?=\S)/)) {
+    if (current && current.length + 1 + word.length > width) {
+      out.push(current);
+      current = indent + word.trimStart();
+    } else current = current ? `${current} ${word}` : word;
+  }
+  if (current) out.push(current);
+  return out.join("\n");
 }
 
 /** Parses argv (without the node and script paths) and runs a verb; resolves to the exit code. */

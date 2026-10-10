@@ -1,8 +1,7 @@
 import type { Command } from "../command.js";
 import { guarded, parseEnvArgs, usage } from "../env-args.js";
 import { loadProject, resolveEnvironment } from "../project.js";
-import { readMigrations } from "../migrations/index.js";
-import { closeVersioned, migrationsDir, openVersioned, renderStatus, statusJson, statusReport } from "../versioned/index.js";
+import { closeVersioned, openVersioned, readChain, renderStatus, statusJson, statusReport } from "../versioned/index.js";
 
 /** Exit code: migrations are pending, and nothing is wrong. */
 export const STATUS_PENDING = 3;
@@ -26,11 +25,11 @@ Options:
 Exit codes:
   0  every migration is applied
   3  migrations are pending (failed part way included), and nothing is wrong
-  4  a checksum mismatch, an applied migration gone from the directory, or an
-     out-of-order migration (apply refuses it without --allow-out-of-order)
+  4  a checksum mismatch, an applied migration gone from the directory, an
+     out-of-order migration (apply refuses it without --allow-out-of-order),
+     or a fork or another problem in the migrations directory
   2  a pending migration has a manual step or an Op step yodel apply does not run
-  1  the status could not be read: a bad config, a malformed migrations
-     directory, a server that does not answer
+  1  the status could not be read: a bad config, a server that does not answer
 `;
 
 /** `yodel status <env>`; the exit codes are in `help`. */
@@ -43,7 +42,7 @@ export const status: Command = {
       const { env: name, json, dir } = parseEnvArgs("status", args);
       const project = await loadProject(dir);
       const env = resolveEnvironment(project, name);
-      const ordered = readMigrations(migrationsDir(project));
+      const ordered = readChain(project);
       const venv = await openVersioned(project, env);
       const report = await statusReport(venv, ordered, { sync: false }).finally(() => closeVersioned(venv));
       if (json) io.out(`${JSON.stringify(statusJson(report), null, 2)}\n`);

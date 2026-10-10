@@ -119,6 +119,8 @@ export interface ApplyRun {
   /** The plan digest the gate is waiting on. */
   planDigest?: string;
   output: string;
+  /** The exit code of the Op's Apply step (`yodel apply --execute`), when it ran. */
+  stepExit?: number;
 }
 
 /** What a `chant run` of an ApplyOp says about its outcome. */
