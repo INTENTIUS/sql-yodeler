@@ -149,4 +149,4 @@ Add its profile to `chant.config.ts`, its entry to `yodel.config.ts` `environmen
 
 ## The sql-yodeler dependency
 
-`package.json` takes `@intentius/sql-yodeler` from npm, `^0.3.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.4.0 after 0.3.x) needs the range changed, since `^0.3.0` stops at 0.3.x.
+`package.json` takes `@intentius/sql-yodeler` from npm, `^0.4.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.5.0 after 0.4.x) needs the range changed, since `^0.4.0` stops at 0.4.x.

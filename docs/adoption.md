@@ -55,7 +55,7 @@ Lineage: dir:<clone>/templates/clickhouse (a directory, recorded by digest only)
 Parameters: database="events", history_database="yodeler", name="events-schema"
 ```
 
-The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.3.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. The run quoted here linked the clone's `node_modules` into `my-schema` in place of `npm install`.
+The template's `package.json` takes `@intentius/sql-yodeler` from npm (`^0.4.0`), so `npm install` in `my-schema` needs no token, and neither do the generated pipelines' `npm ci`; [Installing](configuration.md#installing) has the other routes. The run quoted here linked the clone's `node_modules` into `my-schema` in place of `npm install`.
 
 The first migration creates what `src/schema.ts` declares. `yodel new` needs no server:
 
