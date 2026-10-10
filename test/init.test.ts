@@ -287,3 +287,17 @@ describe("yodel init arguments", () => {
     }
   });
 });
+
+describe("a migration runner's table on ClickHouse (#17)", () => {
+  it("is left out of the import with the Postgres import's warning", async () => {
+    const { withoutRunnerTables } = await import("../src/init/live.js");
+    const table = (name: string) => ({ type: "ClickHouse::Table", logicalId: name, properties: { database: "legacy", name } });
+    const warnings: string[] = [];
+    const kept = await withoutRunnerTables([table("orders"), table("schema_migrations"), table("goose_db_version"), { type: "ClickHouse::Database", logicalId: "db", properties: { name: "schema_migrations" } }] as never, warnings);
+    expect(kept.map((r) => r.logicalId)).toEqual(["orders", "db"]);
+    expect(warnings).toEqual([
+      "legacy.schema_migrations is kept by a migration runner (Rails, golang-migrate, dbmate); left out, since declaring it would have chant change what that tool owns",
+      "legacy.goose_db_version is kept by goose; left out, since declaring it would have chant change what that tool owns",
+    ]);
+  });
+});

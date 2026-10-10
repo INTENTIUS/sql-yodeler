@@ -35,6 +35,7 @@ interface InitDoc {
   schemaFiles: string[];
   migration: { path: string; id: string; checksum: string; statements: number };
   recorded: { history: string; seq: number; note: string };
+  warnings: string[];
 }
 
 const count = async (sql: string) => Number((await clickhouse(sql)).trim());
@@ -52,7 +53,7 @@ async function declarativeDiff(dir: string): Promise<{ changes: unknown[]; refus
 }
 
 /** The versioned plan has nothing to apply, and the declared schema diffs clean against the live database. */
-async function expectNoChange(at: (...args: string[]) => string[], dir: string, baseline: string): Promise<void> {
+async function expectNoChange(at: (...args: string[]) => string[], dir: string, baseline: string, othersOwn: string[] = []): Promise<void> {
   const ran = await yodel(at("plan", "e2e", "--json"));
   expect(ran.code, ran.err).toBe(0);
   expect(json(ran)).toMatchObject({ mode: "versioned", applied: 1, pending: [], problems: [] });
@@ -60,7 +61,9 @@ async function expectNoChange(at: (...args: string[]) => string[], dir: string, 
   const text = await yodel(at("plan", "e2e"));
   expect(text.code, text.err).toBe(0);
   expect(text.out).not.toContain(baseline);
-  expect(await declarativeDiff(dir)).toEqual({ changes: [], refused: [] });
+  // Another tool's table, left out by init, reads as undeclared to chant's ClickHouse plan; an ApplyOp never drops it (no chant marker).
+  const diff = await declarativeDiff(dir);
+  expect({ ...diff, changes: diff.changes.filter((c) => !othersOwn.includes((c as { object: string }).object)) }).toEqual({ changes: [], refused: [] });
 }
 
 describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
@@ -83,6 +86,8 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
     await clickhouse(`CREATE MATERIALIZED VIEW ${DB}.daily_mv TO ${DB}.daily AS SELECT toDate(ts) AS day, kind, count() AS n FROM ${DB}.events GROUP BY day, kind`);
     await clickhouse(`CREATE VIEW ${DB}.recent AS SELECT * FROM ${DB}.events WHERE ts > now() - INTERVAL 1 DAY`);
     await clickhouse(`INSERT INTO ${DB}.events VALUES (1, now(), 'click', 'x')`);
+    // golang-migrate's history table: another tool's, left out as on Postgres (#17).
+    await clickhouse(`CREATE TABLE ${DB}.schema_migrations (version Int64, dirty UInt8, sequence UInt64) ENGINE = MergeTree ORDER BY sequence`);
     ({ dir, dispose } = e2eProject("init-clickhouse", DB));
   });
   afterAll(async () => {
@@ -99,6 +104,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
     doc = json(ran) as InitDoc;
     expect(doc.status).toBe("adopted");
     expect(doc.objects).toEqual([`Database ${DB}`, `Table ${DB}.daily`, `MaterializedView ${DB}.daily_mv`, `Table ${DB}.events`, `View ${DB}.recent`]);
+    expect(doc.warnings).toContain(`${DB}.schema_migrations is kept by a migration runner (Rails, golang-migrate, dbmate); left out, since declaring it would have chant change what that tool owns`);
     expect(doc.schemaFiles).toEqual(["src/schema.ts"]);
     expect(doc.migration.id).toMatch(/^\d{8}T\d{4}-baseline$/);
     expect(doc.migration.statements).toBe(5);
@@ -120,7 +126,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
   }, 300_000);
 
   it("then yodel plan shows no change", async () => {
-    await expectNoChange(at, dir, doc.migration.id);
+    await expectNoChange(at, dir, doc.migration.id, [`${DB}.schema_migrations`]);
   }, 300_000);
 
   it("and yodel status shows the baseline applied with nothing pending", async () => {

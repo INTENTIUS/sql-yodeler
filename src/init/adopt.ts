@@ -98,8 +98,14 @@ export function preflight(project: Project, env: Environment, options: { force?:
   }
 }
 
-/** Whether a plan has nothing to do: no change to a declared object, and no undeclared object it would drop. */
-const planIsEmpty = (plan: Plan): boolean => plan.diff.changes.length === 0 && plan.refused.length === 0;
+/**
+ * Whether a plan has nothing to do: no change to a declared object, and no
+ * undeclared object it would drop, but for the objects the import left out
+ * as another tool's (`leftOut`), which an ApplyOp never drops since they
+ * carry no chant marker.
+ */
+const planIsEmpty = (plan: Plan, leftOut: readonly string[] = []): boolean =>
+  plan.diff.changes.every((c) => leftOut.includes(c.object)) && plan.refused.length === 0;
 
 /** Adopts `env`'s live database into the project; see the module comment. */
 export async function adopt(project: Project, env: Environment, options: AdoptOptions = {}): Promise<Adopted> {
@@ -142,7 +148,7 @@ async function adoptWith(project: Project, env: Environment, venv: VersionedEnv,
     let made: ReturnType<typeof createMigration>;
     try {
       const plan = await planEnvironment(adopted, env, build, { env: processEnv });
-      if (!planIsEmpty(plan)) {
+      if (!planIsEmpty(plan, live.leftOut)) {
         throw new YodelError(
           `the declarations chant's import wrote do not plan clean against ${env.name}, so they are not yet the database; nothing was kept. ` +
             `This is an object chant cannot round-trip; please report it with the plan:\n${await renderPlan(plan, `Plan for ${env.name} after import`)}`,
