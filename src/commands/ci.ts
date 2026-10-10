@@ -17,6 +17,11 @@ Ops), each declared with chant's lexicons:
                 check into a throwaway server, and the plan comment per
                 environment
   yodel-apply   on a push to main: one job per wave (yodel-waves.json)
+  yodel-apply-plans
+                on a pull request, when a wave's approval is pr-review:
+                chant run wave --record-plans records the plan each wave
+                makes at the head, for the review to approve (on GitLab, the
+                merge request job yodel-apply-record-plans)
   watch-<env>   each environment's drift watch, on its schedule
 
 The pipelines come from the installed yodel, so upgrading yodel and running

@@ -88,7 +88,40 @@ export interface EnvironmentConfig {
    * chant.config.ts, so there the two must agree.
    */
   access?: boolean;
+  /**
+   * Which approvals of the migrations Op's gate count (#48), for `yodel
+   * apply <env>` outside the apply pipeline's waves:
+   *
+   * - `ledger` (the default): any `chant approve` of the plan digest;
+   * - `sealed`: only an approval sealed with `chant approve --sign` (or
+   *   `yodel approve --sign`) by a key the signers file
+   *   (`.chant/allowed_signers`) at the base commit lists for the approver.
+   *
+   * Read from yodel.config.ts at the base commit, never from the change.
+   * Default: the environment's wave's `approval` when that is `sealed`, else
+   * `ledger`. A wave's `pr-review` is the wave's alone.
+   */
+  approval?: EnvironmentApprovalMode;
 }
+
+/**
+ * Which approvals of a gate's plan digest count (#48), chant's wave
+ * `approval`:
+ *
+ * - `ledger`: any `chant approve` of the digest on `chant/lifecycle`;
+ * - `pr-review`: also an approving review of the merged pull request's head
+ *   by a writer other than its author, when that head planned the digest;
+ * - `sealed`: only an approval sealed by a key the signers file at the base
+ *   commit lists for its approver.
+ */
+export type ApprovalMode = "ledger" | "pr-review" | "sealed";
+
+export const APPROVAL_MODES: readonly ApprovalMode[] = ["ledger", "pr-review", "sealed"];
+
+/** The modes the migrations Op's gate takes: `pr-review` needs the pipeline's waves. */
+export type EnvironmentApprovalMode = Exclude<ApprovalMode, "pr-review">;
+
+export const ENVIRONMENT_APPROVAL_MODES: readonly EnvironmentApprovalMode[] = ["ledger", "sealed"];
 
 /** `steps` of an environment: run in order, `before` under the lock before the first migration, `after` after the last. */
 export interface ApplySteps {
@@ -183,6 +216,14 @@ export interface WaveConfig {
    * applies the rest. Default 1: one job plans, decides and applies.
    */
   shares?: number;
+  /**
+   * Which approvals of the wave's digest count (#48): `ledger` (the
+   * default), `pr-review` or `sealed`; see {@link ApprovalMode}. Read, like
+   * `gate`, from the commit a change merges onto. Under `pr-review`, `yodel
+   * ci` adds the pull request job that records the plans each head makes
+   * (`chant run wave --record-plans`).
+   */
+  approval?: ApprovalMode;
 }
 
 /** A forge `yodel ci` renders pipelines for. */

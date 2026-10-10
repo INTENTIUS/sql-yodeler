@@ -10,6 +10,7 @@
  */
 
 import { describeServer } from "../server.js";
+import { describeApprovalMode } from "../approval-mode/index.js";
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
 import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
 import { asBackfill, asForm, describeForm } from "../steps/kinds.js";
@@ -59,9 +60,11 @@ function approvalLines(a: ApprovalView | undefined, digest: string | undefined, 
   if (!a) return [];
   if (a.kind === "no-op") return [md ? `No migrations Op: ${a.message.split("\n")[0] ?? ""}` : a.message];
   const out: string[] = [];
+  if (a.mode) out.push(describeApprovalMode(a.mode, code));
   if (a.latest) {
     const l = a.latest;
     if (l.holds) out.push(`Approved by ${l.by} at ${l.at}: the apply after merge runs this plan.`);
+    else if (digest && l.sameDigest && l.uncounted) out.push(`The newest approval of ${code(a.gate)}, by ${l.by} at ${l.at}, is for this plan's digest, but it does not count: ${l.uncounted}.`);
     else if (digest && l.sameDigest) out.push(`The newest approval of ${code(a.gate)}, by ${l.by} at ${l.at}, ${askedAgainLine(l, code)}.`);
     else if (digest && l.digest) {
       out.push(`The newest approval of ${code(a.gate)}, by ${l.by} at ${l.at}, is for ${code(l.digest)}, not this plan; it does not hold.`);
@@ -105,7 +108,7 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   }
   if (plan.digest) {
     lines.push("", `Plan digest: ${plan.digest}`);
-    if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it with:`, `  ${run(plan.approval.command)}`, `or, at a terminal, with ${run(`yodel approve ${plan.environment}`)}, which shows the plan and asks you first.`);
+    if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it with:`, `  ${run(plan.approval.command)}`, `or, at a terminal, with ${run(`yodel approve ${plan.environment}${plan.approval.mode === "sealed" ? " --sign" : ""}`)}, which shows the plan and asks you first.`);
   }
   const a = approvalLines(plan.approval, plan.digest, false);
   if (a.length > 0) lines.push("", ...a);
@@ -274,6 +277,7 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
           op: a.op,
           gate: a.gate,
           ...(a.command ? { approve: a.command } : {}),
+          ...(a.mode ? { approvalMode: a.mode } : {}),
           ...(a.latest ? { approval: { ...a.latest, moved: a.latest.moved ? { confirmed: a.latest.moved.confirmed, changes: a.latest.moved.changes } : undefined } } : {}),
         }
       : a

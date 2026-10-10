@@ -20,7 +20,11 @@ export default {
   // from the commit before the push, so a change cannot loosen its own.
   // A wave applies only migrations the wave before it has applied (its
   // history records them, with the same checksum); `requires: "<env>"` names
-  // another environment, `requires: false` none.
+  // another environment, `requires: false` none. A wave's `approval` says
+  // which approvals count: "ledger" (any chant approve, the default),
+  // "pr-review" (also the pull request's review by a writer other than its
+  // author) or "sealed" (only one sealed with yodel approve --sign by a key
+  // .chant/allowed_signers lists at the base commit).
   waves: [
     { env: "dev", gate: "always" },
     { env: "prod", gate: "always" },

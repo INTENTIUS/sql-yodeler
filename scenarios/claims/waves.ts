@@ -76,9 +76,17 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  *   outcomes, which `yodel report` lists. BREAK: the pipeline runs a yodel
  *   built to run commands when the wave is planned too, so the command runs
  *   in both places.
+ * - sealed (#48): staging's wave is `approval: "sealed"`, and the base
+ *   commit's `.chant/allowed_signers` lists alice's ssh key. The change
+ *   adding a column also adds mallory's key to that file. The wave waits,
+ *   printing a `chant approve ... --sign` command; an unsigned approval by
+ *   alice, and one sealed by mallory with the key the change added, leave it
+ *   waiting with nothing applied; one sealed by alice applies, and the
+ *   history records alice as the signer. BREAK: the wave is rendered without
+ *   `approval` (ledger), so the unsigned approval applies.
  */
 
-const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants", "pre-check"] as const;
+const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants", "pre-check", "sealed"] as const;
 type Part = (typeof PARTS)[number];
 
 interface Envs {
@@ -180,7 +188,7 @@ ${ENV_KEYS.map((k) => `    "${st.envs[k]}": { history: { database: "${history}" 
     "${st.envs.tenants}": { history: { database: "${history}" }, tenants: ${tenantQuery ? `{ query: ${JSON.stringify(tenantQuery)} }` : JSON.stringify(tenantNames(st.p.ctx))} },
   },
   waves: [
-${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i > 0 ? ", requires: false" : ""}${w.shares ? `, shares: ${String(w.shares)}` : ""} },`).join("\n")}
+${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i > 0 ? ", requires: false" : ""}${w.shares ? `, shares: ${String(w.shares)}` : ""}${w.approval ? `, approval: "${w.approval}"` : ""} },`).join("\n")}
   ],
 } satisfies YodelConfig;
 `;
@@ -676,6 +684,63 @@ async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   hold(recorded.some((d) => d.startsWith("before step notify passed")), "the history does not record the before command");
 }
 
+/** An ssh key for sealing approvals (#48), outside the project: its private file and its public line. */
+function sshKey(ctx: Ctx, name: string): { file: string; pub: string } {
+  const file = join(ctx.work, `key-${name}`);
+  if (!existsSync(file)) {
+    const made = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", name, "-f", file], { encoding: "utf8" });
+    if (made.status !== 0) throw new Error(`ssh-keygen could not make ${name}'s key: ${made.stderr}`);
+  }
+  return { file, pub: readFileSync(`${file}.pub`, "utf8").trim().split(" ").slice(0, 2).join(" ") };
+}
+
+async function sealed(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+  const alice = sshKey(ctx, "alice");
+  const mallory = sshKey(ctx, "mallory");
+  // The base: staging sealed (BREAK: ledger), and the signers file listing alice.
+  if (broken) ctx.log("BREAK: staging's wave is rendered without approval: sealed, so any approval counts");
+  await render(st, [{ env: st.envs.staging, gate: "always", ...(broken ? {} : { approval: "sealed" as const }) }, { env: st.envs.prod, gate: "never" }]);
+  st.p.write(".chant/allowed_signers", `alice ${alice.pub}\n`);
+  await st.p.commit("the waves: staging sealed, alice signs");
+  // The change: a column, and mallory's key added to the signers file.
+  st.p.write(".chant/allowed_signers", `alice ${alice.pub}\nmallory ${mallory.pub}\n`);
+  addColumn(st.p, "sealed_note");
+  await migrate(st, "add-sealed-note", "feat: a sealed_note column, and mallory signs");
+
+  const ran = await pipeline(st);
+  const staging = ran.get(job(st, 1, "staging"));
+  hold(staging?.code === 3, `staging's sealed wave did not wait (exit ${String(staging?.code)})`);
+  const printed = /chant approve \S+ \S+ --plan \S+( --sign)?/.exec(staging.out)?.[0] ?? "";
+  const plain = printed.replace(/ --sign$/, "");
+  const approveAs = async (actor: string, key?: string) => {
+    const ran = await st.p.chant([...plain.split(" ").slice(1), "--actor", actor, ...(key ? ["--sign", key] : [])]);
+    if (ran.code !== 0) throw new Error(`chant approve as ${actor} exited ${String(ran.code)}: ${ran.err}`);
+  };
+  const rerun = async (what: string) => {
+    const again = await runJob(st, job(st, 1, "staging"));
+    ctx.log(`staging's wave after ${what}: exit ${String(again.code)}`);
+    return again;
+  };
+
+  // Unsigned, by alice: still waiting, nothing applied (BREAK: ledger counts it, and the column is applied).
+  await approveAs("alice");
+  const unsigned = await rerun("an unsigned approval");
+  hold(unsigned.code === 3 && !(await st.columnOn("staging", "sealed_note")), `an unsigned approval let staging's sealed wave apply (exit ${String(unsigned.code)})`);
+  hold(/ --sign\b/.test(printed), "the sealed wave's approve command does not ask for --sign");
+
+  // Sealed by mallory, whose key the change itself added: still waiting.
+  await approveAs("mallory", mallory.file);
+  const added = await rerun("a seal by a key the change added");
+  hold(added.code === 3 && !(await st.columnOn("staging", "sealed_note")), `a seal by a key the change itself added let staging's wave apply (exit ${String(added.code)})`);
+
+  // Sealed by alice, listed at base: it applies, and the history names her as the signer.
+  await approveAs("alice", alice.file);
+  const signed = await rerun("alice's seal");
+  hold(signed.ok && (await st.columnOn("staging", "sealed_note")), `a seal by alice, listed at base, did not apply staging's wave (exit ${String(signed.code)})`);
+  hold(/approved by alice at \S+, approval sealed/.test(signed.out), "the wave did not say it was approved under sealed, by alice");
+  hold((await runJob(st, job(st, 2, "prod"))).ok, "prod's wave did not apply after staging's");
+}
+
 const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {
   "gate-policy": gatePolicy,
   "wave-order": waveOrder,
@@ -685,6 +750,7 @@ const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>>
   report,
   tenants,
   "pre-check": preCheck,
+  sealed,
 };
 
 /** The parts, run by runParts; a part that caught its break leaves the servers where its break took them, so they are levelled for the parts after. */
@@ -725,7 +791,7 @@ async function level(st: State): Promise<void> {
 
 export const wavesClaim: Claim = {
   name: "waves",
-  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate",
+  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate; a sealed wave counts only an approval sealed by a signer the base commit lists",
   dialects: { ch: body, pg: body },
   parts: PARTS,
 };

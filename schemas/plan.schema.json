@@ -305,6 +305,10 @@
           "description": "The command a person runs to approve this plan. An agent prints it and never runs it.",
           "type": "string"
         },
+        "approvalMode": {
+          "description": "Which approvals of the migrations Op's gate count, as yodel.config.ts at the base commit has it, when not ledger: sealed counts only an approval sealed by a key the signers file at base lists for its approver.",
+          "enum": ["sealed"]
+        },
         "approval": {
           "description": "The newest approval of the gate in chant's ledger.",
           "type": "object",
@@ -361,6 +365,10 @@
                   "$ref": "#/$defs/moved"
                 }
               }
+            },
+            "uncounted": {
+              "description": "The gate's approval mode does not count it (under sealed, it is not sealed by a signer at the base commit), and why.",
+              "type": "string"
             }
           }
         },
@@ -426,6 +434,10 @@
             "approve": {
               "description": "The chant approve command for the wave, for a person to run.",
               "type": "string"
+            },
+            "approval": {
+              "description": "Which approvals of the wave's digest count, as yodel.config.ts at the base commit has the wave, when not ledger.",
+              "enum": ["pr-review", "sealed"]
             },
             "promotions": {
               "description": "Each environment this one requires (waves[].requires) and what its history records of each pending migration.",

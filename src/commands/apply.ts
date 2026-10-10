@@ -18,7 +18,9 @@ import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
 import { describeStep, heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
 import type { ApplyStep } from "../config/define.js";
-import { enforcePromotion, forecastWave, planWave, readWavePlan, verifyWaveDecision, WavePlanMoved, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
+import { migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
+import type { GateLedgerPort } from "@intentius/chant/op/gate";
+import { enforcePromotion, forecastWave, planWave, RECORD_PLANS_ENV, readWavePlan, verifyWaveDecision, WavePlanMoved, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
 import { applySlot, splitSlot, writeSlotPlan } from "../tenants/wave.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
@@ -327,11 +329,12 @@ async function slotWave(project: Project, a: ApplyArgs, io: Io): Promise<number>
   const ordered = readChain(project);
   const log = (l: string) => { io.err(`${l}\n`); };
   if (a.wavePlan !== undefined) {
-    const plan = await writeSlotPlan(project, a.env, ordered, a.wavePlan, { allowOutOfOrder: a.allowOutOfOrder }, log);
-    const forecast = await forecastWave(process.cwd(), a.spec, plan);
+    const forReview = process.env[RECORD_PLANS_ENV] === "1";
+    const plan = await writeSlotPlan(project, a.env, ordered, a.wavePlan, { allowOutOfOrder: a.allowOutOfOrder, forReview }, log);
+    const forecast = forReview ? undefined : await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
       const set = splitSlot(a.env)?.env ?? a.env;
-      log(`${set}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}) for every tenant. Approve it with yodel approve ${set}, or: ${forecast.approve}`);
+      log(`${set}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`}) for every tenant. Approve it with yodel approve ${set}${forecast.approval === "sealed" ? " --sign" : ""}, or: ${forecast.approve}`);
     }
     if (a.json) io.out(`${JSON.stringify(plan, null, 2)}\n`);
     return 0;
@@ -386,7 +389,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const approved = process.env[APPROVED_PLAN_ENV];
     if (!approved) throw new YodelError(`--execute reverts only the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel revert ${env.name} ${revert.id}`);
     const op = await findMigrateOp(project, env, a.op);
-    const ledger = await gitLedger(project.dir);
+    const ledger = await migrationsLedger(project, env.name, io);
     // The policy over the revert (#97), as the base commit has it (#73), as yodel revert judged it before the gate.
     const { policy: basePolicy, note: policyNote } = await policyAtBase(project);
     if (policyNote) io.err(`${policyNote}\n`);
@@ -424,7 +427,9 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   }
 
   if (a.wavePlan !== undefined) {
-    const plan = await writeWavePlan(project, venv, ordered, a.wavePlan, { allowOutOfOrder: a.allowOutOfOrder });
+    // In the pull request job that records the plans a review approves (#48), the wave as it will be after the merge.
+    const forReview = process.env[RECORD_PLANS_ENV] === "1";
+    const plan = await writeWavePlan(project, venv, ordered, a.wavePlan, { allowOutOfOrder: a.allowOutOfOrder, forReview });
     io.err(
       `${env.name}: ${plan.empty ? "nothing to apply" : `${String(plan.pending.length)} pending (${plan.pending.join(", ")})`}; gate ${plan.gate} at ${plan.base.slice(0, 12)}` +
         `${plan.destructive ? `; destructive: ${plan.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : ""}; plan ${plan.planDigest}\n`,
@@ -432,11 +437,15 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     // The before steps (#64): the SQL checks as they ran, and each command as one that will run under the lock (#107).
     for (const o of plan.steps ?? []) io.err(`${describeStep(o)}\n`);
     // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
-    const forecast = await forecastWave(process.cwd(), a.spec, plan);
+    // Recorded for a review (#48), nothing waits now: the wave is decided after the merge.
+    const forecast = forReview ? undefined : await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
       // A tenant set's wave (#56) is approved once for every tenant.
-      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with yodel approve ${env.tenant.env}, or: ` : `. Approve it with yodel approve ${env.name}, or: `;
-      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)})${how}${forecast.approve}\n`);
+      const sign = forecast.approval === "sealed" ? " --sign" : "";
+      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with yodel approve ${env.tenant.env}${sign}, or: ` : `. Approve it with yodel approve ${env.name}${sign}, or: `;
+      const mode = forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`;
+      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${mode})${how}${forecast.approve}\n`);
+      if (forecast.approval === "pr-review") io.err(`${env.name}: under pr-review, an approving review of the merged pull request's head by a writer other than its author approves it too, when that head's pipeline recorded this plan (chant run wave --record-plans).\n`);
       outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve: forecast.approve };
     }
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "wave-plan", plan }), null, 2)}\n`);
@@ -510,7 +519,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (!approved) throw new YodelError(`--execute applies only the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel apply ${env.name}`);
     // The env var is only the Op's hand-off; the approval itself is checked in chant's gate ledger, under the lock.
     const op = await findMigrateOp(project, env, a.op);
-    const ledger = await gitLedger(project.dir);
+    const ledger = await migrationsLedger(project, env.name, io);
     const steps = await stepsAtBase(project, env.name);
     if (steps.note) io.err(`${steps.note}\n`);
     let before: StepOutcome[] = [];
@@ -525,7 +534,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         // Under the lock: every pending migration ran first where this environment requires (exit 4 otherwise).
         await enforcePromotion(project, env.name, ordered, (await inspect(venv, ordered)).status.pending);
         const by = await verifyApproval(ledger, op, digest);
-        io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
+        io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}${by.signer !== undefined ? `, sealed by ${by.signer}` : ""}\n`);
         // The before steps (#64), under the lock: one that fails refuses; a held one is let through by the Op's approval, which every run of it asks for.
         before = await runBeforeSteps(project, venv, env, steps.steps?.before, "under the lock", io);
       },
@@ -644,9 +653,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (!a.json) {
       io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
       if (run.approve) {
+        // A sealed gate (#48) counts only a sealed approval, which --execute checks.
+        const sealed = (await migrationsApprovalAtBase(project, env.name)).mode === "sealed";
+        const approve = sealed && !/ --sign\b/.test(run.approve) ? `${run.approve} --sign` : run.approve;
         io.out(
-          `Approve it with:\n  ${runnable(run.approve, project.dir)}\n` +
-            `or, at a terminal, with ${runnable(`yodel approve ${env.name}`, project.dir)}, which shows the plan and asks you first;\n` +
+          `Approve it with:\n  ${runnable(approve, project.dir)}\n` +
+            `or, at a terminal, with ${runnable(`yodel approve ${env.name}${sealed ? " --sign" : ""}`, project.dir)}, which shows the plan and asks you first;\n` +
             `then run ${runnable(`yodel apply ${env.name}`, project.dir)} again.\n`,
         );
       }
@@ -781,4 +793,16 @@ function afterSteps(project: Project, venv: VersionedEnv, env: Environment, list
       return { note: { steps: outcomes }, ...(error ? { error } : {}) };
     },
   };
+}
+
+/**
+ * chant's gate ledger as the migrations Op's gate counts approvals for
+ * `env` (#48): sealed when yodel.config.ts at the base commit says so, so
+ * `--execute` applies nothing on an approval without a seal a signer at
+ * base made.
+ */
+async function migrationsLedger(project: Project, env: string, io: Io): Promise<GateLedgerPort> {
+  const mode = await migrationsApprovalAtBase(project, env);
+  if (mode.note) io.err(`${mode.note}\n`);
+  return portFor(await gitLedger(project.dir), mode.mode, project.dir, mode.base);
 }

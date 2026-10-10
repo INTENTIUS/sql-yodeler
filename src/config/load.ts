@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { CI_FORGES, WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CI_FORGES, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
@@ -45,7 +45,14 @@ function checkTopology(value: unknown, where: string): void {
 function checkEnvironment(value: unknown, where: string): EnvironmentConfig {
   if (!isRecord(value)) throw new YodelError(`${where}: expected an object`);
   for (const k of Object.keys(value)) {
-    if (!["topology", "history", "lockTtl", "lockWait", "tenants", "steps", "access"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait, tenants, steps, access)`);
+    if (!["topology", "history", "lockTtl", "lockWait", "tenants", "steps", "access", "approval"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected topology, history, lockTtl, lockWait, tenants, steps, access, approval)`);
+  }
+  if (value.approval !== undefined && !ENVIRONMENT_APPROVAL_MODES.includes(value.approval as never)) {
+    throw new YodelError(
+      value.approval === "pr-review"
+        ? `${where}.approval: pr-review is a wave's (waves[].approval): the pull request's pipeline records the plans a review approves for the apply pipeline's waves, not for the migrations Op; expected ${ENVIRONMENT_APPROVAL_MODES.join(" or ")}`
+        : `${where}.approval: ${JSON.stringify(value.approval)} is not an approval mode (expected ${ENVIRONMENT_APPROVAL_MODES.join(" or ")})`,
+    );
   }
   if (value.tenants !== undefined) checkTenants(value.tenants, `${where}.tenants`);
   if (value.steps !== undefined) checkApplySteps(value.steps, `${where}.steps`);
@@ -159,7 +166,10 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
   value.forEach((wave: unknown, i) => {
     const at = `${where}[${String(i)}]`;
     if (!isRecord(wave)) throw new YodelError(`${at}: expected { env, gate }`);
-    for (const k of Object.keys(wave)) if (!["env", "gate", "requires", "shares"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate, requires, shares)`);
+    for (const k of Object.keys(wave)) if (!["env", "gate", "requires", "shares", "approval"].includes(k)) throw new YodelError(`${at}.${k}: unknown setting (expected env, gate, requires, shares, approval)`);
+    if (wave.approval !== undefined && !APPROVAL_MODES.includes(wave.approval as never)) {
+      throw new YodelError(`${at}.approval: ${JSON.stringify(wave.approval)} is not an approval mode (expected ${APPROVAL_MODES.join(", ")})`);
+    }
     if (wave.shares !== undefined && !(typeof wave.shares === "number" && Number.isInteger(wave.shares) && wave.shares >= 1)) throw new YodelError(`${at}.shares: expected a whole number from 1`);
     const env = wave.env;
     if (typeof env !== "string" || env === "") throw new YodelError(`${at}.env: expected an environment's name`);

@@ -232,6 +232,69 @@ The steps are read from `yodel.config.ts` at the base commit, like the policy, s
 
 Every outcome is in the history: the `before` steps on each migration's `started` row, the `after` steps on the last migration's `succeeded` row (`note.steps`). `yodel report` lists them as `step` entries in the audit log.
 
+## Approval modes: which approvals count
+
+Anyone who can push to `chant/lifecycle` can record an approval, in any name. That is enough for dev. For an environment where it is not, a wave's `approval` says which approvals of its digest count:
+
+```ts
+waves: [
+  { env: "dev", gate: "never" },
+  { env: "staging", gate: "always", approval: "pr-review" },
+  { env: "prod", gate: "always", approval: "sealed" },
+],
+```
+
+| `approval` | What counts |
+|---|---|
+| `ledger` (the default) | any `chant approve` of the digest, as above |
+| `pr-review` | an approving review of the merged pull request's head by a writer other than its author, when that head planned this digest; a `chant approve` of the digest counts too |
+| `sealed` | only an approval sealed with an ssh key (`yodel approve --sign`, `chant approve --sign`) that the signers file at the base commit lists for the approver |
+
+The mode is read at the base commit with the gate, so a pull request that switches prod from `sealed` to `ledger` merges, and prod still counts only sealed approvals. `yodel ci` writes it into `yodel-waves.json`, where `chant run wave` reads it, and `yodel apply --wave-apply` checks it again under the lock. `yodel plan` and the pull request comment name the mode of a wave that waits, and a sealed wave's approve command ends in `--sign`. The history records how each wave was approved: the mode, and the review (pull request, head, approvers) or the signer, on the wave's `note.wave`.
+
+The migrations Op's gate, which `yodel apply <env>` goes through outside the waves, takes `environments.<env>.approval`, `ledger` or `sealed`, also read at the base commit. Without it, the environment takes `sealed` when its wave is sealed, else `ledger`. chant's gate step does not know the mode, so it may pass an unsealed approval, but the Apply step (`yodel apply --execute`) refuses it, exit 3, nothing applied, and says why. `pr-review` is a wave's only: the review approves the plans the pull request's pipeline records for the waves.
+
+### Sealed approvals
+
+The signers file is `.chant/allowed_signers` at the root of the repository (or the path `.chant/trust.json` names), in ssh-keygen's allowed signers format: a principal and a public key per line.
+
+```text
+alice ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
+bob ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...
+```
+
+It is read at the base commit, never from the change being applied, so a key that a pull request adds to the file cannot approve that pull request's own plan: it counts for the changes merged after it. Changing the file is a change like any other, reviewed and merged. With no signers file at the base, no approval of a sealed gate counts.
+
+`yodel approve <env> --sign` seals the approval with git's signing key (`user.signingkey`, with `gpg.format ssh`), or the private key `--key <file>` names. Under a sealed gate, `yodel approve` seals without being asked. The approver is `--actor <name>`, else the name chant takes from `GITHUB_ACTOR`, `GITLAB_USER_LOGIN` or `USER`, and it must be the principal the signers file gives the key; a seal by a listed key in another approver's name does not count. With the command a waiting job printed:
+
+```sh
+npx chant approve yodel-apply yodel-apply-wave-3 --plan jcs1-sha256:... --actor alice --sign ~/.ssh/id_ed25519
+```
+
+The job verifies the seal with `ssh-keygen`, which the CI image and `node:22-bookworm` carry. A job image without it cannot verify a seal, and the wave waits.
+
+### Pull request review
+
+Under `pr-review`, the pull request's own review approves the wave, with no `chant approve`. `yodel ci` renders a pull request job that runs `chant run wave --spec yodel-waves.json --record-plans`: it plans every wave at the pull request's head, as the wave will plan after the merge (each environment a wave requires taken as having applied what is pending, which the wave checks when it runs; no `before` step is run), and records the digests on `chant/lifecycle` (`_wave-plans/yodel-apply/<head>.json`). It holds no writer: it plans with each environment's reader.
+
+| Forge | The job | What counts as an approving review |
+|---|---|---|
+| GitHub | `.github/workflows/yodel-apply-plans.yml` | the reviewer's newest review is `APPROVED` on the head commit, and the reviewer has write, maintain or admin on the repository |
+| Forgejo | `.forgejo/workflows/yodel-apply-plans.yml` | the same, and the review is official (Forgejo's mark for a reviewer with write access), not stale and not dismissed |
+| GitLab | `yodel-apply-record-plans`, in merge request pipelines, stage `plans` | the merge request's approvals, by members with the Developer role or higher, and only when the project removes approvals on a new push |
+
+After the merge, the wave finds the pull request that made the commit it applies, and its head. When a writer other than the author approved that head and the head recorded the digest the wave plans now, the wave applies and chant writes an approval to the ledger that names the review. The author's own review never counts, and a writer's standing request for changes holds the review back. A plan that moved after the review (another merge first, a table changed by hand, a wave before it that did not apply what was pending) has a new digest, so the wave waits for a `chant approve` of it.
+
+The wave job reads the review with the forge's API: on GitHub and Forgejo with the job's token (`yodel ci` gives the wave's job `GITHUB_TOKEN`, and on GitHub the workflow `pull-requests: read`); on GitLab with `CHANT_FORGE_TOKEN` or `GITLAB_TOKEN`, a token with `read_api`.
+
+GitLab's limits:
+
+- An approval on GitLab names no commit, so it is tied to the head only by the project's setting "Remove all approvals when commits are added to the source branch" (`reset_approvals_on_push`). Without it, no GitLab approval counts.
+- The record job pushes `chant/lifecycle`, which `CI_JOB_TOKEN` can do only when the project allows Git push requests from job tokens. Otherwise the job fails, nothing is recorded, and the wave waits for `chant approve`.
+- Merged results and merge trains plan a commit that is not the merge request's head; the recorded plan is the head's, so a merge that changes what the wave plans waits for `chant approve`.
+
+A pull request from a fork runs its pipeline without the repository's secrets and with a read-only token: the record job can neither read the environments nor push `chant/lifecycle`, so nothing is recorded, and after the merge the wave waits for a `chant approve` of its digest. Approve those as under `ledger`.
+
 ## The pull request comment
 
 `yodel plan <env> --comment` posts the plan as one comment per environment on the pull (merge) request, and updates that comment on the next push rather than adding another. `--format markdown` prints the same Markdown without posting. From the ClickHouse example, for its rebuild:

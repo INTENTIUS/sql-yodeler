@@ -33,7 +33,7 @@ const EPOCH = new Date(0).toISOString();
 export const NOT_APPROVED = 3;
 
 /** Throws unless the ledger holds an approval of `op`'s gate for `digest`. Returns who approved it. */
-export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, digest: string): Promise<{ resolvedBy: string; timestamp: string }> {
+export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, digest: string): Promise<{ resolvedBy: string; timestamp: string; review?: { pr: number; head: string; approvers: string[] }; signer?: string }> {
   if (op.quorum) {
     throw new YodelError(`--execute cannot check gate "${op.gate}" of ${op.name}: it declares an approval quorum or policy, which only the gate step counts; run yodel apply without --execute`, NOT_APPROVED);
   }
@@ -43,10 +43,16 @@ export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, dig
   const resolutions = ledger.resolutions.filter((r) => r.gate !== op.gate || rule === null || rule.refuses(r) === null);
   const since = latestPendingGate(ledger.pending, op.gate)?.timestamp ?? EPOCH;
   const found = latestResolutionForPlan(resolutions, op.gate, since, digest);
-  if (found.resolution) return { resolvedBy: found.resolution.resolvedBy, timestamp: found.resolution.timestamp };
-  const other = found.mismatched
-    ? ` (the newest approval of that gate is for ${found.mismatched.planDigest ?? "no plan"}, by ${found.mismatched.resolvedBy} at ${found.mismatched.timestamp})`
-    : "";
+  const r = found.resolution;
+  if (r) return { resolvedBy: r.resolvedBy, timestamp: r.timestamp, ...(r.review ? { review: r.review } : {}), ...(r.seal ? { signer: r.seal.signer } : {}) };
+  // An approval of this digest the gate's rule does not count (#48: one not sealed by a signer at base), and why.
+  const uncounted = rule === null ? undefined : latestResolutionForPlan(ledger.resolutions, op.gate, since, digest).resolution;
+  const why = uncounted ? rule?.refuses(uncounted) : null;
+  const other = why
+    ? ` (the approval by ${uncounted?.resolvedBy ?? "?"} at ${uncounted?.timestamp ?? "?"} does not count: ${why})`
+    : found.mismatched
+      ? ` (the newest approval of that gate is for ${found.mismatched.planDigest ?? "no plan"}, by ${found.mismatched.resolvedBy} at ${found.mismatched.timestamp})`
+      : "";
   throw new YodelError(
     `refused: chant's gate ledger holds no approval of ${op.name} / ${op.gate} for plan ${digest}${other}. Nothing was applied. ` +
       `Run yodel apply without --execute; it stops at the gate and prints the chant approve command.`,

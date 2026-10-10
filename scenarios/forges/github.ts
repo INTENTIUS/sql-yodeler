@@ -28,7 +28,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dockerSerializer } from "@intentius/chant-lexicon-docker";
 import { publishedPort, uniqueContainerName } from "@intentius/chant-lexicon-sql/core/container";
@@ -38,6 +38,8 @@ import { NODE_IMAGE, type Forge, type ForgeIssue, type ForgeRepo, type ForgeRun 
 import { MOCK_PORT, MOCK_SERVICE, mockGithubEntities } from "./github.compose.js";
 
 const USER = "yodel34";
+/** The mock's second writer, who reviews (#48). */
+const REVIEWER = "yodel34-reviewer";
 const ACT = process.env.YODEL_CLAIMS_ACT ?? "act";
 /** The actions the workflows use, which act fetches from github.com, not the mock. */
 const ACTIONS = ["actions/checkout", "actions/setup-node"];
@@ -158,12 +160,19 @@ export function githubForge(): Forge {
         applyAgain: (sha) => act("workflow_dispatch", "yodel-apply.yml", "main", sha, { ref: "refs/heads/main", inputs: {} }),
         async openPr(head, sha, title) {
           const pr = await api<{ number: number; base: { sha: string } }>("POST", `/repos/${USER}/${name}/pulls`, { title, head, base: "main" });
-          const checks = await act("pull_request", "yodel-pr.yml", head, sha, {
+          const event = {
             action: "opened",
             number: pr.number,
             pull_request: { number: pr.number, title, head: { ref: head, sha }, base: { ref: "main", sha: pr.base.sha } },
-          });
-          return { id: pr.number, checks };
+          };
+          const checks = await act("pull_request", "yodel-pr.yml", head, sha, event);
+          // A pr-review wave (#48) adds the workflow that records the plans the head makes.
+          if (!existsSync(join(ctx.work, `act-${String(n)}`, ".github", "workflows", "yodel-apply-plans.yml"))) return { id: pr.number, checks };
+          const plans = await act("pull_request", "yodel-apply-plans.yml", head, sha, event);
+          return { id: pr.number, checks: { ok: checks.ok && plans.ok, status: plans.ok ? checks.status : `${checks.status}; plans ${plans.status}`, log: `${checks.log}\n${plans.log}` } };
+        },
+        async review(id, sha, as) {
+          await api("POST", `/repos/${USER}/${name}/pulls/${String(id)}/reviews`, { event: "APPROVE", commit_id: sha, user: as === "author" ? USER : REVIEWER });
         },
         async comments(id) {
           return (await api<Array<{ body: string }>>("GET", `/repos/${USER}/${name}/issues/${String(id)}/comments?per_page=100`)).map((c) => c.body);

@@ -290,6 +290,8 @@ export interface LatestApproval {
    * The approval no longer counts, whatever its digest.
    */
   askedAgain?: { at: string; digest: string | undefined } | undefined;
+  /** The gate's rule does not count it (#48: under `sealed`, it is not sealed by a signer at base), and why. */
+  uncounted?: string | undefined;
 }
 
 /** The newest approval of `op`'s gate in the ledger, and whether it holds for `digest` by the gate's rule (for that digest, newer than the gate's newest pending fact). */
@@ -300,11 +302,13 @@ export async function latestApproval(ledger: GateLedgerPort, op: Pick<MigrateOpR
   const approvedAt = Date.parse(newest.timestamp);
   const after = read.pending.filter((p) => p.gate === op.gate && Date.parse(p.timestamp) > approvedAt).sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))[0];
   const same = digest !== undefined && (await sameDigest(newest.planDigest, digest));
+  const uncounted = (await ledger.approvalRule?.(op.gate))?.refuses(newest) ?? undefined;
   return {
     digest: newest.planDigest,
     by: newest.resolvedBy,
     at: newest.timestamp,
-    holds: same && after === undefined,
+    holds: same && after === undefined && !uncounted,
+    ...(uncounted ? { uncounted } : {}),
     sameDigest: same,
     ...(after ? { askedAgain: { at: after.timestamp, digest: after.planDigest } } : {}),
   };

@@ -52,8 +52,8 @@ export const image = new Dockerfile({
   arg: ["YODEL_VERSION", "YODEL_PACKAGE"],
   env: [`PATH=${PREFIX}/node_modules/.bin:$PATH`],
   run: [
-    // Jobs check out and fetch with git, as the template's pipelines do.
-    "apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*",
+    // Jobs check out and fetch with git, as the template's pipelines do; a sealed wave (#48) verifies seals with ssh-keygen.
+    "apt-get update && apt-get install -y --no-install-recommends git ca-certificates openssh-client && rm -rf /var/lib/apt/lists/*",
     // A job often runs as another user than the one who owns its checkout
     // (on github.com the container job is root and the runner's user owns
     // the workspace), and git then refuses the checkout as dubious ownership.

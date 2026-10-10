@@ -17,6 +17,10 @@
  *   GET    /api/v3/repos/:o/:r/actions/runs/:id      a run act ran, as the claim reported it
  *   POST   /api/v3/repos/:o/:r/actions/runs/:id/rerun-failed-jobs   asks for a re-run: the run is queued
  *   PUT    /api/v3/repos/:o/:r/actions/runs/:id      (the mock's own) the claim reports a run act ran
+ *   GET|POST /api/v3/repos/:o/:r/pulls/:n/reviews     a review; POST takes the mock's own `user`, the reviewer
+ *   GET    /api/v3/repos/:o/:r/commits/:sha/pulls    the pull requests whose head or merge is the commit
+ *   GET    /api/v3/repos/:o/:r/collaborators/:login/permission
+ *                                                    write for MOCK_USER and MOCK_REVIEWER, read for anyone else
  *
  * Pull requests and issues share one numbering, as on GitHub.
  *   GET|POST /:o/:r.git/...                          git; a push needs the token
@@ -36,6 +40,8 @@ const PORT = Number(process.env.PORT ?? 8188);
 const DATA = process.env.MOCK_DATA ?? "/tmp/mock-github";
 const TOKEN = process.env.MOCK_TOKEN ?? "";
 const USER = process.env.MOCK_USER ?? "yodel34";
+/** A second writer, who reviews the pull requests MOCK_USER opens (#48). */
+const REVIEWER = process.env.MOCK_REVIEWER ?? "yodel34-reviewer";
 mkdirSync(DATA, { recursive: true });
 
 interface Pull {
@@ -45,6 +51,16 @@ interface Pull {
   head: string;
   base: string;
   title: string;
+  /** The merge commit, once merged. */
+  mergeSha?: string;
+  mergedAt?: string;
+  reviews: Review[];
+}
+interface Review {
+  id: number;
+  user: { login: string };
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+  commit_id: string;
 }
 interface Comment {
   id: number;
@@ -77,6 +93,7 @@ interface Run {
 
 const repos = new Map<string, Repo>();
 let commentId = 0;
+let reviewId = 0;
 const repoDir = (o: string, r: string) => join(DATA, o, `${r}.git`);
 const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const sha = (dir: string, ref: string): string | null => {
@@ -113,7 +130,18 @@ function authed(req: IncomingMessage): boolean {
 
 function pullJson(o: string, r: string, p: Pull) {
   const dir = repoDir(o, r);
-  return { number: p.number, state: p.state, merged: p.merged, title: p.title, head: { ref: p.head, sha: sha(dir, p.head) }, base: { ref: p.base, sha: sha(dir, p.base) } };
+  return {
+    number: p.number,
+    state: p.state,
+    merged: p.merged,
+    title: p.title,
+    user: { login: USER },
+    html_url: `http://mock-github/${o}/${r}/pull/${String(p.number)}`,
+    merged_at: p.mergedAt ?? null,
+    merge_commit_sha: p.mergeSha ?? null,
+    head: { ref: p.head, sha: sha(dir, p.head) },
+    base: { ref: p.base, sha: sha(dir, p.base) },
+  };
 }
 
 /** A merge commit of the pull request's head on its base, pushed to the bare repository. */
@@ -261,7 +289,7 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
       json(res, 422, { message: "Validation Failed: head or base is not a branch" });
       return;
     }
-    const p: Pull = { number: ++st.last, state: "open", merged: false, head, base, title: str("title") };
+    const p: Pull = { number: ++st.last, state: "open", merged: false, head, base, title: str("title"), reviews: [] };
     st.pulls.push(p);
     json(res, 201, pullJson(o, r, p));
     return;
@@ -280,6 +308,8 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
       const merged = merge(o, r, p);
       p.state = "closed";
       p.merged = true;
+      p.mergeSha = merged;
+      p.mergedAt = new Date().toISOString();
       json(res, 200, { merged: true, sha: merged, message: "Pull Request successfully merged" });
       return;
     }
@@ -287,6 +317,31 @@ function api(req: IncomingMessage, res: ServerResponse, url: URL, body: Buffer):
       json(res, 200, pullJson(o, r, p));
       return;
     }
+    if (rest[2] === "reviews" && rest.length === 3) {
+      if (req.method === "GET") {
+        json(res, 200, p.reviews);
+        return;
+      }
+      if (req.method === "POST") {
+        const event = str("event");
+        const state = event === "APPROVE" ? "APPROVED" : event === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : "COMMENTED";
+        const review: Review = { id: ++reviewId, user: { login: str("user") || USER }, state, commit_id: str("commit_id") || (sha(repoDir(o, r), p.head) ?? "") };
+        p.reviews.push(review);
+        json(res, 200, review);
+        return;
+      }
+    }
+  }
+  if (rest[0] === "commits" && rest[2] === "pulls" && rest.length === 3 && req.method === "GET") {
+    const dir = repoDir(o, r);
+    json(res, 200, st.pulls.filter((p) => p.mergeSha === rest[1] || sha(dir, p.head) === rest[1]).map((p) => pullJson(o, r, p)));
+    return;
+  }
+  if (rest[0] === "collaborators" && rest[2] === "permission" && rest.length === 3 && req.method === "GET") {
+    const login = rest[1] ?? "";
+    const permission = login === USER || login === REVIEWER ? "write" : "read";
+    json(res, 200, { permission, role_name: permission, user: { login } });
+    return;
   }
   if (rest[0] === "issues" && rest[1] === "comments" && rest.length === 3 && req.method === "PATCH") {
     const c = st.comments.find((x) => x.id === Number(rest[2]));

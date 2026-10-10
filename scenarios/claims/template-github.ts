@@ -13,7 +13,7 @@ const body = templateBody(githubForge);
 
 export const templateGithub: Claim = {
   name: "template-github",
-  says: "a project from the starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge",
+  says: "a project from the starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author",
   dialects: { ch: body, pg: body },
   // act names its containers after the workflow and the job, so two runs at once would collide.
   shares: ["act"],
