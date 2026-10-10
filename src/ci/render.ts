@@ -539,6 +539,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     }),
   );
   for (const env of envs) {
+    const clouds = cloudsOf(envs_, planRoles(waves, env));
     jobs.set(
       `plan-${env}`,
       new GitLabJob({
@@ -546,7 +547,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
         stage: "review",
         rules: mr(),
         script: [writeProbe([env, ...requiredOf(waves, env)]), `yodel plan ${env} --comment`],
-        ...(cloudsOf(envs_, planRoles(waves, env)).length > 0 ? { id_tokens: idTokens(cloudsOf(envs_, planRoles(waves, env))) } : {}),
+        ...(clouds.length > 0 ? { id_tokens: idTokens(clouds) } : {}),
         after_script: [reportCommand(env, tc)],
         artifacts: new GitLabArtifacts({ name: reportArtifact(`plan-${env}`), when: "always", paths: [`${REPORT_DIR}/`] }),
       }),
@@ -797,8 +798,9 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
   const at = yaml.indexOf("\njobs:\n");
   if (at < 0) throw new Error(`${forge}: the apply waves have no jobs`);
   const jobs = doc.jobs as Record<string, { steps: Array<Record<string, unknown>> }>;
-  const emit = () => `${withIdToken(forge, yaml.slice(0, at + 1), cloudsOf(envs, waves.flatMap((w) => waveRoles(waves, w.env))))}${emitYAMLEntry("jobs", jobs)}\n`;
-  if (`${yaml.slice(0, at + 1)}${emitYAMLEntry("jobs", jobs)}\n` !== yaml) throw new Error(`${forge}: the apply waves do not emit back to chant's text`);
+  const top = yaml.slice(0, at + 1);
+  const emitJobs = () => `${emitYAMLEntry("jobs", jobs)}\n`;
+  if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the apply waves do not emit back to chant's text`);
   for (const [name, job] of Object.entries(jobs)) {
     const env = envOf(name);
     if (!env) continue;
@@ -808,7 +810,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
       { name: "Keep the report", if: "always()", uses: forge === "forgejo" ? `https://code.forgejo.org/${UPLOAD_ARTIFACT}` : UPLOAD_ARTIFACT, with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
     );
   }
-  return emit();
+  return `${withIdToken(forge, top, cloudsOf(envs, waves.flatMap((w) => waveRoles(waves, w.env))))}${emitJobs()}`;
 }
 
 /** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
