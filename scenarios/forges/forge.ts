@@ -18,6 +18,8 @@ export interface ForgeRun {
   status: string;
   /** Every job's log, joined. */
   log: string;
+  /** The names of the jobs that did not succeed, where the forge says. */
+  failed?: string[];
   /** The forge's id of the run, where a resume names it. */
   id?: number;
 }
@@ -38,6 +40,8 @@ export interface ForgeRepo {
    * goes on with no review. Without it, the claim skips the pr-review part.
    */
   review?(id: number, sha: string, as: "author" | "reviewer"): Promise<void>;
+  /** Sets these secrets (variables on GitLab) to new values; the runs started after see them. */
+  setSecrets?(secrets: Record<string, string>): Promise<void>;
   /** The bodies of the pull request's comments. */
   comments(id: number): Promise<string[]>;
   /** Merges the pull request; main's sha after the merge. */
