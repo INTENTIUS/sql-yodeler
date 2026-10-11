@@ -72,7 +72,7 @@ export async function waveTargets(project: Project, env: string, shares?: number
 }
 
 /** The tenants of a slot now, sorted. */
-async function slotTenants(project: Project, slot: { env: string; index: number; count: number }): Promise<string[]> {
+export async function slotTenants(project: Project, slot: { env: string; index: number; count: number }): Promise<string[]> {
   return ((await listTenants(project, slot.env)) ?? []).filter((t) => slotIndex(t, slot.count) === slot.index).sort();
 }
 
@@ -90,8 +90,6 @@ export interface SlotPlanFile {
   /** The slot, `<env>/@<i>of<n>`. */
   environment: string;
   tenants: Array<{ target: string; plan: WavePlanFile }>;
-  /** Every tenant's held `before` steps, as `<tenant>: <step>`. */
-  held?: string[];
 }
 
 /** `yodel apply <env>/@<i>of<n> --wave-plan <file>`: plans every tenant of the slot, as the query lists them now. */
@@ -114,14 +112,12 @@ export async function writeSlotPlan(project: Project, target: string, ordered: r
       await closeVersioned(venv);
     }
   }
-  const held = tenants.flatMap((t) => (t.plan.held ?? []).map((h) => `${t.target}: ${h}`));
   const doc: SlotPlanFile = {
     planDigest: await slotDigest(target, tenants.map((t) => ({ target: t.target, planDigest: t.plan.planDigest }))),
     destructive: tenants.some((t) => t.plan.destructive),
     empty: tenants.every((t) => t.plan.empty),
     environment: target,
     tenants,
-    ...(held.length > 0 ? { held } : {}),
   };
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`);

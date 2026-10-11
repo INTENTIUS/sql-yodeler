@@ -17,13 +17,13 @@ import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "..
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
-import { describeStep, heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
-import type { ApplyStep } from "../config/define.js";
+import { describeStep, heldSteps, runSqlStep, runStepHooks, sqlStepOfArgv, STEP_SQL_FLAG, stepsAtBase, stepsHooksFile, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
+import type { OpWaveHooksFile } from "@intentius/chant/op";
 import { approveCommand, migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
-import { baseEnvironment } from "../tenants/target.js";
+import { baseEnvironment, tenantTarget } from "../tenants/target.js";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { enforcePromotion, forecastWave, planWave, RECORD_PLANS_ENV, readWavePlan, verifyWaveDecision, WavePlanMoved, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
-import { applySlot, splitSlot, writeSlotPlan } from "../tenants/wave.js";
+import { applySlot, slotTenants, splitSlot, writeSlotPlan } from "../tenants/wave.js";
 import {
   ALLOW_OUT_OF_ORDER_ENV,
   APPROVED_PLAN_ENV,
@@ -123,7 +123,7 @@ export function applyJson(doc: ApplyDoc): Record<string, unknown> {
 
 const usage = "usage: yodel apply <env> [--json] [--dir <project>] [--op <name>] [--allow-out-of-order] [--plan] [--lock-wait <duration>] [--stand-down]";
 
-const waveModes = ["wave-plan", "wave-apply"] as const;
+const waveModes = ["wave-plan", "wave-apply", "step-sql"] as const;
 
 const help = `${usage}
 
@@ -210,7 +210,7 @@ The migrations Op runs two steps of its own, not for direct use:
              ${APPROVED_PLAN_ENV} and chant's gate ledger holds an approval
              of the Op's gate for it (the Op's Apply step)
 
-The apply pipeline's wave jobs (chant run wave, ${WAVES_SPEC_FILE}) run two more:
+The apply pipeline's wave jobs (chant run wave, ${WAVES_SPEC_FILE}) run three more:
   --wave-plan <file>   write the environment's wave plan to <file>: the
                        plan digest, the gate policy at the base commit, and
                        whether a pending step is destructive
@@ -219,6 +219,11 @@ The apply pipeline's wave jobs (chant run wave, ${WAVES_SPEC_FILE}) run two more
                        wave lets it through (an approval of the wave's
                        digest, or a policy at the base commit that needs none)
   --spec <file>        the waves spec (default ${WAVES_SPEC_FILE})
+  ${STEP_SQL_FLAG} <sql>     run one SQL step (yodel.config.ts environments.<env>.steps)
+                       against the environment, as the wave's stage hook
+                       does: with --step <name>, --step-when before|after,
+                       --step-expect <json> and --step-on-failure approve as
+                       the step has them. Exit 0 when it passes, 1 when not
 
 Exit codes:
   0  applied, or nothing to apply, or (--stand-down) stood down for a newer
@@ -257,6 +262,8 @@ interface ApplyArgs {
   standDown: boolean;
   wavePlan: string | undefined;
   waveApply: string | undefined;
+  /** `--step-sql` and the flags with it: one SQL step, as a stage hook runs it (#206). */
+  stepArgv: string[] | undefined;
   spec: string;
   /** A tenant of a slot (#56): chant decided the slot, so the decision is checked for it. */
   decidedAs?: { target: string; planDigest: string } | undefined;
@@ -282,6 +289,11 @@ function parseApplyArgs(args: string[]): ApplyArgs {
         "wave-plan": { type: "string" },
         "wave-apply": { type: "string" },
         spec: { type: "string" },
+        "step-sql": { type: "string" },
+        step: { type: "string" },
+        "step-when": { type: "string" },
+        "step-expect": { type: "string" },
+        "step-on-failure": { type: "string" },
       },
     });
   } catch (e) {
@@ -307,6 +319,7 @@ function parseApplyArgs(args: string[]): ApplyArgs {
     standDown: flag("stand-down") || standDownFromEnv(process.env),
     wavePlan: str("wave-plan"),
     waveApply: str("wave-apply"),
+    stepArgv: str("step-sql") !== undefined ? ["yodel", "apply", ...args] : undefined,
     spec: str("spec") ?? WAVES_SPEC_FILE,
   };
 }
@@ -324,7 +337,7 @@ export const apply: Command = {
       const profile = resolveEnvironment(project, slot?.env ?? a.env).profile;
       // The reader cannot write (#159): a run that writes refuses before the gate, naming the variable that picks the writer.
       const command = `yodel apply ${a.env}`;
-      const writes = !a.plan && !a.digest && a.wavePlan === undefined;
+      const writes = !a.plan && !a.digest && a.wavePlan === undefined && a.stepArgv === undefined;
       const asReader = writes ? readerRefusal(profile, runnable(command, project.dir)) : undefined;
       if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
       try {
@@ -342,6 +355,7 @@ export const apply: Command = {
 
 /** `yodel apply` once the project is loaded and its credentials can write. */
 async function applyIn(project: Project, a: ApplyArgs, args: readonly string[], io: Io): Promise<number> {
+  if (a.stepArgv !== undefined) return stepCheck(project, a.env, a.stepArgv, io);
   if (splitSlot(a.env)) return slotWave(project, a, io);
   const env = resolveEnvironment(project, a.env);
   if (!env.tenant && project.yodel?.config.environments?.[env.name]?.tenants) {
@@ -354,6 +368,31 @@ async function applyIn(project: Project, a: ApplyArgs, args: readonly string[], 
   const refusal = declarativeRefusal(project, env.name);
   if (refusal) throw refusal;
   return declarativeApply(project, env, a, io);
+}
+
+/**
+ * `--step-sql` (#206): one SQL step, as the wave's stage hook runs it, on
+ * `target`, or on every tenant of a slot read now. Prints one line per
+ * target; exits 0 when it passes everywhere, 1 when not.
+ */
+async function stepCheck(project: Project, target: string, argv: readonly string[], io: Io): Promise<number> {
+  const step = sqlStepOfArgv(argv);
+  if (!step) throw new YodelError(`${STEP_SQL_FLAG} needs --step <name>, the step's name\n${usage}`);
+  const slot = splitSlot(target);
+  const targets = slot ? (await slotTenants(project, slot)).map((t) => tenantTarget(slot.env, t)) : [target];
+  let passed = true;
+  for (const t of targets) {
+    const venv = await openVersioned(project, resolveEnvironment(project, t));
+    try {
+      const got = await runSqlStep(venv.driver, step);
+      passed &&= got.passed;
+      const o: StepOutcome = { name: step.name, when: step.when, kind: "sql", passed: got.passed, detail: got.detail, onFailure: step.onFailure ?? "fail" };
+      io.err(`${t}: ${!o.passed && o.onFailure === "approve" ? `${o.when} step ${o.name} failed with onFailure approve (${o.detail}), so the wave waits for a person` : describeStep(o)}\n`);
+    } finally {
+      await closeVersioned(venv);
+    }
+  }
+  return passed ? 0 : 1;
 }
 
 /**
@@ -510,8 +549,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       `${env.name}: ${plan.empty ? "nothing to apply" : `${String(plan.pending.length)} pending (${plan.pending.join(", ")})`}; gate ${plan.gate} at ${plan.base.slice(0, 12)}` +
         `${plan.destructive ? `; destructive: ${plan.destructiveSteps.map((d) => `${d.migration} step ${String(d.step)} (${d.why})`).join(", ")}` : ""}; plan ${plan.planDigest}\n`,
     );
-    // The before steps (#64): the SQL checks as they ran, and each command as one that will run under the lock (#107).
-    for (const o of plan.steps ?? []) io.err(`${describeStep(o)}\n`);
+    // The before steps (#64): chant ran the SQL checks as the wave's before-plan hooks (#206); each command runs under the lock only (#107).
+    if (!plan.empty && !forReview) {
+      for (const s of (await stepsAtBase(project, env.name)).steps?.before ?? []) {
+        if (s.command !== undefined) io.err(`${describeStep({ name: s.name, when: "before", kind: "command", passed: true, detail: "a command: it runs under the lock, not when the wave is planned", onFailure: s.onFailure ?? "fail", deferred: true })}\n`);
+      }
+    }
     // chant decides the wave right after this; tell the webhook now when it will wait (#87), since chant sends nothing.
     // Recorded for a review (#48), nothing waits now: the wave is decided after the merge.
     const forecast = forReview ? undefined : await forecastWave(process.cwd(), a.spec, plan);
@@ -536,11 +579,16 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const cwd = process.cwd();
     let wave: WaveRecord | undefined;
     let before: StepOutcome[] = [];
-    const steps = await stepsAtBase(project, env.name);
-    if (steps.note) io.err(`${steps.note}\n`);
+    // The steps (#64) are the wave's stage hooks, which chant hands this run in CHANT_HOOKS (#206); run by hand, they are the steps at base.
+    const { readOpWaveHooksFile } = await import("@intentius/chant/op");
+    const handed = readOpWaveHooksFile(undefined, cwd);
+    const steps = handed ? undefined : await stepsAtBase(project, env.name);
+    if (steps?.note) io.err(`${steps.note}\n`);
+    let hooksFile: OpWaveHooksFile | undefined = handed ?? undefined;
+    const hooks = applyHooks(project, venv, env, () => (hooksFile ??= stepsHooksFile(steps?.steps, env.name, { approved: wave?.status === "approved", ...(steps?.sha ? { base: steps.sha } : {}) })), io);
     const result = await executeApply(venv, ordered, {
       runNote: () => (wave || before.length > 0 ? { ...(wave ? { wave } : {}), ...(before.length > 0 ? { steps: before } : {}) } : undefined),
-      ...afterSteps(project, venv, env, steps.steps?.after, io),
+      ...hooks.after,
       approvedDigest: planned.migrations,
       allowOutOfOrder: a.allowOutOfOrder,
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
@@ -571,20 +619,18 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         if (now.planDigest !== planned.planDigest) {
           throw new WavePlanMoved(`refused: ${env.name}'s wave plan moved since the wave was decided (decided ${planned.planDigest}, now ${now.planDigest}); nothing was applied. Run the wave again.`);
         }
-        // The before steps' SQL checks (#64) ran again in that plan, under the lock; a held one needs a person's approval whatever the gate.
-        const checked = (now.steps ?? []).filter((o) => !o.deferred);
-        for (const o of checked) io.err(`${describeStep(o)}\n`);
-        let verified = await verifyWaveDecision(cwd, a.spec, a.decidedAs?.target ?? env.name, a.decidedAs?.planDigest ?? planned.planDigest, now.held ?? []);
-        // The commands (#107) run once, here, once the wave may apply: one that fails refuses; a held one needs the approval too.
-        const commands = await runBeforeSteps(project, venv, env, steps.steps?.before?.filter((s) => s.sql === undefined), "under the lock", io);
-        before = [...checked, ...commands];
-        if (heldSteps(commands).length > 0 && verified.wave.status !== "approved") verified = await verifyWaveDecision(cwd, a.spec, a.decidedAs?.target ?? env.name, a.decidedAs?.planDigest ?? planned.planDigest, [...(now.held ?? []), ...heldSteps(commands)]);
+        const verified = await verifyWaveDecision(cwd, a.spec, a.decidedAs?.target ?? env.name, a.decidedAs?.planDigest ?? planned.planDigest);
         wave = verified.wave;
         io.err(`${verified.line}\n`);
+        // The before steps (#64), under the lock, through chant's runner: one that fails refuses (exit 4); a held one with no approval standing stops here (exit 3), and chant waits for, or finds, the approval and runs this again.
+        // A command (#107) runs here only, once per apply.
+        before = await hooks.before();
       },
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
     });
+    // An apply that changed nothing ran no step, and tells chant so: a step command runs once per apply that changes the schema, not once per push (#206).
+    await hooks.skipped(result.stoodDown ?? "nothing to apply");
     if (result.applied.length > 0) await recordApplied(project, env, venv, ordered, io, wave?.review?.approvers.join(", "));
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "execute", environment: env.name, planDigest: planned.migrations, wavePlanDigest: planned.planDigest, result }), null, 2)}\n`);
     else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
@@ -603,9 +649,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (steps.note) io.err(`${steps.note}\n`);
     let before: StepOutcome[] = [];
     let approver: string | undefined;
+    // The steps (#64) as stage hooks (#206), read at base; the Op's approval, checked under the lock before they run, lets a held one through.
+    const hooksFile = stepsHooksFile(steps.steps, env.name, { approved: true, ...(steps.sha ? { base: steps.sha } : {}) });
+    const hooks = applyHooks(project, venv, env, () => hooksFile, io);
     const result = await executeApply(venv, ordered, {
       runNote: () => (before.length > 0 ? { steps: before } : undefined),
-      ...afterSteps(project, venv, env, steps.steps?.after, io),
+      ...hooks.after,
       approvedDigest: approved,
       allowOutOfOrder: a.allowOutOfOrder,
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
@@ -617,7 +666,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         approver = by.resolvedBy;
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}${by.signer !== undefined ? `, sealed by ${by.signer}` : ""}\n`);
         // The before steps (#64), under the lock: one that fails refuses; a held one is let through by the Op's approval, which every run of it asks for.
-        before = await runBeforeSteps(project, venv, env, steps.steps?.before, "under the lock", io);
+        before = await hooks.before();
       },
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
@@ -699,13 +748,21 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   // A command runs there alone (#107), once per apply: here the plan only says it will.
   const steps = await stepsAtBase(project, env.name);
   if (steps.note && !a.json) io.err(`${steps.note}\n`);
-  try {
-    const outcomes = await runBeforeSteps(project, venv, env, steps.steps?.before, "before the gate", a.json ? undefined : io, "plan");
-    if (!a.json && heldSteps(outcomes).length > 0) io.out(`before step ${heldSteps(outcomes).join(", ")} failed with onFailure approve: approving this plan lets it through\n`);
-  } catch (e) {
-    if (!(e instanceof YodelError) || e.exitCode !== EXIT_REFUSED) throw e;
-    if (!a.json) io.err(`yodel apply: ${e.message}\n`);
-    return emit({ status: "refused", refusal: { exitCode: EXIT_REFUSED, message: e.message } }, EXIT_REFUSED);
+  {
+    // The SQL checks are the before-plan hooks (#206). The gate asks for an approval on every run, so a held one goes on to it.
+    const planned = await runStepHooks(stepsHooksFile(steps.steps, env.name, { approved: true }), "before-plan", { driver: venv.driver, dir: project.dir, env: env.name });
+    if (!a.json) {
+      for (const o of planned.outcomes) io.err(`${describeStep(o)}\n`);
+      for (const s of steps.steps?.before ?? []) {
+        if (s.command !== undefined) io.err(`${describeStep({ name: s.name, when: "before", kind: "command", passed: true, detail: "a command: it runs under the lock, not when the run is planned", onFailure: s.onFailure ?? "fail", deferred: true })}\n`);
+      }
+    }
+    const refusal = stepsRefusal(env.name, planned, "before the gate");
+    if (refusal) {
+      if (!a.json) io.err(`yodel apply: ${refusal.message}\n`);
+      return emit({ status: "refused", refusal: { exitCode: refusal.exitCode, message: refusal.message } }, refusal.exitCode);
+    }
+    if (!a.json && heldSteps(planned.outcomes).length > 0) io.out(`before step ${heldSteps(planned.outcomes).join(", ")} failed with onFailure approve: approving this plan lets it through\n`);
   }
 
   const op = await findMigrateOp(project, env, a.op);
@@ -870,25 +927,43 @@ function standingDown(project: Project, env: Environment): () => Promise<string 
   };
 }
 
-/** Runs `env`'s before steps (#64); throws the refusal for one that fails with onFailure fail. */
-async function runBeforeSteps(project: Project, venv: VersionedEnv, env: Environment, list: readonly ApplyStep[] | undefined, when: string, io: Io | undefined, commands: "run" | "plan" = "run"): Promise<StepOutcome[]> {
-  if (!list || list.length === 0) return [];
-  const outcomes = await runApplySteps(venv.driver, list, "before", { dir: project.dir, env: env.name, commands });
-  for (const o of outcomes) io?.err(`${describeStep(o)}\n`);
-  const refusal = stepsRefusal(env.name, outcomes, when);
-  if (refusal) throw refusal;
-  return outcomes;
-}
-
-/** executeApply's `after` (#64), when `env` has after steps. */
-function afterSteps(project: Project, venv: VersionedEnv, env: Environment, list: readonly ApplyStep[] | undefined, io: Io): Pick<ExecuteOptions, "after"> {
-  if (!list || list.length === 0) return {};
+/**
+ * The steps around one apply (#64) as chant's apply-stage hooks (#206):
+ * `before` runs the before-apply hooks under the lock and throws the
+ * refusal when they do not let the apply go on; `after` is executeApply's
+ * `after`; `skipped` tells chant, for an apply that changed nothing, that
+ * the hooks it handed did not run, and why.
+ */
+function applyHooks(project: Project, venv: VersionedEnv, env: Environment, file: () => OpWaveHooksFile, io: Io): {
+  before: () => Promise<StepOutcome[]>;
+  after: Pick<ExecuteOptions, "after">;
+  skipped: (why: string) => Promise<void>;
+} {
+  const ran = new Set<"before-apply" | "after-apply">();
+  const ctx = { driver: venv.driver, dir: project.dir, env: env.name, log: (l: string) => { io.err(`${l}\n`); } };
+  const run = async (moment: "before-apply" | "after-apply") => {
+    ran.add(moment);
+    const got = await runStepHooks(file(), moment, ctx);
+    for (const o of got.outcomes) io.err(`${describeStep(o)}\n`);
+    return { got, refusal: stepsRefusal(env.name, got, "under the lock") };
+  };
   return {
-    after: async () => {
-      const outcomes = await runApplySteps(venv.driver, list, "after", { dir: project.dir, env: env.name });
-      for (const o of outcomes) io.err(`${describeStep(o)}\n`);
-      const error = stepsRefusal(env.name, outcomes, "under the lock");
-      return { note: { steps: outcomes }, ...(error ? { error } : {}) };
+    before: async () => {
+      const { got, refusal } = await run("before-apply");
+      if (refusal) throw refusal;
+      return got.outcomes;
+    },
+    after: {
+      after: async () => {
+        const { got, refusal } = await run("after-apply");
+        return { note: { steps: got.outcomes }, ...(refusal ? { error: refusal } : {}) };
+      },
+    },
+    skipped: async (why) => {
+      const f = file();
+      for (const moment of ["before-apply", "after-apply"] as const) {
+        if (!ran.has(moment) && f.result && (f.hooks[moment]?.length ?? 0) > 0) await runStepHooks(f, moment, { ...ctx, skip: why });
+      }
     },
   };
 }
