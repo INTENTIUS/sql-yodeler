@@ -46,7 +46,7 @@ No changes: the declared schema matches the newest migration's recorded schema (
 
 (From the Postgres example's run, just after it writes `rename-email`; `run.ts postgres --write` rewrites this quote with the README. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
 
-It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Steps](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Steps](steps.md#postgres-postgresmigrationop)).
+It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Data migrations](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Data migrations](steps.md#postgres-postgresmigrationop)).
 
 ## The history table
 
@@ -251,7 +251,7 @@ The checks are part of `migration.json`, so of the checksum and the plan digest:
 
 ## Resuming a migration that failed part way
 
-A statement whose latest row is `succeeded` is never sent again. So when a statement fails, the next `yodel apply` resumes the migration at that statement. (A statement whose latest row is `started`, because the runner stopped while it ran, is sent again: the history cannot tell whether the server ran it.) An Op step that failed resumes from its receipts ([Steps](steps.md)).
+A statement whose latest row is `succeeded` is never sent again. So when a statement fails, the next `yodel apply` resumes the migration at that statement. (A statement whose latest row is `started`, because the runner stopped while it ran, is sent again: the history cannot tell whether the server ran it.) An Op step that failed resumes from its receipts ([Data migrations](steps.md)).
 
 In the Postgres example a migration adds a column, then builds an index on it, and someone has made an index of the same name on dev by hand. The part of the run after the gate:
 

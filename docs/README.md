@@ -15,7 +15,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases declarative
 | [Declaring the schema](schema.md) | the schema as TypeScript in `src/`: one export per object in the database's own DDL, references with `${}`, splitting it across files, generating objects with code, composites, what the build checks and the editor |
 | [The two workflows](workflows.md) | the declarative path (`yodel plan`, `yodel apply` against the declared schema) and the versioned path (`yodel new`, then `yodel apply`) |
 | [Migrations](migrations.md) | the migrations directory, the history table, the apply lock, resume, out-of-order refusal, `yodel status`, `yodel rebase`, `yodel repair`, `yodel checkpoint`, and rollback with `yodel revert` |
-| [Steps](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, `yodel cleanup` of what they keep, and manual steps |
+| [Data migrations](steps.md) | ClickHouse rebuilds, backfills, Postgres `PostgresMigrationOp` steps, `yodel cleanup` of what they keep, and manual steps |
 | [Access control](access.md) | Postgres row-level security, policies, roles and grants, and ClickHouse users, roles, row policies and grants: `access` per environment, what the schema owns and what the environment owns, the plan's access section, adopting them |
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Lint and plan on pull requests only](lint-and-plan.md) | `ci: { apply: false }`: lint, the replay check and the plan comment on every pull request with readers only, no apply pipeline, and turning apply on later |

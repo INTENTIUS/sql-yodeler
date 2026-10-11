@@ -57,6 +57,8 @@ silence            error
                    a yodel:allow line that is malformed, names a rule no statement can silence, has no reason, or silences nothing
 replay             error
                    with --replay <env>: the history, replayed into a fresh database, does not give each migration's recorded schema
+SQL101             the check's level, silenceable
+                   schema check: Two exports declare the same object
 SQLCH101           the check's level, silenceable, clickhouse
                    schema check: A ClickHouse object names an engine the pinned server does not have
 SQLCH102           the check's level, silenceable, clickhouse
@@ -97,6 +99,20 @@ SQLCH119           the check's level, silenceable, clickhouse
                    schema check: An object uses a deprecated or experimental engine
 SQLCH120           the check's level, silenceable, clickhouse
                    schema check: A MergeTree engine uses the deprecated positional arguments
+SQLCH121           the check's level, silenceable, clickhouse
+                   schema check: A column type names a family the pinned server does not have
+SQLCH122           the check's level, silenceable, clickhouse
+                   schema check: A column type's parameters do not fit its family
+SQLCH123           the check's level, silenceable, clickhouse
+                   schema check: A Nullable wraps a type ClickHouse does not allow inside Nullable
+SQLCH124           the check's level, silenceable, clickhouse
+                   schema check: A table declares a column twice
+SQLCH125           the check's level, silenceable, clickhouse
+                   schema check: A codec parameter is outside what the codec takes
+SQLCH126           the check's level, silenceable, clickhouse
+                   schema check: A GRANT column list names a column the table does not declare
+SQLCH127           the check's level, silenceable, clickhouse
+                   schema check: An expression calls a function the pinned server does not have
 ```
 
 `fork`, `directory`, `checksum`, `unreadable-object` and `checkpoint` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
