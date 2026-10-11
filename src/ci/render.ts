@@ -76,7 +76,9 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
+import { stepHooks } from "../apply-steps/index.js";
+import type { OpWaveHooks } from "@intentius/chant/op";
 import { audience, CLOUD_OF, jobLogins, loginSteps, type Login, type LoginSteps } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
@@ -729,6 +731,8 @@ export interface Wave {
   shares?: number;
   /** Which approvals of the wave's digest count (yodel.config.ts `waves[].approval`, #48); absent, `ledger`. */
   approval?: ApprovalMode;
+  /** The environment's steps around apply (yodel.config.ts `environments.<env>.steps`, #64): the wave's stage hooks (#206). */
+  steps?: ApplySteps;
 }
 
 /** The environment `env`'s wave requires, as a list. */
@@ -755,6 +759,7 @@ interface WavesSpec {
     approval?: ApprovalMode;
     environment?: { name: string };
     variables?: Record<string, string>;
+    hooks?: OpWaveHooks;
   }>;
   /** The scheduled resume job (yodel.config.ts `ci.resume`); only the pipelines are rendered from it, the spec file leaves it out. */
   resume?: { schedule: string };
@@ -780,9 +785,17 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
       ...(w.shares !== undefined && w.shares > 1 ? { shares: w.shares } : {}),
       ...(w.approval !== undefined && w.approval !== "ledger" ? { approval: w.approval } : {}),
       ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
+      // The steps around apply (#64) as chant's stage hooks, which the apply runs under its lock (#206).
+      ...hooksOf(w.steps),
     })),
     ...(resume ? { resume } : {}),
   };
+}
+
+/** A wave's stage hooks from its steps, when it has any. */
+function hooksOf(steps: ApplySteps | undefined): { hooks?: OpWaveHooks } {
+  const hooks = stepHooks(steps);
+  return hooks ? { hooks } : {};
 }
 
 interface WavesPipelineResult {
@@ -995,7 +1008,8 @@ export async function readWaves(dir: string, envs: readonly string[]): Promise<W
  * `shares` slots (one without) that read the tenants when the wave runs.
  * The query is not run here, so the pipeline stays the same as tenants come
  * and go; a list or a file is in the repository, and changing it is
- * rendering again.
+ * rendering again. Each wave also gets its environment's steps around
+ * apply (#64), for its stage hooks.
  */
 export async function withTenants(dir: string, waves: readonly Wave[]): Promise<Wave[]> {
   const { loadProject } = await import("../project.js");
@@ -1004,7 +1018,8 @@ export async function withTenants(dir: string, waves: readonly Wave[]): Promise<
   const out: Wave[] = [];
   for (const w of waves) {
     const targets = await waveTargets(project, w.env, w.shares);
-    out.push(targets === undefined ? w : { ...w, targets });
+    const steps = w.steps ?? project.yodel?.config.environments?.[w.env]?.steps;
+    out.push({ ...w, ...(targets !== undefined ? { targets } : {}), ...(steps ? { steps } : {}) });
   }
   return out;
 }

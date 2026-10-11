@@ -69,14 +69,14 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  *   tenant's own table. BREAK: the wave is rendered with the first tenant
  *   alone, so the others never get the migrations.
  * - pre-check (#64): staging has steps around apply, read at the base
- *   commit: a before step that fails with `onFailure: "approve"`, a before
- *   command that appends a line to a file, and an after step. Under gate
- *   `never`, the wave is held: nothing is applied, the command has not run,
- *   and the job prints the approval it needs. Approved, it applies, the
- *   command having run once (#107), and the history records the steps'
- *   outcomes, which `yodel report` lists. BREAK: the pipeline runs a yodel
- *   built to run commands when the wave is planned too, so the command runs
- *   in both places.
+ *   commit, as chant's stage hooks (#206): a before step that fails with
+ *   `onFailure: "approve"`, a before command that appends a line to a
+ *   file, and an after step. Under gate `never`, the wave is held: nothing
+ *   is applied, the command has not run, and the job prints the approval it
+ *   needs. Approved, it applies, the command having run once (#107), and
+ *   the history records the steps' outcomes, which `yodel report` lists.
+ *   BREAK: the waves spec runs the command as a before-plan hook too, so
+ *   it runs when the wave is planned.
  * - sealed (#48): staging's wave is `approval: "sealed"`, and the base
  *   commit's `.chant/allowed_signers` lists alice's ssh key. The change
  *   adding a column also adds mallory's key to that file. The wave waits,
@@ -110,7 +110,7 @@ const ENV_KEYS = ["staging", "prod"] as const;
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; commandsWhenPlanning?: boolean } = {}): Promise<void> {
   const { p } = st;
   p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps, options.tenantQuery));
   // A tenant set's wave has a run per tenant, as yodel ci renders it.
@@ -124,6 +124,19 @@ async function render(st: State, waves: readonly Wave[], options: { allNever?: b
       const before = content;
       content = content.replace(new RegExp(`(\\n {2}${job}:\\n(?: {4}.*\\n)*?) {4}needs:\\n(?: {6}- .*\\n)+`), "$1");
       if (content === before) throw new Error(`could not remove ${job}'s needs from the rendered workflow`);
+    }
+    if (options.commandsWhenPlanning && f.path === "yodel-waves.json") {
+      const spec = JSON.parse(content) as { waves: Array<{ hooks?: { before?: { plan?: Array<{ command: string[] }>; apply?: Array<{ command: string[] }> } } }> };
+      let moved = 0;
+      for (const w of spec.waves) {
+        const commands = (w.hooks?.before?.apply ?? []).filter((h) => h.command[0] === "sh");
+        if (w.hooks?.before && commands.length > 0) {
+          w.hooks.before.plan = [...(w.hooks.before.plan ?? []), ...commands];
+          moved += commands.length;
+        }
+      }
+      if (moved === 0) throw new Error("the rendered waves spec has no before command to run when the wave is planned");
+      content = `${JSON.stringify(spec, null, 2)}\n`;
     }
     p.write(f.path, content);
   }
@@ -651,12 +664,10 @@ async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const notify = `echo "$YODEL_ENV" >> ${notified}`;
   const runs = () => (existsSync(notified) ? readFileSync(notified, "utf8").split("\n").filter(Boolean).length : 0);
   const steps = `{ before: [{ name: "replication-lag", sql: "SELECT 1", onFailure: "approve" }, { name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
-  // Broken: the pipeline's yodel runs a command when it plans the wave, as it does under the lock.
-  const env: Record<string, string> = broken
-    ? { PATH: [yodelBuild(ctx, st.p, "yodel-runs-commands-when-planning", { file: "waves/index.js", from: 'commands: "plan"', to: 'commands: "run"' }).bin, st.p.envFor().PATH ?? ""].join(":") }
-    : {};
-  if (broken) ctx.log("BREAK: the pipeline runs a yodel built to run before commands when the wave is planned too");
-  await render(st, waves(st, "never", "never"), { steps });
+  // Broken: the rendered spec runs the before command when the wave is planned too, as it runs under the lock.
+  if (broken) ctx.log("BREAK: the waves spec runs the before command as a before-plan hook too");
+  await render(st, waves(st, "never", "never"), { steps, commandsWhenPlanning: broken });
+  const env: Record<string, string> = {};
   await st.p.commit("the waves: both never, staging with steps around apply");
   addColumn(st.p, "checked");
   await migrate(st, "add-checked", "feat: a checked column");
