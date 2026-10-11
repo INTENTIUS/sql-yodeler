@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """SQL Yodeler's brand assets: the hat, in every size the site, the README
-and yodel's pages use, and the boot, the site's small mark.
+and yodel's pages use, and the star, the site's small mark.
 
     python3 scripts/brand.py                 # every asset, from docs-site/public/brand/hat-source.png
     python3 scripts/brand.py --from art.png  # first rebuild hat-source.png from a rendered hat
@@ -12,7 +12,7 @@ background), and a 3x3 minimum filter on the alpha takes off the light fringe
 the background leaves; the result is kept at 672 px tall. Every size of the
 hat is that image resampled once, smoothly, so it looks the same at every size.
 
-The boot is pixel art drawn from the grid below, one SVG square per art pixel,
+The star is pixel art drawn from the grid below, one SVG square per art pixel,
 shown with image-rendering: pixelated.
 
 The script overwrites every file it writes. Needs Python 3 with Pillow and NumPy.
@@ -53,44 +53,37 @@ def height(img: Image.Image, h: int) -> Image.Image:
     return img.resize((round(img.width * h / img.height), h), Image.LANCZOS)
 
 
-# ---------------------------------------------------------------- the boot
+# ---------------------------------------------------------------- the star
 
-# 23x21: a cowboy boot, toe to the right, with a lone star on the shaft and a
-# spur at the heel, in the hat's leather. O outline, H L M D the leather from
-# light to dark, S the heel, Y the star and the spur.
-BOOT = """
-....OO.....OO..........
-...OHLO...OLDO.........
-...OHLMO.OMMDO.........
-...OHLMMOMMMDO.........
-...OHLMMMMMMDO.........
-...OHLMMYMMMDO.........
-...OHLMYYYMMDO.........
-...OHLYYYYYMDO.........
-...OHLMYYYMMDO.........
-...OHLMYMYMMDO.........
-...OHLMMMMMMDO.........
-...ODDDDDDDDDO.........
-...OHLMMMMMMMDOO.......
-...OHLMMMMMMMMMDOO.....
-...OHLLMMMMMMMMMMDDOO..
-...OHLLLLLLLLLLLLLLLMOO
-...ODDDDDDDDDDDDDDDDDDO
-...OSSSSOOOOOOOOOOOOOO.
-.Y.OSSSSO..............
-YYYYOSSSO..............
-.Y..OOOO...............
+# 15x15: a five-point star in the cylinder's yellow, lit from the top left.
+# O outline, H highlight, Y the yellow, D its shade.
+STAR = """
+.......O.......
+......OHO......
+......OHO......
+.....OHYYO.....
+.....OHYYO.....
+OOOOOOHYYOOOOOO
+OHHHHHHYYYYYYDO
+.OHHYYYYYYYYDO.
+..OHYYYYYYYDO..
+...OYYYYYYDO...
+...OYYYYYYYO...
+..OYYYYOYYYDO..
+..OYYYO.OYYDO..
+.OYYO.....OYDO.
+.OOO.......OOO.
 """
-LEATHER = {"O": "#17111a", "H": "#ecb56e", "L": "#bd773f", "M": "#96542b", "D": "#643018", "S": "#3f1e14", "Y": "#f7d136"}
+GOLD = {"O": "#3b2410", "H": "#fff2a8", "Y": "#f7d136", "D": "#d67d03"}
 
 
-def boot() -> Image.Image:
-    rows = BOOT.strip("\n").split("\n")
+def star() -> Image.Image:
+    rows = STAR.strip("\n").split("\n")
     img = Image.new("RGBA", (max(map(len, rows)), len(rows)), (0, 0, 0, 0))
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
-            if ch in LEATHER:
-                img.putpixel((x, y), hex_rgba(LEATHER[ch]))
+            if ch in GOLD:
+                img.putpixel((x, y), hex_rgba(GOLD[ch]))
     return img
 
 # ---------------------------------------------------------------- writers
@@ -252,7 +245,7 @@ def main() -> None:
     fit(hat, 160, 148).save(BRAND / "hat-160.png", optimize=True)
 
 
-    (BRAND / "boot.svg").write_text(svg(boot()))
+    (BRAND / "star.svg").write_text(svg(star()))
 
     (PUBLIC / "favicon.svg").write_text(favicon_svg(hat))
     tile(hat, 32, 1).save(PUBLIC / "favicon-32.png", optimize=True)

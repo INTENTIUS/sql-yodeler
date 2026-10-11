@@ -266,7 +266,7 @@ const proofLine = (d: (typeof dialects)[number]) => `Proven: ${d.proven} claims 
 	.tile:hover :global(.sy-hat) {
 		opacity: 0.7;
 	}
-	/* The picked tile wears the boot in its corner. */
+	/* The picked tile wears the star in its corner. */
 	.tile[aria-current='true'] {
 		border-color: var(--sy-rule);
 		border-top-color: var(--sy-brass);
@@ -280,9 +280,9 @@ const proofLine = (d: (typeof dialects)[number]) => `Proven: ${d.proven} claims 
 		position: absolute;
 		top: 0.6rem;
 		right: 0.6rem;
-		width: 23px;
-		height: 21px;
-		background: var(--sy-boot) center / contain no-repeat;
+		width: 15px;
+		height: 15px;
+		background: var(--sy-star) center / contain no-repeat;
 		image-rendering: pixelated;
 	}
 	.roles {

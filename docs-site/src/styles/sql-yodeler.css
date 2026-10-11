@@ -5,8 +5,8 @@
  * Rye, a western face, for the wordmark alone.
  *
  * The hat (scripts/brand.py) is the logo and the mark on cards and buttons;
- * the pixel boot is the small mark: over each section heading, before each
- * sidebar group, on bullets and in the picked tile's corner.
+ * the pixel star is the small mark: over each section heading, before each
+ * sidebar group, on nested bullets and in the picked tile's corner.
  *
  * The signal colours stay colour-blind safe: turquoise and vermillion keep
  * apart under protanopia, deuteranopia and tritanopia, and every status also
@@ -23,7 +23,7 @@
 	--sy-western: 'Rye', Georgia, serif;
 	--sl-font: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 	--sl-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-	--sy-boot: url('/sql-yodeler/brand/boot.svg');
+	--sy-star: url('/sql-yodeler/brand/star.svg');
 	--sy-hat: url('/sql-yodeler/brand/hat-small.png');
 
 	/* dark: warm stone neutrals, turquoise accent */
@@ -108,14 +108,14 @@ h1#_top {
 	font-size: 1.3rem;
 	margin-top: 2.75rem;
 }
-/* The boot over each section heading. */
+/* The star over each section heading. */
 .sl-markdown-content h2:not(.not-content, .not-content *)::before {
 	content: '';
 	display: block;
-	width: 23px;
-	height: 21px;
-	margin-bottom: 0.7rem;
-	background: var(--sy-boot) center / contain no-repeat;
+	width: 15px;
+	height: 15px;
+	margin-bottom: 0.8rem;
+	background: var(--sy-star) center / contain no-repeat;
 	image-rendering: pixelated;
 }
 .sl-markdown-content h3:not(.not-content, .not-content *) {
@@ -135,7 +135,7 @@ h1#_top {
 	text-decoration-color: var(--sy-brass);
 }
 
-/* Bullets are hats, and a nested list's bullets are boots. Ordered lists keep their numbers. */
+/* Bullets are hats, and a nested list's bullets are stars. Ordered lists keep their numbers. */
 .sl-markdown-content ul:not(.not-content, .not-content *, :is(ul, ol) ul) {
 	padding-left: 0;
 	list-style: none;
@@ -165,10 +165,10 @@ h1#_top {
 	content: '';
 	position: absolute;
 	left: 0;
-	top: 0.45em;
-	width: 12px;
-	height: 11px;
-	background: var(--sy-boot) center / contain no-repeat;
+	top: 0.4em;
+	width: 15px;
+	height: 15px;
+	background: var(--sy-star) center / contain no-repeat;
 	image-rendering: pixelated;
 }
 
@@ -232,7 +232,7 @@ code, pre, kbd, samp {
 	font-size: var(--sl-text-sm);
 }
 
-/* Each top-level sidebar group's label starts with the boot. */
+/* Each top-level sidebar group's label starts with the star. */
 .sidebar-content .top-level > li > details > summary .group-label {
 	display: inline-flex;
 	align-items: center;
@@ -241,9 +241,9 @@ code, pre, kbd, samp {
 .sidebar-content .top-level > li > details > summary .group-label::before {
 	content: '';
 	flex: none;
-	width: 23px;
-	height: 21px;
-	background: var(--sy-boot) center / contain no-repeat;
+	width: 15px;
+	height: 15px;
+	background: var(--sy-star) center / contain no-repeat;
 	image-rendering: pixelated;
 }
 
