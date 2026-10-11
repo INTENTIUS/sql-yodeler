@@ -4,7 +4,7 @@ claims: []
 
 # SQL Yodeler
 
-SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declare the schema in TypeScript with chant's `sql` lexicon, and the `yodel` CLI either applies it directly (the declarative path) or writes versioned migrations from it and applies those (the versioned path). Both paths apply behind an approval bound to a digest of the plan. Data migrations (rebuilds, backfills, expand-and-contract column changes) are steps inside a migration, recorded in the same history as the DDL, and resume where they stopped.
+SQL Yodeler manages the schemas of ClickHouse and Postgres databases declaratively. You declare what the schema should be in TypeScript with chant's `sql` lexicon ([Declaring the schema](schema.md)), and the `yodel` CLI works out the change: it either applies it directly (the declarative path) or writes versioned migrations from it and applies those (the versioned path). Both paths apply behind an approval bound to a digest of the plan. Data migrations (rebuilds, backfills, expand-and-contract column changes) are steps inside a migration, recorded in the same history as the DDL, and resume where they stopped.
 
 | Page | What it covers |
 |---|---|
@@ -25,7 +25,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Schema from an ORM](orm.md) | `sources` in `yodel.config.ts`: tables an ORM defines, read from the DDL it prints, planned and applied with the rest |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Webhook events](notify.md) | `notify` in `yodel.config.ts`: signed events for an apply waiting for approval, a refusal, a failure and drift, and checking them in a receiver |
-| [Schema docs](schema-docs.md) | `yodel docs`: an HTML reference and a Mermaid ERD of the schema, from the build |
+| [Generated schema reference](schema-docs.md) | `yodel docs`: an HTML reference and a Mermaid ERD generated from the declared schema |
 | [Topology](topology.md) | ClickHouse on a single node, a cluster, a `Replicated` database and ClickHouse Cloud |
 | [The commands](cli.md) | which command runs what (`yodel`, chant's CLI, the template's `just` targets), `yodel --help`, the exit codes, and the JSON Schemas of `--json` output |
 | [Set up with a coding agent](agents.md) | the prompt to hand a coding agent, the steps it follows to add SQL Yodeler to a repository, and what it leaves to people |

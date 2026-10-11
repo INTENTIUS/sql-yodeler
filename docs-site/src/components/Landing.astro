@@ -1,11 +1,13 @@
 ---
 // The home page's two ends. `part="top"` (the default) is the hat, which opens
-// the docs, the wordmark, the one-line claim, the starting-point picker and the
+// the docs, the wordmark, the one-line claim, the declared schema beside what
+// yodel makes of it (SchemaShowcase.astro), the starting-point picker and the
 // eight highlights. `part="agent"` is the setup prompt for a coding agent, last
 // on the page: the same prompt the agents page and llms.txt carry.
 import AgentPrompt from './AgentPrompt.astro';
 import Hat from './Hat.astro';
 import Picker from './Picker.astro';
+import SchemaShowcase from './SchemaShowcase.astro';
 import { setupPrompt } from '../../prompts.mjs';
 
 interface Props {
@@ -15,8 +17,8 @@ const { part = 'top' } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 // The eight highlights: each card is one link, its title the whole label.
 const pillars = [
+	{ title: 'Your schema, declared in TypeScript', href: '/schema/' },
 	{ title: 'Declarative or versioned migrations', href: '/workflows/' },
-	{ title: 'ClickHouse and Postgres', href: '/topology/' },
 	{ title: 'GitHub, GitLab or Forgejo', href: '/forges/' },
 	{ title: 'Approvals bound to the plan', href: '/approval/' },
 	{ title: 'Data steps that resume', href: '/steps/' },
@@ -29,7 +31,12 @@ const pillars = [
 	<section class="sy-landing not-content">
 		<a class="hero-link" href={`${base}/getting-started/`} aria-label="The docs"><Hat size={132} /></a>
 		<h1 class="wordmark">SQL YODELER</h1>
-		<p class="claim">Schema migrations for ClickHouse and Postgres</p>
+		<p class="claim">Declarative schema migrations for ClickHouse and Postgres</p>
+	</section>
+	<section class="sy-declare not-content">
+		<p class="lede">Declare what the database should be, in TypeScript. yodel works out the change and applies it, or writes it as a migration, behind an approval of the exact plan.</p>
+		<SchemaShowcase />
+		<a class="more" href={`${base}/schema/`}>Declaring the schema</a>
 	</section>
 	<Picker />
 	<ul class="sy-pillars not-content">
@@ -104,6 +111,36 @@ const pillars = [
 	}
 	.sy-agent {
 		padding-block: 0;
+	}
+	.sy-declare {
+		max-width: 64rem;
+		margin: 0.5rem auto 2.5rem;
+	}
+	.sy-declare .lede {
+		margin: 0 auto;
+		max-width: 44rem;
+		text-align: center;
+		font-size: var(--sl-text-lg);
+		line-height: 1.5;
+		color: var(--sl-color-gray-1);
+	}
+	.sy-declare .more {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 1rem;
+		padding: 0.55rem 1rem;
+		font-weight: 600;
+		color: var(--sl-color-black);
+		background: var(--sy-accent);
+		border-radius: 0.5rem;
+		text-decoration: none;
+	}
+	.sy-declare .more::after {
+		content: '\2192';
+	}
+	.sy-declare .more:hover {
+		filter: brightness(1.1);
 	}
 	.sy-pillars {
 		list-style: none;

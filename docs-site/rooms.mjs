@@ -106,7 +106,7 @@ export const ROOMS = [
 	{
 		id: 'new-schema',
 		title: 'Start a new schema',
-		lede: 'For a team starting a schema from nothing: a project from a starter template, then the first migration on a local database.',
+		lede: 'For a team starting a schema from nothing: declare it in TypeScript in a project from a starter template, and yodel writes the first migration from it on a local database.',
 		works: [
 			'A project with a profile, a migrate Op and a drift watch per environment, and pipelines for GitHub, GitLab and Forgejo',
 			'The first migration written from `src/schema.ts`, planned, approved and applied on chant\'s local emulator',
@@ -123,6 +123,7 @@ export const ROOMS = [
 			{ label: 'Setting up each forge', href: 'forges' },
 		],
 		background: [
+			{ label: 'Declaring the schema', href: 'schema' },
 			{ label: 'The two workflows', href: 'workflows' },
 			{ label: 'Migrations', href: 'migrations' },
 			{ label: 'Approval', href: 'approval' },

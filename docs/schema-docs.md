@@ -3,7 +3,9 @@ claims: []
 type: howto
 ---
 
-# Schema docs
+# Generated schema reference
+
+This page is about the reference `yodel docs` generates. Writing the schema itself is [Declaring the schema](schema.md).
 
 `yodel docs` writes a reference of the schema for people reading a pull request or onboarding to a project: one HTML page and one Mermaid entity-relationship diagram, from the build of the declared schema. It reads no server and starts nothing; the HTML has its styles inline and no scripts, so it opens from disk or from any static host.
 
