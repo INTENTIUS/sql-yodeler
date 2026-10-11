@@ -44,7 +44,7 @@ A task page's own prompt sits under its title as "Optional: hand this page to yo
 6. Run `npx yodel lint` and `npm run ci:check`. Both must pass.
 7. Optionally, check the migrations on a local database: `npx chant emulator up --lexicon sql` starts one in Docker, and [Your first migration](getting-started.md) has the variables. `npx yodel plan dev` and `npx yodel apply dev` against it are safe; `yodel apply` stops at the approval, and that is where the agent stops too.
 8. Commit the project (with `package-lock.json`) on a new branch and open a pull request. Check `git status` so the commit holds nothing else.
-9. Tell the user what is left for them, from the template's README: create each environment's reader and writer database users, add the forge's secrets, approve each plan the pull request comment shows, and merge.
+9. Tell the user what is left for them, from the template's README: create each environment's reader and writer database users, add the forge's secrets where [Setting up each forge](forges.md) says, approve each plan the pull request comment shows, and merge.
 
 ## Rules for the agent
 

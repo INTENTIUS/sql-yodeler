@@ -68,7 +68,7 @@ $ npx yodel lint
 1 migration: 0 errors, 0 warnings, 0 silenced.
 ```
 
-Make the directory a git repository and commit (`yodel apply` finds the migrations Op through git, and chant keeps approvals on the `chant/lifecycle` branch). Then create the database users and the forge's secrets the template's README lists, and push. From there each change is a pull request: edit `src/schema.ts`, run `npx yodel new <name>`, commit both. [The two workflows](workflows.md) and [Approval](approval.md) go on from here.
+Make the directory a git repository and commit (`yodel apply` finds the migrations Op through git, and chant keeps approvals on the `chant/lifecycle` branch). Then create the database users the template's README lists, add the forge's secrets as [Setting up each forge](forges.md) says, and push. From there each change is a pull request: edit `src/schema.ts`, run `npx yodel new <name>`, commit both. [The two workflows](workflows.md) and [Approval](approval.md) go on from here.
 
 ## Adopting an existing database: yodel init --from
 

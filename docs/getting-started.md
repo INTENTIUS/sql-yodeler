@@ -417,7 +417,7 @@ The justfile reads a `.env` file in the project when there is one, so the variab
 
 ## Next
 
-- Push the project and set up CI: the README the template wrote into `my-schema` lists the secrets and users each forge needs. From then on each change is a pull request: edit `src/schema.ts`, `npx yodel new <name>`, commit both. The pull request gets a plan comment, and a merge applies what was approved.
+- Push the project and set up CI: [Setting up each forge](forges.md) has the secrets, tokens and runner each forge needs. From then on each change is a pull request: edit `src/schema.ts`, `npx yodel new <name>`, commit both. The pull request gets a plan comment, and a merge applies what was approved.
 - [The two workflows](workflows.md), [Migrations](migrations.md) and [Approval](approval.md) explain what you just ran.
 - [Drift](drift.md) has the scheduled drift check the pipelines run.
 - To take a database you already have into migrations, see [Starting a project](adoption.md#adopting-an-existing-database-yodel-init-from).

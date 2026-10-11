@@ -88,7 +88,7 @@ Once `migrations/` holds the baseline, `init --from` refuses in that project, so
 
 ### Cutting CI over
 
-The template renders pipelines for GitHub Actions, GitLab CI and Forgejo Actions (`npm run ci`, which is `yodel ci`): lint and a plan comment on each pull request with the reader's credentials, and on a merge, an apply per environment with the writer's, behind its approval. Create the users and secrets the template's README lists, remove the old tool's migration jobs in the same pull request that adds these, and from then on make each change by editing `src/` and running `yodel new <name>`. [The two workflows](workflows.md#the-pipelines-yodel-ci) has the details.
+The template renders pipelines for GitHub Actions, GitLab CI and Forgejo Actions (`npm run ci`, which is `yodel ci`): lint and a plan comment on each pull request with the reader's credentials, and on a merge, an apply per environment with the writer's, behind its approval. Create the users the template's README lists and the secrets [Setting up each forge](forges.md) places, remove the old tool's migration jobs in the same pull request that adds these, and from then on make each change by editing `src/` and running `yodel new <name>`. [The two workflows](workflows.md#the-pipelines-yodel-ci) has the details.
 
 ## Rolling back
 
