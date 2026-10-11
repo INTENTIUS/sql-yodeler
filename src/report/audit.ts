@@ -3,7 +3,9 @@
  * from a row of an environment's history table or a line of chant's gate
  * ledger (`_gates/<op>.jsonl` on the `chant/lifecycle` branch), so the log
  * cannot say something those two do not. Pure: rows and ledger lines in,
- * entries and gaps out.
+ * entries and gaps out. chant reads the ledger lines (`deriveGateAudit`,
+ * `@intentius/chant/lifecycle/gate-audit`); this file joins them with the
+ * history.
  *
  * Entries, by where they come from:
  *
@@ -37,6 +39,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { deriveGateAudit, type GateLedgerLine } from "@intentius/chant/lifecycle/gate-audit";
 import type { HistoryRow } from "../history/index.js";
 import { waveRecordOf } from "../waves/record.js";
 import { describeStep, stepsOfNote } from "../apply-steps/index.js";
@@ -71,24 +74,22 @@ export interface AuditGap {
   detail: string;
 }
 
-/** One environment's ledger, as chant's GateLedgerPort reads it. */
+/** One environment's ledger, as chant's `readGateAuditLedgers` reads it. */
 export interface LedgerInput {
   op: string;
   gate: string;
   /** Where the lines are, for the entries' source: `_gates/<op>.jsonl`. */
   path: string;
-  pending: ReadonlyArray<{ gate: string; timestamp: string; planDigest?: string | undefined; runId?: string | undefined }>;
-  resolutions: ReadonlyArray<{ gate: string; timestamp: string; resolvedBy: string; planDigest?: string | undefined; note?: string | undefined }>;
+  lines: readonly GateLedgerLine[];
 }
 
-/** The apply pipeline's wave gates on the ledger (`_gates/<op>.jsonl` of the waves' op): their pending lines and resolutions. */
+/** The apply pipeline's wave gates on the ledger (`_gates/<op>.jsonl` of the waves' op). */
 export interface WaveLedgerInput {
   op: string;
   path: string;
   /** The wave gate yodel.config.ts gives the environment now, if any; the gates its history's waves recorded are read too. */
   gate?: string | undefined;
-  pending: LedgerInput["pending"];
-  resolutions: LedgerInput["resolutions"];
+  lines: readonly GateLedgerLine[];
 }
 
 export interface AuditInput {
@@ -192,27 +193,23 @@ function fromHistory(input: AuditInput): AuditEntry[] {
   return out;
 }
 
-function fromLedger(environment: string, l: LedgerInput): AuditEntry[] {
+/**
+ * The entries of `l`'s lines about `gates`, as chant's reader gives them:
+ * requests and approvals, and with `overrides` the `override-<rule>`
+ * resolutions (`yodel override`).
+ */
+function fromLedger(environment: string, l: { op: string; path: string; lines: readonly GateLedgerLine[] }, gates: ReadonlySet<string>, overrides: boolean): AuditEntry[] {
   const out: AuditEntry[] = [];
-  const source: AuditSource = { ledger: l.path, op: l.op, gate: l.gate };
-  for (const p of l.pending) {
-    if (p.gate !== l.gate) continue;
-    out.push(entry({ at: p.timestamp, environment, kind: "approval-requested", ...(p.planDigest ? { digest: p.planDigest } : {}), ...(p.runId ? { detail: `run ${p.runId}` } : {}), source }));
-  }
-  for (const r of l.resolutions) {
-    const override = r.gate.startsWith("override-");
-    if (!override && r.gate !== l.gate) continue;
-    out.push(
-      entry({
-        at: r.timestamp,
-        environment,
-        kind: override ? "override" : "approved",
-        by: r.resolvedBy,
-        ...(r.planDigest ? { digest: r.planDigest } : {}),
-        ...(override ? { detail: `${r.gate.slice("override-".length)}: ${r.note ?? ""}`.trim() } : r.note ? { detail: r.note } : {}),
-        source: { ...source, gate: r.gate },
-      }),
-    );
+  for (const e of deriveGateAudit({ ledgers: [{ op: l.op, path: l.path, lines: l.lines }] }).entries) {
+    const source: AuditSource = { ledger: l.path, op: l.op, gate: e.gate };
+    const digest = e.digest ? { digest: e.digest } : {};
+    if (e.kind === "approval-requested" && gates.has(e.gate)) {
+      out.push(entry({ at: e.at, environment, kind: "approval-requested", ...digest, ...(e.runId ? { detail: `run ${e.runId}` } : {}), source }));
+    } else if (e.kind === "approved" && gates.has(e.gate)) {
+      out.push(entry({ at: e.at, environment, kind: "approved", ...(e.by ? { by: e.by } : {}), ...digest, ...(e.note ? { detail: e.note } : {}), source }));
+    } else if (overrides && e.kind === "override-recorded" && e.gate.startsWith("override-")) {
+      out.push(entry({ at: e.at, environment, kind: "override", ...(e.by ? { by: e.by } : {}), ...digest, detail: `${e.gate.slice("override-".length)}: ${e.note ?? ""}`.trim(), source }));
+    }
   }
   return out;
 }
@@ -220,9 +217,7 @@ function fromLedger(environment: string, l: LedgerInput): AuditEntry[] {
 /** The wave gates' lines that are this environment's: its configured wave gate, and every gate its history's waves recorded. */
 function fromWaves(environment: string, w: WaveLedgerInput, history: readonly AuditEntry[]): AuditEntry[] {
   const gates = new Set([...(w.gate ? [w.gate] : []), ...history.flatMap((e) => (e.wave ? [e.wave.gate] : []))]);
-  const out: AuditEntry[] = [];
-  for (const gate of gates) out.push(...fromLedger(environment, { op: w.op, gate, path: w.path, pending: w.pending, resolutions: w.resolutions.filter((r) => !r.gate.startsWith("override-")) }));
-  return out;
+  return fromLedger(environment, w, gates, false);
 }
 
 /**
@@ -241,7 +236,7 @@ export function approvalOf(applied: AuditEntry, entries: readonly AuditEntry[], 
 export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: AuditGap[] } {
   const same = input.sameDigest ?? ((a, b) => a === b);
   const history = fromHistory(input);
-  const entries = [...history, ...(input.ledger ? fromLedger(input.environment, input.ledger) : []), ...(input.waves ? fromWaves(input.environment, input.waves, history) : [])].sort(byTime);
+  const entries = [...history, ...(input.ledger ? fromLedger(input.environment, input.ledger, new Set([input.ledger.gate]), true) : []), ...(input.waves ? fromWaves(input.environment, input.waves, history) : [])].sort(byTime);
   const gaps: AuditGap[] = [];
 
   const seqs = new Set(input.rows.map((r) => r.seq));
