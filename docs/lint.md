@@ -59,6 +59,8 @@ replay             error
                    with --replay <env>: the history, replayed into a fresh database, does not give each migration's recorded schema
 SQL101             the check's level, silenceable
                    schema check: Two exports declare the same object
+SQL102             the check's level, silenceable
+                   schema check: sql-types.d.ts differs from what the build declares
 SQLCH101           the check's level, silenceable, clickhouse
                    schema check: A ClickHouse object names an engine the pinned server does not have
 SQLCH102           the check's level, silenceable, clickhouse
