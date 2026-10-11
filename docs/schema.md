@@ -5,7 +5,7 @@ type: concepts
 
 # Declaring the schema
 
-The schema is TypeScript in `src/`. Each exported constant is one object: a database or schema, a table, a view, an index. Its body is the database's own DDL, in a tagged template from chant's `sql` lexicon, so a statement reads the way `SHOW CREATE` prints it. TypeScript holds the statements together: objects import each other, refer to each other with `${}`, and can be made by functions and loops. `yodel new` writes the next migration from the change since the last one, and `yodel plan` shows a declarative change against the live server ([The two workflows](workflows.md)).
+SQL Yodeler is declarative: `src/` says what the database should be, and yodel works out the change from what it is. The schema is TypeScript in `src/`. Each exported constant is one object: a database or schema, a table, a view, an index. Its body is the database's own DDL, in a tagged template from chant's `sql` lexicon, so a statement reads the way `SHOW CREATE` prints it. TypeScript holds the statements together: objects import each other, refer to each other with `${}`, and composites make families of them. `yodel new` writes the next migration from the change since the last one, and `yodel plan` shows a declarative change against the live server ([The two workflows](workflows.md)).
 
 <!-- tabs: dialect -->
 #### ClickHouse
@@ -51,6 +51,17 @@ export const ordersByStatus = index`
 
 The export name is the object's identity, and the name in the SQL is its name on the server. Keep the export name when you change the name in the SQL, and the change is planned as a rename, not as a drop and a create.
 
+## Schema as data
+
+The build reads `src/` as data: it reduces each file to the objects it declares, without running it. So the same source gives the same schema on any machine and in every environment, the schema at two commits can be compared with no database, and nothing in it depends on where or when it was built.
+
+That makes `src/` a small part of TypeScript: exported objects, constants and strings, imports between files, `${}` references, and composites called with literal options. What a program would do is not schema:
+
+- Reading an environment variable or a file, or querying a database. The schema is the same in every environment; what differs between them, the server and the credentials, is in `chant.config.ts`'s profiles ([Installing and configuring](configuration.md)).
+- `if` or a loop around exports, `let`, and functions or callbacks in `src/`. Write each object as an export, or put the repetition in a composite ([Generating objects](#generating-objects)).
+
+A file outside that part still builds, but chant runs it instead of reading it, and `chant build --verbose` names the file and the reason. chant's [TypeScript as data](https://intentius.io/chant/concepts/typescript-as-data/) page has the whole subset.
+
 ## References
 
 An interpolated object is a reference, not text. `${db}.events` still reads `events.events` in the statement sent to the server, and the build also knows the table belongs to that database, so it creates the database first. A column is referenced through `.columns`:
@@ -77,32 +88,40 @@ Any number of files in `src/` make up the schema, and they import each other lik
 
 ## Generating objects
 
-Because the schema is TypeScript, a family of objects can be written once. One rollup table per region:
+A family of objects with the same shape is a composite of your own: the shape once, in a module outside `src/`, and one call per object in `src/`. A rollup table per region:
 
 ```ts
-// src/regions.ts
-import { table } from "@intentius/chant-lexicon-sql/clickhouse";
-import { db } from "./schema.js";
+// lib/rollup.ts
+import { Composite } from "@intentius/chant/composite";
+import { table, type ClickHouseDatabase } from "@intentius/chant-lexicon-sql/clickhouse";
 
-const regions = ["eu", "us", "apac"] as const;
-
-export const [dailyEu, dailyUs, dailyApac] = regions.map(
-  (region) => table`
-    CREATE TABLE ${db}.${`daily_${region}`} (
+export const DailyRollup = Composite((props: { db: ClickHouseDatabase; region: string }) => ({
+  table: table`
+    CREATE TABLE ${props.db}.${`daily_${props.region}`} (
       day  Date,
       kind LowCardinality(String),
       n    UInt64
     )
     ENGINE = SummingMergeTree
     ORDER BY (day, kind)`,
-);
+}), "DailyRollup");
 ```
 
-The build writes three `CREATE TABLE` statements, and `yodel new` adds a fourth region's table the day the list grows.
+```ts
+// src/daily.ts
+import { DailyRollup } from "../lib/rollup.js";
+import { db } from "./schema.js";
+
+export const { table: dailyEu } = DailyRollup({ db, region: "eu" });
+export const { table: dailyUs } = DailyRollup({ db, region: "us" });
+export const { table: dailyApac } = DailyRollup({ db, region: "apac" });
+```
+
+The build reads `src/daily.ts` as data and writes three `CREATE TABLE` statements. A fourth region is one more line, and `yodel new` writes its table into the next migration.
 
 ## Composites
 
-The `sql` lexicon ships composites: functions that take typed options and return several objects. On Postgres, `TenantTable` puts the tenant column first in the table's primary key and in an index:
+The `sql` lexicon ships composites of its own, for shapes many schemas need. On Postgres, `TenantTable` puts the tenant column first in the table's primary key and in an index:
 
 ```ts
 // src/tickets.ts

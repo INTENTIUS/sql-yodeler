@@ -2,7 +2,25 @@
 
 # SQL Yodeler
 
-Schema management and migrations for ClickHouse and Postgres, on chant's `sql` lexicon.
+Declarative schema migrations for ClickHouse and Postgres. Declare your schema in TypeScript, and SQL Yodeler works out the change: it plans and applies it against the live database, or writes it as a versioned migration, behind an approval bound to the plan. Built on chant's `sql` lexicon.
+
+```ts
+// src/schema.ts
+import { database, table } from "@intentius/chant-lexicon-sql/clickhouse";
+
+export const db = database`CREATE DATABASE events ENGINE = Atomic`;
+
+export const events = table`
+  CREATE TABLE ${db}.events (
+    id    UInt64,
+    kind  LowCardinality(String),
+    at    DateTime
+  )
+  ENGINE = MergeTree
+  ORDER BY (kind, at)`;
+```
+
+Each export is one object in the database's own DDL; `${db}` is a reference, so the build orders the objects and checks them against a pinned server's catalog. [Declaring the schema](docs/schema.md) has the whole form, both dialects.
 
 SQL Yodeler is built on [chant](https://intentius.io/chant/), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for two things only: `chant init` to make a project from a template, and `chant emulator up` for a local database. Run the CLI as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it. You approve a plan with `yodel approve`, which records chant's approval for you.
 

@@ -29,7 +29,7 @@ cd my-schema
 npm install
 ```
 
-`database=events` is the ClickHouse database your schema lives in. The template declares one table in it, in `src/schema.ts`:
+`database=events` is the ClickHouse database your schema lives in. The template declares one table in it, in `src/schema.ts`. This declaration is what the database should be; every migration below is worked out from it ([Declaring the schema](schema.md) has the form):
 
 ```ts
 export const db = database`
@@ -56,7 +56,7 @@ cd my-schema
 npm install
 ```
 
-`schema=app` is the Postgres schema your objects live in. The template declares a table and an index in it, in `src/schema.ts`:
+`schema=app` is the Postgres schema your objects live in. The template declares a table and an index in it, in `src/schema.ts`. This declaration is what the database should be; every migration below is worked out from it ([Declaring the schema](schema.md) has the form):
 
 ```ts
 export const app = schema`

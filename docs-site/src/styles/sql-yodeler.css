@@ -232,7 +232,23 @@ code, pre, kbd, samp {
 	font-size: var(--sl-text-sm);
 }
 
-/* Each top-level sidebar group's label starts with the star. */
+/* Each top-level sidebar group's label, and the top-level link, starts with the star. */
+.sidebar-content .top-level > li > a {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	font-size: var(--sl-text-base);
+	font-weight: 600;
+	color: var(--sl-color-white);
+}
+.sidebar-content .top-level > li > a::before {
+	content: '';
+	flex: none;
+	width: 15px;
+	height: 15px;
+	background: var(--sy-star) center / contain no-repeat;
+	image-rendering: pixelated;
+}
 .sidebar-content .top-level > li > details > summary .group-label {
 	display: inline-flex;
 	align-items: center;

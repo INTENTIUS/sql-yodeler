@@ -5,7 +5,7 @@ type: concepts
 
 # The two workflows
 
-`yodel plan <env>` and `yodel apply <env>` take one of two paths, chosen by the project: the versioned path when it has a `migrations/` directory holding at least one migration, the declarative path otherwise. (A template's empty `migrations/`, with only `.gitkeep`, is still declarative.) Both apply behind an approval bound to a digest of what they would do; see [Approval](approval.md).
+Both workflows start from the schema declared in `src/` ([Declaring the schema](schema.md)): it says what the database should be, and yodel works out how to get there. `yodel plan <env>` and `yodel apply <env>` take one of two paths, chosen by the project: the versioned path when it has a `migrations/` directory holding at least one migration, the declarative path otherwise. (A template's empty `migrations/`, with only `.gitkeep`, is still declarative.) Both apply behind an approval bound to a digest of what they would do; see [Approval](approval.md).
 
 ## Declarative: the declared schema against the live database
 

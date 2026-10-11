@@ -342,13 +342,16 @@ function pageTypes() {
 /** The rooms, starts first and then roles, as sidebar items. */
 const roomItems = () => [...STARTS, ...ROLES].map((x) => ({ label: x.label, slug: `for/${x.room}` }));
 
+/** The page the site leads with: the declared schema is what everything else works from. */
+const lead = { label: 'Declaring the schema', slug: 'schema' };
+
 /**
- * The sidebar: "Start here" with the rooms, then one group per page type, in
- * the order of `groups`. Every group starts collapsed; Starlight opens the
- * one that holds the current page.
+ * The sidebar: "Start here" with the rooms, the declared schema on its own,
+ * then one group per page type, in the order of `groups`. Every group starts
+ * collapsed; Starlight opens the one that holds the current page.
  */
 export function sidebar() {
-	return [{ label: 'Start here', collapsed: true, items: roomItems() }, ...docGroups()];
+	return [{ label: 'Start here', collapsed: true, items: roomItems() }, lead, ...docGroups()];
 }
 
 /**
@@ -367,7 +370,7 @@ function docGroups() {
 		if (!items.some((i) => i.slug === slug)) items.push({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug });
 	}
 	return groups
-		.map(([type, label]) => ({ label, collapsed: true, items: items.filter((i) => types[i.slug] === type) }))
+		.map(([type, label]) => ({ label, collapsed: true, items: items.filter((i) => types[i.slug] === type && i.slug !== lead.slug) }))
 		.filter((g) => g.items.length);
 }
 
@@ -486,8 +489,8 @@ export function roomMarkdown(r, rows) {
 
 /**
  * The home page, index.mdx: the landing (src/components/Landing.astro: the
- * hat, the wordmark, the picker and the highlights), the schema in TypeScript
- * (SchemaShowcase.astro), the pipelines and the waves, then docs/README.md's text made valid MDX, then the setup prompt.
+ * hat, the wordmark, the declared schema, the picker and the highlights), the
+ * pipelines and the waves, then docs/README.md's text made valid MDX, then the setup prompt.
  * The Markdown is kept in the front matter for llms-full.txt, as on a page
  * with tabs.
  */
@@ -497,16 +500,9 @@ function writeHome(head, md, source) {
 	const front = head.replace(/\n---\n\n$/, `\nmarkdown: ${JSON.stringify(md)}\n---\n\n`);
 	const body = `import Landing from '../../components/Landing.astro';
 import Pipelines from '../../components/Pipelines.astro';
-import SchemaShowcase from '../../components/SchemaShowcase.astro';
 import Waves from '../../components/Waves.astro';
 
 <Landing />
-
-## Your schema in TypeScript
-
-Each object in \`src/\` is an export whose body is the database's own DDL, and objects refer to each other with \`\${}\`. Change the declaration, and \`yodel new\` writes the migration: on Postgres, a constraint is added \`NOT VALID\` and validated after, with a pre-check of the rows already there. [Declaring the schema](${base}/schema/).
-
-<SchemaShowcase />
 
 ## The pipelines yodel ci writes
 
@@ -556,7 +552,7 @@ export function writePages() {
 	const files = docFiles();
 	const slugs = new Set(files.map((f) => f.slug));
 	// The sidebar's order, which also fails the build on a page without a type.
-	const order = sidebar().flatMap((g) => g.items.map((i) => i.slug));
+	const order = sidebar().flatMap((g) => (g.items ? g.items.map((i) => i.slug) : [g.slug]));
 	rmSync(outDir, { recursive: true, force: true });
 	mkdirSync(outDir, { recursive: true });
 	const described = descriptions();
