@@ -30,7 +30,7 @@ export const workflow = new Workflow({
     "docs-site": new Job({
       "runs-on": "ubuntu-latest",
       "timeout-minutes": 10,
-      steps: [checkout(), ...siteBuildSteps()],
+      steps: [checkout({ lfs: true }), ...siteBuildSteps()],
     }),
     // The CI image publish.yml pushes on a release (.github/src/image.ts),
     // built from this checkout's package instead of npm's: it runs yodel,
