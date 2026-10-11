@@ -7,7 +7,8 @@
 // links into the rest of the repository (examples, source files) become their
 // plain text. Each page's editUrl points "Edit page" at its docs/ file (none
 // for claims.md, which npm run claims:page writes). The landing page is the
-// README's intro over docs/README.md. The sidebar opens with "Start here", the
+// README's intro, then the starting-point picker (src/components/Picker.astro),
+// then docs/README.md. The sidebar opens with "Start here", the
 // rooms, then groups the pages by the `type:` in their front matter
 // (Tutorial, How-to, Concepts, Reference, Proof), each group in the order of
 // docs/README.md's table, and the build fails on a page with no type or an
@@ -481,6 +482,19 @@ export function roomMarkdown(r, rows) {
 	return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
+/**
+ * The home page, index.mdx: the picker (src/components/Picker.astro, which
+ * reads rooms.mjs and the claims record) over docs/README.md's text, made
+ * valid MDX. The Markdown is kept in the front matter for llms-full.txt, as
+ * on a page with tabs.
+ */
+function writeHome(head, md, source) {
+	tabsToMdx(source, (i) => `docs/README.md:${i + 1}`);
+	const { mdx } = tabsToMdx(md, () => 'docs/README.md');
+	const front = head.replace(/\n---\n\n$/, `\nmarkdown: ${JSON.stringify(md)}\n---\n\n`);
+	writeFileSync(`${outDir}index.mdx`, `${front}${mdxImport}import Picker from '../../components/Picker.astro';\n\n<Picker />\n\n${mdx}`);
+}
+
 /** Writes every room under for/, after checking its links and claims. */
 function writeRooms(slugs, rows, order) {
 	const ids = [...STARTS, ...ROLES].map((x) => x.room);
@@ -521,7 +535,6 @@ export function writePages() {
 		writePage(slug, frontmatter(fields), rewriteLinks(top + body.trimEnd() + bottom, slugs), text, `docs/${file}`);
 	}
 	writeRooms(slugs, rows, order);
-	const first = docGroups()[0].items[0];
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');
 	const head = `---
 title: ${JSON.stringify(index.title)}
@@ -536,9 +549,6 @@ hero:
   image:
     html: ${JSON.stringify(hatImg(3))}
   actions:
-    - text: ${JSON.stringify(first.label)}
-      link: ${JSON.stringify(`${base}/${first.slug}/`)}
-      icon: right-arrow
     - text: "@intentius/sql-yodeler on npm"
       link: "https://www.npmjs.com/package/@intentius/sql-yodeler"
       variant: minimal
@@ -546,7 +556,7 @@ hero:
 ---
 
 `;
-	writePage('index', head, rewriteLinks(index.body, slugs), read(new URL('README.md', docsDir)), 'docs/README.md');
+	writeHome(head, rewriteLinks(index.body, slugs), read(new URL('README.md', docsDir)));
 	writeFileSync(`${outDir}404.md`, notFound);
 	writeSchemaReferences();
 }
