@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, describe, expect, it } from "vitest";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
+import { overridePending } from "@intentius/chant/override-gate";
 import { HAT_ICON, HAT_IMG } from "../src/brand.js";
 import { reportJson } from "../src/commands/report.js";
 import type { HistoryRow } from "../src/history/index.js";
@@ -122,6 +123,28 @@ describe("the audit log", () => {
     expect(entries.find((e) => e.kind === "applied" && e.migration === "m1")).toMatchObject({ at: "2026-10-10T09:00:03.000000Z", by: "ci@host", digest: D1, source: { history: "yodeler.history", seq: 3, run: "run-1" } });
     expect(entries.find((e) => e.kind === "repaired")).toMatchObject({ by: "bob@laptop", detail: "whitespace only" });
     expect(entries.find((e) => e.kind === "silenced")?.detail).toBe("step 0: destructive TICKET-1");
+  });
+
+  it("shows the overrides on chant's override gate of the migrations Op's plans and reverts, with the rules and plan of the denial each answers", () => {
+    const answer = (subject: string, plan: string, rules: string[], at: string, note: string) => {
+      const denial = overridePending({ subject, planDigest: plan, rules, timestamp: "2026-10-10T09:00:04.100Z", expiresAt: "2026-10-17T00:00:00.000Z" });
+      return { denial, override: { version: 1, op: "policy-override", gate: subject, timestamp: at, resolvedBy: "alice", planDigest: denial.planDigest, note } };
+    };
+    const plan = answer("migrate-dev", D2, ["no-drops", "small-runs"], "2026-10-10T09:00:04.600Z", "nothing reads it");
+    const revert = answer("migrate-dev/revert-m1", D1, ["no-drops"], "2026-10-10T09:00:04.700Z", "added by mistake");
+    const other = answer("migrate-prod", D2, ["no-drops"], "2026-10-10T09:00:04.800Z", "another Op's");
+    const { entries } = deriveAudit({
+      environment: "dev",
+      history: "yodeler.history",
+      rows: rows(),
+      ledger: ledger(),
+      // As chant's reader (readGateAuditLedgers) gives the override gate's lines.
+      overrides: { op: "migrate-dev", path: "_gates/policy-override.jsonl", lines: [plan.denial, revert.denial, other.denial, plan.override, revert.override, other.override].map((record) => ({ record })) },
+    });
+    expect(entries.filter((e) => e.kind === "override" && "ledger" in e.source && e.source.ledger === "_gates/policy-override.jsonl").map((e) => [e.digest, e.detail, "gate" in e.source ? e.source.gate : ""])).toEqual([
+      [D2, "no-drops, small-runs: nothing reads it", "migrate-dev"],
+      [D1, "no-drops: added by mistake", "migrate-dev/revert-m1"],
+    ]);
   });
 
   it("gives the same ids from the same sources", () => {

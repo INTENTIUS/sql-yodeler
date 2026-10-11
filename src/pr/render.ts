@@ -17,7 +17,7 @@ import { asBackfill, asForm, describeForm } from "../steps/kinds.js";
 import { describeAccessSteps } from "../chant/access.js";
 import { describeExpect } from "../migrations/checks.js";
 import type { ApprovalView, PendingView, VersionedPlan } from "./model.js";
-import { describeResults, type RuleResult } from "../versioned/policy.js";
+import { describeResults, overrideCommand, type RuleResult } from "../versioned/policy.js";
 import { describeWave, type Promotion } from "../waves/index.js";
 
 /** Whether a required environment's history records the migration applied. */
@@ -194,7 +194,7 @@ function policyMarkdown(results: readonly RuleResult[], environment: string): st
   }
   const denied = results.filter((r) => r.outcome === "denied");
   if (denied.length > 0) {
-    out.push("", `\`yodel apply\` refuses this plan until someone \`policy.overriders\` lists records why, for exactly this digest:`, "", fence(denied.map((r) => `yodel override ${environment} --rule ${r.id} --reason "<why>"`).join("\n"), "sh"));
+    out.push("", `\`yodel apply\` refuses this plan until someone \`policy.overriders\` lists records why, for exactly this digest:`, "", fence(overrideCommand(environment, denied.map((r) => r.id)), "sh"));
   }
   return out;
 }
