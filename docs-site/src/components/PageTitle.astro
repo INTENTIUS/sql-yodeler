@@ -10,7 +10,7 @@ import Hat from './Hat.astro';
 const { entry } = Astro.locals.starlightRoute;
 const real = entry.id !== '404';
 const prompt = entry.data.prompt;
-const markdown = pageMarkdown({ title: entry.data.title, url: pageUrl(entry.id), prompt, body: entry.body ?? '' });
+const markdown = pageMarkdown({ title: entry.data.title, url: pageUrl(entry.id), prompt, body: entry.data.markdown ?? entry.body ?? '' });
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 <Default />

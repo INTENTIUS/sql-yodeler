@@ -11,6 +11,14 @@
 // Proof), each group in the order of docs/README.md's table, and the build
 // fails on a page with no type or an unknown one. The 404
 // page is written here too, with the hat.
+//
+// Tabs: a block between `<!-- tabs: <key> -->` and `<!-- /tabs -->` whose
+// sections start at `####` headings is one Starlight tab group on the site
+// (tabsToMdx() has the rules), and plain sections on GitHub. A page with one
+// is written as `<slug>.mdx`, and its Markdown, tab sections under their
+// `####` headings, is kept in its front matter as `markdown`: llms-full.txt and
+// "Copy page as Markdown" use that in place of the MDX body
+// (src/content.config.ts, src/pages/_llms.ts, src/components/PageTitle.astro).
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +82,149 @@ function rewriteLinks(md, slugs) {
 			});
 		})
 		.join('\n');
+}
+
+/** The tab groups a docs page may use, `<!-- tabs: <key> -->`, and the labels each allows. */
+export const tabKeys = { dialect: ['ClickHouse', 'Postgres'], forge: ['GitHub', 'GitLab', 'Forgejo'] };
+
+const TABS_OPEN = /^<!--\s*tabs:\s*(\S*)\s*-->\s*$/;
+const TABS_CLOSE = /^<!--\s*\/tabs\s*-->\s*$/;
+
+/**
+ * One line of Markdown outside fences, made valid MDX: HTML comments dropped
+ * (`state.comment` carries one across lines), `{`, `}` and `<` escaped, code
+ * spans and backslash escapes kept as they are.
+ */
+function mdxLine(line, state) {
+	let out = '';
+	let i = 0;
+	while (i < line.length) {
+		if (state.comment) {
+			const end = line.indexOf('-->', i);
+			if (end === -1) return out;
+			state.comment = false;
+			i = end + 3;
+			continue;
+		}
+		const c = line[i];
+		if (c === '\\') {
+			out += line.slice(i, i + 2);
+			i += 2;
+		} else if (c === '`') {
+			const run = /^`+/.exec(line.slice(i))[0];
+			const close = new RegExp(`(?<!\`)${run}(?!\`)`, 'g');
+			close.lastIndex = i + run.length;
+			const m = close.exec(line);
+			const end = m ? m.index + run.length : i + run.length;
+			out += line.slice(i, end);
+			i = end;
+		} else if (line.startsWith('<!--', i)) {
+			state.comment = true;
+			i += 4;
+		} else {
+			out += c === '{' || c === '}' || c === '<' ? `\\${c}` : c;
+			i += 1;
+		}
+	}
+	return out;
+}
+
+/**
+ * A docs page's tabs blocks as Starlight tab groups:
+ *
+ *     <!-- tabs: dialect -->
+ *     #### ClickHouse
+ *     ...
+ *     #### Postgres
+ *     ...
+ *     <!-- /tabs -->
+ *
+ * becomes <Tabs syncKey="dialect"> with a <TabItem label="..."> per `####`
+ * heading. On GitHub the reader sees each section under its heading. Lines in
+ * code fences are left alone. `count` is the number of blocks; when it is 0
+ * the page stays Markdown and `mdx` is not used. Otherwise `mdx` is the whole
+ * text as MDX: the rest of the page has its HTML comments dropped and `{`, `}`
+ * and `<` escaped outside code (so raw HTML does not survive on such a page).
+ * A malformed block throws, `where(i)` naming the docs file and line i
+ * (0-based) of `md`.
+ */
+export function tabsToMdx(md, where) {
+	const out = [];
+	const state = { comment: false };
+	let fence = null;
+	let block = null;
+	let count = 0;
+	const closeItem = () => {
+		if (block?.item) out.push('', '</TabItem>', '');
+		if (block) block.item = null;
+	};
+	md.split('\n').forEach((line, i) => {
+		const f = /^\s*(`{3,}|~{3,})/.exec(line);
+		if (f) {
+			if (!fence) fence = f[1];
+			else if (f[1].startsWith(fence)) fence = null;
+		}
+		if (fence || f) {
+			if (block && !block.item) throw new Error(`${where(i)}: text before the first #### heading in the tabs block opened at line ${block.line}`);
+			out.push(line);
+			return;
+		}
+		if (!state.comment) {
+			const open = TABS_OPEN.exec(line);
+			if (open) {
+				if (block) throw new Error(`${where(i)}: a tabs block inside the one opened at line ${block.line}; close it with <!-- /tabs --> first`);
+				if (!tabKeys[open[1]]) throw new Error(`${where(i)}: tabs: ${open[1] || '(none)'} is not a tab group; use one of ${Object.keys(tabKeys).join(', ')}`);
+				block = { key: open[1], line: i + 1, item: null, labels: [] };
+				count += 1;
+				out.push('', `<Tabs syncKey="${block.key}">`, '');
+				return;
+			}
+			if (TABS_CLOSE.test(line)) {
+				if (!block) throw new Error(`${where(i)}: <!-- /tabs --> with no tabs block open`);
+				if (!block.labels.length) throw new Error(`${where(i)}: the tabs block opened at line ${block.line} has no #### headings`);
+				closeItem();
+				out.push('</Tabs>', '');
+				block = null;
+				return;
+			}
+			const h = block && /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+			if (h) {
+				if (h[1].length !== 4) throw new Error(`${where(i)}: a ${h[1]} heading inside the tabs block opened at line ${block.line}; each tab starts at a #### heading, and nothing else in the block may be a heading`);
+				const label = h[2];
+				if (!tabKeys[block.key].includes(label)) throw new Error(`${where(i)}: #### ${label} is not a tab of ${block.key}; use one of ${tabKeys[block.key].join(', ')}`);
+				closeItem();
+				block.item = label;
+				block.labels.push(label);
+				out.push(`<TabItem label="${label}">`, '');
+				return;
+			}
+			if (block && !block.item && line.trim() !== '') throw new Error(`${where(i)}: text before the first #### heading in the tabs block opened at line ${block.line}`);
+		}
+		out.push(mdxLine(line, state));
+	});
+	if (block) throw new Error(`${where(block.line - 1)}: the tabs block opened here has no <!-- /tabs --> to close it`);
+	return { count, mdx: out.join('\n').replace(/\n{3,}/g, '\n\n') };
+}
+
+/** The import an MDX page with tabs needs, after its front matter. */
+const mdxImport = "import { Tabs, TabItem } from '@astrojs/starlight/components';\n\n";
+
+/**
+ * A page's file under src/content/docs/: `<slug>.md` as it is, or, when the
+ * Markdown has tabs blocks, `<slug>.mdx` with the import and the tab groups,
+ * and the Markdown kept in the front matter as `markdown` for llms-full.txt
+ * and "Copy page as Markdown". `md` is checked by line against `source`, the
+ * docs file it came from (`file` names it in errors).
+ */
+function writePage(slug, head, md, source, file) {
+	tabsToMdx(source, (i) => `docs/${file}:${i + 1}`);
+	const { count, mdx } = tabsToMdx(md, () => `docs/${file}`);
+	if (!count) {
+		writeFileSync(`${outDir}${slug}.md`, head + md);
+		return;
+	}
+	const front = head.replace(/\n---\n\n$/, `\nmarkdown: ${JSON.stringify(md)}\n---\n\n`);
+	writeFileSync(`${outDir}${slug}.mdx`, front + mdxImport + mdx);
 }
 
 /**
@@ -223,7 +374,7 @@ export function writePages() {
 			...(front.draft ? { unproven: true } : {}),
 			editUrl: generated.has(slug) ? false : `${editBase}${file}`,
 		};
-		writeFileSync(`${outDir}${slug}.md`, frontmatter(fields) + rewriteLinks(top + body.trimEnd() + bottom, slugs));
+		writePage(slug, frontmatter(fields), rewriteLinks(top + body.trimEnd() + bottom, slugs), text, file);
 	}
 	const first = sidebar()[0].items[0];
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');
@@ -250,7 +401,7 @@ hero:
 ---
 
 `;
-	writeFileSync(`${outDir}index.md`, head + rewriteLinks(index.body, slugs));
+	writePage('index', head, rewriteLinks(index.body, slugs), read(new URL('README.md', docsDir)), 'README.md');
 	writeFileSync(`${outDir}404.md`, notFound);
 	writeSchemaReferences();
 }
