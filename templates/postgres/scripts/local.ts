@@ -1,5 +1,5 @@
 /**
- * What `just up` runs after `chant emulator up`: is dev's server the
+ * What `just up` runs after `yodel emulator up`: is dev's server the
  * emulator?
  *
  *   npx tsx scripts/local.ts

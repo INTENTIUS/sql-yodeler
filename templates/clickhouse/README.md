@@ -1,6 +1,6 @@
 # {{chant:name}}
 
-The ClickHouse schema of database `{{chant:database}}`, managed with SQL Yodeler (`yodel`) on chant's `sql` lexicon. Made with `chant init --from` from SQL Yodeler's ClickHouse template.
+The ClickHouse schema of database `{{chant:database}}`, managed with SQL Yodeler (`yodel`) on chant's `sql` lexicon. Made with `yodel create` from SQL Yodeler's ClickHouse template.
 
 | Path | What it is |
 |---|---|
@@ -20,7 +20,7 @@ The history table and the apply lock live in database `{{chant:history_database}
 
 ```sh
 npm install                 # writes package-lock.json; commit it, CI runs npm ci
-just up                     # the local database (chant's emulator); prints what .env needs for dev
+just up                     # the local database (yodel emulator up); prints what .env needs for dev
 just new init               # the first migration, from src/schema.ts
 git init -q && git add -A && git commit -m "feat: the schema"
 just plan                   # what applying to dev would do, and the plan digest
@@ -47,13 +47,13 @@ YODEL_CREDENTIALS=writer npx yodel init --from <env> --force
 | Target | Runs |
 |---|---|
 | `just` | `just --list`: the targets, one line each |
-| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which warns when dev's address (`127.0.0.1`) reaches another server on this machine instead of the emulator, and on the emulator makes the read-only user `reader` that dev reads with (yodel refuses one user as both reader and writer) |
-| `just down` | `npx @intentius/chant emulator down --lexicon sql` |
+| `just up` | `npx yodel emulator up`, then `npx tsx scripts/local.ts`, which warns when dev's address (`127.0.0.1`) reaches another server on this machine instead of the emulator, and on the emulator makes the read-only user `reader` that dev reads with (yodel refuses one user as both reader and writer) |
+| `just down` | `npx yodel emulator down` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |
 | `just replay` | `npm run replay`, which is `yodel ci --replay` (see [The replay check](#the-replay-check)) |
 | `just plan [env]` | `npx yodel plan <env>` |
-| `just approve [env]` | prints the approve command from `npx yodel plan <env> --json`, as `npx @intentius/chant approve ...`, and `git push origin chant/lifecycle`; it never runs them |
+| `just approve [env]` | prints the approve command from `npx yodel plan <env> --json`, `npx yodel approve <env> --plan <digest>`, for you to run at a terminal; it never runs it |
 | `just apply [env]` | `YODEL_CREDENTIALS=writer npx yodel apply <env>` |
 | `just drift [env]` | `npx yodel drift <env>` |
 | `just status [env]` | `npx yodel status <env>` |
@@ -102,11 +102,10 @@ Each plan and wave job also runs `yodel report <env>` (JSON and the HTML run vie
 Each environment is a wave of the apply pipeline, with a gate policy in `yodel.config.ts`: `always` (the default) waits for an approval whenever there is a migration to apply, `on-destructive` only when a pending step drops something, rewrites or locks a table, rebuilds, or is an Op or manual step, and `never` never waits. The pipeline reads the gate from the commit before the push, so a pull request cannot loosen its own. When the wave will wait, the pull request comment ends with the command:
 
 ```sh
-chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:...
-git push origin chant/lifecycle
+npx yodel approve dev --plan jcs1-sha256:...
 ```
 
-The approval is a commit on the `chant/lifecycle` branch; every job fetches that branch. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; approve and push, then re-run the failed job (GitLab: retry it). A wave applies only migrations the wave before it has applied: `yodel apply <env>` reads that environment's history and refuses (exit 4, nothing applied) a migration it does not record, so approve prod's wave once dev has run it. If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
+Run it at a terminal: it shows the plan, asks you to type the environment's name, records the approval as a commit on the `chant/lifecycle` branch and pushes it (every job fetches that branch), and starts a job that waits at the gate again. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; `yodel approve` records the approval and starts the failed job again. A wave applies only migrations the wave before it has applied: `yodel apply <env>` reads that environment's history and refuses (exit 4, nothing applied) a migration it does not record, so approve prod's wave once dev has run it. If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
 
 ### Drift
 
@@ -148,4 +147,4 @@ Add its profile to `chant.config.ts`, its entry to `yodel.config.ts` `environmen
 
 ## The sql-yodeler dependency
 
-`package.json` takes `@intentius/sql-yodeler` from npm, `^0.6.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.7.0 after 0.6.x) needs the range changed, since `^0.6.0` stops at 0.6.x.
+`package.json` takes `@intentius/sql-yodeler` from npm, `^0.7.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.8.0 after 0.7.x) needs the range changed, since `^0.7.0` stops at 0.7.x.

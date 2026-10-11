@@ -21,7 +21,7 @@ export default {
   // A wave applies only migrations the wave before it has applied (its
   // history records them, with the same checksum); `requires: "<env>"` names
   // another environment, `requires: false` none. A wave's `approval` says
-  // which approvals count: "ledger" (any chant approve, the default),
+  // which approvals count: "ledger" (any yodel approve, the default),
   // "pr-review" (also the pull request's review by a writer other than its
   // author) or "sealed" (only one sealed with yodel approve --sign by a key
   // .chant/allowed_signers lists at the base commit).
@@ -38,8 +38,8 @@ export default {
   // image: "ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>", pinned by
   // the digest the release's image job prints, with <version> the yodel this
   // project installs. yodel approve <env> starts a waiting wave's job again
-  // itself; to have a schedule do it too (an approval made with chant approve
-  // alone, or a resume that failed), add resume: { schedule: "*/10 * * * *" }:
+  // itself; to have a schedule do it too (an approval recorded with --no-resume,
+  // or a resume that failed), add resume: { schedule: "*/10 * * * *" }:
   // yodel ci --help says which token each forge needs.
   ci: { forges: ["github", "gitlab", "forgejo"] },
 } satisfies YodelConfig;

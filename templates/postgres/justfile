@@ -13,14 +13,14 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 default:
     @just --list --unsorted
 
-# Start the local database (chant's emulator), and say whether dev reaches it.
+# Start the local database (yodel emulator), and say whether dev reaches it.
 up:
-    npx @intentius/chant emulator up --lexicon sql
+    npx yodel emulator up
     npx tsx scripts/local.ts
 
 # Stop the local database.
 down:
-    npx @intentius/chant emulator down --lexicon sql
+    npx yodel emulator down
 
 # Write the next migration from src/: just new add-orders
 new name:
@@ -38,9 +38,9 @@ replay:
 plan env="dev":
     npx yodel plan {{env}}
 
-# Print the command that approves env's plan, for a person to run. It never runs it.
+# Print the command that approves env's plan, for a person to run at a terminal. It never runs it.
 approve env="dev":
-    @npx yodel plan {{env}} --json | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => { const a = JSON.parse(s.slice(s.indexOf("{"))).approve; console.log(a ? `To approve, run (and push chant/lifecycle when the project has a remote):\n  ${a.replace(/^chant /, "npx @intentius/chant ")}\n  git push origin chant/lifecycle` : "Nothing to approve: no plan is pending."); })'
+    @npx yodel plan {{env}} --json | node -e 'let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => { const a = JSON.parse(s.slice(s.indexOf("{"))).approve; console.log(a ? `To approve, run at a terminal (it shows the plan and asks you first):\n  npx ${a}` : "Nothing to approve: no plan is pending."); })'
 
 # Apply env's approved plan, with env's writer credentials.
 apply env="dev":

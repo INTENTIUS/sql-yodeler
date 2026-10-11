@@ -5,7 +5,7 @@
 # chant run wave: yodel apply <env> --wave-plan plans the environment, the
 # wave's gate policy is read from yodel-waves.json as the commit before the push
 # has it (yodel.config.ts waves, rendered), and a wave that needs an approval
-# exits 3 with the chant approve command, so the waves after it do not run.
+# exits 3 with the yodel approve command, so the waves after it do not run.
 # yodel approve <env> records the approval and starts the waiting job again
 # (or approve, push chant/lifecycle, and run the failed job again). These are
 # the only jobs that hold a writer's credentials, one environment's each, with
