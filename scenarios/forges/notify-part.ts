@@ -105,7 +105,7 @@ export async function startNotifyPart(ctx: Ctx, dir: string): Promise<NotifyPart
 }
 
 /**
- * Runs the part's check the way an approve-and-apply part runs: plain, a
+ * Runs the part's check the way an approval part runs: plain, a
  * check that does not hold is a Violation; under BREAK it must not hold
  * (the receiver rejects), and the flow goes on to its own break.
  */
