@@ -170,6 +170,7 @@ src/probe.ts                           approval forgejo github gitlab
 src/commands/                          ALL
 src/migrations/                        ALL
 src/history/                           ALL
+src/release/                           ALL
 src/versioned/                         ALL
 src/topology/                          ALL
 src/chant/                             ALL
