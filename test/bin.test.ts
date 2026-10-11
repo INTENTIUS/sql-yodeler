@@ -18,3 +18,17 @@ describe.skipIf(!existsSync(bin))("the yodel bin", () => {
     expect(ran.stderr).toMatch(/^yodel plan: no environment "prod".*declared: e2e/);
   });
 });
+
+// A receiver imports @intentius/sql-yodeler/webhook in plain node, with no loader (#211): it and chant's notify-verify are compiled JS.
+describe.skipIf(!existsSync(join(repoRoot, "dist", "notify", "verify.js")))("the webhook export", () => {
+  it("imports and verifies in plain node", async () => {
+    const script = [
+      'import { signWebhook, verifyWebhook } from "@intentius/sql-yodeler/webhook";',
+      'const body = "{}";',
+      'const headers = { "x-yodel-timestamp": "100", "x-yodel-signature": signWebhook("k", 100, body) };',
+      "console.log(JSON.stringify(verifyWebhook({ body, headers, key: \"k\", now: 100 })));",
+    ].join("\n");
+    const ran = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script], { cwd: repoRoot });
+    expect(JSON.parse(ran.stdout)).toEqual({ ok: true, event: {} });
+  });
+});

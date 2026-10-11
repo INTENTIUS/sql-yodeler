@@ -1,37 +1,229 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://intentius.io/sql-yodeler/schemas/v1/event.schema.json",
-  "title": "a yodel webhook event",
-  "description": "Version 1. The body yodel apply, yodel plan and yodel drift post to the webhook yodel.config.ts notify names, signed with HMAC-SHA256 over '<x-yodel-timestamp>.<body>' in the x-yodel-signature header. Within a version, fields are only added; a receiver ignores fields it does not know.",
+  "title": "a yodel webhook event (chant.notify/v1)",
+  "description": "Version 1. The body yodel apply, yodel plan and yodel drift post to the webhook yodel.config.ts notify names: chant's chant.notify/v1 event (https://intentius.io/chant/schemas/notify/v1/notify.schema.json), with source sql-yodeler and the command that sent it in detail.command. Signed with HMAC-SHA256 over '<x-yodel-timestamp>.<body>' in the x-yodel-signature header. A field is only ever added within a version; a receiver ignores fields it does not know.",
   "type": "object",
-  "additionalProperties": false,
-  "required": ["version", "id", "event", "at", "environment", "command", "status", "summary", "migrations"],
+  "required": [
+    "schema",
+    "id",
+    "event",
+    "at",
+    "source",
+    "project",
+    "summary",
+    "targets",
+    "environment",
+    "detail"
+  ],
   "properties": {
-    "version": { "const": 1 },
-    "id": { "type": "string", "description": "Unique per event; also the x-yodel-delivery header." },
-    "event": { "enum": ["waiting", "refused", "failed", "drift"] },
-    "at": { "type": "string", "format": "date-time" },
-    "environment": { "type": "string" },
-    "command": { "enum": ["apply", "plan", "drift"] },
-    "status": { "type": "string", "description": "The command's own word for the outcome: gated, refused, denied, failed, incomplete, drifted." },
-    "summary": { "type": "string" },
-    "migrations": { "type": "array", "items": { "type": "string" }, "description": "The pending migrations, for apply and plan." },
-    "digest": { "type": "string", "description": "The plan digest the run computed." },
-    "approve": { "type": "string", "description": "On waiting: the command that approves the plan." },
-    "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
-    "reason": { "type": "string" },
-    "drift": {
+    "schema": {
+      "const": "chant.notify/v1"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The same for every send of one event about one digest (else drift fingerprint, else commit), so a receiver can drop a repeat; random when there is none. The delivery header carries it too."
+    },
+    "event": {
+      "enum": [
+        "waiting",
+        "refused",
+        "failed",
+        "drift"
+      ]
+    },
+    "at": {
+      "type": "string",
+      "description": "When it was sent, ISO 8601 UTC."
+    },
+    "source": {
+      "const": "sql-yodeler"
+    },
+    "project": {
+      "type": "string",
+      "description": "What the run belongs to: the repository, or a name the product gives."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One line a person can read."
+    },
+    "wave": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["changed", "missing"],
+      "required": [
+        "number"
+      ],
       "properties": {
-        "changed": { "type": "array", "items": { "type": "string" } },
-        "missing": { "type": "array", "items": { "type": "string" } },
-        "fingerprint": { "type": "string", "description": "The same drift has the same fingerprint run after run, so a receiver can tell a repeat from new drift." }
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "gate": {
+          "type": "string",
+          "description": "The gate the wave waits on."
+        }
       }
     },
-    "runUrl": { "type": "string" },
-    "repository": { "type": "string" },
-    "commit": { "type": "string" }
-  }
+    "environment": {
+      "type": "string",
+      "description": "The environment the run is for."
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The migrations concerned: the pending ones for apply and plan; empty for drift."
+    },
+    "digest": {
+      "type": "string",
+      "description": "The plan digest an approval binds."
+    },
+    "approve": {
+      "type": "object",
+      "description": "On waiting: how a person approves it.",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The command to run, as the product prints it."
+        },
+        "chant": {
+          "type": "string",
+          "description": "chant's own command for the same approval, when the product's differs."
+        },
+        "review": {
+          "type": "object",
+          "description": "Under pr-review: the pull request whose approving review would approve it.",
+          "required": [
+            "pr",
+            "url"
+          ],
+          "properties": {
+            "pr": {
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "description": "The command's own word for the outcome: gated, refused, denied, failed, incomplete, drifted."
+    },
+    "reason": {
+      "type": "string",
+      "description": "On refused and failed: why."
+    },
+    "exitCode": {
+      "type": "integer"
+    },
+    "drift": {
+      "type": "object",
+      "required": [
+        "changed"
+      ],
+      "properties": {
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What could not be checked."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "The same drift has the same fingerprint, run after run."
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The CI run's page (GitHub, Forgejo) or job's page (GitLab)."
+        },
+        "forge": {
+          "enum": [
+            "github",
+            "gitlab",
+            "forgejo"
+          ]
+        },
+        "repository": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "pr": {
+          "type": "integer"
+        }
+      }
+    },
+    "reportUrl": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "apply",
+            "plan",
+            "drift"
+          ],
+          "description": "The yodel command that sent it."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "event"
+        ],
+        "properties": {
+          "event": {
+            "const": "drift"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "drift"
+        ],
+        "properties": {
+          "drift": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
 }
