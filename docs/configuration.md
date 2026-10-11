@@ -185,8 +185,8 @@ export default defineConfig({
 
 | Setting | 1. yodel.config.ts | 2. chant.config.ts | 3. variable | Default |
 |---|---|---|---|---|
-| topology (ClickHouse) | `environments.<env>.topology` | `sql.profiles.<env>.topology` | `YODEL_CREDENTIALS` | `credentials()` in chant.config.ts | `writer` or `writer:<env>`: connect as the writer; otherwise the reader. Only an environment's wave job sets it |
-| `YODEL_TOPOLOGY` | `single` |
+| topology (ClickHouse) | `environments.<env>.topology` | `sql.profiles.<env>.topology` | `YODEL_TOPOLOGY` | `single` |
+| which role a process connects as | | `credentials()` in chant.config.ts | `YODEL_CREDENTIALS`: `writer` or `writer:<env>` connects as the writer. Only an environment's wave job sets it | the reader |
 | the history's database (ClickHouse) or schema (Postgres) | `environments.<env>.history.database` | | `YODEL_HISTORY_DATABASE` | `yodeler` |
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
