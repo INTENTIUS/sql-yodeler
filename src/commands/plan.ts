@@ -13,8 +13,7 @@ import { runnable } from "../chant/runnable.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
-import { resolveForgeTarget, type ForgeFlags } from "../pr/forge.js";
-import { commentClient, findComment, upsertComment } from "../pr/comment.js";
+import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
 import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
 
@@ -64,8 +63,10 @@ Options:
     --api-url <url>     the REST API base (https://api.github.com,
                         https://gitlab.example/api/v4,
                         https://forgejo.example/api/v1)
-    --token-env <VAR>   the variable holding the token (default GITHUB_TOKEN;
-                        GITLAB_TOKEN; FORGEJO_TOKEN, else GITHUB_TOKEN)
+    --token-env <VAR>   the variable holding the token (default the first
+                        set of CHANT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN;
+                        CHANT_GITLAB_TOKEN, GITLAB_TOKEN; CHANT_FORGEJO_TOKEN,
+                        FORGEJO_TOKEN, GH_TOKEN, GITHUB_TOKEN)
   -C, --dir <dir>       the project directory (default: the working directory)
 
 Exit codes:
@@ -186,19 +187,15 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   if (!env.tenant && tenantSetOf(project, env.name)) return tenantSetPlan(project, env, a, io);
   const marker = commentMarker(env.name);
   // Resolve the forge first: a job missing its token fails before it reads the server.
-  const target = a.comment ? resolveForgeTarget(a.forge, process.env) : undefined;
-  const client = target ? commentClient(target) : undefined;
-  const existing = client ? await findComment(client, marker) : undefined;
+  const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
+  const existing = forge ? await forge.client.findComment(prOf(forge), marker) : undefined;
   const carried = existing ? subjectIn(existing.body) : undefined;
   const previous = carried ? decodeSubject(carried) : undefined;
 
   const result = await collectVersionedPlan(project, env, { allowOutOfOrder: a.allowOutOfOrder, opName: a.op, previous });
   const code = result.refusal?.exitCode ?? 0;
 
-  if (client && target) {
-    const posted = await upsertComment(client, marker, renderPlanMarkdown(result), existing);
-    io.err(`yodel plan: ${posted.action} the plan comment on ${target.forge} ${target.repo}#${String(target.pr)}${posted.comment.url ? ` (${posted.comment.url})` : ` (comment ${String(posted.comment.id)})`}\n`);
-  }
+  if (forge) await postComment(forge, marker, renderPlanMarkdown(result), io);
   const doc = planJsonVersioned(result);
   if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
   else if (a.format === "markdown") io.out(renderPlanMarkdown(result));
@@ -210,17 +207,20 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
 
 /** `yodel plan <set>` (#56): every tenant, grouped, and one comment for the set. */
 async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
-  const target = a.comment ? resolveForgeTarget(a.forge, process.env) : undefined;
-  const client = target ? commentClient(target) : undefined;
-  const marker = commentMarker(env.name);
-  const existing = client ? await findComment(client, marker) : undefined;
+  const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
   const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
-  if (client && target) {
-    const posted = await upsertComment(client, marker, renderTenantSetMarkdown(result), existing);
-    io.err(`yodel plan: ${posted.action} the plan comment on ${target.forge} ${target.repo}#${String(target.pr)}${posted.comment.url ? ` (${posted.comment.url})` : ` (comment ${String(posted.comment.id)})`}\n`);
-  }
+  if (forge) await postComment(forge, commentMarker(env.name), renderTenantSetMarkdown(result), io);
   if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
   else if (a.format === "markdown") io.out(renderTenantSetMarkdown(result));
   else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
   return tenantSetExitCode(result);
+}
+
+/** The pull request `--comment` posts on: resolveForge refuses a target without one. */
+const prOf = (forge: Forge): number => forge.target.pr ?? 0;
+
+/** Keeps the environment's plan comment on the pull request up to date, through chant's forge client. */
+async function postComment(forge: Forge, marker: string, body: string, io: Io): Promise<void> {
+  const posted = await forge.client.upsertComment(prOf(forge), marker, body);
+  io.err(`yodel plan: ${posted.action} the plan comment on ${describeForge(forge.target)}#${String(prOf(forge))}${posted.url ? ` (${posted.url})` : ` (comment ${String(posted.id)})`}\n`);
 }

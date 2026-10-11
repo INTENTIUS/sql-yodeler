@@ -29,8 +29,8 @@ import { describeHolders, describeMs, isLockTimeout, lockHolders, lockTimeoutOpt
 import { DEFAULT_PG_TIMEOUTS } from "../versioned/postgres/executor.js";
 import { closeVersioned, hasMigrations, inspect, openVersioned, readChain } from "../versioned/index.js";
 import { isApplied } from "../history/index.js";
-import { resolveForgeRepo, type ForgeFlags, type ForgeRepo } from "../pr/forge.js";
-import { driftIssueMarker, issueClient, trackDrift, type DriftOutcome, type IssueAction } from "../pr/issue.js";
+import { describeForge, resolveForge, type ForgeFlags, type ForgeTarget } from "../pr/forge.js";
+import { driftIssueMarker, trackDrift, type DriftOutcome, type IssueAction } from "../pr/issue.js";
 import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/live/client";
 
 interface PgLockSettings {
@@ -149,7 +149,7 @@ Options:
                         that cannot read a declared object leaves the issue as
                         it is, and says so. The forge, repository and token
                         come from the CI job's environment, as for yodel plan
-                        --comment (GITHUB_TOKEN, GITLAB_TOKEN, FORGEJO_TOKEN):
+                        --comment:
     --forge <f>         github, gitlab or forgejo
     --repo <repo>       owner/name (GitHub, Forgejo), or the project id or path (GitLab)
     --api-url <url>     the REST API base
@@ -223,8 +223,8 @@ function outcomeOf(drift: Drift, code: number, body: string): DriftOutcome {
   return { kind: "unknown", why: `${String(drift.unobserved.length)} declared object(s) could not be read, so whether ${drift.environment} drifted is unknown` };
 }
 
-function describeAction(a: IssueAction, target: ForgeRepo): string {
-  const where = `${target.forge} ${target.repo}`;
+function describeAction(a: IssueAction, target: ForgeTarget): string {
+  const where = describeForge(target);
   if (a.action === "none") return `no drift, and no tracking issue open on ${where}`;
   const issue = "issue" in a ? `#${String(a.issue.number)}${a.issue.url ? ` (${a.issue.url})` : ""}` : "";
   if (a.action === "left") return `left the tracking issue${issue ? ` ${issue}` : ""} on ${where} as it is: ${a.why}`;
@@ -266,11 +266,11 @@ export const drift: Command = {
       const source = a.against ?? (versioned ? "history" : "src");
       if (source === "history" && !versioned) throw new YodelError(`--against history compares with the schema the newest applied migration records, and ${project.dir} has no migrations/ directory with a migration`);
       // The forge first: a job missing its token fails before it reads the server.
-      const target = a.issue ? resolveForgeRepo(a.forge, process.env) : undefined;
+      const forge = a.issue ? await resolveForge(a.forge, process.env, "--issue") : undefined;
       const track = async (outcome: DriftOutcome): Promise<IssueAction | undefined> => {
-        if (!target) return undefined;
-        const action = await trackDrift(issueClient(target), driftIssueMarker(await projectPath(project.dir), env.name), outcome);
-        io.err(`yodel drift: ${describeAction(action, target)}\n`);
+        if (!forge) return undefined;
+        const action = await trackDrift(forge.client, driftIssueMarker(await projectPath(project.dir), env.name), outcome);
+        io.err(`yodel drift: ${describeAction(action, forge.target)}\n`);
         return action;
       };
 
