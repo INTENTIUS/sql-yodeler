@@ -217,7 +217,7 @@ export const ROOMS = [
 		],
 		background: [
 			{ label: 'Migrations', href: 'migrations' },
-			{ label: 'Steps', href: 'steps' },
+			{ label: 'Data migrations', href: 'steps' },
 		],
 		reference: [
 			{ label: 'The commands', href: 'cli' },

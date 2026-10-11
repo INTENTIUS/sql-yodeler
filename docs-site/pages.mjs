@@ -342,16 +342,19 @@ function pageTypes() {
 /** The rooms, starts first and then roles, as sidebar items. */
 const roomItems = () => [...STARTS, ...ROLES].map((x) => ({ label: x.label, slug: `for/${x.room}` }));
 
-/** The page the site leads with: the declared schema is what everything else works from. */
-const lead = { label: 'Declaring the schema', slug: 'schema' };
+/** The pages the site leads with: the declared schema, which everything else works from, and the data changes a migration carries. */
+const lead = [
+	{ label: 'Declaring the schema', slug: 'schema' },
+	{ label: 'Data migrations', slug: 'steps' },
+];
 
 /**
- * The sidebar: "Start here" with the rooms, the declared schema on its own,
- * then one group per page type, in the order of `groups`. Every group starts
+ * The sidebar: "Start here" with the rooms, the declared schema and data
+ * migrations on their own, then one group per page type, in the order of `groups`. Every group starts
  * collapsed; Starlight opens the one that holds the current page.
  */
 export function sidebar() {
-	return [{ label: 'Start here', collapsed: true, items: roomItems() }, lead, ...docGroups()];
+	return [{ label: 'Start here', collapsed: true, items: roomItems() }, ...lead, ...docGroups()];
 }
 
 /**
@@ -370,7 +373,7 @@ function docGroups() {
 		if (!items.some((i) => i.slug === slug)) items.push({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug });
 	}
 	return groups
-		.map(([type, label]) => ({ label, collapsed: true, items: items.filter((i) => types[i.slug] === type && i.slug !== lead.slug) }))
+		.map(([type, label]) => ({ label, collapsed: true, items: items.filter((i) => types[i.slug] === type && !lead.some((l) => l.slug === i.slug)) }))
 		.filter((g) => g.items.length);
 }
 

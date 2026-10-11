@@ -3,9 +3,9 @@ claims: [rebuild, resume, column-change]
 type: concepts
 ---
 
-# Steps
+# Data migrations
 
-Most of a migration is statements. A change that is not one statement is a step of the migration: `yodel new` writes it into `migration.json` with the Op that makes it, and into `migration.sql` as a comment. `yodel apply` runs three kinds of Op step itself, in their place among the statements (the statements before a step first, the ones after it only once it succeeded), under the same lock and behind the same approval:
+A migration changes data as well as schema. Most of a migration is statements; a change that is not one statement, such as a backfill, a ClickHouse rebuild or a Postgres rename that readers must survive, is a data step of the migration, behind the same approval and recorded in the same history as the DDL: `yodel new` writes it into `migration.json` with the Op that makes it, and into `migration.sql` as a comment. `yodel apply` runs three kinds of Op step itself, in their place among the statements (the statements before a step first, the ones after it only once it succeeded), under the same lock and behind the same approval:
 
 | Step | Dialect | Written by `yodel new` for |
 |---|---|---|

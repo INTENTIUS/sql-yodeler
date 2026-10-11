@@ -139,9 +139,21 @@ export const { table: tickets, index: ticketsByTenant } = TenantTable({
 
 That builds a table with `PRIMARY KEY (tenant_id, id)` and the index `tickets_tenant_idx` on `(tenant_id, created_at DESC)`. The others: `SoftDeleteTable`, `AuditLogTable`, `JoinTable` and `RefreshedView` on Postgres; `EventsTable`, `ReplacingTable`, `RollupView`, `CdcMirror` and `ShardedTable` on ClickHouse. chant's [composites page](https://intentius.io/chant/lexicons/sql/composites/) has each one's options.
 
+## Data changes
+
+The declaration says what the schema should be; some changes also move data. When the change from the last migration is one no statement makes in place, `yodel new` writes it as a data step of the same migration: a ClickHouse sort-key or engine change as a rebuild into a new table, a Postgres column rename or type change as expand and contract, and a backfill you write with `yodel new <name> --backfill`. A data step runs under the same lock and approval as the statements, and resumes where it stopped ([Data migrations](steps.md)).
+
 ## What the build checks
 
-`chant build`, which yodel runs itself before it writes or plans a migration, parses every statement and checks it against the catalog of a pinned server, read from that release's own system tables: ClickHouse 26.8, and each Postgres major from 14 to 18. An engine, a codec, a MergeTree setting or a Postgres storage parameter the server does not have fails the build, naming the release; so does a key or index column the table does not declare. Lint rules flag what the server would accept but should not: a primary key that is not a prefix of the sort key, a partition finer than a day, a timestamp without time zone, a foreign key no index leads with. [Lint](lint.md) has yodel's own rules on migrations, and chant's [lint rules page](https://intentius.io/chant/lexicons/sql/lint-rules/) has the build's.
+`chant build`, which yodel runs itself before it writes or plans a migration, parses every statement and checks it against the catalog of a pinned server, read from that release's own system tables: ClickHouse 26.8, and each Postgres major from 14 to 18. A mistake fails the build with a message that names the object, the column and the release:
+
+- a column type the server does not have, in any spelling it does not accept (`UInt46`, `uint64`, `numerik`), wrong type parameters (`Decimal(100, 2)`, `numeric(2000,2)`, `bigint(8)`), or a nesting it refuses (`Nullable(Array(String))`)
+- an engine, codec, codec parameter, MergeTree setting, Postgres storage parameter, index access method or operator class the server does not have
+- a function the server does not have, in a default, a key, a partition, a TTL, a check or an index
+- a column named in a key, an index, a foreign key or a grant that the table does not declare, and a foreign key between columns whose types cannot compare
+- a column declared twice, or two exports that declare the same object
+
+Names written as plain text for objects the project does not declare, and column names inside expressions, are left to the server. Lint rules then flag what the server would accept but should not: a primary key that is not a prefix of the sort key, a partition finer than a day, a timestamp without time zone, a foreign key no index leads with. [Lint](lint.md) has yodel's own rules on migrations, and chant's [lint rules page](https://intentius.io/chant/lexicons/sql/lint-rules/) has the build's.
 
 ## In the editor
 
