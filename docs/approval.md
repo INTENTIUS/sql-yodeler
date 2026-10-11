@@ -353,11 +353,11 @@ The hidden `yodel:subject` line at the end records the state the plan was made f
 
 | Forge | Detected by | Token |
 |---|---|---|
-| GitHub Actions | `GITHUB_ACTIONS=true` | `GITHUB_TOKEN`, with `pull-requests: write` |
-| GitLab CI | `GITLAB_CI=true` | `GITLAB_TOKEN`: a project or personal access token with `api` scope (`CI_JOB_TOKEN` cannot write merge request notes) |
-| Forgejo Actions | `FORGEJO_ACTIONS=true` or `GITEA_ACTIONS=true` (or a GitHub-style job whose API URL ends in `/api/v1`) | `FORGEJO_TOKEN`, else `GITHUB_TOKEN` |
+| GitHub Actions | `GITHUB_ACTIONS=true` | the first set of `CHANT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`; the job's `GITHUB_TOKEN` needs `pull-requests: write` |
+| GitLab CI | `GITLAB_CI=true` | the first set of `CHANT_GITLAB_TOKEN`, `GITLAB_TOKEN`, `CI_JOB_TOKEN`: set `GITLAB_TOKEN` to a project or personal access token with `api` scope (`CI_JOB_TOKEN` cannot write merge request notes) |
+| Forgejo Actions | `FORGEJO_ACTIONS=true` or `GITEA_ACTIONS=true` (or a GitHub-style job whose API URL ends in `/api/v1`) | the first set of `CHANT_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
 
-Outside those, or to override them: `--forge github|gitlab|forgejo`, `--repo`, `--pr`, `--api-url`, and `--token-env <VAR>` for the variable that holds the token. The token is never a flag and never printed. The comment job needs only read credentials for the database; the starter templates give it the reader.
+Outside those, or to override them: `--forge github|gitlab|forgejo`, `--repo`, `--pr`, `--api-url`, and `--token-env <VAR>` for the one variable that holds the token. The token is never a flag and never printed. chant's forge client (`@intentius/chant/pr-forge`) reads the job's environment and posts the comment; yodel writes the body. The comment job needs only read credentials for the database; the starter templates give it the reader.
 
 ## When the digest moves
 

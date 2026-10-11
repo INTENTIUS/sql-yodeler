@@ -1,45 +1,35 @@
 /**
- * Where `yodel plan <env> --comment` posts: the forge, the repository, the
- * pull (merge) request and the token, from the CI job's environment, each
- * overridden by a flag.
+ * Where `yodel plan <env> --comment` and `yodel drift <env> --issue` post:
+ * chant's forge client (`@intentius/chant/pr-forge`, #210) for the CI job's
+ * forge, repository, pull (merge) request and token, each overridden by a
+ * flag. chant reads the job's environment and makes every REST call; yodel
+ * keeps the flags and the bodies.
  *
  * - GitHub Actions: `GITHUB_ACTIONS=true`. `GITHUB_REPOSITORY`, the PR number
- *   from the event payload (`GITHUB_EVENT_PATH`: `pull_request.number`, or
- *   `refs/pull/<n>/merge` in `GITHUB_REF`), `GITHUB_API_URL` (default
- *   https://api.github.com), token `GITHUB_TOKEN`.
+ *   from the event payload (`GITHUB_EVENT_PATH`) or `refs/pull/<n>/merge` in
+ *   `GITHUB_REF`, `GITHUB_API_URL` (default https://api.github.com).
  * - GitLab CI: `GITLAB_CI=true`. `CI_API_V4_URL`, `CI_PROJECT_ID`,
- *   `CI_MERGE_REQUEST_IID` (a merge request pipeline), token `GITLAB_TOKEN`
- *   (a project or personal access token with `api` scope: `CI_JOB_TOKEN`
- *   cannot write merge request notes).
+ *   `CI_MERGE_REQUEST_IID` (a merge request pipeline).
  * - Forgejo Actions: `FORGEJO_ACTIONS=true` (runner 7 and later), or
  *   `GITEA_ACTIONS=true`, or a GitHub-style job whose API URL ends in
- *   `/api/v1`. `FORGEJO_REPOSITORY` / `GITHUB_REPOSITORY`, the PR number from
- *   `FORGEJO_EVENT_PATH` / `GITHUB_EVENT_PATH` or the ref, `FORGEJO_API_URL` /
- *   `GITHUB_API_URL` (else `<server>/api/v1`), token `FORGEJO_TOKEN` /
- *   `GITHUB_TOKEN`.
+ *   `/api/v1`. The `FORGEJO_*` variables before the `GITHUB_*` ones, and
+ *   `<server>/api/v1` when no API URL is set.
  *
- * `--token-env <NAME>` names the variable the token is read from; the token
- * itself is never a flag, never printed and never put in an error.
+ * The token is the first set of chant's `FORGE_TOKEN_ORDER`:
+ * `CHANT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` on GitHub;
+ * `CHANT_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` on
+ * Forgejo; `CHANT_GITLAB_TOKEN`, `GITLAB_TOKEN`, `CI_JOB_TOKEN` on GitLab
+ * (`CI_JOB_TOKEN` cannot write merge request notes or issues: name a project
+ * access token with `api` scope). `--token-env <NAME>` names the one
+ * variable to read instead; the token itself is never a flag, never printed
+ * and never put in an error.
  */
 
-import { readFileSync } from "node:fs";
+import type { ForgeFetch, ForgeKind, ForgeTarget, PrForge } from "@intentius/chant/pr-forge";
 import { YodelError } from "../project.js";
 
-export type ForgeKind = "github" | "gitlab" | "forgejo";
+export type { ForgeKind, ForgeTarget, PrForge };
 export const FORGES: readonly ForgeKind[] = ["github", "gitlab", "forgejo"];
-
-export interface ForgeTarget {
-  forge: ForgeKind;
-  /** `owner/name` (GitHub, Forgejo), or the project id or path (GitLab). */
-  repo: string;
-  /** The PR number (GitHub, Forgejo) or MR iid (GitLab). */
-  pr: number;
-  /** The REST API's base, e.g. https://api.github.com, https://gitlab.com/api/v4, https://codeberg.org/api/v1. */
-  apiUrl: string;
-  token: string;
-  /** The variable the token came from, for messages. */
-  tokenEnv: string;
-}
 
 export interface ForgeFlags {
   forge?: string | undefined;
@@ -49,91 +39,69 @@ export interface ForgeFlags {
   tokenEnv?: string | undefined;
 }
 
-const truthy = (v: string | undefined) => v === "true" || v === "1";
-
-/** Which forge the job runs on, from its environment; `undefined` outside a known CI. */
-export function detectForge(env: NodeJS.ProcessEnv): ForgeKind | undefined {
-  if (truthy(env.GITLAB_CI)) return "gitlab";
-  if (truthy(env.FORGEJO_ACTIONS) || truthy(env.GITEA_ACTIONS)) return "forgejo";
-  if (truthy(env.GITHUB_ACTIONS)) return /\/api\/v1\/?$/.test(env.GITHUB_API_URL ?? "") ? "forgejo" : "github";
-  return undefined;
+/** A forge to post to: chant's client, and the target it was made for. */
+export interface Forge {
+  target: ForgeTarget;
+  client: PrForge;
 }
-
-/** The PR number from a GitHub-style event payload, or from the ref. */
-export function prFromEvent(eventPath: string | undefined, ref: string | undefined): number | undefined {
-  if (eventPath) {
-    try {
-      const event = JSON.parse(readFileSync(eventPath, "utf8")) as { pull_request?: { number?: unknown }; number?: unknown; issue?: { number?: unknown; pull_request?: unknown } };
-      const n = event.pull_request?.number ?? (event.issue?.pull_request ? event.issue.number : undefined) ?? (event.pull_request ? event.number : undefined);
-      if (typeof n === "number" && Number.isInteger(n) && n > 0) return n;
-    } catch {
-      // Unreadable payload: fall back to the ref.
-    }
-  }
-  const m = /^refs\/pull\/(\d+)\/(?:merge|head)$/.exec(ref ?? "");
-  return m ? Number(m[1]) : undefined;
-}
-
-const DEFAULT_TOKEN_ENV: Record<ForgeKind, string[]> = {
-  github: ["GITHUB_TOKEN"],
-  gitlab: ["GITLAB_TOKEN"],
-  forgejo: ["FORGEJO_TOKEN", "GITHUB_TOKEN"],
-};
-
-/** Where a job writes on its forge, without a pull request: the repository, the API and the token. */
-export type ForgeRepo = Omit<ForgeTarget, "pr">;
 
 /**
- * Resolves the repository, API and token from flags and the environment;
- * `pr` also the pull (merge) request. `what` names the option that needs
- * them, for messages (`--comment`, `--issue`).
+ * The job's environment with the flags written in as the variables chant
+ * reads, so a flag wins over what the job carries: `--repo`, `--pr` and
+ * `--api-url` stand in for the job's repository, pull request and API.
  */
-function resolve(flags: ForgeFlags, env: NodeJS.ProcessEnv, what: string, withPr: boolean): ForgeTarget | ForgeRepo {
-  if (flags.forge !== undefined && !FORGES.includes(flags.forge as ForgeKind)) throw new YodelError(`--forge must be one of ${FORGES.join(", ")}, got ${JSON.stringify(flags.forge)}`);
-  const forge = (flags.forge as ForgeKind | undefined) ?? detectForge(env);
-  if (!forge) throw new YodelError(`${what} cannot tell the forge: not a GitHub Actions, GitLab CI or Forgejo Actions job; pass --forge github|gitlab|forgejo with --repo${withPr ? ", --pr" : ""} and --api-url`);
-
-  const pick = (...names: string[]) => names.map((n) => env[n]).find((v) => v !== undefined && v !== "");
-  let repo = flags.repo;
-  let pr = flags.pr !== undefined ? Number(flags.pr) : undefined;
-  let apiUrl = flags.apiUrl;
-  if (forge === "gitlab") {
-    repo ??= pick("CI_PROJECT_ID", "CI_PROJECT_PATH");
-    pr ??= pick("CI_MERGE_REQUEST_IID") !== undefined ? Number(pick("CI_MERGE_REQUEST_IID")) : undefined;
-    apiUrl ??= pick("CI_API_V4_URL");
-  } else {
-    const p = forge === "forgejo" ? "FORGEJO_" : "GITHUB_";
-    repo ??= pick(`${p}REPOSITORY`, "GITHUB_REPOSITORY");
-    if (withPr) pr ??= prFromEvent(pick(`${p}EVENT_PATH`, "GITHUB_EVENT_PATH"), pick(`${p}REF`, "GITHUB_REF"));
-    apiUrl ??= pick(`${p}API_URL`, "GITHUB_API_URL");
-    if (!apiUrl && forge === "forgejo") {
-      const server = pick("FORGEJO_SERVER_URL", "GITHUB_SERVER_URL");
-      if (server) apiUrl = `${server.replace(/\/+$/, "")}/api/v1`;
+function withFlags(kind: ForgeKind, flags: ForgeFlags, env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...env };
+  if (kind === "gitlab") {
+    if (flags.repo !== undefined) {
+      out.CI_MERGE_REQUEST_PROJECT_ID = flags.repo;
+      out.CI_PROJECT_ID = flags.repo;
     }
-    if (!apiUrl && forge === "github") apiUrl = "https://api.github.com";
+    if (flags.pr !== undefined) out.CI_MERGE_REQUEST_IID = flags.pr;
+    if (flags.apiUrl !== undefined) out.CI_API_V4_URL = flags.apiUrl;
+    return out;
   }
-
-  const missing: string[] = [];
-  if (!repo) missing.push(forge === "gitlab" ? "the project (--repo, or CI_PROJECT_ID)" : "the repository (--repo owner/name, or GITHUB_REPOSITORY)");
-  if (withPr && (pr === undefined || !Number.isInteger(pr) || pr <= 0)) {
-    missing.push(forge === "gitlab" ? "the merge request (--pr, or CI_MERGE_REQUEST_IID in a merge request pipeline)" : "the pull request (--pr, or a pull_request event)");
+  // A Forgejo job reads FORGEJO_* before GITHUB_*, so a flag sets both.
+  const set = (name: string, value: string | undefined) => {
+    out[`GITHUB_${name}`] = value;
+    out[`FORGEJO_${name}`] = value;
+  };
+  if (flags.repo !== undefined) set("REPOSITORY", flags.repo);
+  if (flags.apiUrl !== undefined) set("API_URL", flags.apiUrl);
+  if (flags.pr !== undefined) {
+    // The event payload names the pull request before the ref does.
+    set("EVENT_PATH", undefined);
+    set("REF", `refs/pull/${flags.pr}/merge`);
   }
-  if (!apiUrl) missing.push(forge === "gitlab" ? "the API URL (--api-url, or CI_API_V4_URL)" : "the API URL (--api-url, or FORGEJO_API_URL / GITHUB_API_URL)");
-  const names = flags.tokenEnv ? [flags.tokenEnv] : DEFAULT_TOKEN_ENV[forge];
-  const tokenEnv = names.find((n) => env[n]) ?? names[0] ?? "";
-  const token = env[tokenEnv] ?? "";
-  if (!token) missing.push(`a token (${names.join(" or ")} is not set${flags.tokenEnv ? "" : "; name another variable with --token-env"})`);
-  if (missing.length > 0) throw new YodelError(`${what} on ${forge} needs ${missing.join(", ")}`);
-  const base = { forge, repo: repo as string, apiUrl: (apiUrl as string).replace(/\/+$/, ""), token, tokenEnv };
-  return withPr ? { ...base, pr: pr as number } : base;
+  return out;
 }
 
-/** Resolves the target from flags and the environment, or says what is missing. */
-export function resolveForgeTarget(flags: ForgeFlags, env: NodeJS.ProcessEnv): ForgeTarget {
-  return resolve(flags, env, "--comment", true) as ForgeTarget;
+/**
+ * chant's forge client for `--comment` (`withPr`: the pull request too) or
+ * `--issue`, from flags and the environment, or a YodelError saying what is
+ * missing. `what` names the option, for messages.
+ */
+export async function resolveForge(flags: ForgeFlags, env: NodeJS.ProcessEnv, what: "--comment" | "--issue", fetchImpl?: ForgeFetch): Promise<Forge> {
+  const withPr = what === "--comment";
+  if (flags.forge !== undefined && !FORGES.includes(flags.forge as ForgeKind)) throw new YodelError(`--forge must be one of ${FORGES.join(", ")}, got ${JSON.stringify(flags.forge)}`);
+  if (flags.pr !== undefined && !/^[1-9]\d*$/.test(flags.pr)) throw new YodelError(`--pr must be a pull request number, got ${JSON.stringify(flags.pr)}`);
+  const { detectForge, forgeTargetFromEnv, forgeClient, ForgeEnvironmentError } = await import("@intentius/chant/pr-forge");
+  const kind = (flags.forge as ForgeKind | undefined) ?? detectForge(env);
+  if (!kind) throw new YodelError(`${what} cannot tell the forge: not a GitHub Actions, GitLab CI or Forgejo Actions job; pass --forge github|gitlab|forgejo with --repo${withPr ? ", --pr" : ""} and --api-url`);
+  let target: ForgeTarget;
+  try {
+    target = forgeTargetFromEnv(withFlags(kind, flags, env), { kind, requirePr: withPr, ...(flags.tokenEnv ? { tokenEnv: flags.tokenEnv } : {}) });
+  } catch (e) {
+    if (!(e instanceof ForgeEnvironmentError)) throw e;
+    const token = e.missing.some((m) => m.startsWith("a token"));
+    const hints = [
+      ...(e.missing.some((m) => !m.startsWith("a token")) ? [`outside CI pass ${withPr ? "--repo, --pr and --api-url" : "--repo and --api-url"}`] : []),
+      ...(token && !flags.tokenEnv ? ["name another token variable with --token-env"] : []),
+    ];
+    throw new YodelError(`${what} on ${kind} needs ${e.missing.join(", ")}${hints.length ? `; ${hints.join("; ")}` : ""}`);
+  }
+  return { target, client: forgeClient(target, fetchImpl) };
 }
 
-/** The repository a job writes to (`yodel drift --issue`), from flags and the environment, or says what is missing. */
-export function resolveForgeRepo(flags: Omit<ForgeFlags, "pr">, env: NodeJS.ProcessEnv, what = "--issue"): ForgeRepo {
-  return resolve(flags, env, what, false);
-}
+/** `github acme/db`, for messages. */
+export const describeForge = (t: ForgeTarget): string => `${t.kind} ${t.repo}`;

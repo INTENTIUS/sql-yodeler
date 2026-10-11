@@ -1,11 +1,17 @@
+/**
+ * src/pr/forge.ts: yodel's flags and the CI job's environment, read through
+ * chant's forge client (#210). The REST calls are chant's and tested there;
+ * these pin what yodel decides: which forge, repository, pull request and
+ * token, which flag wins, and what a job missing one is told.
+ */
+
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { detectForge, prFromEvent, resolveForgeTarget, type ForgeKind, type ForgeTarget } from "../src/pr/forge.js";
-import { commentClient, findComment, upsertComment } from "../src/pr/comment.js";
+import { afterAll, describe, expect, it } from "vitest";
+import type { ForgeFetch } from "@intentius/chant/pr-forge";
+import { resolveForge } from "../src/pr/forge.js";
+import { commentMarker, subjectIn } from "../src/pr/render.js";
 
 const dir = mkdtempSync(join(tmpdir(), "yodel-forge-"));
 afterAll(() => {
@@ -17,194 +23,110 @@ const event = (payload: unknown) => {
   return path;
 };
 
-describe("detecting the forge and the pull request from CI", () => {
-  it("GitHub Actions: repository, PR from the event payload, API URL, GITHUB_TOKEN", () => {
+const target = async (flags: Parameters<typeof resolveForge>[0], env: NodeJS.ProcessEnv, what: "--comment" | "--issue" = "--comment") => {
+  const t = (await resolveForge(flags, env, what)).target;
+  return { kind: t.kind, repo: t.repo, pr: t.pr, apiBase: t.apiBase, tokenSource: t.tokenSource };
+};
+
+describe("the forge and the pull request from CI", () => {
+  it("GitHub Actions: repository, PR from the event payload, API URL, the job's token", async () => {
     const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_EVENT_PATH: event({ pull_request: { number: 42 } }), GITHUB_API_URL: "https://api.github.com", GITHUB_TOKEN: "ghs_x" };
-    expect(detectForge(env)).toBe("github");
-    expect(resolveForgeTarget({}, env)).toEqual({ forge: "github", repo: "acme/db", pr: 42, apiUrl: "https://api.github.com", token: "ghs_x", tokenEnv: "GITHUB_TOKEN" });
+    expect(await target({}, env)).toEqual({ kind: "github", repo: "acme/db", pr: 42, apiBase: "https://api.github.com", tokenSource: "GITHUB_TOKEN" });
   });
 
-  it("GitHub Actions: falls back to refs/pull/<n>/merge, and to api.github.com", () => {
-    const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_REF: "refs/pull/7/merge", GITHUB_TOKEN: "t" };
-    expect(resolveForgeTarget({}, env)).toMatchObject({ pr: 7, apiUrl: "https://api.github.com" });
+  it("GitHub Actions: falls back to refs/pull/<n>/merge and api.github.com, and reads GH_TOKEN before GITHUB_TOKEN", async () => {
+    const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_REF: "refs/pull/7/merge", GITHUB_TOKEN: "t", GH_TOKEN: "g" };
+    expect(await target({}, env)).toMatchObject({ pr: 7, apiBase: "https://api.github.com", tokenSource: "GH_TOKEN" });
   });
 
-  it("GitLab CI: project id, merge request iid, CI_API_V4_URL, GITLAB_TOKEN", () => {
+  it("GitLab CI: project id, merge request iid, CI_API_V4_URL, GITLAB_TOKEN", async () => {
     const env = { GITLAB_CI: "true", CI_API_V4_URL: "https://gitlab.example/api/v4", CI_PROJECT_ID: "123", CI_MERGE_REQUEST_IID: "9", GITLAB_TOKEN: "glpat" };
-    expect(detectForge(env)).toBe("gitlab");
-    expect(resolveForgeTarget({}, env)).toEqual({ forge: "gitlab", repo: "123", pr: 9, apiUrl: "https://gitlab.example/api/v4", token: "glpat", tokenEnv: "GITLAB_TOKEN" });
+    expect(await target({}, env)).toEqual({ kind: "gitlab", repo: "123", pr: 9, apiBase: "https://gitlab.example/api/v4", tokenSource: "GITLAB_TOKEN" });
   });
 
-  it("GitLab CI outside a merge request pipeline says what is missing", () => {
-    expect(() => resolveForgeTarget({}, { GITLAB_CI: "true", CI_API_V4_URL: "u", CI_PROJECT_ID: "1", GITLAB_TOKEN: "t" })).toThrow(/CI_MERGE_REQUEST_IID/);
+  it("GitLab CI outside a merge request pipeline says what is missing", async () => {
+    await expect(resolveForge({}, { GITLAB_CI: "true", CI_API_V4_URL: "u", CI_PROJECT_ID: "1", GITLAB_TOKEN: "t" }, "--comment")).rejects.toThrow(/--comment on gitlab needs CI_MERGE_REQUEST_IID/);
   });
 
-  it("Forgejo Actions: FORGEJO_* variables, FORGEJO_TOKEN", () => {
+  it("Forgejo Actions: FORGEJO_* variables before GITHUB_*, FORGEJO_TOKEN before GITHUB_TOKEN", async () => {
     const env = { FORGEJO_ACTIONS: "true", GITHUB_ACTIONS: "true", FORGEJO_REPOSITORY: "me/db", FORGEJO_EVENT_PATH: event({ number: 3, pull_request: { number: 3 } }), FORGEJO_API_URL: "http://forgejo:3000/api/v1", FORGEJO_TOKEN: "fj", GITHUB_TOKEN: "fj" };
-    expect(detectForge(env)).toBe("forgejo");
-    expect(resolveForgeTarget({}, env)).toEqual({ forge: "forgejo", repo: "me/db", pr: 3, apiUrl: "http://forgejo:3000/api/v1", token: "fj", tokenEnv: "FORGEJO_TOKEN" });
+    expect(await target({}, env)).toEqual({ kind: "forgejo", repo: "me/db", pr: 3, apiBase: "http://forgejo:3000/api/v1", tokenSource: "FORGEJO_TOKEN" });
   });
 
-  it("Forgejo with an older runner (GitHub names only): told apart by its /api/v1 API URL", () => {
+  it("Forgejo with an older runner (GitHub names only): told apart by its /api/v1 API URL", async () => {
     const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "me/db", GITHUB_REF: "refs/pull/5/head", GITHUB_API_URL: "https://codeberg.org/api/v1", GITHUB_TOKEN: "t" };
-    expect(detectForge(env)).toBe("forgejo");
-    expect(resolveForgeTarget({}, env)).toMatchObject({ forge: "forgejo", pr: 5, apiUrl: "https://codeberg.org/api/v1", tokenEnv: "GITHUB_TOKEN" });
+    expect(await target({}, env)).toMatchObject({ kind: "forgejo", pr: 5, apiBase: "https://codeberg.org/api/v1", tokenSource: "GITHUB_TOKEN" });
   });
 
-  it("flags override the environment, and --token-env names the token's variable", () => {
-    const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_REF: "refs/pull/7/merge", GITHUB_TOKEN: "t", MY_TOKEN: "mine" };
-    expect(resolveForgeTarget({ forge: "forgejo", repo: "x/y", pr: "11", apiUrl: "http://f/api/v1/", tokenEnv: "MY_TOKEN" }, env)).toEqual({ forge: "forgejo", repo: "x/y", pr: 11, apiUrl: "http://f/api/v1", token: "mine", tokenEnv: "MY_TOKEN" });
+  it("flags win over the job's environment, and --token-env names the one token variable", async () => {
+    const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_EVENT_PATH: event({ pull_request: { number: 8 } }), GITHUB_TOKEN: "t", MY_TOKEN: "mine" };
+    expect(await target({ forge: "forgejo", repo: "x/y", pr: "11", apiUrl: "http://f/api/v1/", tokenEnv: "MY_TOKEN" }, env)).toEqual({ kind: "forgejo", repo: "x/y", pr: 11, apiBase: "http://f/api/v1", tokenSource: "MY_TOKEN" });
+    expect(await target({ forge: "gitlab", repo: "group/db", pr: "4", apiUrl: "https://gl/api/v4", tokenEnv: "MY_TOKEN" }, env)).toEqual({ kind: "gitlab", repo: "group/db", pr: 4, apiBase: "https://gl/api/v4", tokenSource: "MY_TOKEN" });
   });
 
-  it("outside CI it needs --forge; a missing token is named, never shown", () => {
-    expect(detectForge({})).toBeUndefined();
-    expect(() => resolveForgeTarget({}, {})).toThrow(/pass --forge/);
-    expect(() => resolveForgeTarget({ forge: "gitlab" }, {})).toThrow(/needs the project .*CI_MERGE_REQUEST_IID.*CI_API_V4_URL.*GITLAB_TOKEN is not set/);
-    expect(() => resolveForgeTarget({ forge: "bitbucket" }, {})).toThrow(/--forge must be one of github, gitlab, forgejo/);
+  it("--issue needs no pull request", async () => {
+    expect(await target({}, { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "o/r", GITHUB_TOKEN: "t" }, "--issue")).toMatchObject({ kind: "github", repo: "o/r", pr: undefined });
+    expect(await target({}, { FORGEJO_ACTIONS: "true", GITHUB_REPOSITORY: "o/r", GITHUB_SERVER_URL: "https://fj", GITHUB_TOKEN: "t" }, "--issue")).toMatchObject({ kind: "forgejo", apiBase: "https://fj/api/v1" });
   });
 
-  it("reads a PR number off pull_request and issue_comment payloads only", () => {
-    expect(prFromEvent(event({ pull_request: { number: 8 } }), undefined)).toBe(8);
-    expect(prFromEvent(event({ issue: { number: 4, pull_request: {} } }), undefined)).toBe(4);
-    expect(prFromEvent(event({ ref: "refs/heads/main" }), "refs/heads/main")).toBeUndefined();
-    expect(prFromEvent(join(dir, "missing.json"), "refs/pull/2/merge")).toBe(2);
+  it("outside CI it needs --forge; a missing token is named, never shown", async () => {
+    await expect(resolveForge({}, {}, "--comment")).rejects.toThrow(/--comment cannot tell the forge.*pass --forge/);
+    await expect(resolveForge({ forge: "bitbucket" }, {}, "--comment")).rejects.toThrow(/--forge must be one of github, gitlab, forgejo/);
+    await expect(resolveForge({ forge: "github", pr: "x" }, {}, "--comment")).rejects.toThrow(/--pr must be a pull request number/);
+    await expect(resolveForge({ forge: "github" }, { GITHUB_REPOSITORY: "o/r", GITHUB_REF: "refs/pull/1/merge" }, "--comment")).rejects.toThrow(/needs a token \(CHANT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN\).*--token-env/);
+    await expect(resolveForge({ forge: "github", tokenEnv: "MINE" }, { GITHUB_REPOSITORY: "o/r", GITHUB_REF: "refs/pull/1/merge", MINE: "" }, "--issue")).rejects.toThrow(/needs a token \(MINE\)/);
   });
 });
 
-/** A local fake of one forge's comment API, holding comments in memory. */
-interface Fake {
-  server: Server;
-  url: string;
-  comments: Array<{ id: number; body: string; system?: boolean }>;
-  requests: Array<{ method: string; path: string; auth: string | undefined; body: unknown }>;
-}
-
-async function body(req: IncomingMessage): Promise<unknown> {
-  let text = "";
-  for await (const chunk of req) text += String(chunk);
-  return text ? JSON.parse(text) : undefined;
-}
-
-async function fakeForge(forge: ForgeKind): Promise<Fake> {
-  const fake: Fake = { server: undefined as never, url: "", comments: [], requests: [] };
-  let next = 100;
-  const routes =
-    forge === "gitlab"
-      ? { list: /^\/api\/v4\/projects\/group%2Fdb\/merge_requests\/9\/notes$/, one: /^\/api\/v4\/projects\/group%2Fdb\/merge_requests\/9\/notes\/(\d+)$/, update: "PUT" }
-      : forge === "forgejo"
-        ? { list: /^\/api\/v1\/repos\/me\/db\/issues\/3\/comments$/, one: /^\/api\/v1\/repos\/me\/db\/issues\/comments\/(\d+)$/, update: "PATCH" }
-        : { list: /^\/repos\/acme\/db\/issues\/42\/comments$/, one: /^\/repos\/acme\/db\/issues\/comments\/(\d+)$/, update: "PATCH" };
-  fake.server = createServer((req, res) => {
-    void (async () => {
-      const url = new URL(req.url ?? "/", "http://x");
-      const auth = req.headers.authorization ?? (req.headers["private-token"] as string | undefined);
-      const b = await body(req);
-      fake.requests.push({ method: req.method ?? "", path: url.pathname, auth, body: b });
-      const send = (status: number, value: unknown) => {
-        res.writeHead(status, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(value));
-      };
-      const expected = forge === "gitlab" ? "secret" : forge === "forgejo" ? "token secret" : "Bearer secret";
-      if (auth !== expected) { send(401, { message: "bad credentials" }); return; }
-      const view = (c: { id: number; body: string; system?: boolean }) => ({ ...c, html_url: `http://forge/c/${String(c.id)}` });
-      if (routes.list.test(url.pathname) && req.method === "GET") {
-        const per = Number(url.searchParams.get("per_page") ?? url.searchParams.get("limit") ?? 30);
-        const page = Number(url.searchParams.get("page") ?? 1);
-        send(200, fake.comments.slice((page - 1) * per, page * per).map(view)); return;
+describe("the plan comment through chant's client", () => {
+  /** A GitHub-shaped fake: the comments of acme/db#42, and every request made. */
+  function fake(comments: Array<{ id: number; body: string; user?: { login: string } }>): { fetch: ForgeFetch; calls: string[] } {
+    const calls: string[] = [];
+    const fetch: ForgeFetch = (url, init) => {
+      calls.push(`${init.method} ${url.replace(/\?.*$/, "")}`);
+      const send = (status: number, v: unknown) => Promise.resolve({ ok: status < 400, status, text: () => Promise.resolve(JSON.stringify(v)) });
+      if (init.headers.Authorization !== "Bearer secret") return send(401, {});
+      if (init.method === "GET") return send(200, comments.map((c) => ({ ...c, html_url: `https://gh/c/${String(c.id)}` })));
+      const body = (JSON.parse(init.body ?? "{}") as { body: string }).body;
+      if (init.method === "POST") {
+        const c = { id: comments.length + 100, body };
+        comments.push(c);
+        return send(201, c);
       }
-      if (routes.list.test(url.pathname) && req.method === "POST") {
-        const c = { id: next++, body: (b as { body: string }).body };
-        fake.comments.push(c);
-        send(201, view(c)); return;
-      }
-      const one = routes.one.exec(url.pathname);
-      if (one && req.method === routes.update) {
-        const c = fake.comments.find((x) => x.id === Number(one[1]));
-        if (!c) { send(404, {}); return; }
-        c.body = (b as { body: string }).body;
-        send(200, view(c)); return;
-      }
-      send(404, { message: `no route ${req.method ?? ""} ${url.pathname}` });
-    })();
-  });
-  await new Promise<void>((resolve) => fake.server.listen(0, "127.0.0.1", resolve));
-  const port = (fake.server.address() as AddressInfo).port;
-  fake.url = forge === "gitlab" ? `http://127.0.0.1:${String(port)}/api/v4` : forge === "forgejo" ? `http://127.0.0.1:${String(port)}/api/v1` : `http://127.0.0.1:${String(port)}`;
-  return fake;
-}
-
-const MARKER = "<!-- yodel:plan env=prod -->";
-
-describe.each(["github", "gitlab", "forgejo"] as const)("the %s comment client against a local fake", (forge) => {
-  let fake: Fake;
-  let target: ForgeTarget;
-  beforeAll(async () => {
-    fake = await fakeForge(forge);
-    target = {
-      forge,
-      repo: forge === "gitlab" ? "group/db" : forge === "forgejo" ? "me/db" : "acme/db",
-      pr: forge === "gitlab" ? 9 : forge === "forgejo" ? 3 : 42,
-      apiUrl: fake.url,
-      token: "secret",
-      tokenEnv: "T",
+      const c = comments.find((x) => url.endsWith(`/comments/${String(x.id)}`));
+      if (c) c.body = body;
+      return send(c ? 200 : 404, c ?? {});
     };
-  });
-  afterAll(() => {
-    fake.server.close();
-  });
-  afterEach(() => {
-    fake.comments = [];
-    fake.requests = [];
-  });
+    return { fetch, calls };
+  }
+  const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_REF: "refs/pull/42/merge", GITHUB_TOKEN: "secret" };
+  const marker = commentMarker("prod");
 
-  it("creates the comment when none carries the marker", async () => {
-    fake.comments.push({ id: 1, body: "LGTM" }, { id: 2, body: "<!-- yodel:plan env=staging -->\nother env" });
-    const c = commentClient(target);
-    const r = await upsertComment(c, MARKER, `${MARKER}\nplan one`);
-    expect(r.action).toBe("created");
-    expect(fake.comments.map((x) => x.body)).toEqual(["LGTM", "<!-- yodel:plan env=staging -->\nother env", `${MARKER}\nplan one`]);
-  });
-
-  it("finds the comment by its marker and updates it in place, leaving the others", async () => {
-    fake.comments.push({ id: 1, body: "LGTM" }, { id: 7, body: `${MARKER}\nplan one` });
-    const c = commentClient(target);
-    const found = await findComment(c, MARKER);
+  it("reads back the subject the last plan comment carries, and updates that comment", async () => {
+    const f = fake([{ id: 1, body: "LGTM" }, { id: 7, body: `${marker}\n<!-- yodel:subject abc_1 -->\nplan one` }]);
+    const { client, target } = await resolveForge({}, env, "--comment", f.fetch);
+    const found = await client.findComment(target.pr ?? 0, marker);
     expect(found?.id).toBe(7);
-    const r = await upsertComment(c, MARKER, `${MARKER}\nplan two`, found);
-    expect(r).toMatchObject({ action: "updated", comment: { id: 7 } });
-    expect(fake.comments).toEqual([{ id: 1, body: "LGTM" }, { id: 7, body: `${MARKER}\nplan two` }]);
-    expect(fake.requests.map((q) => q.method)).toEqual(["GET", forge === "gitlab" ? "PUT" : "PATCH"]);
+    expect(subjectIn(found?.body ?? "")).toBe("abc_1");
+    expect(await client.upsertComment(target.pr ?? 0, marker, `${marker}\nplan two`)).toMatchObject({ action: "updated", id: 7 });
+    expect(f.calls.filter((c) => !c.startsWith("GET"))).toEqual(["PATCH https://api.github.com/repos/acme/db/issues/comments/7"]);
   });
 
-  it("sends nothing when the body is the same", async () => {
-    fake.comments.push({ id: 7, body: `${MARKER}\nsame` });
-    const r = await upsertComment(commentClient(target), MARKER, `${MARKER}\nsame`);
-    expect(r.action).toBe("unchanged");
-    expect(fake.requests.map((q) => q.method)).toEqual(["GET"]);
+  it("finds none on a pull request without one, and posts one", async () => {
+    const f = fake([{ id: 1, body: `quoting ${marker}` }]);
+    const { client, target } = await resolveForge({}, env, "--comment", f.fetch);
+    expect(await client.findComment(target.pr ?? 0, marker)).toBeUndefined();
+    expect((await client.upsertComment(target.pr ?? 0, marker, `${marker}\nplan`)).action).toBe("created");
   });
 
-  it("pages through a long thread to find it", async () => {
-    for (let i = 0; i < 150; i++) fake.comments.push({ id: i + 1, body: `comment ${String(i)}` });
-    fake.comments.push({ id: 999, body: `${MARKER}\nold` });
-    const r = await upsertComment(commentClient(target), MARKER, `${MARKER}\nnew`);
-    expect(r).toMatchObject({ action: "updated", comment: { id: 999 } });
-    expect(fake.requests.filter((q) => q.method === "GET")).toHaveLength(2);
-  });
-
-  it("reports a refusal without the token", async () => {
-    const c = commentClient({ ...target, token: "wrong-token" });
-    const err = (await upsertComment(c, MARKER, `${MARKER}\nx`).then(
+  it("never puts the token in an error", async () => {
+    const f = fake([]);
+    const { client, target } = await resolveForge({}, { ...env, GITHUB_TOKEN: "wrong-token" }, "--comment", f.fetch);
+    const err = await client.findComment(target.pr ?? 0, marker).then(
       () => new Error("not refused"),
-      (e: unknown) => e,
-    )) as Error;
-    expect(err.message).toMatch(/answered 401/);
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toMatch(/401/);
     expect(err.message).not.toContain("wrong-token");
-  });
-});
-
-describe("upsertComment", () => {
-  it("refuses a body without the marker", async () => {
-    const c = { list: () => Promise.resolve([]), create: () => Promise.reject(new Error("no")), update: () => Promise.reject(new Error("no")) };
-    await expect(upsertComment(c, MARKER, "no marker")).rejects.toThrow(/no marker/);
   });
 });
