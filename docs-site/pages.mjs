@@ -1,16 +1,17 @@
 // The site's pages, written from the repository's Markdown on every build.
 //
-// docs/*.md is the only source. writePages() turns each file into a Starlight
+// docs/*.md is the source, with rooms.mjs for the room pages under for/ (the
+// Rooms section below). writePages() turns each docs file into a Starlight
 // page under src/content/docs/ (gitignored, never committed): the first
 // heading becomes the title, links between docs pages become site links, and
 // links into the rest of the repository (examples, source files) become their
 // plain text. Each page's editUrl points "Edit page" at its docs/ file (none
 // for claims.md, which npm run claims:page writes). The landing page is the
-// README's intro over docs/README.md. The sidebar groups the pages by the
-// `type:` in their front matter (Tutorial, How-to, Concepts, Reference,
-// Proof), each group in the order of docs/README.md's table, and the build
-// fails on a page with no type or an unknown one. The 404
-// page is written here too, with the hat.
+// README's intro over docs/README.md. The sidebar opens with "Start here", the
+// rooms, then groups the pages by the `type:` in their front matter
+// (Tutorial, How-to, Concepts, Reference, Proof), each group in the order of
+// docs/README.md's table, and the build fails on a page with no type or an
+// unknown one. The 404 page is written here too, with the hat.
 //
 // Tabs: a block between `<!-- tabs: <key> -->` and `<!-- /tabs -->` whose
 // sections start at `####` headings is one Starlight tab group on the site
@@ -23,6 +24,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { pagePrompts } from './prompts.mjs';
+import { DIALECTS, FORGES, ROLES, ROOMS, STARTS } from './rooms.mjs';
 
 export const base = '/sql-yodeler';
 
@@ -214,11 +216,11 @@ const mdxImport = "import { Tabs, TabItem } from '@astrojs/starlight/components'
  * Markdown has tabs blocks, `<slug>.mdx` with the import and the tab groups,
  * and the Markdown kept in the front matter as `markdown` for llms-full.txt
  * and "Copy page as Markdown". `md` is checked by line against `source`, the
- * docs file it came from (`file` names it in errors).
+ * text it came from, which `where` names in errors (`docs/<file>`).
  */
-function writePage(slug, head, md, source, file) {
-	tabsToMdx(source, (i) => `docs/${file}:${i + 1}`);
-	const { count, mdx } = tabsToMdx(md, () => `docs/${file}`);
+function writePage(slug, head, md, source, where) {
+	tabsToMdx(source, (i) => `${where}:${i + 1}`);
+	const { count, mdx } = tabsToMdx(md, () => where);
 	if (!count) {
 		writeFileSync(`${outDir}${slug}.md`, head + md);
 		return;
@@ -251,17 +253,22 @@ function recordRows() {
 	return out;
 }
 
-/** "Proven by" at the end of a page, and on a draft a note at the top naming what is not proven yet. */
-function claimsSections(front, rows) {
-	if (!front.claims.length) return { top: '', bottom: '' };
-	const lines = front.claims.map((name) => {
+/** A table of claims with each one's verdicts per dialect and its last run, from the record's rows. */
+function claimsTable(names, rows) {
+	const lines = names.map((name) => {
 		const rs = rows.get(name) ?? [];
 		const says = (rs[0]?.says ?? '').replace(/\|/g, '\\|');
 		const verdicts = rs.length ? rs.map((r) => `${dialectName[r.dialect] ?? r.dialect}: ${r.plain}, ${r.break}`).join('; ') : 'not recorded';
 		const last = rs.length ? rs.map((r) => `\`${r.commit ?? 'unknown'}\`, ${r.recorded.slice(0, 10)}`).filter((v, i, a) => a.indexOf(v) === i).join('; ') : '';
 		return `| \`${name}\` | ${says} | ${verdicts} | ${last} |`;
 	});
-	const bottom = `\n\n## Proven by\n\nThe scenario claims below run what this page describes against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). [Claims status](claims.md) lists every claim.\n\n| Claim | What it says | Plain, broken | Last run |\n|---|---|---|---|\n${lines.join('\n')}\n`;
+	return `| Claim | What it says | Plain, broken | Last run |\n|---|---|---|---|\n${lines.join('\n')}\n`;
+}
+
+/** "Proven by" at the end of a page, and on a draft a note at the top naming what is not proven yet. */
+function claimsSections(front, rows) {
+	if (!front.claims.length) return { top: '', bottom: '' };
+	const bottom = `\n\n## Proven by\n\nThe scenario claims below run what this page describes against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). [Claims status](claims.md) lists every claim.\n\n${claimsTable(front.claims, rows)}`;
 	const pending = front.claims.filter((name) => !(rows.get(name) ?? []).length || !(rows.get(name) ?? []).every(holds));
 	const top = front.draft && pending.length
 		? `:::caution[Not proven yet]\nThis page is a draft: ${pending.map((c) => `\`${c}\``).join(', ')} ${pending.length === 1 ? 'does' : 'do'} not pass plain and get caught broken in the claims record yet (pending or not recorded), so what it describes may not hold. It is left out of llms.txt until ${pending.length === 1 ? 'it does' : 'they do'}.\n:::\n\n`
@@ -331,11 +338,22 @@ function pageTypes() {
 	return out;
 }
 
+/** The rooms, starts first and then roles, as sidebar items. */
+const roomItems = () => [...STARTS, ...ROLES].map((x) => ({ label: x.label, slug: `for/${x.room}` }));
+
 /**
- * The sidebar: one group per page type, in the order of `groups`. Within a
- * group, pages follow docs/README.md's table, then any page it does not list.
+ * The sidebar: "Start here" with the rooms, then one group per page type, in
+ * the order of `groups`.
  */
 export function sidebar() {
+	return [{ label: 'Start here', items: roomItems() }, ...docGroups()];
+}
+
+/**
+ * The docs pages' groups, one per page type. Within a group, pages follow
+ * docs/README.md's table, then any page it does not list.
+ */
+function docGroups() {
 	const files = docFiles();
 	const types = pageTypes();
 	const items = [];
@@ -349,6 +367,132 @@ export function sidebar() {
 	return groups
 		.map(([type, label]) => ({ label, items: items.filter((i) => types[i.slug] === type) }))
 		.filter((g) => g.items.length);
+}
+
+// ── Rooms ────────────────────────────────────────────────────────────────────
+//
+// One page per starting point and role, from docs-site/rooms.mjs, written as
+// Markdown with tabs blocks and passed through the same transform as a docs
+// page. The sections are the same on every room, in this order: the lede,
+// Works, Differs, First step, Proof, Then read.
+
+const roomsFile = 'docs-site/rooms.mjs';
+const roomsEditUrl = 'https://github.com/INTENTIUS/sql-yodeler/edit/main/docs-site/rooms.mjs';
+
+/** A heading's anchor as the site gives it: smart dashes, then GitHub's slug, numbered when it repeats. */
+function anchorOf(text, seen) {
+	const plain = text
+		.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+		.replace(/`/g, '')
+		.replace(/---/g, '—')
+		.replace(/--/g, '–');
+	const base = plain.toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, '').replace(/ /g, '-');
+	let slug = base;
+	for (let n = 1; seen.has(slug); n += 1) slug = `${base}-${n}`;
+	seen.add(slug);
+	return slug;
+}
+
+/** The anchors of a docs page's headings, outside code fences and tabs blocks, with "Proven by" when the page has claims. */
+function anchors(md) {
+	const seen = new Set();
+	let fence = null;
+	let tabs = false;
+	for (const line of md.split('\n')) {
+		const f = /^\s*(`{3,}|~{3,})/.exec(line);
+		if (f) {
+			if (!fence) fence = f[1];
+			else if (f[1].startsWith(fence)) fence = null;
+			continue;
+		}
+		if (fence) continue;
+		if (TABS_OPEN.test(line)) tabs = true;
+		else if (TABS_CLOSE.test(line)) tabs = false;
+		const h = !tabs && /^#{2,6}\s+(.*?)\s*#*\s*$/.exec(line);
+		if (h) anchorOf(h[1], seen);
+	}
+	if (pageFront(md).claims.length) anchorOf('Proven by', seen);
+	return seen;
+}
+
+/**
+ * Throws, naming the room, when one of its links leads to no docs page or no
+ * heading on it, or one of its claims is not in the record.
+ */
+export function checkRoom(r, slugs, rows) {
+	const links = [r.first.link, ...r.tasks, ...r.background, ...r.reference];
+	for (const { label, href } of links) {
+		if (/^https:\/\//.test(href)) continue;
+		const [slug, anchor] = href.split('#');
+		if (!slugs.has(slug)) throw new Error(`${roomsFile}: room ${r.id} links "${label}" to ${href}, but docs/ has no page ${slug}.md`);
+		if (anchor && !anchors(read(new URL(`${slug}.md`, docsDir))).has(anchor)) {
+			throw new Error(`${roomsFile}: room ${r.id} links "${label}" to ${href}, but docs/${slug}.md has no heading with the anchor #${anchor}`);
+		}
+	}
+	for (const name of r.claims) {
+		if (!rows.has(name)) throw new Error(`${roomsFile}: room ${r.id} names the claim ${name}, which scenarios/claims-record.json does not have`);
+	}
+	for (const id of Object.keys(r.differs)) {
+		if (![...DIALECTS, ...FORGES].some((x) => x.id === id)) throw new Error(`${roomsFile}: room ${r.id} has differs for ${id}, which is not a dialect or forge`);
+	}
+}
+
+/** A room's link as Markdown: a docs slug becomes a link to its .md file, which rewriteLinks() turns into a site link. */
+const roomLink = ({ label, href }) => {
+	if (/^https:\/\//.test(href)) return `[${label}](${href})`;
+	const [slug, anchor] = href.split('#');
+	return `[${label}](${slug}.md${anchor ? `#${anchor}` : ''})`;
+};
+
+/** A tabs block of `key` with one section per item, or nothing when every section is empty. */
+function tabsBlock(key, items) {
+	if (items.every((x) => !x.body)) return '';
+	return [`<!-- tabs: ${key} -->`, ...items.flatMap((x) => [`#### ${x.label}`, '', x.body || 'Nothing beyond the other pages.', '']), '<!-- /tabs -->', ''].join('\n');
+}
+
+const bullets = (lines) => lines.map((l) => `- ${l}`).join('\n');
+const fenced = (lang, text) => `\`\`\`${lang}\n${text}\n\`\`\``;
+
+/** A room's page as Markdown, its tab groups as tabs blocks. */
+export function roomMarkdown(r, rows) {
+	const out = [r.lede, '', '## Works', '', bullets(r.works), ''];
+	out.push('## Differs', '');
+	out.push('### By database', '', tabsBlock('dialect', DIALECTS.map((d) => ({ label: d.label, body: bullets([...d.differs, ...(r.differs[d.id] ?? [])]) }))));
+	out.push('### By forge', '', tabsBlock('forge', FORGES.map((f) => ({ label: f.label, body: bullets([...f.differs, ...(r.differs[f.id] ?? [])]) }))));
+	out.push('## First step', '');
+	if (r.first.note) out.push(r.first.note, '');
+	const lang = r.first.lang ?? 'sh';
+	const cmd = r.first.command ?? {};
+	if (cmd.any) out.push(fenced(lang, cmd.any), '');
+	else if (cmd.clickhouse && cmd.postgres && cmd.clickhouse !== cmd.postgres) {
+		out.push(tabsBlock('dialect', DIALECTS.map((d) => ({ label: d.label, body: fenced(lang, cmd[d.id]) }))));
+	} else if (cmd.clickhouse || cmd.postgres) out.push(fenced(lang, cmd.clickhouse ?? cmd.postgres), '');
+	out.push(`Next: ${roomLink(r.first.link)}.`, '');
+	out.push('## Proof', '');
+	if (r.claims.length) {
+		out.push('The scenario claims below run what this room relies on against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). [Claims status](claims.md) lists every claim.', '', claimsTable(r.claims, rows));
+	} else {
+		out.push('No scenario claim runs what this room describes. [Claims status](claims.md) lists every claim.', '');
+	}
+	out.push('## Then read', '');
+	for (const [label, links] of [['Tasks', r.tasks], ['Background', r.background], ['Reference', r.reference]]) {
+		if (links.length) out.push(`### ${label}`, '', bullets(links.map(roomLink)), '');
+	}
+	return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+/** Writes every room under for/, after checking its links and claims. */
+function writeRooms(slugs, rows, order) {
+	const ids = [...STARTS, ...ROLES].map((x) => x.room);
+	for (const id of ids) if (!ROOMS.some((r) => r.id === id)) throw new Error(`${roomsFile}: ${id} is a start or role with no room in ROOMS`);
+	mkdirSync(`${outDir}for`, { recursive: true });
+	for (const r of ROOMS) {
+		checkRoom(r, slugs, rows);
+		const slug = `for/${r.id}`;
+		const fields = { title: r.title, description: r.lede, rank: order.indexOf(slug), claims: r.claims, editUrl: roomsEditUrl };
+		const md = roomMarkdown(r, rows);
+		writePage(slug, frontmatter(fields), rewriteLinks(md, slugs), md, `${roomsFile} (room ${r.id})`);
+	}
 }
 
 export function writePages() {
@@ -374,9 +518,10 @@ export function writePages() {
 			...(front.draft ? { unproven: true } : {}),
 			editUrl: generated.has(slug) ? false : `${editBase}${file}`,
 		};
-		writePage(slug, frontmatter(fields), rewriteLinks(top + body.trimEnd() + bottom, slugs), text, file);
+		writePage(slug, frontmatter(fields), rewriteLinks(top + body.trimEnd() + bottom, slugs), text, `docs/${file}`);
 	}
-	const first = sidebar()[0].items[0];
+	writeRooms(slugs, rows, order);
+	const first = docGroups()[0].items[0];
 	const index = splitTitle(read(new URL('README.md', docsDir)), 'docs/README.md');
 	const head = `---
 title: ${JSON.stringify(index.title)}
@@ -401,7 +546,7 @@ hero:
 ---
 
 `;
-	writePage('index', head, rewriteLinks(index.body, slugs), read(new URL('README.md', docsDir)), 'README.md');
+	writePage('index', head, rewriteLinks(index.body, slugs), read(new URL('README.md', docsDir)), 'docs/README.md');
 	writeFileSync(`${outDir}404.md`, notFound);
 	writeSchemaReferences();
 }
