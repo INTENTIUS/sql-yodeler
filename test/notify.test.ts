@@ -1,10 +1,13 @@
 /**
- * Webhook events (#61): the signature, the receiver's check, delivery to a
- * receiver over HTTP, the Slack message, which outcomes send an event, and
- * the config refusing a URL or key written into it.
+ * Webhook events (#61), through chant's notify (#211): the signature under
+ * yodel's header names, the receiver's check (also of an event 0.7.0 sent),
+ * delivery to a receiver over HTTP, the Slack message, which outcomes send
+ * an event, and the config refusing a URL or key written into it.
  */
 
+import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,10 +15,11 @@ import { readSchema } from "../src/schemas.js";
 import { checkYodelConfig } from "../src/config/load.js";
 import { waveFailure } from "../src/commands/apply.js";
 import { YodelError } from "../src/project.js";
+import { repoRoot } from "./helpers/run.js";
 import {
   eventFromDrift,
   eventFromRun,
-  makeEvent,
+  makeNotifyEvent,
   notifyConfigProblem,
   sendEvent,
   signWebhook,
@@ -29,14 +33,24 @@ const KEY = "s3cret-key";
 const NOW = 1_800_000_000;
 
 const waiting = () =>
-  makeEvent(
-    { event: "waiting", environment: "prod", command: "apply", status: "gated", summary: "prod is waiting", migrations: ["20261010T000000Z-a"], digest: "jcs1-sha256:ab", approve: "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:ab" },
-    { GITHUB_SERVER_URL: "https://github.example", GITHUB_REPOSITORY: "acme/db", GITHUB_RUN_ID: "42", GITHUB_SHA: "abc123" },
+  makeNotifyEvent(
+    {
+      source: "sql-yodeler",
+      event: "waiting",
+      environment: "prod",
+      detail: { command: "apply" },
+      status: "gated",
+      summary: "prod is waiting",
+      targets: ["20261010T000000Z-a"],
+      digest: "jcs1-sha256:ab",
+      approve: { command: "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:ab" },
+    },
+    { env: { GITHUB_SERVER_URL: "https://github.example", GITHUB_REPOSITORY: "acme/db", GITHUB_RUN_ID: "42", GITHUB_SHA: "abc123" } },
   );
 
 describe("the signature and the receiver's check", () => {
   const event = waiting();
-  const { headers, body } = webhookRequest(event, KEY, NOW);
+  const { headers, body } = webhookRequest(event, KEY, { now: NOW, prefix: "x-yodel" });
 
   it("signs <timestamp>.<body> with HMAC-SHA256", () => {
     expect(headers["x-yodel-signature"]).toBe(signWebhook(KEY, NOW, body));
@@ -64,8 +78,24 @@ describe("the signature and the receiver's check", () => {
   });
 
   it("carries the CI run, the repository and the commit", () => {
-    expect(event).toMatchObject({ version: 1, runUrl: "https://github.example/acme/db/actions/runs/42", repository: "acme/db", commit: "abc123" });
-    expect(makeEvent({ ...event, event: "failed" }, { CI_JOB_URL: "https://gitlab.example/j/1", CI_PROJECT_PATH: "acme/db", CI_COMMIT_SHA: "def" })).toMatchObject({ runUrl: "https://gitlab.example/j/1", repository: "acme/db", commit: "def" });
+    expect(event).toMatchObject({ schema: "chant.notify/v1", source: "sql-yodeler", run: { url: "https://github.example/acme/db/actions/runs/42", repository: "acme/db", commit: "abc123" } });
+    const fields = eventFromRun("apply", { environment: "prod", status: "failed", exitCode: 1 }) ?? fail();
+    expect(makeNotifyEvent(fields, { env: { CI_JOB_URL: "https://gitlab.example/j/1", CI_PROJECT_PATH: "acme/db", CI_COMMIT_SHA: "def" } })).toMatchObject({ run: { url: "https://gitlab.example/j/1", repository: "acme/db", commit: "def" } });
+  });
+
+  // An event as 0.7.0 sent it: its own body (version 1), signed by 0.7.0's signWebhook. Frozen, so a receiver on this release still verifies one.
+  it("verifies an event 0.7.0 signed", () => {
+    const old =
+      '{"version":1,"id":"6f0c2c9e-1d55-4c7e-9a43-2f7d0b8e51a2","event":"waiting","at":"2026-10-10T09:12:44.120Z","environment":"prod","command":"apply","status":"gated","summary":"prod is waiting for approval of jcs1-sha256:9f2c (1 migration)","migrations":["20261010T090000Z-add-note"],"digest":"jcs1-sha256:9f2c","approve":"yodel approve prod --plan jcs1-sha256:9f2c","runUrl":"https://github.com/acme/db/actions/runs/123","repository":"acme/db","commit":"4b1d"}';
+    const at = 1_791_623_564;
+    const oldHeaders = {
+      "x-yodel-event": "waiting",
+      "x-yodel-delivery": "6f0c2c9e-1d55-4c7e-9a43-2f7d0b8e51a2",
+      "x-yodel-timestamp": String(at),
+      "x-yodel-signature": "sha256=85ef12c48714e97541edc4fec1548c292148f13b57a10ea19ca6836db8343bb8",
+    };
+    expect(verifyWebhook({ body: old, headers: oldHeaders, key: KEY, now: at + 5 })).toEqual({ ok: true, event: JSON.parse(old) as unknown });
+    expect(verifyWebhook({ body: old, headers: oldHeaders, key: "another-key", now: at + 5 }).ok).toBe(false);
   });
 });
 
@@ -111,8 +141,8 @@ describe("delivery", () => {
     expect(err).toEqual([]);
     const hook = r.got.find((g) => g.path === "/hook");
     expect(hook?.ok).toBe(true);
-    expect(hook?.event).toMatchObject({ event: "waiting", environment: "prod", migrations: ["m1"], digest: "jcs1-sha256:cd", approve: "chant approve x y --plan jcs1-sha256:cd" });
-    expect((r.got.find((g) => g.path === "/slack")?.event as unknown as { text: string }).text).toContain("Approve with: `chant approve x y --plan jcs1-sha256:cd`");
+    expect(hook?.event).toMatchObject({ schema: "chant.notify/v1", source: "sql-yodeler", event: "waiting", environment: "prod", targets: ["m1"], digest: "jcs1-sha256:cd", approve: { command: "chant approve x y --plan jcs1-sha256:cd" }, detail: { command: "apply" } });
+    expect((r.got.find((g) => g.path === "/slack")?.event as unknown as { text: string }).text).toContain("Approve: `chant approve x y --plan jcs1-sha256:cd`");
   });
 
   it("signed with another key, the receiver rejects it, and yodel says so without failing", async () => {
@@ -130,7 +160,7 @@ describe("delivery", () => {
     const sent = await sendEvent({ webhook: "HOOK_URL", key: "HOOK_KEY" }, fields, { io: out, verb: "apply", env: { HOOK_URL: `${r.url()}/hook` } });
     expect(sent[0]?.ok).toBe(false);
     expect(r.got).toEqual([]);
-    expect(err.join("")).toMatch(/HOOK_KEY is not set, and yodel does not send an unsigned event/);
+    expect(err.join("")).toMatch(/yodel apply: notify: the waiting event was not delivered to the webhook: HOOK_KEY is not set, and an event is never sent unsigned/);
   });
 
   it("sends only the events the config lists, and nothing without a config or an event", async () => {
@@ -143,24 +173,24 @@ describe("delivery", () => {
 
 describe("which outcomes send an event", () => {
   it("apply: gated waits, refused and denied are refused, failed fails; applied and unchanged send none", () => {
-    expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }, { id: "b" }], planDigest: "d1" })).toMatchObject({ event: "waiting", digest: "d1", migrations: ["a", "b"], summary: "prod is waiting for approval of d1 (2 migrations)" });
+    expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }, { id: "b" }], planDigest: "d1" })).toMatchObject({ event: "waiting", digest: "d1", targets: ["a", "b"], summary: "prod is waiting for approval of d1 (2 migrations)" });
     expect(eventFromRun("apply", { environment: "prod", status: "refused", refusal: { exitCode: 4, message: "a checksum mismatch\nmore" } })).toMatchObject({ event: "refused", reason: "a checksum mismatch\nmore", summary: "apply in prod was refused: a checksum mismatch" });
     expect(eventFromRun("apply", { environment: "prod", status: "denied", policy: [{ id: "no-drops", outcome: "denied" }] })).toMatchObject({ event: "refused", status: "denied", reason: "policy rule no-drops denies the plan" });
-    expect(eventFromRun("apply", { environment: "prod", status: "failed", exitCode: 5 })).toMatchObject({ event: "failed", reason: "apply failed (exit 5)" });
+    expect(eventFromRun("apply", { environment: "prod", status: "failed", exitCode: 5 })).toMatchObject({ event: "failed", reason: "apply failed (exit 5)", exitCode: 5 });
     expect(eventFromRun("apply", { environment: "prod", status: "applied" })).toBeUndefined();
     expect(eventFromRun("apply", { environment: "prod", status: "unchanged" })).toBeUndefined();
   });
 
   it("apply's wave modes (#87): a wave that will wait, a refusal, a failure", () => {
     const approve = "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:w";
-    expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }], gatePlanDigest: "jcs1-sha256:w", approve })).toMatchObject({ event: "waiting", digest: "jcs1-sha256:w", approve, migrations: ["a"] });
+    expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }], gatePlanDigest: "jcs1-sha256:w", approve })).toMatchObject({ event: "waiting", digest: "jcs1-sha256:w", approve: { command: approve }, targets: ["a"] });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("refused: prod applies only migrations staging applied first", 4)))).toMatchObject({ event: "refused", reason: "refused: prod applies only migrations staging applied first" });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("refused: wave 2 (prod) needs an approval", 3)))).toMatchObject({ event: "refused" });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("a statement failed", 1)))).toMatchObject({ event: "failed", reason: "apply failed (exit 1)" });
   });
 
   it("plan: a refusal or a denying rule is refused; a plan that would run sends none", () => {
-    expect(eventFromRun("plan", { environment: "dev", refusal: { exitCode: 4, message: "out of order" } })).toMatchObject({ event: "refused", command: "plan", status: "refused" });
+    expect(eventFromRun("plan", { environment: "dev", refusal: { exitCode: 4, message: "out of order" } })).toMatchObject({ event: "refused", detail: { command: "plan" }, status: "refused" });
     expect(eventFromRun("plan", { environment: "dev", policy: [{ id: "r", outcome: "denied" }] })).toMatchObject({ event: "refused", status: "denied" });
     expect(eventFromRun("plan", { environment: "dev", pending: [{ id: "a" }], policy: [{ id: "r", outcome: "allowed" }] })).toBeUndefined();
   });
@@ -170,8 +200,10 @@ describe("which outcomes send an event", () => {
     expect(eventFromDrift({ environment: "prod", drifted: false, changed: [], missing: [] })).toBeUndefined();
   });
 
-  it("Slack gets one line, the approve command and the run", () => {
-    expect(slackMessage(waiting()).text).toBe("yodel waiting: prod is waiting\nApprove with: `chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:ab`\nRun: https://github.example/acme/db/actions/runs/42");
+  it("Slack gets chant's message: the summary, the approve command and the run", () => {
+    expect(slackMessage(waiting()).text).toBe(
+      "*sql-yodeler: prod is waiting*\nTargets: 20261010T000000Z-a\nDigest: `jcs1-sha256:ab`\nApprove: `chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:ab`\nRun: <https://github.example/acme/db/actions/runs/42>",
+    );
   });
 });
 
@@ -183,7 +215,7 @@ describe("notify in yodel.config.ts", () => {
   });
 
   it("refuses a URL or a key written into the config, a webhook without a key, and unknown settings or events", () => {
-    expect(() => checkYodelConfig({ notify: { webhook: "https://hooks.example/x", key: "K" } }, "yodel.config.ts")).toThrow(/notify.webhook: the name of the environment variable that holds the URL \(such as YODEL_WEBHOOK_URL\), never the URL itself/);
+    expect(() => checkYodelConfig({ notify: { webhook: "https://hooks.example/x", key: "K" } }, "yodel.config.ts")).toThrow(/notify.webhook: the name of the environment variable that holds the URL, never the URL itself/);
     expect(notifyConfigProblem({ webhook: "U", key: "not a name!" })).toMatch(/^notify.key: .*never the key itself/);
     expect(notifyConfigProblem({ webhook: "U" })).toMatch(/^notify.key: a webhook needs a signing key/);
     expect(notifyConfigProblem({ key: "K" })).toMatch(/^notify.webhook:/);
@@ -201,15 +233,19 @@ describe("the event schema", () => {
   it("describes every event yodel sends", () => {
     const events = [
       waiting(),
-      makeEvent(eventFromRun("apply", { environment: "p", status: "refused", refusal: { exitCode: 4, message: "m" } }) ?? fail(), {}),
-      makeEvent(eventFromRun("apply", { environment: "p", status: "failed", exitCode: 1 }) ?? fail(), {}),
-      makeEvent(eventFromDrift({ environment: "p", drifted: true, changed: [{ name: "t" }], missing: [], fingerprint: "f" }) ?? fail(), {}),
+      makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "gated", pending: [{ id: "a" }], planDigest: "d", approve: "yodel approve p --plan d", chantApprove: "chant approve o g --plan d" }) ?? fail(), { env: {} }),
+      makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "refused", refusal: { exitCode: 4, message: "m" } }) ?? fail(), { env: {} }),
+      makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "failed", exitCode: 1 }) ?? fail(), { env: {} }),
+      makeNotifyEvent(eventFromDrift({ environment: "p", drifted: true, changed: [{ name: "t" }], missing: [], fingerprint: "f" }) ?? fail(), { env: {} }),
     ];
     for (const e of events) expect(validate(e), JSON.stringify(validate.errors)).toBe(true);
   });
 
-  it("refuses a field it does not describe", () => {
-    expect(validate({ ...waiting(), extra: 1 })).toBe(false);
+  it("is chant's notify event, from sql-yodeler, with the command in detail", () => {
+    const chant = ajv.compile(JSON.parse(readFileSync(join(repoRoot, "node_modules", "@intentius", "chant", "src", "notify.schema.json"), "utf8")) as object);
+    expect(chant(waiting()), JSON.stringify(chant.errors)).toBe(true);
+    expect(validate({ ...waiting(), source: "terragucci" })).toBe(false);
+    expect(validate({ ...waiting(), detail: {} })).toBe(false);
   });
 });
 

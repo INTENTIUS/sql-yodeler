@@ -30,7 +30,7 @@ export const WEBHOOK_KEY_VAR = "YODEL_WEBHOOK_KEY";
 interface Delivery {
   ok: boolean;
   reason?: string;
-  event?: { event?: string; environment?: string; approve?: string; digest?: string } | undefined;
+  event?: { event?: string; environment?: string; approve?: { command?: string }; digest?: string } | undefined;
 }
 
 export interface NotifyPart {
@@ -97,7 +97,7 @@ export async function startNotifyPart(ctx: Ctx, dir: string): Promise<NotifyPart
         return `the receiver accepted no waiting event for dev (${String(got.length)} deliveries${got.length > 0 ? `: ${got.map((d) => (d.ok ? String(d.event?.event) : `rejected, ${d.reason ?? ""}`)).join("; ")}` : ""})`;
       }
       const e = accepted[accepted.length - 1]?.event;
-      if (!e?.approve?.startsWith("chant approve ") || !e.digest) return `the waiting event names no approve command or digest: ${JSON.stringify(e)}`;
+      if (!e?.approve?.command?.startsWith("chant approve ") || !e.digest) return `the waiting event names no approve command or digest: ${JSON.stringify(e)}`;
       return undefined;
     },
     close: () => new Promise<void>((done) => server.close(() => { done(); })),

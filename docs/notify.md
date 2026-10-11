@@ -19,6 +19,7 @@ export default defineConfig({
     webhook: "YODEL_WEBHOOK_URL", // the variable holding the webhook's URL
     key: "YODEL_WEBHOOK_KEY",     // the variable holding the signing key
     slack: "SLACK_WEBHOOK_URL",   // optional: a Slack incoming webhook
+    teams: "TEAMS_WEBHOOK_URL",   // optional: a Microsoft Teams (Workflows) incoming webhook
     events: ["waiting", "refused", "failed", "drift"], // optional: default all four
   },
 });
@@ -37,33 +38,49 @@ A delivery that fails (the receiver is down, it answers 401) is reported on stde
 | `failed` | `yodel apply` | the Op's run failed: a statement, the lock, a plan that moved since approval |
 | `drift` | `yodel drift` (the watch) | a declared object changed out of band or is gone (exit 2) |
 
-The apply pipeline's wave jobs (`chant run wave`, see [approval](approval.md)) send the same events from `yodel apply`'s wave modes. `--wave-plan` makes the decision chant makes right after it, from the same sources (the wave's policy at the base commit, and the gate ledger), and sends `waiting` when the wave will wait, with the wave's set digest and the command that approves it, `yodel approve <env> --plan <digest>` (and chant's own in `chantApprove`, for a script). `--wave-plan` and `--wave-apply` send `refused` for a refusal (an environment before this one has not applied a migration, a wave with no decision that lets it through) and `failed` for anything else that stops them. The job's exit code is chant's: 3 for a wave that waits, which is yodel's code for an approval outstanding too, and 1 when an apply failed or refused.
+The apply pipeline's wave jobs (`chant run wave`, see [approval](approval.md)) send the same events from `yodel apply`'s wave modes. `--wave-plan` makes the decision chant makes right after it, from the same sources (the wave's policy at the base commit, and the gate ledger), and sends `waiting` when the wave will wait, with the wave's set digest and the command that approves it, `yodel approve <env> --plan <digest>` (and chant's own in `approve.chant`, for a script). `--wave-plan` and `--wave-apply` send `refused` for a refusal (an environment before this one has not applied a migration, a wave with no decision that lets it through) and `failed` for anything else that stops them. The job's exit code is chant's: 3 for a wave that waits, which is yodel's code for an approval outstanding too, and 1 when an apply failed or refused.
 
-The body is JSON, described by [schemas/event.schema.json](../schemas/event.schema.json) (`https://intentius.io/sql-yodeler/schemas/v1/event.schema.json`):
+The body is chant's notify event, `chant.notify/v1`, the same one chant's own waves and other products built on chant send. yodel sets `source` to `sql-yodeler` and puts the command that sent it in `detail.command`. [schemas/event.schema.json](../schemas/event.schema.json) (`https://intentius.io/sql-yodeler/schemas/v1/event.schema.json`) describes what yodel sends:
 
 ```json
 {
-  "version": 1,
-  "id": "6f0c2c9e-1d55-4c7e-9a43-2f7d0b8e51a2",
+  "schema": "chant.notify/v1",
+  "id": "3c51a0f4...",
   "event": "waiting",
   "at": "2026-10-10T09:12:44.120Z",
-  "environment": "prod",
-  "command": "apply",
-  "status": "gated",
+  "source": "sql-yodeler",
+  "project": "acme/db",
   "summary": "prod is waiting for approval of jcs1-sha256:9f2c... (1 migration)",
-  "migrations": ["20261010T090000Z-add-note"],
+  "environment": "prod",
+  "targets": ["20261010T090000Z-add-note"],
   "digest": "jcs1-sha256:9f2c...",
-  "approve": "yodel approve prod --plan jcs1-sha256:9f2c...",
-  "chantApprove": "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:9f2c...",
-  "runUrl": "https://github.com/acme/db/actions/runs/123",
-  "repository": "acme/db",
-  "commit": "4b1d..."
+  "approve": {
+    "command": "yodel approve prod --plan jcs1-sha256:9f2c...",
+    "chant": "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:9f2c..."
+  },
+  "status": "gated",
+  "detail": { "command": "apply" },
+  "run": { "url": "https://github.com/acme/db/actions/runs/123", "forge": "github", "repository": "acme/db", "commit": "4b1d..." }
 }
 ```
 
-`refused` and `failed` add `reason`; `drift` adds `drift: { changed: [...], missing: [...], fingerprint }` and has no migrations; the fingerprint is the same for the same drift run after run, so a receiver can tell a repeat from new drift. `runUrl`, `repository` and `commit` are there when yodel runs in GitHub Actions, Forgejo Actions or GitLab CI. Within version 1 fields are only added, so a receiver ignores fields it does not know.
+`targets` are the pending migrations. `refused` and `failed` add `reason`, and `failed` adds `exitCode` when the run had one. `drift` adds `drift: { changed: [...], missing: [...], fingerprint }` and has no targets; the fingerprint is the same for the same drift run after run, so a receiver can tell a repeat from new drift. The `id` is the same for every send about one digest (or one drift fingerprint), so a receiver can drop a repeat. `run` is there when yodel runs in GitHub Actions, Forgejo Actions or GitLab CI. Within `chant.notify/v1` fields are only added, so a receiver ignores fields it does not know.
 
-Slack gets a line of text instead: `yodel waiting: prod is waiting for approval of ...`, then the approve command and the run.
+Slack and Teams get chant's message instead: the summary, then the targets, the digest, the approve command and the run.
+
+### From 0.7.0
+
+Releases up to 0.7.0 sent yodel's own body (`"version": 1`). A receiver that reads fields from the event needs these changes; one that only checks the signature needs none:
+
+| 0.7.0 | Now |
+|---|---|
+| `version: 1` | `schema: "chant.notify/v1"`, and `source: "sql-yodeler"` |
+| `migrations` | `targets` |
+| `approve` (a string) | `approve.command` |
+| `chantApprove` | `approve.chant` |
+| `command` | `detail.command` |
+| `runUrl`, `repository`, `commit` | `run.url`, `run.repository`, `run.commit` |
+| `id`, random per send | `id`, the same for a repeat of one event |
 
 ## The signature
 
@@ -76,7 +93,7 @@ Each request carries:
 | `x-yodel-timestamp` | when it was sent, in seconds since the epoch |
 | `x-yodel-signature` | `sha256=` and the hex HMAC-SHA256 of `<timestamp>.<body>`, keyed with the key |
 
-The receiver checks it with `verifyWebhook` from `@intentius/sql-yodeler/webhook`, which needs only `node:crypto`. It compares the signature in constant time and refuses a delivery whose timestamp is more than five minutes from now, so a captured request cannot be replayed later:
+The receiver checks it with `verifyWebhook` from `@intentius/sql-yodeler/webhook`, which is chant's check under yodel's header names and needs only `node:crypto`; it imports in plain Node, with no loader. A receiver written for an earlier release keeps working unchanged. It compares the signature in constant time and refuses a delivery whose timestamp is more than five minutes from now, so a captured request cannot be replayed later:
 
 ```ts
 import { createServer } from "node:http";
@@ -99,4 +116,4 @@ In another language, compute HMAC-SHA256 over the timestamp header, a `.`, and t
 
 ## What proves it
 
-The template claims (`template`, `template-github`, `template-gitlab`) configure `notify` in the project, hold the URL and the key as the forge's secrets, and run a receiver that checks each delivery with `verifyWebhook`. The first push's apply stops at the gate, and the receiver must accept a `waiting` event for the environment that names the approve command. Under `BREAK=1` the receiver checks with another key and rejects it. The part runs once the template installs a release of `@intentius/sql-yodeler` with `notify` and its rendered apply jobs pass the two variables; until then the claims say they skipped it, and this page is a draft.
+The forge claims (`forgejo`, `github`, `gitlab`) configure `notify` in the project, hold the URL and the key as the forge's secrets, and run a receiver that checks each delivery with `verifyWebhook`. The first push's apply stops at the gate, and the receiver must accept a `waiting` event for the environment that names the approve command. Under `BREAK=1` the receiver checks with another key and rejects it. The part runs once the template installs a release of `@intentius/sql-yodeler` with `notify` and its rendered apply jobs pass the two variables; until then the claims say they skipped it, and this page is a draft.

@@ -363,8 +363,8 @@ export interface YodelConfig {
   policy?: PolicyConfig;
   /**
    * Webhook events (#61): the NAMES of the environment variables holding a
-   * webhook's URL and signing key, and optionally a Slack incoming webhook's
-   * URL. `{ webhook: "YODEL_WEBHOOK_URL", key: "YODEL_WEBHOOK_KEY" }`.
+   * webhook's URL and signing key, and optionally a Slack or Teams incoming
+   * webhook's URL. `{ webhook: "YODEL_WEBHOOK_URL", key: "YODEL_WEBHOOK_KEY" }`.
    */
   notify?: NotifyConfig;
   /**
