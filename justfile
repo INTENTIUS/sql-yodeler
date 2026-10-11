@@ -30,6 +30,10 @@ workflows:
 site:
     npm --prefix docs-site ci && npm --prefix docs-site run build
 
+# Serve the docs site at http://localhost:4321/sql-yodeler/; restart it to pick up edits under docs/.
+serve:
+    npm --prefix docs-site ci && npm --prefix docs-site run dev
+
 # Measure what yodel costs as a schema and a history grow.
 bench:
     npm run bench
