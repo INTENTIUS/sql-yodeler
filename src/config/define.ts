@@ -280,6 +280,17 @@ export interface CiConfig {
    * {@link CiLogin}.
    */
   login?: CiLogin;
+  /**
+   * Whether `yodel ci` renders the apply pipeline (#175). Default `true`.
+   * With `false` it renders the pull request checks (lint, the replay check,
+   * the plan comment and its write probe) and the drift watches, all with
+   * readers, and no `yodel-waves.json`, `yodel-apply` pipeline,
+   * `yodel-apply-plans` job or GitLab apply stages and include; `yodel ci
+   * --check` does not expect them. The project applies some other way, and
+   * CI holds no writer. Refused with a wave whose `approval` is `pr-review`,
+   * or with `resume`: both need the apply pipeline.
+   */
+  apply?: boolean;
 }
 
 /**

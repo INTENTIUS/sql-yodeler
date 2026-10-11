@@ -19,6 +19,10 @@
  * The apply pipeline's waves are yodel.config.ts `waves`, in order; without
  * it, one wave per environment in profile order, each with gate `always`.
  *
+ * yodel.config.ts `ci.apply: false` (#175) leaves out the apply pipeline and
+ * the waves spec on every forge: the pull request checks and the watches
+ * remain, and no job holds a writer.
+ *
  * Three pipelines per forge, each declared with chant: yodel-pr with the
  * github lexicon's Workflow, Job and Step (Forgejo renders the same
  * declaration through the forgejo lexicon's dialect) and the gitlab
@@ -174,7 +178,12 @@ export interface Environments {
   credentials?: Record<string, EnvCredentials>;
   /** yodel.config.ts `ci.login` (#132): the cloud login a job runs before yodel when a role it holds is cloud-minted. */
   login?: CiLogin;
+  /** yodel.config.ts `ci.apply: false` (#175): no apply pipeline, so no job holds a writer. */
+  apply?: false;
 }
+
+/** Whether the apply pipeline is rendered: unless yodel.config.ts `ci.apply` is false. */
+const rendersApply = (envs: Pick<Environments, "apply">): boolean => envs.apply !== false;
 
 /** What a job holding one role of an environment needs: the variables it reads, and the cloud identity its token source mints from. */
 export interface RoleNeeds {
@@ -631,9 +640,11 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     );
   }
   for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, Object.fromEntries(jobs), "gitlab"))) jobs.set(name, job);
+  const apply = rendersApply(envs_);
   const variables = envs.flatMap((env) => {
     const creds = envs_.credentials?.[env];
-    const writer = writerVariables(env, dialect, creds).slice(1);
+    // With ci.apply: false no job holds a writer, so no writer variable is set.
+    const writer = apply ? writerVariables(env, dialect, creds).slice(1) : [];
     return [
       `#   ${readerVariables(env, dialect, creds).join(", ")}: not protected (merge request`,
       "#     pipelines run on unprotected branches), masked; no environment scope.",
@@ -645,8 +656,15 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const header = [
     ...HEADER,
     "#",
-    "# Merge requests: lint and the plan comment (stage review). A push to the",
-    `# default branch: the apply waves, one stage each, in ${GITLAB_APPLY_FILE}.`,
+    ...(apply
+      ? [
+          "# Merge requests: lint and the plan comment (stage review). A push to the",
+          `# default branch: the apply waves, one stage each, in ${GITLAB_APPLY_FILE}.`,
+        ]
+      : [
+          "# Merge requests: lint and the plan comment (stage review). No apply",
+          "# pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI.",
+        ]),
     `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
     "#",
     "# GitLab gives every job the project's CI/CD variables unless a variable is",
@@ -665,19 +683,25 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
           "#     the plan comment and the drift watch's tracking issue; CI_JOB_TOKEN",
           "#     cannot write merge request notes or issues.",
         ]),
-    "# The jobs that hold no writer read with the reader: chant.config.ts picks an",
-    "# environment's writer only under YODEL_CREDENTIALS=writer:<env>, which only",
-    "# that environment's wave job sets.",
-    ...identityHeader("gitlab", cloudsOf(envs_, envs.flatMap((env) => [...planRoles(waves, env), ...waveRoles(waves, env), [env, "reader"] as [string, Role]]))),
+    ...(apply
+      ? [
+          "# The jobs that hold no writer read with the reader: chant.config.ts picks an",
+          "# environment's writer only under YODEL_CREDENTIALS=writer:<env>, which only",
+          "# that environment's wave job sets.",
+        ]
+      : ["# Every job reads with the reader; none holds a writer."]),
+    ...identityHeader("gitlab", cloudsOf(envs_, envs.flatMap((env) => [...planRoles(waves, env), ...(apply ? waveRoles(waves, env) : []), [env, "reader"] as [string, Role]]))),
   ];
   // The stages this file's jobs use (review, then any the project's own jobs add), then the apply file's waves and the watch file's ops.
   // A pr-review wave (#48) adds the merge request job that records the plans, in chant's stage "plans".
   const jobStages = [...jobs.values()].map((job) => (job as { props?: { stage?: unknown } }).props?.stage).filter((stage) => typeof stage === "string");
-  const plans = waves.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
+  // ci.apply: false (#175): no apply file, so neither its include nor its stages.
+  const plans = apply && waves.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
+  const applyStages = apply ? [...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : [])] : [];
   const pipeline = new GitLabPipeline({
     comment: asComment(header),
-    include: [{ local: GITLAB_APPLY_FILE }, { local: GITLAB_WATCH_FILE }],
-    stages: [...new Set([...jobStages, ...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : []), "ops"])],
+    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }],
+    stages: [...new Set([...jobStages, ...applyStages, "ops"])],
     variables: { GIT_DEPTH: "0" },
   });
   const entities = new Map<string, Declarable>([["pipeline", pipeline], ["workflow", workflow], ...jobs]);
@@ -1130,6 +1154,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.image ? { image: ci.image } : {}),
     ...(ci?.resume ? { resume: { schedule: ci.resume.schedule } } : {}),
     ...(ci?.login ? { login: ci.login } : {}),
+    ...(ci?.apply === false ? { apply: false as const } : {}),
   };
 }
 
@@ -1217,7 +1242,8 @@ export function forgeOf(path: string): Forge | undefined {
 export async function render(dir: string): Promise<RenderedFile[]> {
   const envs = await environments(dir);
   const forges = envs.forges ?? FORGES;
-  const files = [...review(envs), ...(await applyPipelines(dir, envs)), ...(await watchPipelines(dir, envs))];
+  // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
+  const files = [...review(envs), ...(rendersApply(envs) ? await applyPipelines(dir, envs) : []), ...(await watchPipelines(dir, envs))];
   return files.filter((f) => {
     const forge = forgeOf(f.path);
     return forge === undefined || forges.includes(forge);

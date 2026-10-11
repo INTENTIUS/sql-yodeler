@@ -125,6 +125,8 @@ Each environment is a profile in `chant.config.ts`, with its own history. The st
 
 `yodel ci` renders a project's pipelines for GitHub Actions, GitLab CI and Forgejo Actions from `chant.config.ts` (the environments), `yodel.config.ts` (`waves`, `ci`) and `ops/` (each environment's migrate and watch Ops), each declared with chant's lexicons: `yodel-pr` (lint, the replay check and the plan comment on a pull request), `yodel-apply` (the waves, after a push to main) and a `watch-<env>` per environment. The templates' `npm run ci` runs it.
 
+`ci: { apply: false }` leaves out `yodel-apply` and `yodel-waves.json` on every forge, for a team that wants lint and the plan comment on pull requests before CI applies anything: [Lint and plan on pull requests only](lint-and-plan.md).
+
 The pipelines come from the installed package, so a fix to them reaches a project when it upgrades `@intentius/sql-yodeler` and runs `yodel ci` again. `yodel ci --check` writes nothing and exits 1 naming each file that differs from what it renders; the pull request's lint job runs it, so a pipeline edited by hand, or not rendered again after an upgrade, fails the pull request until the rendered files are committed. `yodel ci --replay` runs the lint job's replay check on your machine, in a throwaway server it starts with Docker.
 
 `ci.forges` in `yodel.config.ts` picks the forges (default all three). A project's own jobs go in the module `ci.jobs` names, declared with chant, never in the rendered files:
