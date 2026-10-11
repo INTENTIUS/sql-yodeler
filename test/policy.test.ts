@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
 import { projectFromConfig } from "../src/project.js";
 import { checkYodelConfig } from "../src/config/load.js";
 import type { PolicyConfig } from "../src/config/define.js";
@@ -14,21 +13,24 @@ import {
   inspect,
   judgePlan,
   openVersioned,
-  overrideGate,
+  overrideSubject,
   policyPlan,
   policyRefusal,
-  readOverrides,
   REFUSED,
   selectToApply,
   type MigrateOpRef,
+  type OverrideSource,
   type VersionedEnv,
 } from "../src/versioned/index.js";
+import { appliedOverride, overrideDigest, type StandingOverride } from "@intentius/chant/override-gate";
+import { OVERRIDDEN_AT, overrideSource } from "./helpers/overrides.js";
 import { deriveState } from "../src/history/index.js";
 import { renderPlanMarkdown, renderPlanText } from "../src/pr/render.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
 
 const OP: MigrateOpRef = { name: "migrate-prod", filePath: "/p/ops/migrate-prod.op.ts", gate: "approve-migrate-prod", quorum: false };
+const SUBJECT = overrideSubject(OP.name);
 
 const drop: MigrationStep = {
   kind: "statement",
@@ -80,28 +82,39 @@ describe("policy over the plan (#53)", () => {
     const refusal = policyRefusal(prod, "prod", "jcs1-sha256:x", "before the gate");
     expect(refusal?.exitCode).toBe(REFUSED);
     expect(refusal?.message).toMatch(/rules no-drops, small-runs deny this plan/);
-    expect(refusal?.message).toContain('yodel override prod --rule no-drops --reason "<why>"');
+    expect(refusal?.message).toContain('yodel override prod --rule no-drops --rule small-runs --reason "<why>"');
   });
 
-  it("counts an override only for exactly that digest, with a reason, by someone overriders lists", async () => {
-    const at = (gate: string, by: string, digest: string, note?: string, timestamp = "2026-10-10T12:00:00.000Z") => ({ version: 1 as const, op: OP.name, gate, resolvedBy: by, timestamp, planDigest: digest, ...(note ? { note } : {}) });
-    const port = memoryGateLedgerPort({
-      resolutions: [
-        at(overrideGate("no-drops"), "alice", "jcs1-sha256:aa", "the table was emptied in TICKET-1"),
-        at(overrideGate("no-drops"), "mallory", "jcs1-sha256:bb", "trust me"),
-        at(overrideGate("small-runs"), "alice", "jcs1-sha256:bb"),
-        at(overrideGate("no-drops"), "alice", "jcs1-sha256:bb", "older", "2026-10-09T12:00:00.000Z"),
-        at(overrideGate("no-drops"), "alice", "jcs1-sha256:bb", "newer", "2026-10-10T13:00:00.000Z"),
-      ],
-    });
-    expect(await readOverrides(port, OP, "jcs1-sha256:aa", ["alice"])).toEqual([{ rule: "no-drops", by: "alice", at: "2026-10-10T12:00:00.000Z", reason: "the table was emptied in TICKET-1", digest: "jcs1-sha256:aa" }]);
-    expect((await readOverrides(port, OP, "jcs1-sha256:bb", ["alice"])).map((o) => o.reason)).toEqual(["newer"]);
-    expect(await readOverrides(port, OP, "jcs1-sha256:aa", undefined)).toEqual([]);
-    expect(await readOverrides(port, OP, "jcs1-sha256:cc", ["alice", "mallory"])).toEqual([]);
-
-    const results = await judgePlan({ policy, environment: "prod", dialect: "clickhouse", toApply: pending([m1, m2]).slice(1), digest: "jcs1-sha256:aa", ledger: () => Promise.resolve({ port, op: OP }) });
-    expect(results.find((r) => r.id === "no-drops")).toMatchObject({ outcome: "overridden", override: { by: "alice" } });
-    expect(policyRefusal(results, "prod", "jcs1-sha256:aa", "under the lock")).toBeUndefined();
+  it("counts an override, on chant's override gate, only for exactly that digest and its rules, with a reason, by someone overriders lists, once", async () => {
+    const AA = "jcs1-sha256:aa";
+    const toApply = pending([m1, m2]);
+    const denied = ["no-drops", "small-runs"];
+    const spent: StandingOverride[] = [];
+    const judge = (source: OverrideSource, spend = false) =>
+      judgePlan({
+        policy,
+        environment: "prod",
+        dialect: "clickhouse",
+        toApply,
+        digest: AA,
+        ledger: () => Promise.resolve(source),
+        ...(spend ? { spend: (o: StandingOverride) => { spent.push(o); return Promise.resolve(); } } : {}),
+      });
+    const overridden = async (source: OverrideSource) => (await judge(source)).flatMap((r) => (r.override ? [r.override] : []));
+    const counts = overrideSource(SUBJECT, AA, denied, [{ by: "alice", note: "the table was emptied in TICKET-1" }]);
+    expect(await overridden(counts)).toEqual(denied.map((rule) => ({ rule, by: "alice", at: OVERRIDDEN_AT, reason: "the table was emptied in TICKET-1", digest: AA })));
+    expect(policyRefusal(await judge(counts), "prod", AA, "under the lock")).toBeUndefined();
+    // Someone overriders does not list, no reason, another plan, a part of the rules, older than the denial: none counts.
+    expect(await overridden(overrideSource(SUBJECT, AA, denied, [{ by: "mallory", note: "trust me" }]))).toEqual([]);
+    expect(await overridden(overrideSource(SUBJECT, AA, denied, [{ by: "alice" }]))).toEqual([]);
+    expect(await overridden(overrideSource(SUBJECT, AA, denied, [{ by: "alice", note: "x", digest: "jcs1-sha256:bb" }]))).toEqual([]);
+    expect(await overridden(overrideSource(SUBJECT, AA, denied, [{ by: "alice", note: "x", rules: ["no-drops"] }]))).toEqual([]);
+    expect(await overridden(overrideSource(SUBJECT, AA, denied, [{ by: "alice", note: "x" }], { deniedAt: "2026-10-10T13:00:00.000Z" }))).toEqual([]);
+    // Under the lock the run spends it, and once spent it counts no more.
+    await judge(counts, true);
+    expect(spent.map((o) => [o.by, o.digest])).toEqual([["alice", overrideDigest(SUBJECT, AA, denied)]]);
+    const applied = appliedOverride(spent[0] as StandingOverride, { timestamp: "2026-10-10T12:30:00.000Z" });
+    expect(await overridden(overrideSource(SUBJECT, AA, denied, [{ by: "alice", note: "x" }], { applied: [applied] }))).toEqual([]);
   });
 
   it("is checked in yodel.config.ts", () => {
@@ -123,7 +136,7 @@ describe("policy over the plan (#53)", () => {
     const toApply = selectToApply(status, false);
     const digest = await currentDigest(venv, status, toApply);
     const rules: PolicyConfig = { overriders: ["alice"], rules: [policy.rules[0] as PolicyConfig["rules"][number]] };
-    const run = (port: ReturnType<typeof memoryGateLedgerPort>) =>
+    const run = (source: OverrideSource | undefined) =>
       executeApply(venv, [m1, m2], {
         approvedDigest: digest,
         allowOutOfOrder: false,
@@ -131,18 +144,17 @@ describe("policy over the plan (#53)", () => {
         log: () => undefined,
         processEnv: { USER: "tester" },
         policy: async (d, pend) => {
-          const results = await judgePlan({ policy: rules, environment: "prod", dialect: "clickhouse", toApply: pend, digest: d, ledger: () => Promise.resolve({ port, op: OP }) });
+          const results = await judgePlan({ policy: rules, environment: "prod", dialect: "clickhouse", toApply: pend, digest: d, ledger: () => Promise.resolve(source) });
           const refusal = policyRefusal(results, "prod", d, "under the lock");
           if (refusal) throw refusal;
           return results.flatMap((r) => (r.override ? [r.override] : []));
         },
       });
-    await expect(run(memoryGateLedgerPort())).rejects.toMatchObject({ exitCode: REFUSED, message: expect.stringMatching(/refused by policy under the lock: rule no-drops denies/) as unknown });
+    await expect(run(undefined)).rejects.toMatchObject({ exitCode: REFUSED, message: expect.stringMatching(/refused by policy under the lock: rule no-drops denies/) as unknown });
     expect(ch.sent).toEqual([]);
     expect(ch.rows).toEqual([]);
 
-    const port = memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: overrideGate("no-drops"), resolvedBy: "alice", timestamp: "2026-10-10T12:00:00.000Z", planDigest: digest, note: "emptied in TICKET-1" }] });
-    expect((await run(port)).applied).toEqual([m1.id, m2.id]);
+    expect((await run(overrideSource(SUBJECT, digest, ["no-drops"], [{ by: "alice", note: "emptied in TICKET-1" }]))).applied).toEqual([m1.id, m2.id]);
     const started = ch.rows.filter((r) => r.kind === "migration" && r.status === "started");
     expect(started).toHaveLength(2);
     for (const r of started) expect(JSON.parse(String(r.note))).toEqual({ policy: { overrides: [{ rule: "no-drops", by: "alice", at: "2026-10-10T12:00:00.000Z", reason: "emptied in TICKET-1", digest }] } });

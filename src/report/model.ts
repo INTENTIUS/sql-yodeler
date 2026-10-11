@@ -13,7 +13,8 @@ import { resolveEnvironment, type Project } from "../project.js";
 import { closeVersioned, findMigrateOp, gitLedger, openVersioned, type MigrateOpRef } from "../versioned/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
 import { baseEnvironment } from "../tenants/target.js";
-import { approvalOf, byTime, deriveAudit, isoTime, type AuditEntry, type AuditGap, type LedgerInput, type WaveLedgerInput } from "./audit.js";
+import { OVERRIDE_OP } from "@intentius/chant/override-gate";
+import { approvalOf, byTime, deriveAudit, isoTime, type AuditEntry, type AuditGap, type LedgerInput, type OverrideLedgerInput, type WaveLedgerInput } from "./audit.js";
 
 export const REPORT_VERSION = 1;
 
@@ -138,7 +139,18 @@ export async function collectReport(project: Project, chain: readonly Migration[
       }
     }
 
-    const derived = deriveAudit({ environment: name, history: env.history ?? "history", rows, ledger, waves, sameDigest: samePlanDigest });
+    // The overrides (`yodel override`) are on chant's override gate, under the migrations Op's name.
+    let overrides: OverrideLedgerInput | undefined;
+    if (port && env.op) {
+      try {
+        const [read] = await readGateAuditLedgers(port, [OVERRIDE_OP]);
+        overrides = { op: env.op.name, path: gateLedgerPath(OVERRIDE_OP), lines: read?.lines ?? [] };
+      } catch (e) {
+        env.notes.push(`the override gate's ledger could not be read (${firstLine(e)}); overrides are not shown`);
+      }
+    }
+
+    const derived = deriveAudit({ environment: name, history: env.history ?? "history", rows, ledger, overrides, waves, sameDigest: samePlanDigest });
     audit.push(...derived.entries);
     gaps.push(...derived.gaps);
 

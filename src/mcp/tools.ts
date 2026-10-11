@@ -16,6 +16,7 @@ import { drift } from "../commands/drift.js";
 import { lint } from "../commands/lint.js";
 import { plan } from "../commands/plan.js";
 import { status } from "../commands/status.js";
+import { overrideCommand } from "../versioned/policy.js";
 
 /** The only verbs a tool may run, and only with the flags {@link runVerb} allows. */
 export const READ_VERBS: Readonly<Record<string, Command>> = { status, plan, lint, drift };
@@ -123,11 +124,13 @@ interface PlanResults {
   policy?: Array<{ id: string; outcome: string }>;
 }
 
-/** A plan's steps that are a person's: overriding each policy rule that denies it (when it should not stand), and approving it. */
+/** A plan's steps that are a person's: overriding the policy rules that deny it (when the denial should not stand), and approving it. */
 export function personSteps(env: string, plan: PlanResults | null): NonNullable<ToolEnvelope["forPerson"]> {
-  const steps = (plan?.policy ?? [])
-    .filter((r) => r.outcome === "denied")
-    .map((r) => ({ action: `override policy rule ${r.id}, if a person on policy.overriders decides it should not stand`, command: `yodel override ${env} --rule ${r.id} --reason "<why>"` }));
+  const denied = (plan?.policy ?? []).filter((r) => r.outcome === "denied").map((r) => r.id);
+  const steps: NonNullable<ToolEnvelope["forPerson"]> =
+    denied.length > 0
+      ? [{ action: `override policy ${denied.length === 1 ? "rule" : "rules"} ${denied.join(", ")}, if a person on policy.overriders decides the denial should not stand`, command: overrideCommand(env, denied) }]
+      : [];
   if (typeof plan?.approve === "string") steps.push({ action: "approve this plan, after reading it", command: plan.approve });
   return steps;
 }

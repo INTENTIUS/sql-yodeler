@@ -5,30 +5,82 @@
  *
  * `yodel plan` reports each rule's outcome; `yodel apply` refuses (exit 4)
  * before the gate, and its Apply step again under the lock, a plan a rule
- * denies. An override is a person's decision to run that plan anyway:
- * `yodel override <env> --rule <id> --reason <text>` records it on chant's
- * gate ledger (the `chant/lifecycle` branch) as an approval of the gate
- * `override-<id>` of the migrations Op, for exactly the current plan digest,
- * with the reason as its note. It counts only when the plan digest is the
- * same, so it is refused once the plan moves, and only when
- * `policy.overriders` lists who recorded it. The Apply step writes the
- * overrides it relied on into the history (the `note` of each migration's
- * `started` row).
+ * denies. An override is a person's decision to run that plan anyway, and
+ * chant's override gate (`@intentius/chant/override-gate`) records and
+ * decides it: `yodel override <env> --rule <id> --reason <text>` records the
+ * denial and then the override on `_gates/policy-override.jsonl` (the
+ * `chant/lifecycle` branch), under the migrations Op's name
+ * ({@link overrideSubject}). It counts only for the same plan digest and the
+ * same denying rules, only when `policy.overriders` at base lists who
+ * recorded it, under `sealed` only sealed, and once: the Apply step spends it
+ * before it applies, and writes the overrides it relied on into the history
+ * (the `note` of each migration's `started` row).
  */
 
-import type { GateLedgerPort } from "@intentius/chant/op/gate";
-import type { PolicyConfig, PolicyPlan, PolicyRule, PolicyStep } from "../config/define.js";
+import type { GateSigners, OverrideDecision, StandingOverride } from "@intentius/chant/override-gate";
+import type { OverrideLedger } from "@intentius/chant/lifecycle/override-ledger";
+import type { EnvironmentApprovalMode, PolicyConfig, PolicyPlan, PolicyRule, PolicyStep } from "../config/define.js";
 import type { SqlDialect } from "../project.js";
 import { YodelError } from "../project.js";
 import { EXIT_REFUSED } from "../exit.js";
 import { silencesOf } from "../lint/index.js";
-import type { MigrateOpRef } from "./op.js";
 import type { PendingMigration } from "./state.js";
 import type { RevertPlan } from "./revert.js";
-import { sameDigest } from "./digest.js";
 
-/** The gate an override of `rule` is recorded as an approval of. */
-export const overrideGate = (rule: string): string => `override-${rule}`;
+/** The subject chant's override gate records an override of `op`'s plan under: the Op's name, or for the revert of a migration (#97) `<op>/revert-<id>`. */
+export const overrideSubject = (op: string, revert?: string): string => (revert === undefined ? op : `${op}/revert-${revert}`);
+
+/** Where `policy.overriders` comes from, for chant's refusals. */
+const OVERRIDERS_PATH = "yodel.config.ts policy.overriders";
+
+/** The override ledger for one subject, and how an override of it counts. */
+export interface OverrideSource {
+  subject: string;
+  ledger: OverrideLedger;
+  mode?: EnvironmentApprovalMode | undefined;
+  /** The signers at base, under `sealed`; without them nothing counts. */
+  signers?: GateSigners | undefined;
+}
+
+/** {@link OverrideSource} from the checkout at `cwd`, judged as `approval` (the migrations Op's mode at base) has it. */
+export async function overrideSourceAt(cwd: string, subject: string, approval?: { mode: EnvironmentApprovalMode; base?: string | undefined }): Promise<OverrideSource> {
+  const { readOverrideLedger } = await import("@intentius/chant/lifecycle/override-ledger");
+  const ledger = await readOverrideLedger({ cwd });
+  if (approval?.mode !== "sealed") return { subject, ledger };
+  const { gateSignersAt } = await import("@intentius/chant/gate-decision");
+  return { subject, ledger, mode: "sealed", ...(approval.base !== undefined ? { signers: gateSignersAt(cwd, approval.base) } : {}) };
+}
+
+/** chant's decision for the plan `digest` that `rules` deny. */
+export async function decidePolicyOverride(source: OverrideSource, digest: string, rules: readonly string[], overriders: readonly string[] | undefined): Promise<OverrideDecision> {
+  const { decideOverride } = await import("@intentius/chant/override-gate");
+  return decideOverride({
+    ledger: source.ledger,
+    applied: source.ledger.applied,
+    subject: source.subject,
+    planDigest: digest,
+    rules,
+    overriders: overriders ?? [],
+    overridersPath: OVERRIDERS_PATH,
+    mode: source.mode ?? "ledger",
+    ...(source.signers ? { signers: source.signers } : {}),
+  });
+}
+
+/**
+ * Spends `override` before the run applies under it: chant's applied record
+ * on `chant/lifecycle`, pushed. A write that fails stops the run; a push
+ * that does not land is logged.
+ */
+export async function spendOverride(cwd: string, override: StandingOverride, log: (line: string) => void): Promise<void> {
+  const { appliedOverride } = await import("@intentius/chant/override-gate");
+  const { recordOverridesApplied } = await import("@intentius/chant/lifecycle/override-ledger");
+  const { pushLifecycleReport } = await import("@intentius/chant/lifecycle/git");
+  const { isLifecycleLocalNote } = await import("@intentius/chant/lifecycle/local-note");
+  await recordOverridesApplied([appliedOverride(override, { timestamp: new Date().toISOString() })], { cwd });
+  const { pushed, pushWarning } = await pushLifecycleReport({ cwd });
+  if (!pushed && !isLifecycleLocalNote(pushWarning)) log(`the override by ${override.by} is spent here, but the push to chant/lifecycle did not land: ${pushWarning ?? "no reason given"}`);
+}
 
 /** An override that counts: who recorded it, when, why, and the digest it is for. */
 export interface PolicyOverride {
@@ -161,20 +213,6 @@ export function evaluatePolicy(policy: PolicyConfig | undefined, plan: PolicyPla
     });
 }
 
-/** The overrides on the ledger that count for `digest`: of a rule's override gate, for that digest, with a reason, by someone `overriders` lists. The newest per rule. */
-export async function readOverrides(port: GateLedgerPort, op: MigrateOpRef, digest: string, overriders: readonly string[] | undefined): Promise<PolicyOverride[]> {
-  const { resolutions } = await port.read(op.name);
-  const byRule = new Map<string, PolicyOverride>();
-  for (const r of resolutions) {
-    if (!r.gate.startsWith("override-") || !r.note || !(overriders ?? []).includes(r.resolvedBy)) continue;
-    if (!(await sameDigest(r.planDigest, digest))) continue;
-    const rule = r.gate.slice("override-".length);
-    const prior = byRule.get(rule);
-    if (!prior || prior.at < r.timestamp) byRule.set(rule, { rule, by: r.resolvedBy, at: r.timestamp, reason: r.note, digest });
-  }
-  return [...byRule.values()];
-}
-
 /** The results with each denied rule an override counts for marked overridden. */
 export function withOverrides(results: readonly RuleResult[], overrides: readonly PolicyOverride[]): RuleResult[] {
   return results.map((r) => {
@@ -193,10 +231,13 @@ export function policyRefusal(results: readonly RuleResult[], environment: strin
   const target = revert ? ` --revert ${revert.id}${revert.step !== undefined ? ` --step ${revert.step}` : ""}` : "";
   return new YodelError(
     `refused by policy ${when}: ${denied.length === 1 ? "rule" : "rules"} ${ids} ${denied.length === 1 ? "denies" : "deny"} ${what}${digest ? ` (${digest})` : ""}. Nothing was ${revert ? "reverted" : "applied"}:\n${lines.join("\n")}\n` +
-      `To run it anyway, someone policy.overriders lists records why, for exactly this plan: ${denied.map((r) => `yodel override ${environment}${target} --rule ${r.id} --reason "<why>"`).join("; ")}`,
+      `To run it anyway, someone policy.overriders lists records why, for exactly this plan: ${overrideCommand(environment, denied.map((r) => r.id), target)}`,
     EXIT_REFUSED,
   );
 }
+
+/** The command that overrides the denial by `rules`: one override names every rule that denies the plan. */
+export const overrideCommand = (environment: string, rules: readonly string[], target = ""): string => `yodel override ${environment}${target} ${rules.map((r) => `--rule ${r}`).join(" ")} --reason "<why>"`;
 
 /** The whole evaluation: the rules over the plan, with the overrides on the ledger for `digest`. Empty when the config declares no policy. */
 export async function judgePlan(input: {
@@ -205,20 +246,33 @@ export async function judgePlan(input: {
   dialect: SqlDialect;
   toApply: readonly PendingMigration[];
   digest: string | undefined;
-  ledger: () => Promise<{ port: GateLedgerPort; op: MigrateOpRef } | undefined>;
+  ledger: () => Promise<OverrideSource | undefined>;
+  /** Under the lock: spends the override the run applies under ({@link spendOverride}). */
+  spend?: (override: StandingOverride) => Promise<void>;
   now?: Date;
 }): Promise<RuleResult[]> {
   if (!input.policy || input.toApply.length === 0) return [];
-  return judgePolicyPlan(input.policy, policyPlan(input.environment, input.dialect, input.toApply, input.now), input.digest, input.ledger);
+  return judgePolicyPlan(input.policy, policyPlan(input.environment, input.dialect, input.toApply, input.now), input.digest, input.ledger, input.spend);
 }
 
-/** The rules over `plan`, with the overrides on the ledger for `digest` marking the denials they answer. */
-async function judgePolicyPlan(policy: PolicyConfig, plan: PolicyPlan, digest: string | undefined, ledger: () => Promise<{ port: GateLedgerPort; op: MigrateOpRef } | undefined>): Promise<RuleResult[]> {
+/** The rules over `plan`, with the override that counts for `digest` (chant's decision) marking the denials it answers. */
+async function judgePolicyPlan(
+  policy: PolicyConfig,
+  plan: PolicyPlan,
+  digest: string | undefined,
+  ledger: () => Promise<OverrideSource | undefined>,
+  spend?: (override: StandingOverride) => Promise<void>,
+): Promise<RuleResult[]> {
   const results = evaluatePolicy(policy, plan);
-  if (!digest || !results.some((r) => r.outcome === "denied")) return results;
-  const at = await ledger();
-  if (!at) return results;
-  return withOverrides(results, await readOverrides(at.port, at.op, digest, policy.overriders));
+  const denied = results.filter((r) => r.outcome === "denied").map((r) => r.id);
+  if (!digest || denied.length === 0) return results;
+  const source = await ledger();
+  if (!source) return results;
+  const decision = await decidePolicyOverride(source, digest, denied, policy.overriders);
+  if (decision.status !== "overridden") return results;
+  await spend?.(decision.override);
+  const { by, at, reason } = decision.override;
+  return withOverrides(results, denied.map((rule) => ({ rule, by, at, reason, digest })));
 }
 
 /**
@@ -234,11 +288,13 @@ export async function judgeRevert(input: {
   dialect: SqlDialect;
   plan: RevertPlan;
   digest: string | undefined;
-  ledger: () => Promise<{ port: GateLedgerPort; op: MigrateOpRef } | undefined>;
+  ledger: () => Promise<OverrideSource | undefined>;
+  /** Under the lock: spends the override the revert runs under. */
+  spend?: (override: StandingOverride) => Promise<void>;
   now?: Date;
 }): Promise<RuleResult[]> {
   if (!input.policy || input.plan.statements.length === 0) return [];
-  return judgePolicyPlan(input.policy, policyRevertPlan(input.environment, input.dialect, input.plan, input.now), input.digest, input.ledger);
+  return judgePolicyPlan(input.policy, policyRevertPlan(input.environment, input.dialect, input.plan, input.now), input.digest, input.ledger, input.spend);
 }
 
 /** One line per rule, for text output. */

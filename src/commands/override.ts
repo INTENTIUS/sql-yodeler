@@ -6,15 +6,18 @@ import { EXIT_REFUSED } from "../exit.js";
 import { policyAtBase } from "../config/base.js";
 import { runChant } from "../chant/process.js";
 import { runnableAsWriter } from "../chant/runnable.js";
+import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import {
   closeVersioned,
   currentRevert,
+  decidePolicyOverride,
   findMigrateOp,
   hasMigrations,
   judgePlan,
   judgeRevert,
   openVersioned,
-  overrideGate,
+  overrideSourceAt,
+  overrideSubject,
   readChain,
   readRevertStep,
   statusReport,
@@ -26,26 +29,30 @@ const usage = "usage: yodel override <env> --rule <id> --reason <text> [--by <na
 
 const help = `${usage}
 
-Records an override of a policy rule (yodel.config.ts policy.rules) for the
-plan yodel apply <env> would run now: a person's decision, with a reason, to
-apply a plan the rule denies. It is written to chant's gate ledger (the
-chant/lifecycle branch) with chant approve <op> override-<rule> --plan
-<digest> --note <reason>, bound to the environment's migrations Op and the
-plan digest. It counts only for exactly that digest: once the plan moves
-(a migration added or edited, the live schema changed), the rule denies
-again and needs a new override. It counts only when policy.overriders
-lists the name it is recorded under (--by, else chant's: the CI actor or
-your user). yodel apply records the overrides it relied on in the history.
+Records an override of the policy rules (yodel.config.ts policy.rules) that
+deny the plan yodel apply <env> would run now: a person's decision, with a
+reason, to apply a plan they deny. It goes through chant's override gate on
+the chant/lifecycle branch (_gates/policy-override.jsonl): the denial, under
+the environment's migrations Op, then chant approve policy-override <op>
+--rule <id> --reason <text>. It counts only for exactly that plan digest and
+those rules: once the plan moves (a migration added or edited, the live
+schema changed), it denies again and needs a new override. It counts only
+when policy.overriders at the base commit lists the name it is recorded
+under (--by, else chant's: the CI actor or your user), under approval
+sealed only signed (--sign is passed for you), and once: yodel apply spends
+it before it applies and records it in the history.
 
 With --revert <id>, the plan is the revert yodel revert <env> <id> would run
 (with --step, the hand-written revert step it is given), and the override
 counts for that revert's digest only.
 
-Refused when the rule does not deny the current plan: an override answers
-one denial, it is not a standing exception.
+Name every rule that denies the plan: one override answers one denial, it is
+not a standing exception. Refused when a rule given does not deny it, or a
+rule that denies it is not given.
 
 Options:
-  --rule <id>           the rule to override (repeatable)
+  --rule <id>           a rule to override (repeatable; every rule that
+                        denies the plan)
   --reason <text>       why; required
   --by <name>           who is overriding (chant approve --approver)
   --revert <id>         override for the revert of <id> (yodel revert), not
@@ -60,10 +67,14 @@ Exit codes:
   0  recorded
   4  nothing recorded: the plan has nothing to apply or apply would refuse
      it (with --revert: yodel revert would refuse the revert), a rule that
-     does not deny it, a name policy.overriders does not list
+     does not deny it, a denying rule not given, a name policy.overriders
+     does not list
   1  anything else: a bad config, a server that does not answer, chant
      approve failed
 `;
+
+/** How long the denial `yodel override` records stands; past it, an override of the same plan records a fresh one. */
+const DENIAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** `yodel override <env> --rule <id> --reason <text>`; the exit codes are in `help`. */
 export const override: Command = {
@@ -141,14 +152,32 @@ export const override: Command = {
         if (notDenying.length > 0) {
           throw new YodelError(`${notDenying.join(", ")} ${notDenying.length === 1 ? "does" : "do"} not deny ${what} (${digest}); an override answers a denial. Nothing recorded.`, EXIT_REFUSED);
         }
-        const op = await findMigrateOp(project, env, typeof values.op === "string" ? values.op : undefined);
-        for (const rule of rules) {
-          const denial = results.find((x) => x.id === rule);
-          io.out(`${rule} denies ${digest}:\n${(denial?.reasons ?? []).map((x) => `  ${x}`).join("\n")}\n`);
-          const ran = await runChant(["approve", op.name, overrideGate(rule), "--plan", digest, "--note", reason, ...(by ? ["--approver", by] : [])], { cwd: project.dir, onStdout: io.err, onStderr: io.err });
-          if (ran.code !== 0) throw new YodelError(`chant approve ${op.name} ${overrideGate(rule)} failed (exit ${String(ran.code)}); the override of ${rule} was not recorded`);
-          io.out(`Recorded an override of ${rule} for ${digest}${by ? ` by ${by}` : ""}: ${reason}\n`);
+        // One override answers the whole denial: chant binds it to every rule that denies the plan.
+        const denied = results.filter((x) => x.outcome === "denied").map((x) => x.id);
+        const missing = denied.filter((r) => !rules.includes(r));
+        if (missing.length > 0) {
+          throw new YodelError(`${missing.join(", ")} also ${missing.length === 1 ? "denies" : "deny"} ${what} (${digest}); an override names every rule that denies the plan: add ${missing.map((r) => `--rule ${r}`).join(" ")}. Nothing recorded.`, EXIT_REFUSED);
         }
+        for (const rule of denied) io.out(`${rule} denies ${digest}:\n${(results.find((x) => x.id === rule)?.reasons ?? []).map((x) => `  ${x}`).join("\n")}\n`);
+
+        const op = await findMigrateOp(project, env, typeof values.op === "string" ? values.op : undefined);
+        const subject = overrideSubject(op.name, revertId);
+        const approval = await migrationsApprovalAtBase(project, env.name);
+        if (approval.note) io.err(`${approval.note}\n`);
+        const decision = await decidePolicyOverride(await overrideSourceAt(project.dir, subject, approval), digest, denied, policy.overriders);
+        // chant approve policy-override answers a recorded denial, so the denial goes on the ledger first, unless it stands there already.
+        if (decision.status !== "overridden" && !decision.standing) {
+          const { recordOverrideDenial } = await import("@intentius/chant/lifecycle/override-ledger");
+          const now = new Date();
+          await recordOverrideDenial(
+            { subject, planDigest: digest, rules: denied, timestamp: now.toISOString(), expiresAt: new Date(now.getTime() + DENIAL_TTL_MS).toISOString(), description: `policy denies ${what}` },
+            { cwd: project.dir },
+          );
+        }
+        const args = ["approve", "policy-override", subject, ...denied.flatMap((r) => ["--rule", r]), "--reason", reason, ...(by ? ["--approver", by] : []), ...(approval.mode === "sealed" ? ["--sign"] : [])];
+        const ran = await runChant(args, { cwd: project.dir, onStdout: io.err, onStderr: io.err });
+        if (ran.code !== 0) throw new YodelError(`chant approve policy-override ${subject} failed (exit ${String(ran.code)}); the override was not recorded`);
+        io.out(`Recorded an override of ${denied.join(", ")} for ${digest}${by ? ` by ${by}` : ""}: ${reason}\n`);
         io.out(`It counts for this plan only. ${revertId !== undefined ? "Revert" : "Apply"} with:\n  ${runnableAsWriter(next, project.dir, env.profile)}\n`);
         return 0;
       } finally {

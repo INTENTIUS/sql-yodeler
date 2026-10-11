@@ -13,7 +13,7 @@
  * |----------------------|---------------------------------------------------------------|
  * | `approval-requested` | a pending fact on the ledger: a run stopped at the gate       |
  * | `approved`           | a resolution of the migrations Op's gate                      |
- * | `override`           | a resolution of an `override-<rule>` gate (`yodel override`)  |
+ * | `override`           | an override on chant's override gate (`yodel override`), or a resolution of an `override-<rule>` gate (before 0.8) |
  * | `silenced`           | a `-- yodel:allow` silence on a migration's first started row |
  * | `applied`            | the migration row that first recorded a migration succeeded   |
  * | `refused`            | a failed migration row naming a pre-migration check           |
@@ -39,7 +39,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { deriveGateAudit, type GateLedgerLine } from "@intentius/chant/lifecycle/gate-audit";
+import { deriveGateAudit, POLICY_OVERRIDE_OP, type GateLedgerLine } from "@intentius/chant/lifecycle/gate-audit";
 import type { HistoryRow } from "../history/index.js";
 import { waveRecordOf } from "../waves/record.js";
 import { describeStep, stepsOfNote } from "../apply-steps/index.js";
@@ -92,6 +92,14 @@ export interface WaveLedgerInput {
   lines: readonly GateLedgerLine[];
 }
 
+/** chant's override gate (`_gates/policy-override.jsonl`): the denials `yodel override` records and the overrides that answer them. */
+export interface OverrideLedgerInput {
+  /** The migrations Op's name: the subject of its plans' overrides, and `<op>/revert-<id>` of its reverts'. */
+  op: string;
+  path: string;
+  lines: readonly GateLedgerLine[];
+}
+
 export interface AuditInput {
   environment: string;
   /** `<database>.history`, for the entries' source. */
@@ -99,6 +107,8 @@ export interface AuditInput {
   rows: readonly HistoryRow[];
   /** Absent when the environment has no migrations Op to read the ledger of. */
   ledger?: LedgerInput | undefined;
+  /** The override gate's ledger (`yodel override`), when it could be read. */
+  overrides?: OverrideLedgerInput | undefined;
   /** The waves' gate ledger, when the project's apply pipeline runs waves. */
   waves?: WaveLedgerInput | undefined;
   /** Whether two digests are the same plan (chant's samePlanDigest). Default: equal strings. */
@@ -214,6 +224,34 @@ function fromLedger(environment: string, l: { op: string; path: string; lines: r
   return out;
 }
 
+/**
+ * The overrides of the migrations Op's plans and reverts on chant's override
+ * gate, as chant's reader gives them: each with the rules of the denial it
+ * answers, and the plan digest that denial names (its `plan`).
+ */
+function fromOverrides(environment: string, o: OverrideLedgerInput): AuditEntry[] {
+  const mine = (gate: string) => gate === o.op || gate.startsWith(`${o.op}/revert-`);
+  const { entries } = deriveGateAudit({ ledgers: [{ op: POLICY_OVERRIDE_OP, path: o.path, lines: o.lines }] });
+  const planOf = (gate: string, digest: string | undefined) => {
+    const plan = entries.find((e) => e.kind === "override-requested" && e.gate === gate && e.digest === digest)?.detail.plan;
+    return typeof plan === "string" ? plan : digest;
+  };
+  return entries
+    .filter((e) => e.kind === "override-recorded" && mine(e.gate))
+    .map((e) => {
+      const digest = planOf(e.gate, e.digest);
+      return entry({
+        at: e.at,
+        environment,
+        kind: "override",
+        ...(e.by ? { by: e.by } : {}),
+        ...(digest ? { digest } : {}),
+        detail: `${(e.rules ?? []).join(", ")}: ${e.note ?? ""}`.trim(),
+        source: { ledger: o.path, op: POLICY_OVERRIDE_OP, gate: e.gate },
+      });
+    });
+}
+
 /** The wave gates' lines that are this environment's: its configured wave gate, and every gate its history's waves recorded. */
 function fromWaves(environment: string, w: WaveLedgerInput, history: readonly AuditEntry[]): AuditEntry[] {
   const gates = new Set([...(w.gate ? [w.gate] : []), ...history.flatMap((e) => (e.wave ? [e.wave.gate] : []))]);
@@ -236,7 +274,12 @@ export function approvalOf(applied: AuditEntry, entries: readonly AuditEntry[], 
 export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: AuditGap[] } {
   const same = input.sameDigest ?? ((a, b) => a === b);
   const history = fromHistory(input);
-  const entries = [...history, ...(input.ledger ? fromLedger(input.environment, input.ledger, new Set([input.ledger.gate]), true) : []), ...(input.waves ? fromWaves(input.environment, input.waves, history) : [])].sort(byTime);
+  const entries = [
+    ...history,
+    ...(input.ledger ? fromLedger(input.environment, input.ledger, new Set([input.ledger.gate]), true) : []),
+    ...(input.overrides ? fromOverrides(input.environment, input.overrides) : []),
+    ...(input.waves ? fromWaves(input.environment, input.waves, history) : []),
+  ].sort(byTime);
   const gaps: AuditGap[] = [];
 
   const seqs = new Set(input.rows.map((r) => r.seq));

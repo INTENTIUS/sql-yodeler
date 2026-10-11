@@ -19,9 +19,10 @@ import {
   currentRevert,
   describeResults,
   findMigrateOp,
-  gitLedger,
   judgeRevert,
   openVersioned,
+  overrideSourceAt,
+  overrideSubject,
   policyRefusal,
   readChain,
   readRevertStep,
@@ -237,7 +238,8 @@ async function revertIn(project: Project, env: Environment, a: RevertArgs, io: I
       digest,
       ledger: async () => {
         try {
-          return { port: await gitLedger(project.dir), op: op ?? (await findMigrateOp(project, env, a.op)) };
+          const name = (op ?? (await findMigrateOp(project, env, a.op))).name;
+          return await overrideSourceAt(project.dir, overrideSubject(name, a.id), await migrationsApprovalAtBase(project, env.name));
         } catch {
           return undefined;
         }

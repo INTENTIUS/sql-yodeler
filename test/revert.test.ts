@@ -19,7 +19,7 @@ import {
   executeRevert,
   inspect,
   judgeRevert,
-  overrideGate,
+  overrideSubject,
   policyRefusal,
   openVersioned,
   planRevert,
@@ -28,10 +28,12 @@ import {
   statusJson,
   verifyApproval,
   type MigrateOpRef,
+  type OverrideSource,
   type RevertStepFile,
   type VersionedEnv,
 } from "../src/versioned/index.js";
 import { FakeClickHouse } from "./helpers/fake-clickhouse.js";
+import { overrideSource } from "./helpers/overrides.js";
 import type { PolicyConfig } from "../src/config/define.js";
 import { revertWaveOf } from "../src/commands/revert.js";
 
@@ -142,6 +144,7 @@ describe("the history after a revert", () => {
 });
 
 const OP: MigrateOpRef = { name: "migrate-e2e", filePath: "/p/ops/migrate-e2e.op.ts", gate: "approve-migrate-e2e", quorum: false };
+const REVERT_SUBJECT = overrideSubject(OP.name, m1.id);
 const ledgerFor = (digest: string) => memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-10T12:00:00.000Z", planDigest: digest }] });
 const quiet = () => undefined;
 
@@ -198,13 +201,11 @@ describe("the policy over a revert (#97)", () => {
     expect(refused?.message).toContain(`denies the revert of ${m1.id}`);
     expect(refused?.message).toContain(`yodel override e2e --revert ${m1.id} --rule no-drops`);
 
-    const port = memoryGateLedgerPort({
-      resolutions: [{ version: 1, op: OP.name, gate: overrideGate("no-drops"), resolvedBy: "alice", timestamp: "2026-10-10T12:00:00.000Z", planDigest: "jcs1-sha256:aa", note: "nothing reads it" }],
-    });
-    const over = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:aa", ledger: () => Promise.resolve({ port, op: OP }) });
+    const source = overrideSource(REVERT_SUBJECT, "jcs1-sha256:aa", ["no-drops"], [{ by: "alice", note: "nothing reads it" }]);
+    const over = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:aa", ledger: () => Promise.resolve(source) });
     expect(over).toMatchObject([{ id: "no-drops", outcome: "overridden", override: { by: "alice", reason: "nothing reads it" } }]);
     // An override of another digest (the apply's, or the revert before it moved) does not count.
-    const other = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:bb", ledger: () => Promise.resolve({ port, op: OP }) });
+    const other = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:bb", ledger: () => Promise.resolve(source) });
     expect(other[0]?.outcome).toBe("denied");
     // A rule's check sees that the plan is a revert.
     const seen = await judgeRevert({ policy: { rules: [{ id: "no-reverts", check: (pl) => (pl.revert ? `reverts ${pl.revert.id} to ${String(pl.revert.to)}` : undefined) }] }, environment: "e2e", dialect: "clickhouse", plan: p, digest: undefined, ledger: () => Promise.resolve(undefined) });
@@ -218,8 +219,8 @@ describe("the policy over a revert (#97)", () => {
     const applyDigest = await currentDigest(venv, status, selectToApply(status, false));
     await executeApply(venv, ordered, { approvedDigest: applyDigest, allowOutOfOrder: false, approve: (d) => verifyApproval(ledgerFor(applyDigest), OP, d), log: quiet, processEnv: { USER: "tester" } });
     const { digest } = await currentRevert(venv, ordered, m1.id);
-    const judge = (port?: ReturnType<typeof memoryGateLedgerPort>) => async (d: string, planned: Parameters<typeof judgeRevert>[0]["plan"]) => {
-      const results = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: planned, digest: d, ledger: () => Promise.resolve(port ? { port, op: OP } : undefined) });
+    const judge = (source?: OverrideSource) => async (d: string, planned: Parameters<typeof judgeRevert>[0]["plan"]) => {
+      const results = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: planned, digest: d, ledger: () => Promise.resolve(source) });
       const refusal = policyRefusal(results, "e2e", d, "under the lock", { id: m1.id });
       if (refusal) throw refusal;
       return results.flatMap((r) => (r.override ? [r.override] : []));
@@ -227,8 +228,8 @@ describe("the policy over a revert (#97)", () => {
     const sent = ch.sent.length;
     await expect(executeRevert(venv, ordered, { id: m1.id, approvedDigest: digest, approve: (d) => verifyApproval(ledgerFor(digest), OP, d), policy: judge(), log: quiet })).rejects.toThrow(/refused by policy under the lock/);
     expect(ch.sent.length).toBe(sent);
-    const port = memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: overrideGate("no-drops"), resolvedBy: "alice", timestamp: "2026-10-10T12:00:00.000Z", planDigest: digest, note: "TICKET-9" }] });
-    await executeRevert(venv, ordered, { id: m1.id, approvedDigest: digest, approve: (d) => verifyApproval(ledgerFor(digest), OP, d), policy: judge(port), log: quiet, processEnv: { USER: "tester" } });
+    const source = overrideSource(REVERT_SUBJECT, digest, ["no-drops"], [{ by: "alice", note: "TICKET-9" }]);
+    await executeRevert(venv, ordered, { id: m1.id, approvedDigest: digest, approve: (d) => verifyApproval(ledgerFor(digest), OP, d), policy: judge(source), log: quiet, processEnv: { USER: "tester" } });
     const reverted = ch.rows.at(-1);
     expect(reverted?.status).toBe("reverted");
     expect(JSON.parse(reverted?.note as string) as unknown).toMatchObject({ policy: { overrides: [{ rule: "no-drops", by: "alice", reason: "TICKET-9", digest }] } });

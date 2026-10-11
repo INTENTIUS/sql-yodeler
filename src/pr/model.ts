@@ -13,6 +13,7 @@
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { approveCommand, migrationsApprovalAtBase, portFor, signFlag, type EnvironmentApprovalMode } from "../approval-mode/index.js";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
+import { OVERRIDE_OP } from "@intentius/chant/override-gate";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { migrationChecks, scanMigrations, type Migration, type MigrationCheck } from "../migrations/index.js";
 import { describeTopology } from "../history/index.js";
@@ -25,6 +26,8 @@ import {
   inspect,
   gitLedger,
   judgePlan,
+  overrideSourceAt,
+  overrideSubject,
   migrateOpExample,
   migrationsDir,
   closeVersioned,
@@ -212,7 +215,10 @@ async function collectWith(
       ledger: async () => {
         if (approval.kind !== "op" || options.ledger === null) return undefined;
         try {
-          return { port: options.ledger ?? (await gitLedger(project.dir)), op: options.op ?? (await findMigrateOp(project, env, options.opName)) };
+          const subject = overrideSubject((options.op ?? (await findMigrateOp(project, env, options.opName))).name);
+          if (!options.ledger) return await overrideSourceAt(project.dir, subject, await migrationsApprovalAtBase(project, env.name, options.processEnv));
+          // A ledger port given in place of chant's reads the override gate's lines as any gate's; it holds no applied records.
+          return { subject, ledger: { ...(await options.ledger.read(OVERRIDE_OP)), applied: [] } };
         } catch {
           return undefined;
         }

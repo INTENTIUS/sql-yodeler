@@ -2,7 +2,7 @@ import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, rmSync, sy
 import { join } from "node:path";
 import { hold, runParts, Violation, type Claim, type Ctx } from "../../lib/claim.js";
 import { parse, parseOr, Project } from "../../lib/project.js";
-import { addColumn, addTable, createTableByHand, mainTable, needsVersioned } from "../../lib/schema.js";
+import { addColumn, addTable, mainTable, needsVersioned } from "../../lib/schema.js";
 
 /**
  * A pending migration applies only behind the migrations Op's gate: yodel
@@ -80,12 +80,12 @@ export async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
 /**
  * Policy over the plan (#53): yodel.config.ts refuses a drop in this
  * environment. A migration that drops a table is refused before the gate
- * (exit 4) naming the rule. An override recorded with yodel override counts
- * for exactly the plan digest it was recorded for: once the plan moves (a
- * table made by hand) the rule denies again; back on that digest the plan
- * applies, and the history records the override and its reason. The
- * policy is read at the base commit (#73): the change that adds the drop
- * also deletes the rule, and the drop is still denied.
+ * (exit 4) naming the rule. An override recorded with yodel override lets
+ * the plan apply, and the history records the override and its reason.
+ * Which overrides count (the digest, the rules, the overriders, spent once)
+ * is chant's override gate, and its claims. The policy is read at the base
+ * commit (#73): the change that adds the drop also deletes the rule, and
+ * the drop is still denied.
  * BREAK: the policy is read from the change itself (YODEL_BASE=HEAD), where
  * the rule is gone, so the drop is not refused.
  */
@@ -117,10 +117,6 @@ async function policyOverApply(ctx: Ctx, p: Project): Promise<void> {
 
   const over = await p.yodel(["override", p.env, "--rule", "no-drops", "--reason", "nothing reads it since TICKET-7", "--by", "alice"], { env: base });
   if (over.code !== 0) throw new Error(`yodel override exited ${String(over.code)}: ${over.err.slice(-400)}`);
-  await createTableByHand(ctx, "extra");
-  const moved = await p.apply([], base);
-  hold(moved.ran.code === 4 && moved.doc.status === "denied", `yodel apply after the plan moved exited ${String(moved.ran.code)}, status ${String(moved.doc.status)}: an override counted for another digest`);
-  await ctx.db.exec(`DROP TABLE ${ctx.db.name}.extra`);
 
   const applied = await p.approvedApply([], base);
   hold(applied.ran.code === 0, `yodel apply with the override for this digest exited ${String(applied.ran.code)}, status ${String(applied.doc.status)}`);

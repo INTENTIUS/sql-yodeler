@@ -381,9 +381,9 @@ export interface YodelConfig {
 /**
  * Rules over the versioned plan (#53). `yodel plan` shows each rule's
  * outcome, and `yodel apply` refuses (exit 4) a plan a rule denies, unless
- * someone {@link PolicyConfig.overriders} lists recorded an override of that
- * rule for exactly that plan digest (`yodel override <env> --rule <id>
- * --reason <text>`).
+ * someone {@link PolicyConfig.overriders} lists recorded an override of the
+ * rules that deny it for exactly that plan digest (`yodel override <env>
+ * --rule <id> --reason <text>`, through chant's override gate).
  *
  * ```ts
  * policy: {

@@ -34,7 +34,7 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 |---|---|
 | `approval-requested` | a pending fact on the ledger: a run stopped at the migrations Op's gate, or the environment's wave stopped at its wave gate |
 | `approved` | a resolution of the gate or the wave gate (`chant approve`, `yodel approve`) |
-| `override` | a resolution of an `override-<rule>` gate (`yodel override`), with the rule and the reason |
+| `override` | an override on chant's override gate (`yodel override`), with the rules, the plan and the reason; or, before 0.8, a resolution of an `override-<rule>` gate |
 | `silenced` | a `-- yodel:allow` silence, on the migration's first started row |
 | `applied` | the history row that first recorded the migration succeeded |
 | `refused` | a failed migration row naming a pre-migration check |

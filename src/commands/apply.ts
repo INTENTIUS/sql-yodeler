@@ -32,7 +32,10 @@ import {
   describeResults,
   judgePlan,
   judgeRevert,
+  overrideSourceAt,
+  overrideSubject,
   policyRefusal,
+  spendOverride,
   runChecks,
   currentDigest,
   currentRevert,
@@ -59,6 +62,7 @@ import {
 import type { ExecuteOptions, ExecuteResult } from "../versioned/engine.js";
 import type { StatusReport } from "../versioned/report.js";
 import type { RuleResult } from "../versioned/policy.js";
+import type { StandingOverride } from "@intentius/chant/override-gate";
 import { BASELINE_ENV } from "../versioned/op.js";
 import { baselineFromEnv, executeBaseline, planBaseline, projectBaseline } from "../init/second.js";
 import { appliedHead, recordReleaseLines } from "../release/index.js";
@@ -154,7 +158,8 @@ Two paths, chosen by the project:
   before the gate and again under the lock: a rule that denies it refuses
   (exit 4) naming the rule, unless someone policy.overriders lists recorded
   an override for exactly this plan digest (yodel override <env> --rule <id>
-  --reason <text>). The history records the overrides a run relied on.
+  --reason <text>). An override counts once: the Apply step spends it, and
+  the history records the overrides a run relied on.
 
   A migration's pre-migration checks (checks in its migration.json, read-only
   queries) run against the environment: the first pending migration's before
@@ -467,7 +472,15 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       ...(basePolicy
         ? {
             policy: async (digest, planned) => {
-              const results = await judgeRevert({ policy: basePolicy, environment: env.name, dialect: project.dialect, plan: planned, digest, ledger: () => Promise.resolve({ port: ledger, op }) });
+              const results = await judgeRevert({
+                policy: basePolicy,
+                environment: env.name,
+                dialect: project.dialect,
+                plan: planned,
+                digest,
+                ledger: async () => overrideSourceAt(project.dir, overrideSubject(op.name, revert.id), await migrationsApprovalAtBase(project, env.name)),
+                spend: (o) => spendOverride(project.dir, o, (l) => { io.err(`${l}\n`); }),
+              });
               const refusal = policyRefusal(results, env.name, digest, "under the lock", { id: revert.id, step: revert.step?.file });
               if (refusal) throw refusal;
               for (const line of describeResults(results)) io.err(`${line}\n`);
@@ -537,12 +550,14 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
             policy: async (digest, toApply) => {
               const ledger = async () => {
                 try {
-                  return { port: await gitLedger(project.dir), op: await findMigrateOp(project, env, a.op) };
+                  const op = await findMigrateOp(project, env, a.op);
+                  return await overrideSourceAt(project.dir, overrideSubject(op.name), await migrationsApprovalAtBase(project, env.name));
                 } catch {
                   return undefined;
                 }
               };
-              const results = await judgePlan({ policy: basePolicy, environment: env.name, dialect: project.dialect, toApply, digest, ledger });
+              const spend = (o: StandingOverride) => spendOverride(project.dir, o, (l) => { io.err(`${l}\n`); });
+              const results = await judgePlan({ policy: basePolicy, environment: env.name, dialect: project.dialect, toApply, digest, ledger, spend });
               const refusal = policyRefusal(results, env.name, digest, "under the lock");
               if (refusal) throw refusal;
               for (const line of describeResults(results)) io.err(`${line}\n`);
@@ -609,7 +624,15 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       ...(basePolicy
         ? {
             policy: async (digest, toApply) => {
-              const results = await judgePlan({ policy: basePolicy, environment: env.name, dialect: project.dialect, toApply, digest, ledger: () => Promise.resolve({ port: ledger, op }) });
+              const results = await judgePlan({
+                policy: basePolicy,
+                environment: env.name,
+                dialect: project.dialect,
+                toApply,
+                digest,
+                ledger: async () => overrideSourceAt(project.dir, overrideSubject(op.name), await migrationsApprovalAtBase(project, env.name)),
+                spend: (o) => spendOverride(project.dir, o, (l) => { io.err(`${l}\n`); }),
+              });
               const refusal = policyRefusal(results, env.name, digest, "under the lock");
               if (refusal) throw refusal;
               for (const line of describeResults(results)) io.err(`${line}\n`);
@@ -695,7 +718,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     dialect: project.dialect,
     toApply: report.status.pending,
     digest: report.digest,
-    ledger: async () => ({ port: await gitLedger(project.dir), op }),
+    ledger: async () => overrideSourceAt(project.dir, overrideSubject(op.name), await migrationsApprovalAtBase(project, env.name)),
   });
   const denied = policyRefusal(policy, env.name, report.digest, "before the gate");
   if (denied) {
