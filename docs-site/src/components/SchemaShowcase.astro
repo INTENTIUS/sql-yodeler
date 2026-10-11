@@ -1,0 +1,88 @@
+---
+// The home page's "Your schema in TypeScript": per dialect, a change to the
+// declared schema beside what yodel made of it. Both pairs are quoted from
+// recorded runs: the ClickHouse one from docs/getting-started.md (step 6, the
+// plan), the Postgres one from examples/postgres/README.md (the coupons
+// migration). The tabs share Starlight's `dialect` sync key with the picker
+// and the docs pages.
+import { Code, TabItem, Tabs } from '@astrojs/starlight/components';
+
+const clickhouse = {
+	schema: `export const events = table\`
+  CREATE TABLE \${db}.events (
+    id       UInt64,
+    kind     LowCardinality(String),
+    at       DateTime,
+    country  LowCardinality(String) DEFAULT ''
+  )
+  ENGINE = MergeTree
+  ORDER BY (kind, at)\`;`,
+	mark: 6,
+	outTitle: 'npx yodel new add-country, then npx yodel plan dev',
+	outLang: 'text',
+	out: `20261010T2213-add-country
+  0  statement  SQLCH201 metadata  events.events
+       ALTER TABLE \`events\`.\`events\` ADD COLUMN country  LowCardinality(String) DEFAULT '' AFTER \`at\``,
+};
+const postgres = {
+	schema: `export const orders = table\`
+  CREATE TABLE \${shopSchema}.orders (
+      id bigint GENERATED ALWAYS AS IDENTITY,
+      customer_email text NOT NULL,
+      status text DEFAULT 'placed'::text NOT NULL,
+      amount numeric(12,2) NOT NULL,
+      placed_at timestamp with time zone DEFAULT now() NOT NULL,
+      coupon text,
+      CONSTRAINT orders_pkey PRIMARY KEY (id),
+      CONSTRAINT orders_amount_positive CHECK (amount > 0)
+  )\`;`,
+	mark: [8, 10],
+	outTitle: 'npx yodel new coupons: migration.sql',
+	outLang: 'sql',
+	out: `-- orders (shop.orders): SQLPG201 metadata
+ALTER TABLE shop.orders ADD COLUMN coupon text;
+
+-- orders (shop.orders): SQLPG217 metadata
+-- pre-check, must return 0 (rows that fail the check orders_amount_positive (amount > 0)): SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0)
+ALTER TABLE shop.orders ADD CONSTRAINT orders_amount_positive CHECK (amount > 0) NOT VALID;
+
+-- orders (shop.orders): SQLPG220 validate
+ALTER TABLE shop.orders VALIDATE CONSTRAINT orders_amount_positive;`,
+};
+const dialects = [
+	{ label: 'ClickHouse', ...clickhouse },
+	{ label: 'Postgres', ...postgres },
+];
+---
+<div class="sy-showcase not-content">
+	<Tabs syncKey="dialect">
+		{dialects.map((d) => (
+			<TabItem label={d.label}>
+				<div class="pair">
+					<Code code={d.schema} lang="ts" title="src/schema.ts" mark={d.mark} />
+					<Code code={d.out} lang={d.outLang} title={d.outTitle} wrap />
+				</div>
+			</TabItem>
+		))}
+	</Tabs>
+</div>
+
+<style>
+	.sy-showcase {
+		margin-top: 1.25rem;
+	}
+	.pair {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 0.75rem;
+		align-items: start;
+	}
+	.pair :global(.expressive-code) {
+		margin: 0;
+	}
+	@media (max-width: 60rem) {
+		.pair {
+			grid-template-columns: minmax(0, 1fr);
+		}
+	}
+</style>

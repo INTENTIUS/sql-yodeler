@@ -486,8 +486,8 @@ export function roomMarkdown(r, rows) {
 
 /**
  * The home page, index.mdx: the landing (src/components/Landing.astro: the
- * hat, the wordmark, the picker and the highlights), the pipelines and the
- * waves, then docs/README.md's text made valid MDX, then the setup prompt.
+ * hat, the wordmark, the picker and the highlights), the schema in TypeScript
+ * (SchemaShowcase.astro), the pipelines and the waves, then docs/README.md's text made valid MDX, then the setup prompt.
  * The Markdown is kept in the front matter for llms-full.txt, as on a page
  * with tabs.
  */
@@ -497,9 +497,16 @@ function writeHome(head, md, source) {
 	const front = head.replace(/\n---\n\n$/, `\nmarkdown: ${JSON.stringify(md)}\n---\n\n`);
 	const body = `import Landing from '../../components/Landing.astro';
 import Pipelines from '../../components/Pipelines.astro';
+import SchemaShowcase from '../../components/SchemaShowcase.astro';
 import Waves from '../../components/Waves.astro';
 
 <Landing />
+
+## Your schema in TypeScript
+
+Each object in \`src/\` is an export whose body is the database's own DDL, and objects refer to each other with \`\${}\`. Change the declaration, and \`yodel new\` writes the migration: on Postgres, a constraint is added \`NOT VALID\` and validated after, with a pre-check of the rows already there. [Declaring the schema](${base}/schema/).
+
+<SchemaShowcase />
 
 ## The pipelines yodel ci writes
 
