@@ -1,5 +1,5 @@
 /**
- * The template-gitlab claim's runner as a Compose project, declared with
+ * The gitlab claim's runner as a Compose project, declared with
  * chant's docker lexicon: a gitlab-runner with the docker executor,
  * registered to the claim's project alone, on the GitLab's network (so a
  * job clones from and calls the API at GitLab's external_url, as the

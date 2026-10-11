@@ -1,5 +1,5 @@
 ---
-claims: [new, resume, out-of-order, lock-retry, approval, lint]
+claims: [migrations, resume, approval]
 type: concepts
 ---
 

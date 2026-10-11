@@ -1,5 +1,5 @@
-import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
-import { Project } from "../lib/project.js";
+import { hold, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { Project } from "../../lib/project.js";
 
 /** A table of `name` with an id and one more column, as a declaration. */
 const declared = (name: string, column: string) =>

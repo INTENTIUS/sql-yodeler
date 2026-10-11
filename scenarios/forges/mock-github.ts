@@ -1,5 +1,5 @@
 /**
- * A small GitHub for the template-github claim: the REST calls the claim and
+ * A small GitHub for the github claim: the REST calls the claim and
  * `yodel plan --comment` make, and the repositories' git over smart HTTP
  * (git http-backend). It runs in a container (./github.compose.ts) with
  * node's type stripping, so it imports node's modules only. State is in

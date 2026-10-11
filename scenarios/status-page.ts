@@ -75,7 +75,7 @@ export function renderPage(record: ClaimsRecord | undefined, claims: readonly Cl
       ? `The record was last written at ${when(record.recorded)}, at commit ${commitOf(record)}. A row run in an earlier run keeps that run's commit and date.`
       : "There is no record yet.",
     "",
-    "A row marked \"not recorded\" has not been run into the record. CI does not run the template claim, which needs a Forgejo with a runner.",
+    "A row marked \"not recorded\" has not been run into the record. CI does not run the forge claims (forgejo, github, gitlab), which need a local forge.",
     "",
     "Each docs page names the claims that prove it, and `npm run check` fails when a page that is not a draft names one that does not pass plain and get caught broken here. The last column lists those pages.",
     "",

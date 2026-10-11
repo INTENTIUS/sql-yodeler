@@ -1,6 +1,6 @@
 /**
  * yodel test (#54): loading test files, judging expectations, and the
- * report as JSON and JUnit. The runs against a server are in the lint claim.
+ * report as JSON and JUnit. The runs against a server are in the migrations claim.
  */
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

@@ -1,5 +1,5 @@
 ---
-claims: [lint, new]
+claims: [migrations]
 type: reference
 ---
 

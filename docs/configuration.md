@@ -1,5 +1,5 @@
 ---
-claims: [topology, declarative, approval]
+claims: [clickhouse, declarative, approval]
 type: reference
 ---
 

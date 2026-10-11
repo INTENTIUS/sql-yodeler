@@ -1,5 +1,5 @@
 ---
-claims: [adopt, resume, out-of-order]
+claims: [declarative, resume, migrations]
 type: howto
 ---
 

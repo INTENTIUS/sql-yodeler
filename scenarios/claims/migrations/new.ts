@@ -1,7 +1,7 @@
-import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
-import { parse, Project } from "../lib/project.js";
-import { declareRoutines, insertedStatus, routinesOnServer } from "../lib/routines.js";
-import { addColumn, mainTable } from "../lib/schema.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
+import { parse, Project } from "../../lib/project.js";
+import { declareRoutines, insertedStatus, routinesOnServer } from "../../lib/routines.js";
+import { addColumn, mainTable } from "../../lib/schema.js";
 
 /**
  * `yodel new` writes the next migration from the declared schema with no

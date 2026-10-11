@@ -1,7 +1,7 @@
 /**
  * The starter template (#17), end to end on a forge: the body the template
- * claims share (template on Forgejo, template-github on act and the mock
- * GitHub, template-gitlab on a local GitLab). Each forge is in its own file
+ * claims share (forgejo on Forgejo, github on act and the mock
+ * GitHub, gitlab on a local GitLab). Each forge is in its own file
  * here; see ./forge.ts for what a forge provides.
  *
  * The project is made with `chant init --from <this checkout>#templates/<dialect>`

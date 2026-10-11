@@ -3,12 +3,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { clickhouseQuery, type ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
-import { startKeeperCluster } from "../../test/e2e/keeper-cluster.js";
-import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
-import { postgresSession } from "../lib/db.js";
-import { run, type Ran } from "../lib/exec.js";
-import { parse, Project } from "../lib/project.js";
-import { addColumn, mainTable } from "../lib/schema.js";
+import { startKeeperCluster } from "../../../test/e2e/keeper-cluster.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
+import { postgresSession } from "../../lib/db.js";
+import { run, type Ran } from "../../lib/exec.js";
+import { parse, Project } from "../../lib/project.js";
+import { addColumn, mainTable } from "../../lib/schema.js";
 
 /**
  * Postgres: a statement blocked behind another session's lock gives up at

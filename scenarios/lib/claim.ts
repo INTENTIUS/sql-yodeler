@@ -14,8 +14,13 @@
  * and the run is caught only when each part caught its own break; under
  * BREAK=<part> that part alone is broken and the others must hold. A part
  * may run on some dialects only (its entry names them).
+ *
+ * A claim rolled up from several ({@link rollup}) runs each member's body in
+ * turn, one claim run in place of several.
  */
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Db } from "./db.js";
 
 export type Dialect = "ch" | "pg";
@@ -133,4 +138,85 @@ export async function runParts<S>(ctx: Ctx, state: S, parts: ReadonlyArray<PartE
   }
   if (held.length) throw new NotCaught(`${held.join(", ")} held with ${held.length === 1 ? "its property" : "their properties"} broken`);
   if (caught.length) throw new Violation(caught.join("; "));
+}
+
+/**
+ * One claim made of several members, run one after another in one claim
+ * run: fewer runs, each paying its setup once. Each member's body runs as it
+ * would alone, on the claim's database reset before it and a work directory
+ * of its own, with `ctx.claim` its own name.
+ *
+ * The parts are the members' parts, each named `<prefix>-<part>`, the
+ * prefix the member's name unless given (a member whose prefix is the
+ * claim's name keeps its part names), and a member with no parts is one
+ * part, its prefix. Under BREAK=1 every member breaks its own property and
+ * must catch it; under BREAK=<part> the member that owns the part breaks it
+ * alone and the others run plain and must hold. A member runs on its own
+ * dialects only.
+ */
+export function rollup(name: string, entries: ReadonlyArray<Claim | readonly [prefix: string, member: Claim]>, extra: Partial<Pick<Claim, "shares" | "stallMinutes">> = {}): Claim {
+  const members = entries.map((e) => ("name" in e ? { prefix: e.name, m: e } : { prefix: e[0], m: e[1] }));
+  const allDialects = [...new Set(members.flatMap(({ m }) => Object.keys(m.dialects) as Dialect[]))];
+  const owners = new Map<string, { member: Claim; part?: string }>();
+  const dialectsOf: Record<string, readonly Dialect[]> = {};
+  for (const { prefix, m } of members) {
+    const mine = Object.keys(m.dialects) as Dialect[];
+    for (const part of m.parts ?? [undefined]) {
+      const q = part === undefined ? prefix : prefix === name ? part : `${prefix}-${part}`;
+      if (owners.has(q)) throw new Error(`rollup ${name}: two members have a part named ${q}`);
+      owners.set(q, part === undefined ? { member: m } : { member: m, part });
+      const ds = (part === undefined ? undefined : m.partDialects?.[part]) ?? mine;
+      if (ds.length < allDialects.length) dialectsOf[q] = ds;
+    }
+  }
+  const body =
+    (dialect: Dialect): Body =>
+    async (ctx) => {
+      const target = ctx.breaking === undefined ? undefined : owners.get(ctx.breaking);
+      const caught: string[] = [];
+      const held: string[] = [];
+      let first = true;
+      for (const { m } of members) {
+        const run = m.dialects[dialect];
+        if (run === undefined) continue;
+        if (typeof run !== "function") throw new Pending(run.needs);
+        if (!first) await ctx.db.reset();
+        first = false;
+        const work = join(ctx.work, m.name);
+        mkdirSync(work, { recursive: true });
+        const broken = ctx.broken && (target === undefined || target.member === m);
+        const breaking = broken ? target?.part : undefined;
+        ctx.log(`member ${m.name}${broken ? " (broken)" : ""}`);
+        const mctx: Ctx = { ...ctx, claim: m.name, broken, work };
+        if (breaking === undefined) delete mctx.breaking;
+        else mctx.breaking = breaking;
+        try {
+          await run(mctx);
+        } catch (e) {
+          if (e instanceof NotCaught && broken) {
+            held.push(`${m.name}: ${e.message}`);
+            continue;
+          }
+          if (!(e instanceof Violation)) throw e;
+          if (!broken) throw new (ctx.broken ? Error : Violation)(`${m.name}: ${e.message}`);
+          caught.push(`${m.name}: ${e.message}`);
+          continue;
+        }
+        if (broken) held.push(m.name);
+      }
+      if (held.length) throw new NotCaught(`${held.join("; ")} held with the property broken`);
+      if (caught.length) throw new Violation(caught.join("; "));
+    };
+  const stalls = members.flatMap(({ m }) => (m.stallMinutes === undefined ? [] : [m.stallMinutes]));
+  const stallMinutes = extra.stallMinutes ?? (stalls.length ? Math.max(...stalls) : undefined);
+  const shares = [...new Set([...members.flatMap(({ m }) => m.shares ?? []), ...(extra.shares ?? [])])];
+  return {
+    name,
+    says: members.map(({ m }) => m.says).join("; "),
+    dialects: Object.fromEntries(allDialects.map((d) => [d, body(d)])),
+    parts: [...owners.keys()],
+    ...(Object.keys(dialectsOf).length ? { partDialects: dialectsOf } : {}),
+    ...(shares.length ? { shares } : {}),
+    ...(stallMinutes !== undefined ? { stallMinutes } : {}),
+  };
 }

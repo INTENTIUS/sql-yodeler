@@ -5,255 +5,30 @@
   "dirty": false,
   "rows": [
     {
-      "claim": "adopt",
+      "claim": "migrations",
       "dialect": "ch",
-      "says": "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 23,
-        "break": 9
+        "plain": 192,
+        "break": 117
       },
-      "recorded": "2026-10-10T21:02:27.350Z",
-      "commit": "9329873",
+      "recorded": "2026-10-10T20:29:45.726Z",
+      "commit": "c6f58a4",
       "dirty": false
     },
     {
-      "claim": "adopt",
+      "claim": "migrations",
       "dialect": "pg",
-      "says": "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 22,
-        "break": 8
-      },
-      "recorded": "2026-10-10T21:02:27.350Z",
-      "commit": "9329873",
-      "dirty": false
-    },
-    {
-      "claim": "new",
-      "dialect": "ch",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 43,
-        "break": 14
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "new",
-      "dialect": "pg",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 33,
-        "break": 20
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "lint",
-      "dialect": "ch",
-      "says": "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 121,
-        "break": 81
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "lint",
-      "dialect": "pg",
-      "says": "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 100,
-        "break": 58
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "pr-comment",
-      "dialect": "ch",
-      "says": "the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 35,
-        "break": 56
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "pr-comment",
-      "dialect": "pg",
-      "says": "the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 40,
-        "break": 50
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "approval",
-      "dialect": "ch",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 257,
-        "break": 187
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "approval",
-      "dialect": "pg",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 208,
-        "break": 209
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "resume",
-      "dialect": "ch",
-      "says": "an interrupted apply resumes where it stopped: a backfill step written as yodel's form (table, key, batch size, SQL) from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 39,
-        "break": 40
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "resume",
-      "dialect": "pg",
-      "says": "an interrupted apply resumes where it stopped: a backfill step written as yodel's form (table, key, batch size, SQL) from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 40,
-        "break": 96
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "out-of-order",
-      "dialect": "ch",
-      "says": "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 28,
-        "break": 22
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "out-of-order",
-      "dialect": "pg",
-      "says": "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 91,
-        "break": 31
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "rebuild",
-      "dialect": "ch",
-      "says": "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own, sealed under a sealed environment",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 109,
-        "break": 95
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "drift",
-      "dialect": "ch",
-      "says": "yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 55,
-        "break": 37
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "drift",
-      "dialect": "pg",
-      "says": "yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 106,
-        "break": 37
+        "plain": 224,
+        "break": 109
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
@@ -262,13 +37,13 @@
     {
       "claim": "declarative",
       "dialect": "ch",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL; yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift; yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 272,
-        "break": 226
+        "plain": 350,
+        "break": 272
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
@@ -277,73 +52,88 @@
     {
       "claim": "declarative",
       "dialect": "pg",
-      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
+      "says": "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL; yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift; yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 216,
-        "break": 179
+        "plain": 344,
+        "break": 224
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
       "dirty": false
     },
     {
-      "claim": "topology",
+      "claim": "approval",
       "dialect": "ch",
-      "says": "ClickHouse: one migrations directory applies to a single node and to a Replicated database, and one to a sharded cluster with drift read there, each rendered for its topology",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied; the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 103,
-        "break": 59
+        "plain": 292,
+        "break": 243
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
       "dirty": false
     },
     {
-      "claim": "lock-retry",
+      "claim": "approval",
+      "dialect": "pg",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied; the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 248,
+        "break": 259
+      },
+      "recorded": "2026-10-10T20:29:45.726Z",
+      "commit": "c6f58a4",
+      "dirty": false
+    },
+    {
+      "claim": "resume",
       "dialect": "ch",
-      "says": "Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
+      "says": "an interrupted apply resumes where it stopped: a backfill step written as yodel's form (table, key, batch size, SQL) from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran; Postgres: a column rename runs as a PostgresMigrationOp step (expand, backfill, switch, contract) and keeps every value; a step that fails part way keeps its work and resumes from its receipts; Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 40,
-        "break": 68
+        "plain": 79,
+        "break": 108
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
       "dirty": false
     },
     {
-      "claim": "lock-retry",
+      "claim": "resume",
       "dialect": "pg",
-      "says": "Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
+      "says": "an interrupted apply resumes where it stopped: a backfill step written as yodel's form (table, key, batch size, SQL) from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran; Postgres: a column rename runs as a PostgresMigrationOp step (expand, backfill, switch, contract) and keeps every value; a step that fails part way keeps its work and resumes from its receipts; Postgres: a statement blocked behind another session's lock times out at lock_timeout and is retried until it succeeds; Postgres and ClickHouse with Keeper: two applies at once never send a statement twice, the second waits naming the holder, and --stand-down steps aside for a newer commit",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 42,
-        "break": 114
+        "plain": 156,
+        "break": 258
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
       "dirty": false
     },
     {
-      "claim": "column-change",
-      "dialect": "pg",
-      "says": "Postgres: a column rename runs as a PostgresMigrationOp step (expand, backfill, switch, contract) and keeps every value; a step that fails part way keeps its work and resumes from its receipts",
+      "claim": "clickhouse",
+      "dialect": "ch",
+      "says": "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own, sealed under a sealed environment; ClickHouse: one migrations directory applies to a single node and to a Replicated database, and one to a sharded cluster with drift read there, each rendered for its topology",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 74,
-        "break": 48
+        "plain": 212,
+        "break": 154
       },
       "recorded": "2026-10-10T20:29:45.726Z",
       "commit": "c6f58a4",
@@ -380,9 +170,9 @@
       "dirty": false
     },
     {
-      "claim": "template",
+      "claim": "forgejo",
       "dialect": "ch",
-      "says": "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
+      "says": "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
       "needs": null,
       "plain": "pass",
       "break": "caught",
@@ -395,9 +185,9 @@
       "dirty": false
     },
     {
-      "claim": "template",
+      "claim": "forgejo",
       "dialect": "pg",
-      "says": "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
+      "says": "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
       "needs": null,
       "plain": "pass",
       "break": "caught",
@@ -410,30 +200,15 @@
       "dirty": false
     },
     {
-      "claim": "template-github",
+      "claim": "github",
       "dialect": "ch",
-      "says": "a project from the starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
+      "says": "a project from the ClickHouse starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
         "plain": 345,
         "break": 396
-      },
-      "recorded": "2026-10-10T21:55:51.425Z",
-      "commit": "868ff97",
-      "dirty": false
-    },
-    {
-      "claim": "template-github",
-      "dialect": "pg",
-      "says": "a project from the starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 364,
-        "break": 393
       },
       "recorded": "2026-10-10T21:55:51.425Z",
       "commit": "868ff97",

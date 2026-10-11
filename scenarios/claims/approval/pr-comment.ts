@@ -1,8 +1,8 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { hold, type Claim, type Ctx } from "../lib/claim.js";
-import { Project } from "../lib/project.js";
-import { addColumn, addTable, mainTable } from "../lib/schema.js";
+import { hold, type Claim, type Ctx } from "../../lib/claim.js";
+import { Project } from "../../lib/project.js";
+import { addColumn, addTable, mainTable } from "../../lib/schema.js";
 
 /** A GitHub-shaped fake holding the comments of acme/db#34. */
 async function fakeGitHub(): Promise<{ api: string; comments: Array<{ id: number; body: string }>; close: () => void }> {

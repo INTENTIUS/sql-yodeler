@@ -1,5 +1,5 @@
 ---
-claims: [new, declarative]
+claims: [migrations, declarative]
 type: concepts
 ---
 

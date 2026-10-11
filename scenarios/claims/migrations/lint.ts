@@ -1,8 +1,8 @@
 import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { hold, partDialects, partNames, runParts, type Claim, type Ctx } from "../lib/claim.js";
-import { parse, Project } from "../lib/project.js";
-import { addColumn, addTable, mainTable } from "../lib/schema.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { parse, Project } from "../../lib/project.js";
+import { addColumn, addTable, mainTable } from "../../lib/schema.js";
 
 interface Lint {
   p: Project;

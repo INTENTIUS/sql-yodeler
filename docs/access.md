@@ -1,5 +1,5 @@
 ---
-claims: [declarative, adopt]
+claims: [declarative]
 type: concepts
 ---
 

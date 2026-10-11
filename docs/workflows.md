@@ -1,5 +1,5 @@
 ---
-claims: [declarative, new, approval, waves, adopt]
+claims: [declarative, migrations, approval, waves]
 type: concepts
 ---
 

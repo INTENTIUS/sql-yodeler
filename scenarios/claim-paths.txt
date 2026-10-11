@@ -48,63 +48,60 @@ scenarios/lib/                         ALL
 scenarios/fixtures/                    ALL
 scenarios/claims/index.ts              ALL
 
-# Each claim's own file.
-scenarios/claims/adopt.ts              adopt
-scenarios/claims/new.ts                new
-scenarios/claims/lint.ts               lint
-scenarios/claims/pr-comment.ts         pr-comment
-scenarios/claims/approval.ts           approval
-scenarios/claims/resume.ts             resume
-scenarios/claims/out-of-order.ts       out-of-order
-scenarios/claims/rebuild.ts            rebuild
-scenarios/claims/drift.ts              drift
+# Each claim's own file, and the members a rolled-up claim runs.
+scenarios/claims/migrations.ts         migrations
+scenarios/claims/migrations/           migrations
 scenarios/claims/declarative.ts        declarative
-scenarios/claims/topology.ts           topology
-scenarios/claims/template.ts           template
-scenarios/claims/template-github.ts    template-github
-scenarios/claims/template-gitlab.ts    template-gitlab
-scenarios/claims/lock-retry.ts         lock-retry
-scenarios/claims/column-change.ts      column-change
+scenarios/claims/declarative/          declarative
+scenarios/claims/approval.ts           approval
+scenarios/claims/approval/             approval
+scenarios/claims/resume.ts             resume
+scenarios/claims/resume/               resume
+scenarios/claims/clickhouse.ts         clickhouse
+scenarios/claims/clickhouse/           clickhouse
 scenarios/claims/waves.ts              waves
+scenarios/claims/forgejo.ts            forgejo
+scenarios/claims/github.ts             github
+scenarios/claims/gitlab.ts             gitlab
 
-# The forges the template claims run on, and the body they share.
-scenarios/forges/forgejo.ts            template
-scenarios/forges/github.ts             template-github
-scenarios/forges/github.compose.ts     template-github
-scenarios/forges/mock-github.ts        template-github
-scenarios/forges/gitlab.ts             template-gitlab
-scenarios/forges/gitlab.compose.ts     template-gitlab
-scenarios/forges/                      template template-github template-gitlab
+# The forges the forge claims run on, and the template body they share.
+scenarios/forges/forgejo.ts            forgejo
+scenarios/forges/github.ts             github
+scenarios/forges/github.compose.ts     github
+scenarios/forges/mock-github.ts        github
+scenarios/forges/gitlab.ts             gitlab
+scenarios/forges/gitlab.compose.ts     gitlab
+scenarios/forges/                      forgejo github gitlab
 
-# The starter templates: only the template claims make a project from them.
+# The starter templates: only the forge claims make a project from them.
 # yodel ci renders their pipelines, and the waves claim renders its pipeline with it.
-src/ci/                                waves template template-github template-gitlab
-src/commands/ci.ts                     template template-github template-gitlab
-templates/                             template template-github template-gitlab
+src/ci/                                waves forgejo github gitlab
+src/commands/ci.ts                     forgejo github gitlab
+templates/                             forgejo github gitlab
 
 # yodel init, and what --from adopts with.
-src/commands/init.ts                   adopt template template-github template-gitlab
-src/init/                              adopt template template-github template-gitlab
+src/commands/init.ts                   declarative forgejo github gitlab
+src/init/                              declarative forgejo github gitlab
 
 # yodel lint. apply and rebase read a migration's yodel:allow lines through
 # lint/index.ts and lint/silences.ts, so those two reach every claim.
 src/lint/index.ts                      ALL
 src/lint/silences.ts                   ALL
-src/commands/lint.ts                   lint template template-github template-gitlab
-src/lint/                              lint template template-github template-gitlab
-src/replay/                            lint template template-github template-gitlab
+src/commands/lint.ts                   migrations forgejo github gitlab
+src/lint/                              migrations forgejo github gitlab
+src/replay/                            migrations forgejo github gitlab
 
 # yodel plan and the pull request comment it posts.
-src/commands/plan.ts                   adopt declarative pr-comment template template-github template-gitlab waves
+src/commands/plan.ts                   declarative approval forgejo github gitlab waves
 src/pr/tenants.ts                      waves
-src/pr/                                pr-comment drift template template-github template-gitlab
+src/pr/                                approval declarative forgejo github gitlab
 
 # yodel report and the audit log (#57).
 src/commands/report.ts                 approval waves
 src/report/                            approval waves
 
 # The apply pipeline's waves.
-src/waves/                             waves template template-github template-gitlab
+src/waves/                             waves forgejo github gitlab
 # Tenant sets (#56): only a target named <env>/<tenant> runs them, and only the waves claim names one.
 src/tenants/                           waves
 # Approval modes (#48): every --execute and --wave-apply reads the mode before it checks the approval.
@@ -113,35 +110,35 @@ src/approval-mode/                     ALL
 src/apply-steps/                       waves
 
 # yodel drift, which the templates' watch runs (--issue).
-src/commands/drift.ts                  drift template template-github template-gitlab
-src/chant/drift.ts                     drift template template-github template-gitlab
+src/commands/drift.ts                  declarative forgejo github gitlab
+src/chant/drift.ts                     declarative forgejo github gitlab
 
 # Webhook events (#61): sent by apply, plan and drift only when yodel.config.ts
-# names a webhook, which only the template claims' projects do.
-src/notify/                            template template-github template-gitlab
+# names a webhook, which only the forge claims' projects do.
+src/notify/                            forgejo github gitlab
 # yodel docs (#62): offline, and no claim runs it; test/schema-docs.test.ts
 # and the docs-site build prove it.
 src/commands/docs.ts                   -
 src/schema-docs/                       -
 
-# yodel checkpoint (#63): the lint claim writes, replays and applies one.
-src/commands/checkpoint.ts             lint
+# yodel checkpoint (#63): the migrations claim writes, replays and applies one.
+src/commands/checkpoint.ts             migrations
 
-# yodel revert (#55): the lint claim reverts a migration through the gate.
-src/commands/revert.ts                 lint
+# yodel revert (#55): the migrations claim reverts a migration through the gate.
+src/commands/revert.ts                 migrations
 
-# yodel cleanup (#16): the rebuild claim drops the old table it kept; every plan names what is kept.
-src/commands/cleanup.ts                rebuild
-src/cleanup/                           rebuild pr-comment drift template template-github template-gitlab
+# yodel cleanup (#16): the clickhouse claim drops the old table it kept; every plan names what is kept.
+src/commands/cleanup.ts                clickhouse
+src/cleanup/                           clickhouse approval declarative forgejo github gitlab
 
-# yodel test (#54): the lint claim runs tests on the replayed database.
-src/commands/test.ts                   lint
-src/testing/                           lint
+# yodel test (#54): the migrations claim runs tests on the replayed database.
+src/commands/test.ts                   migrations
+src/testing/                           migrations
 
 # yodel rebase and yodel repair.
-src/commands/rebase.ts                 out-of-order
-src/commands/repair.ts                 out-of-order
-src/rebase/                            out-of-order
+src/commands/rebase.ts                 migrations
+src/commands/repair.ts                 migrations
+src/rebase/                            migrations
 
 # yodel mcp and the --json schemas: no claim runs the server or reads a
 # schema (the unit tests prove them, #58).
@@ -151,10 +148,10 @@ src/schemas.ts                         -
 schemas/                               -
 
 # Step kinds. The step index and kinds are on every migration's path.
-src/steps/rebuild.ts                   rebuild topology
+src/steps/rebuild.ts                   clickhouse
 src/steps/backfill.ts                  resume
-src/steps/postgres-migration.ts        column-change
-src/steps/run.ts                       rebuild resume column-change topology
+src/steps/postgres-migration.ts        resume
+src/steps/run.ts                       clickhouse resume
 src/steps/                             ALL
 
 # DDL sources (#67): every build syncs them, but only the declarative
@@ -163,9 +160,9 @@ src/sources/ddl.ts                     declarative
 src/sources/                           ALL
 
 # Credentials (#50): yodel config check and its write probe, which the
-# approval claim runs and every template pull request job runs first.
-src/commands/config.ts                 approval template template-github template-gitlab
-src/probe.ts                           approval template template-github template-gitlab
+# approval claim runs and every forge pull request job runs first.
+src/commands/config.ts                 approval forgejo github gitlab
+src/probe.ts                           approval forgejo github gitlab
 
 # The core every claim runs: yodel new, apply and status, the migrations
 # directory, the history, the versioned engine and its gate, the topology

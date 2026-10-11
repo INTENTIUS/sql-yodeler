@@ -1,5 +1,5 @@
 ---
-claims: [topology]
+claims: [clickhouse]
 type: reference
 ---
 

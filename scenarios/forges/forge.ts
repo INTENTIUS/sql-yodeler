@@ -1,5 +1,5 @@
 /**
- * What the template claims need from a forge: a fresh repository with the
+ * What the forge claims need from a forge: a fresh repository with the
  * pipelines' secrets, the runs a push and a pull request start, the pull
  * request's comments, a merge, a run of the drift watch and the issues it
  * keeps. Forgejo and GitLab run the pipelines

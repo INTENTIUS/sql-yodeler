@@ -1,6 +1,6 @@
-import { hold, type Claim, type Ctx } from "../lib/claim.js";
-import { Project } from "../lib/project.js";
-import { addColumn, addTable } from "../lib/schema.js";
+import { hold, type Claim, type Ctx } from "../../lib/claim.js";
+import { Project } from "../../lib/project.js";
+import { addColumn, addTable } from "../../lib/schema.js";
 
 /**
  * Two branches each add a migration after the same one. main's (B) merges
