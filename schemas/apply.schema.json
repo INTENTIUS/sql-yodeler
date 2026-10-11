@@ -125,6 +125,7 @@
           "description": "gated: the command a person runs to approve. An agent prints it and never runs it.",
           "type": "string"
         },
+        "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
         "gatePlanDigest": {
           "type": "string"
         },
@@ -289,6 +290,7 @@
           "description": "gated: the command a person runs to approve. An agent prints it and never runs it.",
           "type": "string"
         },
+        "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
         "planDigest": {
           "type": "string"
         },

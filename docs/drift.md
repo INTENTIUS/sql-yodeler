@@ -61,7 +61,7 @@ import { WatchOp } from "@intentius/chant/op";
 export const { op } = WatchOp({ name: "watch-dev", env: "dev", schedule: "17 * * * *" });
 ```
 
-`npx chant run watch-dev` runs it once. It takes a snapshot, diffs declared against live, and reports:
+The watch job in the template's pipelines runs it on its schedule (`chant run watch-dev`, underneath). A run takes a snapshot, diffs declared against live, and reports:
 
 <!-- quote: clickhouse#watch-run -->
 ```console

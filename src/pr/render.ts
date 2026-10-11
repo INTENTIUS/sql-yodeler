@@ -104,11 +104,11 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   }
   if (plan.wave) {
     lines.push("", describeWave(plan.wave));
-    if (plan.wave.waits) lines.push(`Approve it for the pipeline with:`, `  ${run(plan.wave.approve)}`);
+    if (plan.wave.waits) lines.push(`Approve it for the pipeline, at a terminal, with:`, `  ${run(plan.wave.approve)}`);
   }
   if (plan.digest) {
     lines.push("", `Plan digest: ${plan.digest}`);
-    if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it with:`, `  ${run(plan.approval.command)}`, `or, at a terminal, with ${run(`yodel approve ${plan.environment}${plan.approval.mode === "sealed" ? " --sign" : ""}`)}, which shows the plan and asks you first.`);
+    if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it at a terminal with:`, `  ${run(plan.approval.command)}`, `which shows the plan and asks you first.`);
   }
   const a = approvalLines(plan.approval, plan.digest, false);
   if (a.length > 0) lines.push("", ...a);
@@ -224,11 +224,11 @@ export function renderPlanMarkdown(plan: VersionedPlan, options: { sql?: boolean
       for (const m of plan.pending) out.push(`| \`${m.id}\` | ${promotions.map((p) => ranOn(p, m.id)).join(" | ")} |`);
     }
     out.push("", describeWave(plan.wave, (c) => `\`${c}\``));
-    if (plan.wave.waits) out.push("", "Approve it before merging:", "", fence(plan.wave.approve, "sh"));
+    if (plan.wave.waits) out.push("", "Approve it before merging, at a terminal:", "", fence(`npx ${plan.wave.approve}`, "sh"));
   }
   if (plan.digest) {
     out.push("", "#### Approval", "", plan.wave ? `Plan digest \`yodel apply ${plan.environment}\` binds, outside the pipeline: \`${plan.digest}\`` : `Plan digest the apply gate binds: \`${plan.digest}\``);
-    if (plan.approval?.kind === "op" && plan.approval.command) out.push("", "Approve it with:", "", fence(plan.approval.command, "sh"));
+    if (plan.approval?.kind === "op" && plan.approval.command) out.push("", "Approve it at a terminal (it shows the plan and asks you first):", "", fence(`npx ${plan.approval.command}`, "sh"));
   }
   const a = approvalLines(plan.approval, plan.digest, true);
   if (a.length > 0) out.push("", ...a);
@@ -277,6 +277,7 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
           op: a.op,
           gate: a.gate,
           ...(a.command ? { approve: a.command } : {}),
+          ...(a.chantCommand ? { chantApprove: a.chantCommand } : {}),
           ...(a.mode ? { approvalMode: a.mode } : {}),
           ...(a.latest ? { approval: { ...a.latest, moved: a.latest.moved ? { confirmed: a.latest.moved.confirmed, changes: a.latest.moved.changes } : undefined } } : {}),
         }

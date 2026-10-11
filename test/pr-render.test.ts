@@ -54,7 +54,7 @@ const clickhousePlan = (over: Partial<VersionedPlan> = {}): VersionedPlan => ({
   problems: ["20261009T0900-zero was applied with checksum sha256:a, but its files now hash to sha256:b"],
   digest: DIGEST,
   subject,
-  approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: `chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}` },
+  approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: `yodel approve prod --plan ${DIGEST}`, chantCommand: `chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}` },
   notes: [],
   ...over,
 });
@@ -114,13 +114,14 @@ describe("the plan comment's markdown", () => {
     expect(md).toContain("#### Integrity problems (1)");
     expect(md).toContain("- 20261009T0900-zero was applied with checksum sha256:a");
     expect(md).toContain("would refuse (exit 4)");
-    expect(md).not.toContain("chant approve");
+    expect(md).not.toContain("yodel approve");
   });
 
-  it("prints the digest the gate binds and the exact chant approve command, and carries the subject hidden", () => {
+  it("prints the digest the gate binds and the yodel approve command (#202), never chant's, and carries the subject hidden", () => {
     const md = renderPlanMarkdown(clickhousePlan());
     expect(md).toContain(`Plan digest the apply gate binds: \`${DIGEST}\``);
-    expect(md).toContain(`\`\`\`sh\nchant approve migrate-prod approve-migrate-prod --plan ${DIGEST}\n\`\`\``);
+    expect(md).toContain(`Approve it at a terminal (it shows the plan and asks you first):\n\n\`\`\`sh\nnpx yodel approve prod --plan ${DIGEST}\n\`\`\``);
+    expect(md).not.toContain("chant approve");
     expect(md).toContain("Not approved yet.");
     const carried = subjectIn(md);
     expect(carried && decodeSubject(carried)).toEqual(subject);
@@ -133,7 +134,7 @@ describe("the plan comment's markdown", () => {
           kind: "op",
           op: "migrate-prod",
           gate: "approve-migrate-prod",
-          command: `chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}`,
+          command: `yodel approve prod --plan ${DIGEST}`,
           latest: { digest: OLD, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, sameDigest: false, moved: { approved: OLD, now: DIGEST, confirmed: true, changes: [{ part: "pending", message: "new pending migration: 20261009T1000-one" }] } },
         },
       }),
@@ -219,13 +220,15 @@ describe("the plan as text and JSON", () => {
     expect(text).toContain("yodel apply runs it as this step");
     expect(text).toContain("Integrity problems (1):");
     expect(text).toContain(`Plan digest: ${DIGEST}`);
-    expect(text).toContain(`  chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}`);
+    expect(text).toContain(`Approve it at a terminal with:\n  yodel approve prod --plan ${DIGEST}\nwhich shows the plan and asks you first.`);
+    expect(text).not.toContain("chant approve");
   });
 
   it("JSON carries the digest, the approve command and each step's rule, class or Op", () => {
     const doc = planJsonVersioned(clickhousePlan()) as { planDigest: string; approve: string; pending: Array<{ steps: Array<Record<string, unknown>> }> };
     expect(doc.planDigest).toBe(DIGEST);
-    expect(doc.approve).toBe(`chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}`);
+    expect(doc.approve).toBe(`yodel approve prod --plan ${DIGEST}`);
+    expect((doc as { chantApprove?: string }).chantApprove).toBe(`chant approve migrate-prod approve-migrate-prod --plan ${DIGEST}`);
     expect(doc.pending[0]?.steps.map((s) => [s.kind, s.rule ?? s.op])).toEqual([["statement", "SQLCH201"], ["statement", "SQLCH210"], ["op", "ClickHouseRebuildOp"], ["manual", undefined]]);
   });
 });

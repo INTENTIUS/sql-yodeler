@@ -35,6 +35,7 @@
     "due": { "type": "integer", "minimum": 0 },
     "planDigest": { "description": "When something is due: the digest an approval of the drop binds.", "type": "string" },
     "approve": { "description": "When something is due and not approved: the command that approves it.", "type": "string" },
+    "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
     "dropped": { "$ref": "common.schema.json#/$defs/stringList" }
   }
 }

@@ -79,7 +79,8 @@ describe("the schemas", () => {
     const withJson: string[] = [];
     for (const c of (await import("../src/commands/index.js")).commands) {
       const help = await yodel([c.name, "--help"]);
-      if (/^\s+--json\b/m.test(help.out)) withJson.push(c.name);
+      // yodel emulator --json prints chant's own report, which chant describes.
+      if (/^\s+--json\b/m.test(help.out) && c.name !== "emulator") withJson.push(c.name);
     }
     expect(withJson.sort()).toEqual(Object.keys(COMMAND_SCHEMAS).filter((k) => !k.includes(" ")).sort());
   });
@@ -200,13 +201,14 @@ describe("each command's --json output validates against its schema", () => {
           kind: "op",
           op: "migrate-prod",
           gate: "approve",
-          command: "chant approve migrate-prod approve --plan sha256:d",
+          command: "yodel approve prod --plan sha256:d",
+          chantCommand: "chant approve migrate-prod approve --plan sha256:d",
           latest: { digest: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", holds: false, sameDigest: false, askedAgain: { at: "2026-10-10T09:30:00Z", digest: "sha256:old" }, moved: { approved: "sha256:old", now: "sha256:d", confirmed: false, changes: [{ part: "live", message: "the live schema moved" }] } },
         }),
       ),
     );
     expectValid("plan", planJsonVersioned(versionedPlan({ kind: "no-op", message: "no migrations Op for prod\n\ndeclare one" })));
-    const wave = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }], waits: true, planDigest: "sha256:w", digest: "sha256:s", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan sha256:s", promotions: [{ env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c", ran: "applied with another checksum" as const, recorded: "c0" }] }], blocked: true };
+    const wave = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }], waits: true, planDigest: "sha256:w", digest: "sha256:s", approve: "yodel approve prod --plan sha256:s", chantApprove: "chant approve yodel-apply yodel-apply-wave-2 --plan sha256:s", promotions: [{ env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c", ran: "applied with another checksum" as const, recorded: "c0" }] }], blocked: true };
     expectValid("plan", planJsonVersioned({ ...versionedPlan({ kind: "no-op", message: "no migrations Op for prod" }), wave }));
     expectValid("plan", planJsonVersioned({ environment: "dev", dialect: "postgres", appliedCount: 0, pending: [], problems: [], refusal: { exitCode: 4, message: "a fork" }, notes: [] }));
   });
@@ -223,7 +225,7 @@ describe("each command's --json output validates against its schema", () => {
       { status: "denied", policy: [{ id: "online-only", outcome: "denied", reasons: ["a rebuild is not online"] }] },
       { status: "stood-down", stoodDown: "standing down: main on origin is at b, newer than this run's a" },
       { status: "stood-down", stoodDown: "standing down", op: "migrate-dev" },
-      { status: "gated", op: "migrate-dev", gate: "approve", moved: { approved: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: true, changes: [], askedAgain: { at: "2026-10-10T09:30:00Z", digest: "sha256:old" } }, approve: "chant approve migrate-dev approve --plan sha256:d", gatePlanDigest: "sha256:d" },
+      { status: "gated", op: "migrate-dev", gate: "approve", moved: { approved: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: true, changes: [], askedAgain: { at: "2026-10-10T09:30:00Z", digest: "sha256:old" } }, approve: "yodel approve dev --plan sha256:d", chantApprove: "chant approve migrate-dev approve --plan sha256:d", gatePlanDigest: "sha256:d" },
       { status: "failed", op: "migrate-dev", exitCode: 5, chantExitCode: 1 },
       { status: "applied", op: "migrate-dev", appliedNow: ["20261010T0910-rebuild"] },
     ];
@@ -239,7 +241,7 @@ describe("each command's --json output validates against its schema", () => {
     const declared: DeclarativeOutcome[] = [
       { status: "refused", plan },
       { status: "unchanged", plan },
-      { status: "gated", gate: "approve", approve: "chant approve apply-dev approve --plan sha256:d", planDigest: "sha256:d", plan },
+      { status: "gated", gate: "approve", approve: "yodel approve dev --plan sha256:d", chantApprove: "chant approve apply-dev approve --plan sha256:d", planDigest: "sha256:d", plan },
       { status: "failed", exitCode: 1, plan },
       { status: "incomplete", plan, remaining: plan },
       { status: "applied", plan },

@@ -116,9 +116,18 @@ export async function portFor(port: GateLedgerPort, mode: ApprovalMode, cwd: str
 /** What a printed approve command needs for `mode`: `--sign` under sealed. */
 export const signFlag = (mode: ApprovalMode): string => (mode === "sealed" ? " --sign" : "");
 
+/**
+ * The command yodel prints for a person to approve `digest` for `env`
+ * (#202): `yodel approve <env> --plan <digest>`, with `--sign` under
+ * sealed. The JSON outputs carry chant's own command beside it, as
+ * `chantApprove`, for scripts.
+ */
+export const approveCommand = (env: string, digest: string | undefined, mode: ApprovalMode = "ledger"): string =>
+  `yodel approve ${env}${digest !== undefined ? ` --plan ${digest}` : ""}${signFlag(mode)}`;
+
 /** One sentence on which approvals count under `mode`, for the plan and the pull request comment. */
 export function describeApprovalMode(mode: ApprovalMode, code: (s: string) => string = (s) => s): string {
-  if (mode === "sealed") return `Approvals count only sealed (approval ${code("sealed")}): ${code("chant approve --sign")} or ${code("yodel approve --sign")}, with a key ${code(SIGNERS_FILE)} at the base commit lists for the approver.`;
-  if (mode === "pr-review") return `Approval ${code("pr-review")}: an approving review of this pull request's head, by a writer other than its author, approves the plan that head records; ${code("chant approve")} of the digest counts too.`;
-  return `Approval ${code("ledger")}: any ${code("chant approve")} of the digest counts.`;
+  if (mode === "sealed") return `Approvals count only sealed (approval ${code("sealed")}): ${code("yodel approve --sign")}, with a key ${code(SIGNERS_FILE)} at the base commit lists for the approver.`;
+  if (mode === "pr-review") return `Approval ${code("pr-review")}: an approving review of this pull request's head, by a writer other than its author, approves the plan that head records; ${code("yodel approve")} of the digest counts too.`;
+  return `Approval ${code("ledger")}: any approval of the digest (${code("yodel approve")}) counts.`;
 }

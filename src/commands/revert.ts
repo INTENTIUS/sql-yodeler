@@ -3,7 +3,8 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
-import { GATED } from "../chant/apply.js";
+import { GATED, gatedCommands } from "../chant/apply.js";
+import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
 import { LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
@@ -45,7 +46,7 @@ The revert runs through the environment's migrations Op, as yodel apply
 does: its Plan step prints the revert's digest (the statements, the history
 and the live schema), its gate binds the approval to that digest, and its
 Apply step plans the revert again under the lock, refuses if the digest
-moved, and runs it. A run that stops at the gate prints the chant approve
+moved, and runs it. A run that stops at the gate prints the yodel approve
 command; approve, then run yodel revert again. The history gets a revert row
 for each statement and a migration row reverted: <id> is then pending
 again, and yodel status shows it reverted. Delete it, or rewrite it with
@@ -269,11 +270,12 @@ async function revertIn(project: Project, env: Environment, a: RevertArgs, io: I
       onOutput: (t) => { io.err(t); },
     });
     if (ran.status === "gated") {
+      const commands = gatedCommands(ran, env.name, (await migrationsApprovalAtBase(project, env.name)).mode);
       if (!a.json) {
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this revert${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
-        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel revert ${env.name} ${plan.migration.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir, env.profile)} again.\n`);
+        if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel revert ${env.name} ${plan.migration.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir, env.profile)} again.\n`);
       }
-      return emit({ status: "gated", op: op.name, gate: op.gate, ...(ran.approve ? { approve: ran.approve } : {}), ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
     }
     if (ran.status === "failed") {
       const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;

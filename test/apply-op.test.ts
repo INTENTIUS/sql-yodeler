@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApplyOp } from "@intentius/chant/op";
 import type { OpConfig } from "@intentius/chant/op/types";
-import { readApplyRun, selectApplyOp } from "../src/chant/apply.js";
+import { gatedCommands, readApplyRun, selectApplyOp } from "../src/chant/apply.js";
 import { projectFromConfig, resolveEnvironment } from "../src/project.js";
 
 const project = projectFromConfig("/p", "/p/chant.config.ts", {
@@ -71,11 +71,21 @@ describe("readApplyRun", () => {
       "  plan    : jcs1-sha256:abc",
       "  approve : chant approve apply-e2e approve-apply-e2e --plan jcs1-sha256:abc",
     ].join("\n");
-    expect(readApplyRun(3, output)).toMatchObject({
+    const run = readApplyRun(3, output);
+    expect(run).toMatchObject({
       status: "gated",
-      approve: "chant approve apply-e2e approve-apply-e2e --plan jcs1-sha256:abc",
+      chantApprove: "chant approve apply-e2e approve-apply-e2e --plan jcs1-sha256:abc",
       planDigest: "jcs1-sha256:abc",
     });
+    // A person is told to run yodel approve (#202); chant's command stays for scripts.
+    expect(gatedCommands(run, "e2e")).toEqual({ approve: "yodel approve e2e --plan jcs1-sha256:abc", chantApprove: "chant approve apply-e2e approve-apply-e2e --plan jcs1-sha256:abc" });
+  });
+
+  it("prints yodel approve with --sign where the gate is sealed, and seals chant's command too (#202)", () => {
+    const run = { chantApprove: "chant approve migrate-prod approve-migrate-prod --plan d" };
+    expect(gatedCommands(run, "prod", "sealed")).toEqual({ approve: "yodel approve prod --plan d --sign", chantApprove: "chant approve migrate-prod approve-migrate-prod --plan d --sign" });
+    expect(gatedCommands({ chantApprove: "chant approve a b --plan d --sign" }, "prod")).toEqual({ approve: "yodel approve prod --plan d --sign", chantApprove: "chant approve a b --plan d --sign" });
+    expect(gatedCommands({}, "prod")).toEqual({});
   });
 
   it("maps chant run's exit codes", () => {

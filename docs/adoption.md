@@ -9,16 +9,18 @@ There are two ways in: a new project from a starter template, whose first migrat
 
 ## A new project from a template
 
-`templates/clickhouse` and `templates/postgres` in this repository are starter projects for `chant init --from`. [Your first migration](getting-started.md) takes a project made this way to applied migrations on a local database, step by step. Each gives `chant.config.ts` with a `dev` and a `prod` profile, `yodel.config.ts`, a migrations Op and a drift watch per environment, and CI pipelines for GitHub Actions, GitLab CI and Forgejo Actions. The parameters are in each template's `chant.template.json`.
+`templates/clickhouse` and `templates/postgres` in this repository are starter projects, and `yodel create` makes a project from one. [Your first migration](getting-started.md) takes a project made this way to applied migrations on a local database, step by step. Each gives `chant.config.ts` with a `dev` and a `prod` profile, `yodel.config.ts`, a migrations Op and a drift watch per environment, and CI pipelines for GitHub Actions, GitLab CI and Forgejo Actions. `yodel create --help` lists the options.
 
-From GitHub, with chant's CLI from npm (`@intentius/chant`; plain `npx chant` outside a project runs an unrelated package):
+Before the project exists, run yodel from npm:
 
 ```sh
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
+npx @intentius/sql-yodeler@latest create my-schema --clickhouse --database events
+npx @intentius/sql-yodeler@latest create my-schema --postgres --schema app
 ```
 
-or from a clone, by path, shown here as `<clone>`. Inside the clone, `npx chant` is the clone's own chant:
+The template is the one released with that yodel (tag `v<version>` of this repository), so the project matches the yodel that made it. `--name` sets the package name, the directory's name by default.
+
+The transcript below predates `yodel create`: it made the project from a clone's template, shown as `<clone>`, with chant's CLI, which `yodel create` runs underneath. The project is the same.
 
 <!-- quote: template#template-init -->
 ```console
@@ -85,7 +87,7 @@ The live database is only read. The one write is the history row (and the histor
 
 What it needs first:
 
-- A project: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect` and `sql.profiles.<env>`, with the project's databases (ClickHouse, `databases`) or schemas (Postgres, `schemas`) listed and the history's database or schema not among them, and a `package.json` from which chant and the `sql` lexicon resolve. `init` does not write `chant.config.ts`. The usual way to get one is a [starter template](#a-new-project-from-a-template) made with the existing database's name (`--param database=<name>` for ClickHouse, `--param schema=<name>` for Postgres); its `src/schema.ts` is a placeholder, so run `init` with `--force` to write over it.
+- A project: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect` and `sql.profiles.<env>`, with the project's databases (ClickHouse, `databases`) or schemas (Postgres, `schemas`) listed and the history's database or schema not among them, and a `package.json` from which chant and the `sql` lexicon resolve. `init` does not write `chant.config.ts`. The usual way to get one is a [starter template](#a-new-project-from-a-template) made with the existing database's name (`yodel create <dir> --clickhouse --database <name>`, or `--postgres --schema <name>`); its `src/schema.ts` is a placeholder, so run `init` with `--force` to write over it.
 - The writer's credentials. `init` writes the history row, and creates the history's database or schema and table when they are not there. The templates read the reader's credentials, which their READMEs create read-only, unless `YODEL_CREDENTIALS=writer`, so with a template it is `YODEL_CREDENTIALS=writer npx yodel init --from <env> --force`.
 - No subdirectory in `migrations/`. Move another tool's migration files out of it first.
 
@@ -175,7 +177,7 @@ YODEL_CREDENTIALS=writer npx yodel init --baseline prod
    Make prod hold the baseline's schema (or empty it, and let yodel apply run the baseline), then run yodel init --baseline prod again. Nothing was recorded.
    ```
 
-2. When they match, it runs `<env>`'s migrations Op, as `yodel apply` does. The Plan step compares again and prints the record's digest (the baseline, the empty history and the live schema), the gate binds the approval to that digest, and the run stops there (exit 3) with the `chant approve` command to run. Approve, and run `yodel init --baseline <env>` again.
+2. When they match, it runs `<env>`'s migrations Op, as `yodel apply` does. The Plan step compares again and prints the record's digest (the baseline, the empty history and the live schema), the gate binds the approval to that digest, and the run stops there (exit 3) with the command that approves it, `yodel approve <env> --plan <digest>`. Approve, and run `yodel init --baseline <env>` again.
 3. The Apply step takes the lock, checks that the history still records nothing, compares again, refuses if the digest moved since the approval, and appends the baseline's history row: a succeeded migration row whose `note` starts `baseline:`, with the approved digest. None of the baseline's statements is sent.
 
 From there `yodel status <env>` lists the baseline applied, and `yodel plan <env>` and `yodel apply <env>` take the migrations after it, as in every other environment. It refuses (exit 4) a project with no migrations and an environment whose history records anything.

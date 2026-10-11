@@ -5,7 +5,7 @@ type: concepts
 
 # Approval
 
-`yodel apply` applies only a plan someone approved, on both paths. The approval is chant's (the [Glossary](glossary.md) has the terms): a gate in an Op, bound to a plan digest, resolved with `chant approve`, and kept on the `chant/lifecycle` branch of the project's git repository. yodel keeps no approval store of its own. The output quoted here is from the examples' runs; `...` marks lines left out.
+`yodel apply` applies only a plan someone approved, on both paths. The approval is chant's (the [Glossary](glossary.md) has the terms): a gate in an Op, bound to a plan digest, resolved by a person with `yodel approve` (chant's `approve` underneath), and kept on the `chant/lifecycle` branch of the project's git repository. yodel keeps no approval store of its own. The output quoted here is from the examples' runs; `...` marks lines left out. The runs were recorded before yodel printed `yodel approve` in its messages: where they show `chant approve ...`, yodel now prints `npx yodel approve <env> --plan <digest>`, which records the same approval, and the runs approve with chant's command because they had no terminal to ask.
 
 ## The migrations Op
 
@@ -50,7 +50,7 @@ On the versioned path the digest covers what the run would do and the state it w
 - the topology the statements are rendered for;
 - the live schema: a fingerprint of the server's catalog in the environment's databases or schemas. The history's own database is left out, so recording a run does not move the digest.
 
-It is chant's plan digest (`jcs1-sha256:...`), so `chant approve <op> <gate> --plan <digest>` takes it. `yodel plan <env>` prints it with the command that approves it:
+It is chant's plan digest (`jcs1-sha256:...`), the one the gate binds. `yodel plan <env>` prints it with the command that approves it, `npx yodel approve <env> --plan <digest>`:
 
 <!-- quote: clickhouse#plan -->
 ```console
@@ -72,6 +72,8 @@ Not approved yet. Approving binds exactly this digest; if anything it covers cha
 `yodel status <env>` prints it too, and `yodel apply <env> --plan` prints the pending migrations and the digest without applying.
 
 ## Approving
+
+Run the command the plan printed, at a terminal: `npx yodel approve dev --plan <digest>` shows the plan, asks you to type `dev`, and records the approval ([Approve and resume](#approve-and-resume)). The run below, with no terminal to ask, recorded the same approval with chant's command:
 
 <!-- quote: clickhouse#approve -->
 ```console
@@ -118,14 +120,14 @@ The token comes from `CHANT_FORGE_TOKEN`, else `GITHUB_TOKEN` or `GH_TOKEN` (Git
 
 - `--plan <digest>` names the digest you mean to approve, the one in the pull request comment or the waiting job's log. When it is not the plan that waits, nothing is approved, and yodel names the digest that waits.
 - `--no-resume` records the approval and starts nothing. Push `chant/lifecycle` and run the job again yourself, or leave it to the [scheduled resume job](#the-scheduled-resume-job).
-- When the approval is recorded but no job was started (no token, a token the forge refused, a push that did not land), chant says why and `yodel approve` exits 3. Run `chant run resume --op <op>` once that is fixed, or run the job again.
+- When the approval is recorded but no job was started (no token, a token the forge refused, a push that did not land), chant says why and `yodel approve` exits 3. Once that is fixed, run the job again, or leave it to the [scheduled resume job](#the-scheduled-resume-job).
 - When no CI job waits (the gate was reached by `yodel apply` on your machine), there is nothing to resume; run `yodel apply <env>`. In a repository with no remote, `yodel approve` records the approval and resumes nothing.
 
-It never approves without a person at the terminal: with no terminal to ask (a script, CI, a coding agent) it approves nothing and exits 4. The printed `npx chant approve ...` command records the same approval in one line (add `--resume` to start the job), and `"$(npx yodel apply dev --digest)"` can stand in for the digest.
+It never approves without a person at the terminal: with no terminal to ask (a script, CI, a coding agent) it approves nothing and exits 4, and no flag skips the question. A script that records approvals itself takes chant's command from the `--json` output's `chantApprove` field.
 
 ### The scheduled resume job
 
-An approval made with `chant approve` alone, or one whose resume failed, leaves the job waiting. `yodel.config.ts` `ci.resume` adds a job that starts it on a schedule:
+An approval recorded with `--no-resume`, by a script with `chantApprove`, or one whose resume failed, leaves the job waiting. `yodel.config.ts` `ci.resume` adds a job that starts it on a schedule:
 
 ```ts
 ci: { forges: ["github", "gitlab", "forgejo"], resume: { schedule: "*/10 * * * *" } },
@@ -160,10 +162,10 @@ terragucci's `on-destroy` is the same rule; SQL Yodeler and chant spell it `on-d
 `npm run ci` renders the waves as `yodel-waves.json`, a chant Op waves spec, and the `yodel-apply` pipeline from it on GitHub, GitLab and Forgejo: one job per wave, each needing the one before. Every job runs `chant run wave`, which:
 
 1. plans the environment with `yodel apply <env> --wave-plan <file>`: the migrations' plan digest, the gate policy, and whether a pending step is destructive, all in one digest;
-2. reads the wave's gate policy from `yodel-waves.json` as the commit before the push has it, and decides. A wave that needs an approval applies nothing, prints `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, and exits 3, so the waves after it do not run;
+2. reads the wave's gate policy from `yodel-waves.json` as the commit before the push has it, and decides. A wave that needs an approval applies nothing, prints the command that approves it, `npx yodel approve <env> --plan <digest>`, and exits 3, so the waves after it do not run;
 3. applies with `yodel apply <env> --wave-apply <file>`, which takes the lock, plans again, and applies only when the plan is still the one the wave decided on and the decision holds: an approval of the wave's digest in the gate ledger, or a policy at the base commit that needs none.
 
-To let a waiting wave through, run `yodel approve <env>` at a terminal: it approves the wave and starts its job again ([Approve and resume](#approve-and-resume)). With the chant approve command the job printed, or `--no-resume`, push `chant/lifecycle` and re-run the failed job (on GitLab, retry it). In a project whose `yodel.config.ts` `waves` names the environment, `yodel approve` approves the wave's gate, `yodel-apply-wave-<k>`, for the wave's set digest, which is what the job waits on, not the migrations Op's gate. It plans the wave as the job does (the plan, the gate policy at the base commit, what the environments before it applied), shows it, and asks you to type the environment's name. A wave whose policy needs no approval for the plan has nothing to approve, and one an earlier environment has not caught up with is refused until it has.
+To let a waiting wave through, run `yodel approve <env>` at a terminal: it approves the wave and starts its job again ([Approve and resume](#approve-and-resume)). With `--no-resume`, push `chant/lifecycle` and re-run the failed job (on GitLab, retry it). In a project whose `yodel.config.ts` `waves` names the environment, `yodel approve` approves the wave's gate, `yodel-apply-wave-<k>`, for the wave's set digest, which is what the job waits on, not the migrations Op's gate. It plans the wave as the job does (the plan, the gate policy at the base commit, what the environments before it applied), shows it, and asks you to type the environment's name. A wave whose policy needs no approval for the plan has nothing to approve, and one an earlier environment has not caught up with is refused until it has.
 
 The policy comes from the base commit, the first parent of the commit being applied, never from the change. A pull request that sets prod's gate to `never` merges, and prod still waits under the gate main had. Only the gate is read there: the waves, their order and the migrations come from the commit being applied. yodel reads its own config at the base the same way: `YODEL_BASE` names another commit, and on a pull request it is the merge base with the target branch.
 
@@ -230,7 +232,7 @@ A `sql` step is a read-only query on the environment's server, judged like a mig
 The steps are read from `yodel.config.ts` at the base commit, like the policy, so a pull request cannot add a step that runs with the writer's credentials, or remove one that would hold it. They run only when something is pending:
 
 - `before` steps run under the lock just before the first migration. A SQL check also runs when the wave is planned (`--wave-plan`), and in the migrations Op's path `yodel apply <env>` runs it before the gate. A command runs once per apply, under the lock: it may have side effects (a notification, a snapshot), so planning only shows that it will run. In a wave it runs once the wave may apply, after the SQL checks. A failing step refuses the run, exit 4, nothing applied.
-- With `onFailure: "approve"`, a failing `before` step holds the wave for a person instead, whatever its gate: the wave plan's digest names the held steps, `on-destructive` waits on it, and under `never` the wave job applies nothing and exits 3 with the `chant approve` command for the wave's digest. Once someone approves that plan, the job run again applies it. If the step passes by then, the plan has moved and the wave decides again. A command's failure is only known under the lock, so it is not in the plan's digest: the job stops there the same way, and the command runs again on the approved run, its failure let through.
+- With `onFailure: "approve"`, a failing `before` step holds the wave for a person instead, whatever its gate: the wave plan's digest names the held steps, `on-destructive` waits on it, and under `never` the wave job applies nothing and exits 3 with the command that approves the wave's digest, `yodel approve <env> --plan <digest>`. Once someone approves that plan, the job run again applies it. If the step passes by then, the plan has moved and the wave decides again. A command's failure is only known under the lock, so it is not in the plan's digest: the job stops there the same way, and the command runs again on the approved run, its failure let through.
 - `after` steps run under the lock once the last migration's statements succeeded. A failing one fails the run, exit 1; the migrations stay applied.
 
 Every outcome is in the history: the `before` steps on each migration's `started` row, the `after` steps on the last migration's `succeeded` row (`note.steps`). `yodel report` lists them as `step` entries in the audit log.
@@ -249,9 +251,9 @@ waves: [
 
 | `approval` | What counts |
 |---|---|
-| `ledger` (the default) | any `chant approve` of the digest, as above |
-| `pr-review` | an approving review of the merged pull request's head by a writer other than its author, when that head planned this digest; a `chant approve` of the digest counts too |
-| `sealed` | only an approval sealed with an ssh key (`yodel approve --sign`, `chant approve --sign`) that the signers file at the base commit lists for the approver |
+| `ledger` (the default) | any approval of the digest (`yodel approve`), as above |
+| `pr-review` | an approving review of the merged pull request's head by a writer other than its author, when that head planned this digest; a `yodel approve` of the digest counts too |
+| `sealed` | only an approval sealed with an ssh key (`yodel approve --sign`) that the signers file at the base commit lists for the approver |
 
 The mode is read at the base commit with the gate, so a pull request that switches prod from `sealed` to `ledger` merges, and prod still counts only sealed approvals. `yodel ci` writes it into `yodel-waves.json`, where `chant run wave` reads it, and `yodel apply --wave-apply` checks it again under the lock. chant documents the modes in [Which approvals count](https://intentius.io/chant/guide/op-waves/#which-approvals-count). `yodel plan` and the pull request comment name the mode of a wave that waits, and a sealed wave's approve command ends in `--sign`. The history records how each wave was approved: the mode, and the review (pull request, head, approvers) or the signer, on the wave's `note.wave`.
 
@@ -271,14 +273,14 @@ It is read at the base commit, never from the change being applied, so a key tha
 `yodel approve <env> --sign` seals the approval with git's signing key (`user.signingkey`, with `gpg.format ssh`), or the private key `--key <file>` names. Under a sealed gate, `yodel approve` seals without being asked. The approver is `--actor <name>`, else the name chant takes from `GITHUB_ACTOR`, `GITLAB_USER_LOGIN` or `USER`, and it must be the principal the signers file gives the key; a seal by a listed key in another approver's name does not count. With the command a waiting job printed:
 
 ```sh
-npx chant approve yodel-apply yodel-apply-wave-3 --plan jcs1-sha256:... --actor alice --sign ~/.ssh/id_ed25519
+npx yodel approve prod --plan jcs1-sha256:... --sign --key ~/.ssh/id_ed25519 --actor alice
 ```
 
 The job verifies the seal with `ssh-keygen`, which the CI image and `node:22-bookworm` carry. A job image without it cannot verify a seal, and the wave waits.
 
 ### Pull request review
 
-Under `pr-review`, the pull request's own review approves the wave, with no `chant approve`. `yodel ci` renders a pull request job that runs `chant run wave --spec yodel-waves.json --record-plans`: it plans every wave at the pull request's head, as the wave will plan after the merge (each environment a wave requires taken as having applied what is pending, which the wave checks when it runs; no `before` step is run), and records the digests on `chant/lifecycle` (`_wave-plans/yodel-apply/<head>.json`). It holds no writer: it plans with each environment's reader, and runs the write probe first ([Configuration](configuration.md)), as every pull request job does.
+Under `pr-review`, the pull request's own review approves the wave, with no `yodel approve`. `yodel ci` renders a pull request job that runs `chant run wave --spec yodel-waves.json --record-plans`: it plans every wave at the pull request's head, as the wave will plan after the merge (each environment a wave requires taken as having applied what is pending, which the wave checks when it runs; no `before` step is run), and records the digests on `chant/lifecycle` (`_wave-plans/yodel-apply/<head>.json`). It holds no writer: it plans with each environment's reader, and runs the write probe first ([Configuration](configuration.md)), as every pull request job does.
 
 | Forge | The job | What counts as an approving review |
 |---|---|---|
@@ -286,17 +288,17 @@ Under `pr-review`, the pull request's own review approves the wave, with no `cha
 | Forgejo | `.forgejo/workflows/yodel-apply-plans.yml` | the same, and the review is official (Forgejo's mark for a reviewer with write access), not stale and not dismissed |
 | GitLab | `yodel-apply-record-plans`, in merge request pipelines, stage `plans` | the merge request's approvals, by members with the Developer role or higher, and only when the project removes approvals on a new push |
 
-After the merge, the wave finds the pull request that made the commit it applies, and its head. When a writer other than the author approved that head and the head recorded the digest the wave plans now, the wave applies and chant writes an approval to the ledger that names the review. The author's own review never counts, and a writer's standing request for changes holds the review back. A plan that moved after the review (another merge first, a table changed by hand, a wave before it that did not apply what was pending) has a new digest, so the wave waits for a `chant approve` of it.
+After the merge, the wave finds the pull request that made the commit it applies, and its head. When a writer other than the author approved that head and the head recorded the digest the wave plans now, the wave applies and chant writes an approval to the ledger that names the review. The author's own review never counts, and a writer's standing request for changes holds the review back. A plan that moved after the review (another merge first, a table changed by hand, a wave before it that did not apply what was pending) has a new digest, so the wave waits for a `yodel approve` of it.
 
 The wave job reads the review with the forge's API: on GitHub and Forgejo with the job's token (`yodel ci` gives the wave's job `GITHUB_TOKEN`, and on GitHub the workflow `pull-requests: read`); on GitLab with `CHANT_FORGE_TOKEN` or `GITLAB_TOKEN`, a token with `read_api`.
 
 GitLab's limits:
 
 - An approval on GitLab names no commit, so it is tied to the head only by the project's setting "Remove all approvals when commits are added to the source branch" (`reset_approvals_on_push`). Without it, no GitLab approval counts.
-- The record job pushes `chant/lifecycle`, which `CI_JOB_TOKEN` can do only when the project allows Git push requests from job tokens. Otherwise the job fails, nothing is recorded, and the wave waits for `chant approve`.
-- Merged results and merge trains plan a commit that is not the merge request's head; the recorded plan is the head's, so a merge that changes what the wave plans waits for `chant approve`.
+- The record job pushes `chant/lifecycle`, which `CI_JOB_TOKEN` can do only when the project allows Git push requests from job tokens. Otherwise the job fails, nothing is recorded, and the wave waits for `yodel approve`.
+- Merged results and merge trains plan a commit that is not the merge request's head; the recorded plan is the head's, so a merge that changes what the wave plans waits for `yodel approve`.
 
-A pull request from a fork runs its pipeline without the repository's secrets and with a read-only token: the record job can neither read the environments nor push `chant/lifecycle`, so nothing is recorded, and after the merge the wave waits for a `chant approve` of its digest. Approve those as under `ledger`.
+A pull request from a fork runs its pipeline without the repository's secrets and with a read-only token: the record job can neither read the environments nor push `chant/lifecycle`, so nothing is recorded, and after the merge the wave waits for a `yodel approve` of its digest. Approve those as under `ledger`.
 
 ## The pull request comment
 
@@ -462,7 +464,7 @@ then run npx yodel apply dev again.
 [exit 3]
 ```
 
-After a new `chant approve`, the apply goes through. A migration that failed part way moves the digest too, since the statements that succeeded are part of it; the [Postgres example](../examples/postgres/README.md#4-a-migration-that-fails-part-way-and-resumes) approves again before resuming.
+After a new approval (`yodel approve`), the apply goes through. A migration that failed part way moves the digest too, since the statements that succeeded are part of it; the [Postgres example](../examples/postgres/README.md#4-a-migration-that-fails-part-way-and-resumes) approves again before resuming.
 
 ## Policy and overrides
 

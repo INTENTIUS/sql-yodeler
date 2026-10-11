@@ -51,6 +51,7 @@
         "op": { "type": "string" },
         "gate": { "type": "string" },
         "approve": { "type": "string" },
+        "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
         "gatePlanDigest": { "type": "string" },
         "history": { "description": "Where the baseline's row was recorded (status recorded).", "type": "string" },
         "exitCode": { "type": "integer" }

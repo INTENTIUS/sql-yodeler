@@ -55,7 +55,7 @@ export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, dig
       : "";
   throw new YodelError(
     `refused: chant's gate ledger holds no approval of ${op.name} / ${op.gate} for plan ${digest}${other}. Nothing was applied. ` +
-      `Run yodel apply without --execute; it stops at the gate and prints the chant approve command.`,
+      `Run yodel apply without --execute; it stops at the gate and prints the command that approves its plan.`,
     NOT_APPROVED,
   );
 }

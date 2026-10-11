@@ -5,11 +5,13 @@
  * gate is bound to its Plan phase's digest, so an approval given for one
  * change set never applies another; yodel never resolves the gate itself.
  * `chant approve <op> <gate> --plan <digest>` does, and the next run walks
- * through it.
+ * through it. yodel prints `yodel approve <env> --plan <digest>` for a
+ * person, which runs that for them (#202).
  */
 
 import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
+import { approveCommand, type ApprovalMode } from "../approval-mode/index.js";
 import { runChant } from "./process.js";
 
 /** The ApplyOp yodel runs for an environment. */
@@ -127,8 +129,8 @@ export type ApplyRunStatus = "applied" | "gated" | "failed";
 export interface ApplyRun {
   status: ApplyRunStatus;
   code: number;
-  /** The `chant approve ...` command chant printed for a gated run. */
-  approve?: string;
+  /** The `chant approve ...` command chant printed for a gated run; yodel prints {@link gatedCommands}' instead. */
+  chantApprove?: string;
   /** The plan digest the gate is waiting on. */
   planDigest?: string;
   output: string;
@@ -139,9 +141,26 @@ export interface ApplyRun {
 /** What a `chant run` of an ApplyOp says about its outcome. */
 export function readApplyRun(code: number, output: string): ApplyRun {
   const status: ApplyRunStatus = code === 0 ? "applied" : code === GATED ? "gated" : "failed";
-  const approve = /^\s*approve\s*:\s*(chant approve .+?)\s*$/m.exec(output)?.[1];
+  const chantApprove = /^\s*approve\s*:\s*(chant approve .+?)\s*$/m.exec(output)?.[1];
   const planDigest = /^\s*plan\s*:\s*(\S+)\s*$/m.exec(output)?.[1];
-  return { status, code, ...(approve ? { approve } : {}), ...(planDigest ? { planDigest } : {}), output };
+  return { status, code, ...(chantApprove ? { chantApprove } : {}), ...(planDigest ? { planDigest } : {}), output };
+}
+
+/**
+ * For a run that stopped at its gate (#202): `approve`, the command a person
+ * runs (`yodel approve <env> --plan <digest>`, with `--sign` when the gate
+ * is sealed), and `chantApprove`, chant's own, for scripts. Empty when chant
+ * printed no approve command.
+ */
+export function gatedCommands(run: Pick<ApplyRun, "chantApprove" | "planDigest">, env: string, mode: ApprovalMode = "ledger"): { approve?: string; chantApprove?: string } {
+  if (!run.chantApprove) return {};
+  const signed = / --sign\b/.test(run.chantApprove);
+  const digest = run.planDigest ?? /--plan\s+(\S+)/.exec(run.chantApprove)?.[1];
+  const sealed = mode === "sealed" || signed;
+  return {
+    approve: approveCommand(env, digest, sealed ? "sealed" : "ledger"),
+    chantApprove: sealed && !signed ? `${run.chantApprove} --sign` : run.chantApprove,
+  };
 }
 
 /** Runs the ApplyOp with `chant run <op>`, its output passed to `onOutput` as it arrives. */

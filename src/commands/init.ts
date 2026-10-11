@@ -4,7 +4,8 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { migrationId } from "../migrations/index.js";
 import { adopt, BASELINE_NAME, planBaseline, projectBaseline, type Adopted } from "../init/index.js";
-import { GATED } from "../chant/apply.js";
+import { GATED, gatedCommands } from "../chant/apply.js";
+import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
 import { EXIT_REFUSED } from "../exit.js";
@@ -62,7 +63,7 @@ Op, as yodel apply does: its Plan step compares again and prints the
 record's digest (the baseline, the empty history and the live schema), its
 gate binds the approval to that digest, and its Apply step compares again
 under the lock, refuses if the digest moved, and appends the row. A run
-that stops at the gate prints the chant approve command; approve, then run
+that stops at the gate prints the yodel approve command; approve, then run
 yodel init --baseline <env> again. Then yodel plan <env> shows the
 migrations after the baseline pending, as in every other environment.
 
@@ -196,11 +197,12 @@ async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Pr
     if (!a.json) io.out(`${env.name}'s live schema is the schema ${baseline.id} records, and its history records nothing.\nPlan digest: ${planDigest}\n\nRunning ${op.name} (${op.filePath}) to record ${baseline.id} applied in ${env.name}\n`);
     const ran = await runMigrateOp(project, op, { allowOutOfOrder: false, baseline: baseline.id, onOutput: (t) => { io.err(t); } });
     if (ran.status === "gated") {
+      const commands = gatedCommands(ran, env.name, (await migrationsApprovalAtBase(project, env.name)).mode);
       if (!a.json) {
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this record${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
-        if (ran.approve) io.out(`Approve it with:\n  ${runnable(ran.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again.\n`);
+        if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again.\n`);
       }
-      return emit({ status: "gated", op: op.name, gate: op.gate, ...(ran.approve ? { approve: ran.approve } : {}), ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
     }
     if (ran.status === "failed") {
       const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;

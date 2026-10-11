@@ -127,10 +127,10 @@ describe("yodel approve --sign", () => {
 describe("the plan and the comment say which approvals count", () => {
   const view = { wave: 1, gate: "always" as const, base: "a".repeat(40), baseSource: "HEAD^1", planDigest: "p", digest: "jcs1-sha256:d", promotions: [], blocked: false, destructiveSteps: [], waits: true };
   it("names a sealed or pr-review wave's mode, and says nothing new under ledger", () => {
-    expect(describeWave({ ...view, approve: "chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:d" })).toBe("The apply pipeline waits in wave 1 for an approval of jcs1-sha256:d (gate always at aaaaaaaaaaaa).");
-    expect(describeWave({ ...view, approve: "x --sign", approval: "sealed" })).toMatch(/Approvals count only sealed \(approval sealed\): chant approve --sign or yodel approve --sign, with a key \.chant\/allowed_signers at the base commit lists/);
-    expect(describeWave({ ...view, approve: "x", approval: "pr-review" }, (c) => `\`${c}\``)).toMatch(/Approval `pr-review`: an approving review of this pull request's head, by a writer other than its author/);
-    expect(describeApprovalMode("ledger")).toMatch(/any chant approve/);
+    expect(describeWave({ ...view, approve: "yodel approve prod --plan jcs1-sha256:d", chantApprove: "chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:d" })).toBe("The apply pipeline waits in wave 1 for an approval of jcs1-sha256:d (gate always at aaaaaaaaaaaa).");
+    expect(describeWave({ ...view, approve: "x --sign", chantApprove: "y --sign", approval: "sealed" })).toMatch(/Approvals count only sealed \(approval sealed\): yodel approve --sign, with a key \.chant\/allowed_signers at the base commit lists/);
+    expect(describeWave({ ...view, approve: "x", chantApprove: "y", approval: "pr-review" }, (c) => `\`${c}\``)).toMatch(/Approval `pr-review`: an approving review of this pull request's head, by a writer other than its author/);
+    expect(describeApprovalMode("ledger")).toBe("Approval ledger: any approval of the digest (yodel approve) counts.");
   });
 });
 

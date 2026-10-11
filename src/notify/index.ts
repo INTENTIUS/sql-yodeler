@@ -55,8 +55,10 @@ export interface NotifyEvent {
   migrations: string[];
   /** The plan digest the run computed, when it computed one. */
   digest?: string;
-  /** The command that approves the plan, on `waiting`. */
+  /** The command that approves the plan, on `waiting`: `yodel approve <env> --plan <digest>`, for a person at a terminal. */
   approve?: string;
+  /** chant's own command for the same approval, for scripts. */
+  chantApprove?: string;
   /** Why it was refused or failed: the refusal's message, the failing exit code. */
   reason?: string;
   /** drift: the objects changed and missing, and the drift's fingerprint (the same drift, the same fingerprint, run after run). */
@@ -124,7 +126,8 @@ export function eventFromRun(command: "apply" | "plan", doc: Record<string, unkn
   const deniedRules = Array.isArray(doc.policy) ? (doc.policy as Array<{ id?: string; outcome?: string }>).filter((r) => r.outcome === "denied").map((r) => r.id ?? "") : [];
   if (status === "gated") {
     const approve = str(doc.approve);
-    return { ...base, event: "waiting", status, summary: `${environment} is waiting for approval of ${digest ?? "its plan"} (${String(migrations.length)} migration${migrations.length === 1 ? "" : "s"})`, ...(approve ? { approve } : {}) };
+    const chantApprove = str(doc.chantApprove);
+    return { ...base, event: "waiting", status, summary: `${environment} is waiting for approval of ${digest ?? "its plan"} (${String(migrations.length)} migration${migrations.length === 1 ? "" : "s"})`, ...(approve ? { approve } : {}), ...(chantApprove ? { chantApprove } : {}) };
   }
   if (status === "refused" || status === "denied" || (command === "plan" && (refusal !== undefined || deniedRules.length > 0))) {
     const reason = typeof refusal === "string" ? refusal : deniedRules.length > 0 ? `policy rule ${deniedRules.join(", ")} denies the plan` : status === "refused" ? "refused" : "denied by policy";

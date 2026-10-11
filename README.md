@@ -22,16 +22,16 @@ export const events = table`
 
 Each export is one object in the database's own DDL; `${db}` is a reference, so the build orders the objects and checks them against a pinned server's catalog. [Declaring the schema](docs/schema.md) has the whole form, both dialects.
 
-SQL Yodeler is built on [chant](https://intentius.io/chant/), a declarative infrastructure-as-code toolkit in TypeScript. You need chant's CLI (`@intentius/chant` on npm) for two things only: `chant init` to make a project from a template, and `chant emulator up` for a local database. Run the CLI as `npx @intentius/chant@latest` before the project exists, and as `npx chant` inside it, where `npm install` put it. You approve a plan with `yodel approve`, which records chant's approval for you.
+SQL Yodeler is built on [chant](https://intentius.io/chant/), a declarative infrastructure-as-code toolkit in TypeScript. The `yodel` CLI covers every step, and runs chant's CLI underneath: `yodel create` makes a project from a template, `yodel emulator up` starts a local database, and `yodel approve` records an approval. Before a project exists, run it as `npx @intentius/sql-yodeler`; inside one, as `npx yodel`.
 
 ## Getting started
 
 [Your first migration](docs/getting-started.md) goes from an empty directory to two applied migrations on a local ClickHouse, with every command and its output. In short:
 
 ```sh
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+npx @intentius/sql-yodeler@latest create my-schema --clickhouse --database events
 cd my-schema && npm install && git init -b main && git add -A && git commit -m "chore: a new yodel project"
-npx chant emulator up --lexicon sql            # ClickHouse and Postgres in Docker
+npx yodel emulator up                          # ClickHouse and Postgres in Docker
 curl -s http://127.0.0.1:8123 --data-binary "CREATE USER IF NOT EXISTS reader IDENTIFIED WITH no_password SETTINGS readonly = 1"
 curl -s http://127.0.0.1:8123 --data-binary "GRANT SELECT, SHOW ON *.* TO reader"
 export DEV_CLICKHOUSE_READER_USER=reader DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
@@ -44,9 +44,9 @@ YODEL_CREDENTIALS=writer npx yodel apply dev
 
 yodel refuses an environment whose reader and writer are one user, so dev reads with a read-only user, `reader`, and applies with the emulator's `default` user, picked by `YODEL_CREDENTIALS=writer`. The template's `just up` makes the reader and prints these variables for a `.env` file, and `just apply` sets the writer.
 
-For Postgres, use `templates/postgres` with `--param name=app-schema --param schema=app`.
+For Postgres, use `--postgres --schema app`.
 
-Each template gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `yodel ci` (`npm run ci`) renders the pipelines from the installed package, so upgrading yodel and rendering again brings its pipeline fixes, and the project's own jobs, declared in a module `yodel.config.ts` `ci.jobs` names, are kept. The parameters are in each template's `chant.template.json`; the template's README covers the credentials and each forge's setup, and so does [Setting up each forge](docs/forges.md).
+Each template gives `chant.config.ts` with a profile per environment (`dev`, `prod`), `yodel.config.ts`, a migrate Op per environment (`yodel apply` behind a gate bound to the plan digest), a `WatchOp` per environment for drift on a schedule, and pipelines for GitHub Actions, GitLab CI and Forgejo Actions: `yodel lint` and the plan comment on pull requests with read-only credentials, `yodel apply` on a push to main with the writer, and the drift watch on its cron with the reader. `yodel ci` (`npm run ci`) renders the pipelines from the installed package, so upgrading yodel and rendering again brings its pipeline fixes, and the project's own jobs, declared in a module `yodel.config.ts` `ci.jobs` names, are kept. `yodel create --help` lists its options; the template's README covers the credentials and each forge's setup, and so does [Setting up each forge](docs/forges.md).
 
 ## Documentation
 
@@ -109,7 +109,7 @@ export const op = Op({
 });
 ```
 
-`yodel apply prod` stops at the gate; approve at a terminal with `npx yodel approve prod`, then run it again. A script, which has no terminal to ask, runs the `chant approve migrate-prod approve-migrate-prod --plan <digest>` command that `yodel apply` prints instead. `yodel apply prod --plan` prints the pending migrations and the digest without applying. Running `chant run migrate-prod` directly needs `yodel` on PATH.
+`yodel apply prod` stops at the gate and prints the command that approves its plan, `npx yodel approve prod --plan <digest>`: run it at a terminal, then run `yodel apply prod` again. `yodel apply prod --json` also gives chant's own approve command, `chantApprove`, for a script that records approvals itself. `yodel apply prod --plan` prints the pending migrations and the digest without applying.
 
 ## yodel lint
 
@@ -130,7 +130,7 @@ The reason is required. `yodel apply` records each silence (step, rule, reason) 
 
 `yodel lint --env <env>` also reads the environment's history: an applied migration whose files changed since it ran is a `checksum` error, a pending migration's edit a warning. `yodel.config.ts` sets rule levels: `lint: { rules: { "ch-mutation": "warning", "pg-lock": "off" } }`; the integrity rules cannot be lowered. `yodel lint --rules` lists the rules and their levels.
 
-`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server (a throwaway emulator, `npx chant emulator up --lexicon sql`) and compares each with its recorded schema; the first that differs fails the run (rule `replay`, exit 3), named. The databases or schemas the history names must not exist there yet: otherwise it exits 4 and runs nothing, unless `--reset`, which drops them first (never point it at a server whose data matters). `--keep` leaves the replayed database in place to look at.
+`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server (a throwaway emulator, `npx yodel emulator up`) and compares each with its recorded schema; the first that differs fails the run (rule `replay`, exit 3), named. The databases or schemas the history names must not exist there yet: otherwise it exits 4 and runs nothing, unless `--reset`, which drops them first (never point it at a server whose data matters). `--keep` leaves the replayed database in place to look at.
 
 ## Contributing
 

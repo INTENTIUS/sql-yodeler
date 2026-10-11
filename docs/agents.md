@@ -31,18 +31,18 @@ A task page's own prompt sits under its title as "Optional: hand this page to yo
 
 1. Check the repository: Node 22.12 or later, a git repository, and whether it already holds other code. The template's CI pipelines go in the project's `.github/workflows`, `.forgejo/workflows` and `.gitlab-ci.yml`, which a forge reads only at the repository root. If the repository holds other code, ask the user where the project goes.
 2. Ask the user for the dialect (ClickHouse or Postgres), the database (ClickHouse) or schema (Postgres) the tables live in, and whether it exists already.
-3. Make the project from the template, with chant's CLI from npm (plain `npx chant` outside a project is an unrelated package). `--force` lets it write into a directory that is not empty; check `git status` afterwards.
+3. Make the project from the template with `yodel create`, from npm. It makes the project in a new directory, or one that holds nothing but `.git`, and refuses any other; check `git status` afterwards.
 
    ```sh
-   npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=<package name> --param database=<database> --force .
-   npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=<package name> --param schema=<schema> --force .
-   npm install
+   npx @intentius/sql-yodeler@latest create <dir> --clickhouse --database <database> --name <package name>
+   npx @intentius/sql-yodeler@latest create <dir> --postgres --schema <schema> --name <package name>
+   cd <dir> && npm install
    ```
 
 4. Edit `chant.config.ts`: each environment's default server address (`dev`, `prod`, and any the user names). Credentials stay out of files: the profiles name environment variables, and the template's README lists them. For another environment, add its profile, its entry in `yodel.config.ts`, and copies of `ops/migrate-dev.op.ts` and `ops/watch-dev.op.ts` with `dev` changed, then run `npm run ci` to render the pipelines again.
 5. For a new database, declare the tables in `src/` (chant's `sql` lexicon; the template's `src/schema.ts` shows the form) and write the first migration with `npx yodel new init`. For a database that exists, do not write `src/` by hand: `npx yodel init --from <env> --force` adopts it ([Starting a project](adoption.md)). It writes one row to that environment's history, so ask the user first and run it with the credentials they give you.
 6. Run `npx yodel lint` and `npm run ci:check`. Both must pass.
-7. Optionally, check the migrations on a local database: `npx chant emulator up --lexicon sql` starts one in Docker, and [Your first migration](getting-started.md) has the variables. `npx yodel plan dev` and `npx yodel apply dev` against it are safe; `yodel apply` stops at the approval, and that is where the agent stops too.
+7. Optionally, check the migrations on a local database: `npx yodel emulator up` starts one in Docker, and [Your first migration](getting-started.md) has the variables. `npx yodel plan dev` and `npx yodel apply dev` against it are safe; `yodel apply` stops at the approval, and that is where the agent stops too.
 8. Commit the project (with `package-lock.json`) on a new branch and open a pull request. Check `git status` so the commit holds nothing else.
 9. Tell the user what is left for them, from the template's README: create each environment's reader and writer database users, add the forge's secrets where [Setting up each forge](forges.md) says, approve each plan the pull request comment shows, and merge.
 

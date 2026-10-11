@@ -127,7 +127,7 @@ describe("yodel.config.ts at the base commit", () => {
 });
 
 describe("the wave in yodel plan", () => {
-  const view = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", planDigest: "p", digest: "jcs1-sha256:d", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:d", promotions: [], blocked: false };
+  const view = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", planDigest: "p", digest: "jcs1-sha256:d", approve: "yodel approve prod --plan jcs1-sha256:d", chantApprove: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:d", promotions: [], blocked: false };
   it("says whether the pipeline waits, and why", () => {
     expect(describeWave({ ...view, destructiveSteps: [], waits: false })).toBe("The apply pipeline applies this in wave 2 with no approval (gate on-destructive at aaaaaaaaaaaa: nothing pending is destructive).");
     expect(describeWave({ ...view, destructiveSteps: [{ migration: "m1", step: 0, what: "", why: "destructive" }], waits: true })).toBe(

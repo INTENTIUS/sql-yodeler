@@ -85,7 +85,7 @@ export function renderTenantSetText(plan: TenantSetPlan, options: { runnable?: (
   }
   if (plan.wave) {
     lines.push("", describeTenantSetWave(plan.wave, plan.tenants.length));
-    if (plan.wave.waits && plan.wave.approve) lines.push("Approve it for the pipeline with:", `  ${run(plan.wave.approve)}`, `or, at a terminal, with ${run(`yodel approve ${plan.environment}`)}, which shows every tenant's plan and asks you first.`);
+    if (plan.wave.waits && plan.wave.approve) lines.push("Approve it for the pipeline, at a terminal, with:", `  ${run(plan.wave.approve)}`, "which shows every tenant's plan and asks you first.");
   }
   return `${lines.join("\n")}\n`;
 }
@@ -115,7 +115,7 @@ export function renderTenantSetMarkdown(plan: TenantSetPlan, options: { sql?: bo
   if (plan.wave) {
     out.push("", "#### The apply pipeline", "", describeTenantSetWave(plan.wave, plan.tenants.length, code));
     if (plan.wave.waits && plan.wave.approve) {
-      out.push("", "Approve it before merging, once for every tenant:", "", fence(plan.wave.approve, "sh"), "", `or, at a terminal, \`yodel approve ${plan.environment}\`, which shows every tenant's plan and asks first.`);
+      out.push("", "Approve it before merging, once for every tenant, at a terminal (it shows every tenant's plan and asks first):", "", fence(`npx ${plan.wave.approve}`, "sh"));
     }
   }
   if (!withSql) out.push("", "_The statements are left out: the comment would be too long. `yodel plan` prints them._");

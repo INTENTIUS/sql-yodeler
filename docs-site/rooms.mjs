@@ -44,10 +44,10 @@ export const DIALECTS = [
 			'A single node, a cluster, a Replicated database or ClickHouse Cloud',
 		],
 		differs: [
-			'A project owns ClickHouse databases (`--param database=<name>` on the template).',
+			'A project owns ClickHouse databases (`yodel create <dir> --clickhouse --database <name>`).',
 			'A rebuild keeps the old table until `yodel cleanup` drops it, and lint flags mutations and rebuilds (`ch-mutation`, `ch-rebuild`).',
 		],
-		template: { path: 'templates/clickhouse', params: '--param name=events-schema --param database=events' },
+		template: { path: 'templates/clickhouse', params: '--clickhouse --database events' },
 	},
 	{
 		id: 'postgres',
@@ -59,10 +59,10 @@ export const DIALECTS = [
 			'Lint that flags statements which rewrite a table or hold a long lock',
 		],
 		differs: [
-			'A project owns Postgres schemas (`--param schema=<name>` on the template).',
+			'A project owns Postgres schemas (`yodel create <dir> --postgres --schema <name>`).',
 			"Roles stay the environment's: the schema declares the policies and grants that name them.",
 		],
-		template: { path: 'templates/postgres', params: '--param name=app-schema --param schema=app' },
+		template: { path: 'templates/postgres', params: '--postgres --schema app' },
 	},
 ];
 
@@ -94,7 +94,7 @@ export const FORGES = [
 	},
 ];
 
-const template = (d) => `npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#${d.template.path} ${d.template.params} my-schema`;
+const template = (d) => `npx @intentius/sql-yodeler@latest create my-schema ${d.template.params}`;
 const [clickhouse, postgres] = DIALECTS;
 
 /**

@@ -37,7 +37,7 @@ A delivery that fails (the receiver is down, it answers 401) is reported on stde
 | `failed` | `yodel apply` | the Op's run failed: a statement, the lock, a plan that moved since approval |
 | `drift` | `yodel drift` (the watch) | a declared object changed out of band or is gone (exit 2) |
 
-The apply pipeline's wave jobs (`chant run wave`, see [approval](approval.md)) send the same events from `yodel apply`'s wave modes. `--wave-plan` makes the decision chant makes right after it, from the same sources (the wave's policy at the base commit, and the gate ledger), and sends `waiting` when the wave will wait, with the wave's set digest and its `chant approve yodel-apply yodel-apply-wave-<k>` command. `--wave-plan` and `--wave-apply` send `refused` for a refusal (an environment before this one has not applied a migration, a wave with no decision that lets it through) and `failed` for anything else that stops them. The job's exit code is chant's: 3 for a wave that waits, which is yodel's code for an approval outstanding too, and 1 when an apply failed or refused.
+The apply pipeline's wave jobs (`chant run wave`, see [approval](approval.md)) send the same events from `yodel apply`'s wave modes. `--wave-plan` makes the decision chant makes right after it, from the same sources (the wave's policy at the base commit, and the gate ledger), and sends `waiting` when the wave will wait, with the wave's set digest and the command that approves it, `yodel approve <env> --plan <digest>` (and chant's own in `chantApprove`, for a script). `--wave-plan` and `--wave-apply` send `refused` for a refusal (an environment before this one has not applied a migration, a wave with no decision that lets it through) and `failed` for anything else that stops them. The job's exit code is chant's: 3 for a wave that waits, which is yodel's code for an approval outstanding too, and 1 when an apply failed or refused.
 
 The body is JSON, described by [schemas/event.schema.json](../schemas/event.schema.json) (`https://intentius.io/sql-yodeler/schemas/v1/event.schema.json`):
 
@@ -53,7 +53,8 @@ The body is JSON, described by [schemas/event.schema.json](../schemas/event.sche
   "summary": "prod is waiting for approval of jcs1-sha256:9f2c... (1 migration)",
   "migrations": ["20261010T090000Z-add-note"],
   "digest": "jcs1-sha256:9f2c...",
-  "approve": "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:9f2c...",
+  "approve": "yodel approve prod --plan jcs1-sha256:9f2c...",
+  "chantApprove": "chant approve migrate-prod approve-migrate-prod --plan jcs1-sha256:9f2c...",
   "runUrl": "https://github.com/acme/db/actions/runs/123",
   "repository": "acme/db",
   "commit": "4b1d..."

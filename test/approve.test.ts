@@ -3,12 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main } from "../src/cli.js";
-import { chantApproveArgs } from "../src/commands/approve.js";
+import type { GateResolutionRecord, PendingGateRecord } from "@intentius/chant/lifecycle/gate-ledger";
+import { gitGateLedgerPort } from "@intentius/chant/op/gate";
+import { approveDeclarative, approveOther, chantApproveArgs, standingGate, type OtherContext } from "../src/commands/approve.js";
 import type { Io } from "../src/command.js";
+import { approveCommand } from "../src/approval-mode/index.js";
+import { findApplyOp } from "../src/chant/apply.js";
+import { findMigrateOp } from "../src/versioned/index.js";
+import { loadProject, resolveEnvironment, type Environment, type Project } from "../src/project.js";
 import { installedLocally, onPath, runnable } from "../src/chant/runnable.js";
 import { renderPlanText } from "../src/pr/render.js";
 import type { VersionedPlan } from "../src/pr/model.js";
-import { fixture } from "./helpers/run.js";
+import { fixture, projectFrom } from "./helpers/run.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -55,7 +61,7 @@ describe("the approve command yodel prints runs as printed (#14)", () => {
     expect(runnable("chant approve a b --plan d", nowhere.project, { PATH: nowhere.path })).toBe("chant approve a b --plan d");
   });
 
-  it("plan's text names yodel approve next to the chant approve command", () => {
+  it("plan's text names yodel approve with the digest, never chant approve (#202)", () => {
     const plan: VersionedPlan = {
       environment: "dev",
       dialect: "clickhouse",
@@ -64,10 +70,18 @@ describe("the approve command yodel prints runs as printed (#14)", () => {
       problems: [],
       notes: [],
       digest: "jcs1-sha256:00",
-      approval: { kind: "op", op: "migrate-dev", gate: "approve-migrate-dev", command: "chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:00" },
+      approval: { kind: "op", op: "migrate-dev", gate: "approve-migrate-dev", command: approveCommand("dev", "jcs1-sha256:00"), chantCommand: "chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:00" },
     };
     const text = renderPlanText(plan, { runnable: (c) => `npx ${c}` });
-    expect(text).toContain("Approve it with:\n  npx chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:00\nor, at a terminal, with npx yodel approve dev, which shows the plan and asks you first.");
+    expect(text).toContain("Approve it at a terminal with:\n  npx yodel approve dev --plan jcs1-sha256:00\nwhich shows the plan and asks you first.");
+    expect(text).not.toContain("chant approve");
+  });
+
+  it("is yodel approve <env> --plan <digest>, with --sign where the gate is sealed", () => {
+    expect(approveCommand("prod", "jcs1-sha256:00")).toBe("yodel approve prod --plan jcs1-sha256:00");
+    expect(approveCommand("prod", "jcs1-sha256:00", "sealed")).toBe("yodel approve prod --plan jcs1-sha256:00 --sign");
+    expect(approveCommand("prod", "jcs1-sha256:00", "pr-review")).toBe("yodel approve prod --plan jcs1-sha256:00");
+    expect(approveCommand("prod/acme", undefined)).toBe("yodel approve prod/acme");
   });
 });
 
@@ -89,11 +103,151 @@ describe("yodel approve", () => {
     expect(forced.text().err).toContain("Unknown option '--yes'");
   });
 
-  it("is for versioned projects", async () => {
-    const c = capture(() => Promise.resolve("e2e"));
-    const code = await main(["approve", "e2e", "--dir", fixture("clickhouse")], c.io);
-    expect(code).toBe(1);
-    expect(c.text().err).toMatch(/yodel approve is for versioned migrations/);
+  it("approves nothing in a declarative project without a terminal either", async () => {
+    const c = capture();
+    expect(await main(["approve", "e2e", "--dir", fixture("clickhouse")], c.io)).toBe(4);
+    expect(c.text().err).toContain("there is no terminal to ask, so nothing was approved");
+  });
+});
+
+describe("standingGate: the plan a gate waits on (#202)", () => {
+  const at = (m: number) => new Date(Date.UTC(2026, 9, 10, 9, m)).toISOString();
+  const pending = (gate: string, digest: string | undefined, m: number, expires = 60): PendingGateRecord => ({
+    version: 1, kind: "pending", op: "o", gate, timestamp: at(m), expiresAt: at(m + expires), ...(digest ? { planDigest: digest } : {}),
+  });
+  const resolution = (gate: string, digest: string, m: number): GateResolutionRecord => ({ version: 1, kind: "resolution", op: "o", gate, resolvedBy: "alice", timestamp: at(m), planDigest: digest });
+
+  it("is the newest live pending fact of the gate", () => {
+    const ledger = { pending: [pending("g", "d1", 0), pending("g", "d2", 5), pending("other", "d3", 6)], resolutions: [] };
+    expect(standingGate(ledger, "o", "g", at(10))).toEqual({ op: "o", gate: "g", digest: "d2", at: at(5) });
+  });
+
+  it("is nothing once it expired, binds no plan, or an approval of its plan came after it", () => {
+    expect(standingGate({ pending: [pending("g", "d1", 0, 5)], resolutions: [] }, "o", "g", at(10))).toBeUndefined();
+    expect(standingGate({ pending: [pending("g", undefined, 0)], resolutions: [] }, "o", "g", at(10))).toBeUndefined();
+    expect(standingGate({ pending: [pending("g", "d1", 0)], resolutions: [resolution("g", "d1", 1)] }, "o", "g", at(10))).toBeUndefined();
+    // An approval of another plan, or one from before the gate asked, does not answer it.
+    expect(standingGate({ pending: [pending("g", "d1", 2)], resolutions: [resolution("g", "d0", 3), resolution("g", "d1", 1)] }, "o", "g", at(10))?.digest).toBe("d1");
+  });
+});
+
+describe("yodel approve in a declarative project (#202)", () => {
+  const disposers: Array<() => void> = [];
+  afterEach(() => {
+    for (const d of disposers.splice(0)) d();
+  });
+
+  /** The clickhouse fixture with its ApplyOp's gate waiting on `digest`, as yodel apply leaves it. */
+  async function waiting(digest?: string) {
+    const { dir, dispose } = projectFrom("clickhouse");
+    disposers.push(dispose);
+    const project = await loadProject(dir);
+    const env = resolveEnvironment(project, "e2e");
+    const op = await findApplyOp(project, env);
+    if (digest) {
+      const now = Date.now();
+      await gitGateLedgerPort({ cwd: dir }).appendPending({ op: op.name, gate: op.gate, timestamp: new Date(now).toISOString(), expiresAt: new Date(now + 3_600_000).toISOString(), planDigest: digest });
+    }
+    return { project, env, op };
+  }
+
+  const context = (w: Awaited<ReturnType<typeof waiting>>, answer: string, expected?: string) => {
+    let out = "";
+    let err = "";
+    const ran: string[][] = [];
+    const asked: string[] = [];
+    const c: OtherContext = {
+      project: w.project,
+      env: w.env,
+      expected,
+      ask: (q) => {
+        asked.push(q);
+        return Promise.resolve(answer);
+      },
+      io: { out: (t) => (out += t), err: (t) => (err += t) },
+      resuming: () => Promise.resolve(false),
+      signing: () => ({}),
+      run: (args) => {
+        ran.push([...args]);
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      },
+    };
+    return { c, ran, asked, text: () => ({ out, err }) };
+  };
+  const shown = (project: Project, env: Environment, io: Io) => {
+    io.out(`(the plan for ${env.name})\n`);
+    return Promise.resolve();
+  };
+  const digest = `jcs1-sha256:${"a".repeat(64)}`;
+
+  it("shows the plan, asks, and approves the digest the ApplyOp's gate waits on", async () => {
+    const w = await waiting(digest);
+    const t = context(w, "e2e");
+    expect(await approveDeclarative(t.c, undefined, shown)).toBe(0);
+    expect(t.text().out).toContain("(the plan for e2e)");
+    expect(t.text().out).toContain(`${w.op.name} is waiting at gate "${w.op.gate}" for approval of ${digest}`);
+    expect(t.asked[0]).toContain("Type e2e to approve");
+    expect(t.ran).toEqual([["approve", w.op.name, w.op.gate, "--plan", digest]]);
+    expect(t.text().out).toContain(`Approved ${digest} for ${w.op.name} / ${w.op.gate}`);
+  });
+
+  it("takes --plan when it is the plan that waits, and refuses another, naming the one that waits", async () => {
+    const w = await waiting(digest);
+    const same = context(w, "e2e", digest);
+    expect(await approveDeclarative(same.c, undefined, shown)).toBe(0);
+    expect(same.ran).toHaveLength(1);
+    const other = context(w, "e2e", "jcs1-sha256:other");
+    expect(await approveDeclarative(other.c, undefined, shown)).toBe(4);
+    expect(other.text().err).toContain(`--plan jcs1-sha256:other is not the plan waiting for e2e, which is ${digest}. Nothing was approved.`);
+    expect(other.ran).toEqual([]);
+  });
+
+  it("approves nothing on a wrong answer", async () => {
+    const w = await waiting(digest);
+    const t = context(w, "prod");
+    expect(await approveDeclarative(t.c, undefined, shown)).toBe(4);
+    expect(t.text().err).toContain("Not approved: the answer was not e2e.");
+    expect(t.ran).toEqual([]);
+  });
+
+  it("says there is nothing to approve when no run waits at the gate", async () => {
+    const w = await waiting();
+    const t = context(w, "e2e");
+    expect(await approveDeclarative(t.c, undefined, shown)).toBe(0);
+    expect(t.text().out).toMatch(/Nothing waits at apply-e2e \/ .*: there is nothing to approve/);
+    const meant = context(w, "e2e", digest);
+    expect(await approveDeclarative(meant.c, undefined, shown)).toBe(4);
+    expect(t.ran).toEqual([]);
+  });
+});
+
+describe("yodel approve <env> --plan for a plan the migrations Op stopped for (#202)", () => {
+  it("approves a revert or a baseline record waiting at the gate, by its digest", async () => {
+    const { dir, dispose } = projectFrom("lint-clickhouse");
+    try {
+      const project = await loadProject(dir);
+      const env = resolveEnvironment(project, "e2e");
+      const op = await findMigrateOp(project, env);
+      const digest = `jcs1-sha256:${"b".repeat(64)}`;
+      const now = Date.now();
+      await gitGateLedgerPort({ cwd: dir }).appendPending({ op: op.name, gate: op.gate, timestamp: new Date(now).toISOString(), expiresAt: new Date(now + 3_600_000).toISOString(), planDigest: digest });
+      const ran: string[][] = [];
+      let out = "";
+      const c: OtherContext = {
+        project, env, expected: digest, ask: () => Promise.resolve("e2e"), io: { out: (t) => (out += t), err: () => undefined },
+        resuming: () => Promise.resolve(false), signing: (mode) => (mode === "sealed" ? { sign: true } : {}),
+        run: (args) => {
+          ran.push([...args]);
+          return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+        },
+      };
+      expect(await approveOther(c)).toBe(0);
+      expect(ran).toEqual([["approve", op.name, op.gate, "--plan", digest]]);
+      expect(out).toContain(`${op.name} is waiting at gate "${op.gate}" for approval of ${digest}`);
+      expect(await approveOther({ ...c, expected: "jcs1-sha256:nothing" })).toBeUndefined();
+    } finally {
+      dispose();
+    }
   });
 });
 

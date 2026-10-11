@@ -57,7 +57,7 @@ describe("the versioned plan", () => {
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort() });
     const gate = await digestOf(venv, [m1, m2]);
     expect(plan.digest).toBe(gate);
-    expect(plan.approval).toEqual({ kind: "op", op: OP.name, gate: OP.gate, command: `chant approve migrate-e2e approve-migrate-e2e --plan ${gate}` });
+    expect(plan.approval).toEqual({ kind: "op", op: OP.name, gate: OP.gate, command: `yodel approve e2e --plan ${gate}`, chantCommand: `chant approve migrate-e2e approve-migrate-e2e --plan ${gate}` });
     expect(plan.pending.map((p) => p.id)).toEqual([m1.id, m2.id]);
     expect(plan.pending[0]?.steps.map((s) => s.step.kind)).toEqual(["statement", "statement"]);
     const carried = subjectIn(renderPlanMarkdown(plan));
