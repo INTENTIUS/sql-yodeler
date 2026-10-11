@@ -123,7 +123,7 @@ Each environment is a profile in `chant.config.ts`, with its own history. The st
 
 ## The pipelines: yodel ci
 
-`yodel ci` renders a project's pipelines for GitHub Actions, GitLab CI and Forgejo Actions from `chant.config.ts` (the environments), `yodel.config.ts` (`waves`, `ci`) and `ops/` (each environment's migrate and watch Ops), each declared with chant's lexicons: `yodel-pr` (lint, the replay check and the plan comment on a pull request), `yodel-apply` (the waves, after a push to main) and a `watch-<env>` per environment. The templates' `npm run ci` runs it.
+`yodel ci` renders a project's pipelines for GitHub Actions, GitLab CI and Forgejo Actions from `chant.config.ts` (the environments), `yodel.config.ts` (`waves`, `ci`) and `ops/` (each environment's migrate and watch Ops), each declared with chant's lexicons: `yodel-pr` (lint, the replay check and the plan comment on a pull request), `yodel-apply` (the waves, after a push to main) and a `watch-<env>` per environment. The templates' `npm run ci` runs it. [Setting up each forge](forges.md) has the secrets, tokens and runner each forge needs for them.
 
 `ci: { apply: false }` leaves out `yodel-apply` and `yodel-waves.json` on every forge, for a team that wants lint and the plan comment on pull requests before CI applies anything: [Lint and plan on pull requests only](lint-and-plan.md).
 

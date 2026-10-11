@@ -18,6 +18,7 @@ SQL Yodeler manages the schemas of ClickHouse and Postgres databases. You declar
 | [Access control](access.md) | Postgres row-level security, policies, roles and grants, and ClickHouse users, roles, row policies and grants: `access` per environment, what the schema owns and what the environment owns, the plan's access section, adopting them |
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Lint and plan on pull requests only](lint-and-plan.md) | `ci: { apply: false }`: lint, the replay check and the plan comment on every pull request with readers only, no apply pipeline, and turning apply on later |
+| [Setting up each forge](forges.md) | GitHub, GitLab and Forgejo side by side: the pipeline files, where the readers' and the writer's secrets go, the tokens for the plan comment, the drift watch and resuming, cloud roles over OIDC, runners and pull requests from forks |
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Reports and the audit log](audit.md) | `yodel report`: every environment's migrations side by side, the audit log derived from the history and the gate ledger, its gaps, `audit.jsonl` and the HTML run view |
 | [Schema from an ORM](orm.md) | `sources` in `yodel.config.ts`: tables an ORM defines, read from the DDL it prints, planned and applied with the rest |

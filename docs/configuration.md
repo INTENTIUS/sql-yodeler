@@ -161,11 +161,7 @@ On GitHub the step requests the job's OIDC token for the cloud's audience and wr
 | watch-`<env>` (schedule) | `<env>`'s reader |
 | wave `<env>` (push to main) | `<env>`'s writer (`YODEL_CREDENTIALS=writer:<env>`), and the reader of the environment it requires |
 
-The pipelines map only those, but a pull request can change a workflow, so where a secret is readable decides what a pull request could take:
-
-- GitHub: keep the readers as repository secrets and the writer's as environment secrets of the environment named after it (Settings > Environments > `<env>`), with deployment branches limited to `main`. Only the wave job names that environment. Pull requests from forks get no secrets at all.
-- GitLab: the readers unprotected and masked, with no environment scope; the writer's protected, masked and scoped to the environment `<env>`, so only a job on a protected branch that declares that environment gets them. `.gitlab-ci.yml` lists the variables in its header.
-- Forgejo: secrets belong to the repository, with no environment scope, so a workflow on any branch of the repository can name the writer's. Limit who can push branches to those trusted to apply, or take pull requests from forks, which get no secrets. A token source whose cloud role trusts only the runner that runs `main` closes the rest.
+The pipelines map only those, but a pull request can change a workflow, so where a secret is readable decides what a pull request could take. [Setting up each forge](forges.md) says where the readers' and the writer's secrets go on GitHub, GitLab and Forgejo so that only the wave job can read the writer's, and which tokens the jobs use.
 
 The database grants are the other half: the reader with SELECT (and on Postgres `default_transaction_read_only = on`; on ClickHouse `readonly = 1`), the writer with what the migrations need on the environment's schema or database and the history's. The write probe proves the first half on every pull request.
 

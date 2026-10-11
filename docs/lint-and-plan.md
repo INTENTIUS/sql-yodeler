@@ -25,7 +25,7 @@ This page is for a team that wants SQL Yodeler to review migrations in pull requ
 
 3. Render the pipelines with `npm run ci` (which runs `yodel ci`). With `apply: false` it writes `yodel-pr` and a `watch-<env>` per environment on each forge, and no `yodel-waves.json`, no `yodel-apply` or `yodel-apply-plans` workflow, and no `.gitlab/yodel-apply.gitlab-ci.yml`; `.gitlab-ci.yml` has no apply stages and does not include that file. A project made from a template already has those files: `yodel ci` does not delete them, so delete them yourself and commit the result. `yodel ci --check` then passes, because it no longer expects them.
 
-4. Add only the readers' secrets on the forge: for each environment, its URL and its reader (`DEV_CLICKHOUSE_URL`, `DEV_CLICKHOUSE_READER_USER`, `DEV_CLICKHOUSE_READER_PASSWORD` for `dev` on ClickHouse, `DEV_POSTGRES_...` on Postgres), and on GitLab `GITLAB_TOKEN`, a project access token with the `api` scope (Reporter) for the plan comment and the drift watch's issue. Where each one goes on each forge is in [Least privilege on each forge](configuration.md#least-privilege-on-each-forge). No writer's secret is needed.
+4. Add only the readers' secrets on the forge: for each environment, its URL and its reader (`DEV_CLICKHOUSE_URL`, `DEV_CLICKHOUSE_READER_USER`, `DEV_CLICKHOUSE_READER_PASSWORD` for `dev` on ClickHouse, `DEV_POSTGRES_...` on Postgres), and on GitLab `GITLAB_TOKEN`, a project access token with the `api` scope (Reporter) for the plan comment and the drift watch's issue. Where each one goes on each forge is in [Setting up each forge](forges.md). No writer's secret is needed.
 
 5. Open a pull request with a migration and read the plan comment: the pending migrations for each environment, what they would run, and the digest an approval would be bound to. [The pull request comment](approval.md#the-pull-request-comment) shows one.
 
@@ -44,6 +44,6 @@ Applying is left to you. `YODEL_CREDENTIALS=writer yodel apply <env>` from a mac
 
 1. Remove `apply: false` from `ci` in `yodel.config.ts`.
 2. Run `npm run ci` and commit what it writes: `yodel-waves.json` and the apply pipeline on each forge.
-3. Add the writers' secrets where [Least privilege on each forge](configuration.md#least-privilege-on-each-forge) says, so that only each environment's wave job can read them.
+3. Add the writers' secrets where [Setting up each forge](forges.md) says, so that only each environment's wave job can read them.
 
 The next push to main runs the apply waves, each waiting for its approval. [Approval](approval.md) covers the gates and the waves.

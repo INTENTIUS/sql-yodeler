@@ -117,6 +117,8 @@ The watch reports a declared object changed out of band or gone; an object `src/
 
 ## Setting up each forge
 
+The same steps, with every forge side by side, are at https://intentius.io/sql-yodeler/forges/.
+
 GitHub Actions:
 
 - Repository secrets: the readers' variables and the URLs.
