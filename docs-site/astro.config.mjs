@@ -27,12 +27,20 @@ export default defineConfig({
 			sidebar: sidebar(),
 			// The hat (scripts/brand.py draws it): the logo beside the title, the
 			// favicons, and the square 400 px hat a shared link shows.
-			logo: { src: './src/assets/brand/hat.svg', alt: '' },
+			logo: { src: './src/assets/brand/hat.png', alt: '' },
 			favicon: '/favicon.svg',
 			customCss: ['./src/styles/sql-yodeler.css'],
 			// The title gets a "Copy page as Markdown" button, an llms.txt pointer
-			// and, on a task page, its prompt for a coding agent. The footer adds the hat.
-			components: { PageTitle: './src/components/PageTitle.astro', Footer: './src/components/Footer.astro' },
+			// and, on a task page, its prompt for a coding agent. The footer adds the
+			// hat, the header a Docs link, and the theme starts dark.
+			components: {
+				PageTitle: './src/components/PageTitle.astro',
+				Footer: './src/components/Footer.astro',
+				SocialIcons: './src/components/SocialIcons.astro',
+				SiteTitle: './src/components/SiteTitle.astro',
+				ThemeProvider: './src/components/ThemeProvider.astro',
+				ThemeSelect: './src/components/ThemeSelect.astro',
+			},
 			// docs/schema-docs.md shows the examples' ERDs as <pre class="mermaid">;
 			// Mermaid, pinned, draws them in the browser.
 			head: [

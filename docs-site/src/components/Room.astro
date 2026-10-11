@@ -1,0 +1,324 @@
+---
+// One room of the site, from docs-site/rooms.mjs: the lede, then three cards
+// (what works, what differs on each database and forge, the first step), the
+// claims that prove it, and the pages to read next as tasks, background and
+// reference. pages.mjs writes each room's page as this component, with the
+// same content as Markdown (roomMarkdown) in its front matter for llms.txt and
+// "Copy page as Markdown", and checks the room's links and claims first.
+import { Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import { DIALECTS, FORGES, ROOMS } from '../../rooms.mjs';
+import record from '../../../scenarios/claims-record.json';
+
+interface Props {
+	id: string;
+}
+type Link = { label: string; href: string };
+type Row = { claim: string; dialect: string; says: string; plain: string; break: string; commit?: string; recorded: string };
+
+const r = ROOMS.find((x) => x.id === Astro.props.id)!;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** A line of rooms.mjs as HTML: `code` spans as <code>, the rest escaped. */
+const md = (t: string) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>');
+/** A room's link: a docs slug (with an anchor) as a site path, or a full address as it is. */
+const href = (h: string) => {
+	if (/^https:\/\//.test(h)) return h;
+	const [slug, anchor] = h.split('#');
+	return `${base}/${slug}/${anchor ? `#${anchor}` : ''}`;
+};
+const differs = r.differs as Record<string, string[]>;
+const dialectLines = DIALECTS.map((d) => ({ label: d.label, lines: [...d.differs, ...(differs[d.id] ?? [])] }));
+const forgeLines = FORGES.map((f) => ({ label: f.label, lines: [...f.differs, ...(differs[f.id] ?? [])] }));
+
+const first = r.first as { note?: string; lang?: string; command?: { any?: string; clickhouse?: string; postgres?: string }; link: Link };
+const lang = first.lang ?? 'sh';
+const cmd = first.command ?? {};
+const perDialect = !cmd.any && cmd.clickhouse && cmd.postgres && cmd.clickhouse !== cmd.postgres;
+const single = cmd.any ?? (perDialect ? undefined : (cmd.clickhouse ?? cmd.postgres));
+
+const rows = (record.rows as Row[]);
+const names: Record<string, string> = { ch: 'ClickHouse', pg: 'Postgres' };
+const claims = (r.claims as string[]).map((name) => {
+	const rs = rows.filter((x) => x.claim === name);
+	return {
+		name,
+		says: rs[0]?.says ?? '',
+		verdicts: rs.map((x) => ({ dialect: names[x.dialect] ?? x.dialect, ok: x.plain === 'pass' && x.break === 'caught', text: `${x.plain}, ${x.break}` })),
+	};
+});
+const read = [
+	['Tasks', r.tasks],
+	['Background', r.background],
+	['Reference', r.reference],
+] as [string, Link[]][];
+---
+<div class="sy-room not-content">
+	<p class="lede">{r.lede}</p>
+	<div class="cols">
+		<section>
+			<h2>Works</h2>
+			<ul>{(r.works as string[]).map((w) => <li set:html={md(w)} />)}</ul>
+		</section>
+		<section>
+			<h2>Differs</h2>
+			<h3>By database</h3>
+			<Tabs syncKey="dialect">
+				{dialectLines.map((d) => (
+					<TabItem label={d.label}>
+						<ul>{d.lines.map((l) => <li set:html={md(l)} />)}</ul>
+					</TabItem>
+				))}
+			</Tabs>
+			<h3>By forge</h3>
+			<Tabs syncKey="forge">
+				{forgeLines.map((f) => (
+					<TabItem label={f.label}>
+						<ul>{f.lines.map((l) => <li set:html={md(l)} />)}</ul>
+					</TabItem>
+				))}
+			</Tabs>
+		</section>
+		<section class="first">
+			<h2>First step</h2>
+			{first.note && <p set:html={md(first.note)} />}
+			{single && <Code code={single} lang={lang} />}
+			{perDialect && (
+				<Tabs syncKey="dialect">
+					{DIALECTS.map((d) => (
+						<TabItem label={d.label}>
+							<Code code={cmd[d.id as 'clickhouse' | 'postgres']!} lang={lang} />
+						</TabItem>
+					))}
+				</Tabs>
+			)}
+			<p><a class="go" href={href(first.link.href)}>{first.link.label}</a></p>
+		</section>
+	</div>
+	<section>
+		<h2>Proof</h2>
+		{claims.length ? (
+			<>
+				<p class="note">Each claim runs what this room relies on against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). <a href={`${base}/claims/`}>Claims status</a> lists every claim.</p>
+				<table>
+					<thead><tr><th>Claim</th><th>What it says</th><th>Plain, broken</th></tr></thead>
+					<tbody>
+						{claims.map((c) => (
+							<tr>
+								<td><code>{c.name}</code></td>
+								<td>{c.says}</td>
+								<td class="verdicts">{c.verdicts.length ? c.verdicts.map((v) => <span class:list={['verdict', { ok: v.ok }]}>{v.dialect}: {v.text}</span>) : 'not recorded'}</td>
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</>
+		) : (
+			<p class="note">No scenario claim runs what this room describes. <a href={`${base}/claims/`}>Claims status</a> lists every claim.</p>
+		)}
+	</section>
+	<section class="read">
+		<h2>Then read</h2>
+		<dl>
+			{read.filter(([, links]) => links.length).map(([label, links]) => (
+				<>
+					<dt>{label}</dt>
+					<dd>{links.map((l) => <a href={href(l.href)}>{l.label}</a>)}</dd>
+				</>
+			))}
+		</dl>
+	</section>
+</div>
+
+<style>
+	.sy-room {
+		display: grid;
+		gap: 2.25rem;
+		font-size: var(--sl-text-sm);
+		line-height: 1.6;
+		color: var(--sl-color-gray-2);
+	}
+	.lede {
+		margin: 0;
+		font-size: var(--sl-text-base);
+		color: var(--sl-color-gray-3);
+	}
+	.cols {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+		gap: 0.75rem;
+	}
+	.cols section {
+		min-width: 0;
+		padding: 1rem 1.15rem;
+		border: 1px solid var(--sy-rule);
+		border-top: 1px solid var(--sy-brass);
+		border-radius: 0.6rem;
+		background: var(--sy-panel);
+	}
+	h2 {
+		margin: 0 0 0.7rem;
+		font-size: 0.68rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--sl-color-gray-3);
+	}
+	h3 {
+		margin: 0.9rem 0 0.2rem;
+		font-size: var(--sl-text-xs);
+		font-weight: 600;
+		color: var(--sl-color-gray-2);
+	}
+	h3:first-of-type {
+		margin-top: 0;
+	}
+	ul {
+		display: grid;
+		gap: 0.45rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	li {
+		position: relative;
+		margin: 0;
+		padding-left: 1.75rem;
+		color: var(--sl-color-white);
+	}
+	li::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 0.1em;
+		width: 20px;
+		height: 18px;
+		background: var(--sy-hat) center / contain no-repeat;
+	}
+	p {
+		margin: 0 0 0.7rem;
+	}
+	.note {
+		color: var(--sl-color-gray-3);
+	}
+	:global(.sy-room code) {
+		font-size: 0.85em;
+		padding: 0.05em 0.3em;
+		border: 1px solid var(--sy-rule);
+		border-radius: 0.3rem;
+		background: var(--sl-color-gray-6);
+	}
+	.cols :global(starlight-tabs) {
+		font-size: var(--sl-text-sm);
+	}
+	.cols :global(starlight-tabs [role='tablist']) {
+		margin-bottom: 0.6rem;
+	}
+	.cols :global(.expressive-code) {
+		margin-bottom: 0.8rem;
+	}
+	a {
+		color: var(--sy-accent);
+		text-decoration: none;
+	}
+	a:hover {
+		text-decoration: underline;
+		text-decoration-color: var(--sy-brass);
+		text-underline-offset: 0.2em;
+	}
+	.go {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.95rem;
+		font-weight: 600;
+		color: var(--sl-color-black);
+		background: var(--sy-accent);
+		border-radius: 0.5rem;
+	}
+	.go::after {
+		content: '\2192';
+	}
+	.go:hover {
+		text-decoration: none;
+		filter: brightness(1.1);
+	}
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.85rem;
+	}
+	th,
+	td {
+		padding: 0.6rem 0.9rem 0.6rem 0;
+		text-align: left;
+		vertical-align: top;
+		border-bottom: 1px solid var(--sy-rule);
+	}
+	th {
+		font-size: 0.68rem;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+		border-bottom-color: var(--sy-brass);
+	}
+	td:first-child code {
+		white-space: nowrap;
+	}
+	.verdicts {
+		display: grid;
+		gap: 0.2rem;
+		white-space: nowrap;
+	}
+	.verdict {
+		font-family: var(--sl-font-mono);
+		font-size: 0.75rem;
+		color: var(--sy-warn);
+	}
+	.verdict.ok {
+		color: var(--sl-color-gray-2);
+	}
+	dl {
+		display: grid;
+		grid-template-columns: 7rem 1fr;
+		gap: 0.75rem 1.25rem;
+		margin: 0;
+	}
+	dt {
+		font-size: 0.68rem;
+		font-weight: 600;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+		padding-top: 0.3rem;
+	}
+	dd {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin: 0;
+	}
+	dd a {
+		padding: 0.2rem 0.65rem;
+		white-space: nowrap;
+		color: var(--sl-color-white);
+		border: 1px solid var(--sy-rule);
+		border-radius: 999px;
+	}
+	dd a:hover {
+		text-decoration: none;
+		border-color: var(--sy-brass);
+	}
+	@media (max-width: 40rem) {
+		dl {
+			grid-template-columns: 1fr;
+			gap: 0.4rem;
+		}
+		dd {
+			margin-bottom: 0.6rem;
+		}
+		.verdicts {
+			white-space: normal;
+		}
+	}
+</style>

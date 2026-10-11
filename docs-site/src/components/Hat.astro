@@ -1,39 +1,23 @@
 ---
-// SQL Yodeler's logo, the pixel-art cowboy hat with a database on it. `scale`
-// shows the 78x72 art (an SVG with a square per art pixel) at a whole
-// multiple, so every art pixel stays square and sharp; `small` is the 18x16
-// mark for inline use, a PNG at twice that size resampled once from the art.
+// SQL Yodeler's logo, the cowboy hat with a database on it. `size` is its
+// height on the page in CSS pixels (the width follows the art's 728:672);
+// `small` is the 22x20 mark for inline use. Each file is drawn at twice the
+// size it is shown, resampled once from the render (scripts/brand.py).
 // Decorative by default (alt=""), since a word beside it names SQL Yodeler.
-// The art is transparent, so the hat sits on whatever is behind it.
-// scripts/brand.py draws both files.
 interface Props {
-	scale?: number | 'small';
+	size?: number | 'small';
 	alt?: string;
 	class?: string;
 }
-const { scale = 1, alt = '', class: className } = Astro.props;
+const { size = 36, alt = '', class: className } = Astro.props;
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const small = scale === 'small';
-const n = small ? 1 : scale;
+const small = size === 'small';
+const h = small ? 20 : size;
+const w = small ? 22 : Math.round((h * 728) / 672);
 ---
-<span class:list={['sy-hat-tile', className]} style={`padding:${small ? 2 : 4 * n}px ${small ? 3 : 4 * n}px;border-radius:${small ? 5 : 6 * n}px`}><img
-	class="sy-hat"
-	src={small ? `${base}/brand/hat-small.png` : `${base}/brand/hat.svg`}
-	width={small ? 18 : 78 * n}
-	height={small ? 16 : 72 * n}
-	alt={alt}
-	decoding="async"
-/></span>
+<img class:list={['sy-hat', className]} src={small ? `${base}/brand/hat-small.png` : `${base}/brand/hat.png`} width={w} height={h} alt={alt} decoding="async" />
 
 <style>
-	/* The span keeps the hat's padding and centering; the art itself is transparent. */
-	.sy-hat-tile {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		vertical-align: middle;
-		line-height: 0;
-	}
 	.sy-hat {
 		display: inline-block;
 		max-width: none;
