@@ -212,7 +212,7 @@ export function forgejoForge(): Forge {
     name: "Forgejo",
     jobUrl: (d) => (d === "ch" ? (process.env.YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL ?? "http://clickhouse:8123") : (process.env.YODEL_CLAIMS_FORGEJO_POSTGRES_URL ?? "postgres://pgdb:5432/postgres")),
     async repo(ctx, name, secrets): Promise<ForgeRepo> {
-      if (!forgejo.password) throw new Error("YODEL_CLAIMS_FORGEJO_PASSWORD is not set; the template claim needs the local Forgejo");
+      if (!forgejo.password) throw new Error("YODEL_CLAIMS_FORGEJO_PASSWORD is not set; the forgejo claim needs the local Forgejo");
       const repo = `${forgejo.user}/${name}`;
       await api("DELETE", `/repos/${repo}`);
       const made = await api("POST", "/user/repos", { name, private: false, auto_init: false });

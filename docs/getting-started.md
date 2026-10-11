@@ -1,5 +1,5 @@
 ---
-claims: [new, lint, approval, drift]
+claims: [migrations, approval, declarative]
 type: tutorial
 ---
 

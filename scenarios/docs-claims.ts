@@ -3,7 +3,7 @@
  * matter naming the scenario claims that prove what it describes:
  *
  *   ---
- *   claims: [approval, pr-comment]
+ *   claims: [approval, waves]
  *   ---
  *
  * (an empty list is allowed, and says the page makes no claim a scenario

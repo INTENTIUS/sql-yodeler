@@ -1,5 +1,5 @@
 ---
-claims: [template, template-github, template-gitlab]
+claims: [forgejo, github, gitlab]
 type: howto
 draft: true
 ---

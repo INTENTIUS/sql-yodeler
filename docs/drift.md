@@ -1,5 +1,5 @@
 ---
-claims: [drift]
+claims: [declarative]
 type: concepts
 ---
 

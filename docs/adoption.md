@@ -1,5 +1,5 @@
 ---
-claims: [adopt, new]
+claims: [declarative, migrations]
 type: howto
 ---
 

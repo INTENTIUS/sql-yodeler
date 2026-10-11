@@ -117,7 +117,7 @@ export const ROOMS = [
 			command: { clickhouse: template(clickhouse), postgres: template(postgres) },
 			link: { label: 'Your first migration', href: 'getting-started' },
 		},
-		claims: ['new', 'lint', 'approval', 'drift'],
+		claims: ['migrations', 'approval', 'declarative'],
 		tasks: [
 			{ label: 'Your first migration', href: 'getting-started' },
 			{ label: 'Setting up each forge', href: 'forges' },
@@ -149,7 +149,7 @@ export const ROOMS = [
 			command: { any: 'YODEL_CREDENTIALS=writer npx yodel init --from <env> --force' },
 			link: { label: 'Adopting an existing database', href: 'adoption#adopting-an-existing-database-yodel-init-from' },
 		},
-		claims: ['adopt'],
+		claims: ['declarative'],
 		tasks: [
 			{ label: 'Starting a project', href: 'adoption' },
 			{ label: 'Setting up each forge', href: 'forges' },
@@ -179,7 +179,7 @@ export const ROOMS = [
 			command: { any: 'npm run ci' },
 			link: { label: 'Lint and plan on pull requests only', href: 'lint-and-plan' },
 		},
-		claims: ['lint', 'pr-comment'],
+		claims: ['migrations', 'approval'],
 		tasks: [
 			{ label: 'Lint and plan on pull requests only', href: 'lint-and-plan' },
 			{ label: 'Setting up each forge', href: 'forges' },
@@ -209,7 +209,7 @@ export const ROOMS = [
 			command: { any: 'YODEL_CREDENTIALS=writer npx yodel init --from <env> --force' },
 			link: { label: 'Coming from another migration tool', href: 'from-other-tools' },
 		},
-		claims: ['adopt', 'resume', 'out-of-order'],
+		claims: ['declarative', 'resume', 'migrations'],
 		tasks: [
 			{ label: 'Coming from another migration tool', href: 'from-other-tools' },
 			{ label: 'Cutting CI over', href: 'from-other-tools#cutting-ci-over' },
@@ -239,7 +239,7 @@ export const ROOMS = [
 			command: { any: 'npm run ci' },
 			link: { label: 'The pipelines: yodel ci', href: 'workflows#the-pipelines-yodel-ci' },
 		},
-		claims: ['waves', 'template'],
+		claims: ['waves', 'forgejo'],
 		tasks: [
 			{ label: 'Setting up each forge', href: 'forges' },
 			{ label: 'Lint and plan on pull requests only', href: 'lint-and-plan' },
@@ -332,7 +332,7 @@ export const ROOMS = [
 			command: { clickhouse: template(clickhouse), postgres: template(postgres) },
 			link: { label: 'Your first migration', href: 'getting-started' },
 		},
-		claims: ['new', 'template', 'template-github'],
+		claims: ['migrations', 'forgejo', 'github'],
 		tasks: [
 			{ label: 'Your first migration', href: 'getting-started' },
 		],

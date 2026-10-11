@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
-import { parse, Project } from "../lib/project.js";
-import { accessOnServer, manageAccess, reader } from "../lib/access.js";
-import { chAccessOnServer, chNames } from "../lib/clickhouse-objects.js";
-import { secondServer, type SecondServer } from "../lib/second-server.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
+import { parse, Project } from "../../lib/project.js";
+import { accessOnServer, manageAccess, reader } from "../../lib/access.js";
+import { chAccessOnServer, chNames } from "../../lib/clickhouse-objects.js";
+import { secondServer, type SecondServer } from "../../lib/second-server.js";
 
 /** The database a team already has, made by hand: no ownership markers, and data. `exec` runs SQL on the server it is made on (default the claim's). */
 async function handMade(claim: Ctx, exec?: (sql: string) => Promise<void>): Promise<void> {

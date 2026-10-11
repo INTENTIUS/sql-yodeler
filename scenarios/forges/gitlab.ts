@@ -1,5 +1,5 @@
 /**
- * The template-gitlab claim's forge: a local GitLab CE (terragucci's GitLab
+ * The gitlab claim's forge: a local GitLab CE (terragucci's GitLab
  * lab answers at http://localhost:8959, as `http://gitlab:8929` on the
  * Docker network `tglab`). Each run makes its own project, with shared
  * runners off, and its own project runner (./gitlab.compose.ts) on that
@@ -86,7 +86,7 @@ export function gitlabForge(): Forge {
     name: "GitLab",
     jobUrl: (d) => (d === "ch" ? (process.env.YODEL_CLAIMS_GITLAB_CLICKHOUSE_URL ?? fromJob(endpoints.clickhouse)) : (process.env.YODEL_CLAIMS_GITLAB_POSTGRES_URL ?? fromJob(endpoints.postgres))),
     async repo(ctx: Ctx, name, secrets): Promise<ForgeRepo> {
-      if (!gitlab.token) throw new Error("YODEL_CLAIMS_GITLAB_TOKEN is not set; the template-gitlab claim needs a local GitLab");
+      if (!gitlab.token) throw new Error("YODEL_CLAIMS_GITLAB_TOKEN is not set; the gitlab claim needs a local GitLab");
       const me = await must<{ username: string }>("GET", "/user");
       // A project per run: deleting one is asynchronous and holds its path a while.
       const path = `${name}-${Date.now().toString(36)}`;

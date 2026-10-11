@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stampedComment } from "@intentius/chant-lexicon-sql/core/ownership";
-import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
-import { run } from "../lib/exec.js";
-import { Project } from "../lib/project.js";
-import { insertEvents } from "../lib/schema.js";
+import { hold, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { run } from "../../lib/exec.js";
+import { Project } from "../../lib/project.js";
+import { insertEvents } from "../../lib/schema.js";
 
 /** A project whose events table holds 30 rows. */
 async function withRows(ctx: Ctx): Promise<Project> {

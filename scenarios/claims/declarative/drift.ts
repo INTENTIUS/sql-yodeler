@@ -1,6 +1,6 @@
-import { hold, partNames, runParts, type Claim, type Ctx } from "../lib/claim.js";
-import { parse, Project } from "../lib/project.js";
-import { addColumn, mainTable } from "../lib/schema.js";
+import { hold, partNames, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { parse, Project } from "../../lib/project.js";
+import { addColumn, mainTable } from "../../lib/schema.js";
 import { declared } from "./declarative.js";
 
 interface DriftDoc {

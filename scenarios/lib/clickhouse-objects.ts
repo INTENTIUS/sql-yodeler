@@ -1,7 +1,7 @@
 /**
  * ClickHouse dictionaries, SQL functions and access control in a claim
  * (#46): the declarations the declarative claim adds to the fixture, what
- * the adopt claim makes by hand, and what the server is asked about them.
+ * the declarative claim's adopt part makes by hand, and what the server is asked about them.
  *
  * Every object that belongs to no database (a function, a user, a role) is
  * named `<database>__<name>`, so the plain and the broken run each have

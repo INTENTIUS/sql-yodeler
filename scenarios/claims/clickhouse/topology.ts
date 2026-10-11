@@ -1,8 +1,8 @@
 import { clickhouseQuery, type ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
-import { startKeeperCluster, CLUSTER, SHARDED_CLUSTER, type KeeperCluster } from "../../test/e2e/keeper-cluster.js";
-import { hold, runParts, type Claim, type Ctx } from "../lib/claim.js";
-import { endpoints } from "../lib/db.js";
-import { parse, Project } from "../lib/project.js";
+import { startKeeperCluster, CLUSTER, SHARDED_CLUSTER, type KeeperCluster } from "../../../test/e2e/keeper-cluster.js";
+import { hold, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { endpoints } from "../../lib/db.js";
+import { parse, Project } from "../../lib/project.js";
 
 const op = (env: string) => `import { Op, phase, gate, shell, stepOutput } from "@intentius/chant/op";
 

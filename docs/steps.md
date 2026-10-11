@@ -1,5 +1,5 @@
 ---
-claims: [rebuild, resume, column-change]
+claims: [clickhouse, resume]
 type: concepts
 ---
 

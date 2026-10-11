@@ -1,5 +1,5 @@
 /**
- * The template-github claim's forge. GitHub has no edition to run locally,
+ * The github claim's forge. GitHub has no edition to run locally,
  * so, as terragucci's github profile does, the forge is a mock GitHub
  * (./mock-github.ts: repositories, pull requests, comments, git over HTTP),
  * started per run as a Compose project declared in ./github.compose.ts, and
