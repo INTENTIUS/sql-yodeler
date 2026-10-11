@@ -9,14 +9,13 @@ This page takes you from an empty directory to two migrations applied to a Click
 
 ## What chant is
 
-SQL Yodeler is built on [chant](https://intentius.io/chant/) (`@intentius/chant` on npm), a declarative infrastructure-as-code toolkit in TypeScript. You declare your schema with chant's `sql` lexicon, and the `yodel` CLI does the rest. You need chant's own CLI for two things only:
+SQL Yodeler is built on [chant](https://intentius.io/chant/) (`@intentius/chant` on npm), a declarative infrastructure-as-code toolkit in TypeScript. You declare your schema with chant's `sql` lexicon, and the `yodel` CLI does the rest, running chant's CLI underneath where it needs it:
 
-- `chant init --from ...` makes a new project from a template.
-- `chant emulator up --lexicon sql` starts a local ClickHouse and Postgres in Docker.
+- `yodel create` makes a new project from a template.
+- `yodel emulator up` starts a local ClickHouse and Postgres in Docker.
+- `yodel approve <env>` approves a plan before `yodel apply` runs it: it shows the plan, asks you to type the environment's name, and records the approval for you.
 
-You approve a plan before `yodel apply` runs it with `yodel approve <env>`: it shows the plan, asks you to type the environment's name, and records chant's approval (`chant approve`) for you. A script has no terminal to ask, so it runs the `chant approve ...` command that `yodel apply` prints, which records the same approval.
-
-The chant CLI is the npm package `@intentius/chant`. Before your project exists, run it as `npx @intentius/chant@latest` (with `@latest`, npx does not reuse an older copy it cached). Inside the project, `npm install` puts the version the project pins in `node_modules`, so `npx chant` works there. (Plain `npx chant` outside a project runs an unrelated package with the same name.)
+Before your project exists, run yodel as `npx @intentius/sql-yodeler@latest` (with `@latest`, npx does not reuse an older copy it cached). Inside the project, `npm install` puts the version the project pins in `node_modules`, so `npx yodel` works there.
 
 ## 1. Make the project
 
@@ -24,12 +23,12 @@ The chant CLI is the npm package `@intentius/chant`. Before your project exists,
 #### ClickHouse
 
 ```sh
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
+npx @intentius/sql-yodeler@latest create my-schema --clickhouse --database events --name events-schema
 cd my-schema
 npm install
 ```
 
-`database=events` is the ClickHouse database your schema lives in. The template declares one table in it, in `src/schema.ts`. This declaration is what the database should be; every migration below is worked out from it ([Declaring the schema](schema.md) has the form):
+`--database events` is the ClickHouse database your schema lives in, and `--name` the package name (the directory's name when left out). The template declares one table in it, in `src/schema.ts`. This declaration is what the database should be; every migration below is worked out from it ([Declaring the schema](schema.md) has the form):
 
 ```ts
 export const db = database`
@@ -51,12 +50,12 @@ export const events = table`
 #### Postgres
 
 ```sh
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
+npx @intentius/sql-yodeler@latest create my-schema --postgres --schema app --name app-schema
 cd my-schema
 npm install
 ```
 
-`schema=app` is the Postgres schema your objects live in. The template declares a table and an index in it, in `src/schema.ts`. This declaration is what the database should be; every migration below is worked out from it ([Declaring the schema](schema.md) has the form):
+`--schema app` is the Postgres schema your objects live in. The template declares a table and an index in it, in `src/schema.ts`. This declaration is what the database should be; every migration below is worked out from it ([Declaring the schema](schema.md) has the form):
 
 ```ts
 export const app = schema`
@@ -86,10 +85,10 @@ git add -A && git commit -m "chore: a new yodel project"
 ## 2. Start a local database
 
 ```sh
-npx chant emulator up --lexicon sql
+npx yodel emulator up
 ```
 
-This starts ClickHouse on `http://127.0.0.1:8123` (user `default`, no password) and Postgres on `127.0.0.1:5432` (user `postgres`, password `chant`), in Docker.
+This starts ClickHouse on `http://127.0.0.1:8123` (user `default`, no password) and Postgres on `127.0.0.1:5432` (user `postgres`, password `chant`), in Docker, and prints both. `npx yodel emulator status` says whether they run, and `npx yodel emulator down` stops them.
 
 ## 3. Point the dev environment at it
 
@@ -147,7 +146,7 @@ If a Postgres of your own already listens on `127.0.0.1:5432` (Homebrew's, for e
 
 ## 4. Write the first migration
 
-The output on the rest of this page is from a run of the ClickHouse template; on Postgres the commands are the same.
+The output on the rest of this page is from a run of the ClickHouse template; on Postgres the commands are the same. It was recorded before yodel printed `yodel approve` in its messages, so where an approval is asked for, the output shows chant's `chant approve` command, and the run approves with it, having no terminal to ask; you run `npx yodel approve dev`, which records the same approval.
 
 `yodel new` writes the next migration from the change in `src/` since the last one. The first one creates everything. `yodel lint` checks the migrations offline:
 
@@ -201,7 +200,7 @@ or, at a terminal, with npx yodel approve dev, which shows the plan and asks you
 Not approved yet. Approving binds exactly this digest; if anything it covers changes before the apply runs, the gate asks again and nothing is applied.
 ```
 
-The plan prints two approve commands. The first, for `yodel-apply`, is for the CI pipeline's wave job after a merge, and you need it only once the project has a remote and CI. The second, for `migrate-dev`, is the one `yodel apply dev` waits for on your machine.
+The plan prints two approvals. The first, of the apply pipeline's wave, is for the CI pipeline's wave job after a merge, and you need it only once the project has a remote and CI. The second, of `migrate-dev`, is the one `yodel apply dev` waits for on your machine.
 
 `yodel apply` runs only a plan someone approved. The first run stops at the approval and prints the command that gives it (exit 3):
 
@@ -240,7 +239,7 @@ then run YODEL_CREDENTIALS=writer:dev npx yodel apply dev again.
 
 The note about a remote is expected: approvals live on a `chant/lifecycle` branch, and this repository has no remote to push it to.
 
-To approve, run `npx yodel approve dev`: it shows the plan and asks you to type `dev`. Or run the printed `chant approve ...` command as `npx chant approve ...`, or let `yodel apply dev --digest` fill in the digest, as here, where no terminal was there to ask. The approval holds for this exact plan only. Then run `yodel apply` again:
+To approve, run `npx yodel approve dev`: it shows the plan and asks you to type `dev`. The command `yodel apply` prints adds the digest, `npx yodel approve dev --plan <digest>`, so it approves only the plan you were shown. The run below had no terminal to ask, so it recorded the same approval with chant's command. The approval holds for this exact plan only. Then run `yodel apply` again:
 
 <!-- quote: getting-started#approve -->
 ```console
@@ -401,8 +400,8 @@ Each template has a `justfile` for these steps. [just](https://github.com/casey/
 
 | just | Runs |
 |---|---|
-| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator, makes the read-only user `reader` there (the statements in step 3), and prints the reader and writer lines for a `.env` file |
-| `just down` | `npx @intentius/chant emulator down --lexicon sql` |
+| `just up` | `npx yodel emulator up`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator, makes the read-only user `reader` there (the statements in step 3), and prints the reader and writer lines for a `.env` file |
+| `just down` | `npx yodel emulator down` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |
 | `just replay` | `npm run replay`: every migration replayed into a throwaway server and compared with its recorded schema |

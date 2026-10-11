@@ -18,6 +18,7 @@
     "migrations": { "type": "array", "items": { "type": "string" }, "description": "The pending migrations, for apply and plan." },
     "digest": { "type": "string", "description": "The plan digest the run computed." },
     "approve": { "type": "string", "description": "On waiting: the command that approves the plan." },
+    "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
     "reason": { "type": "string" },
     "drift": {
       "type": "object",

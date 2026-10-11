@@ -5,20 +5,21 @@ type: reference
 
 # The commands
 
-A SQL Yodeler project meets three command-line tools: `yodel`, chant's CLI, and the `just` targets the starter templates add. This page says which one does what, then lists `yodel`'s commands, its exit codes and the JSON Schemas of its `--json` output.
+Everything a SQL Yodeler project needs is a `yodel` command, and the starter templates add `just` targets that wrap them. This page says which one does what, then lists `yodel`'s commands, its exit codes and the JSON Schemas of its `--json` output.
 
 ## Which command runs what
 
 | Command | What it is for |
 |---|---|
-| `yodel` | everything about the schema and the migrations: `plan`, `new`, `lint`, `apply`, `approve`, `status`, `drift`, `report`, `ci` and the rest of the commands `yodel --help` lists below. Inside a project, run it as `npx yodel`. |
-| `npx @intentius/chant@latest init --from ...` | once, to make the project from a starter template ([Your first migration](getting-started.md#1-make-the-project)). |
-| `npx chant emulator up --lexicon sql` | a local ClickHouse and Postgres in Docker, for development. |
-| `chant approve` | records an approval of a plan digest. `yodel approve <env>` records the same approval for you at a terminal; `chant approve <op> <gate> --plan <digest>` is the form a script uses ([Approval](approval.md)). |
-| `chant run` | runs an Op. `yodel apply` runs the migrations Op itself, so you need `chant run` only to run an Op directly, as CI may. |
+| `npx @intentius/sql-yodeler create <dir> --clickhouse` (or `--postgres`) | once, to make the project from SQL Yodeler's template, the one released with that yodel ([Your first migration](getting-started.md#1-make-the-project)). |
+| `yodel emulator up` | a local ClickHouse and Postgres in Docker, for development; `yodel emulator status` and `yodel emulator down` check and stop them. |
+| `yodel` | everything about the schema and the migrations: `plan`, `new`, `lint`, `apply`, `status`, `drift`, `report`, `ci` and the rest of the commands `yodel --help` lists below. Inside a project, run it as `npx yodel`. |
+| `yodel approve <env>` | a person's approval of the plan `yodel apply` would run, at a terminal: it shows the plan and asks you to type the environment's name. Every message that asks for an approval prints it with the digest, `yodel approve <env> --plan <digest>` ([Approval](approval.md)). |
 | the template's `just` targets | optional shortcuts that print the command they run; [the table in Your first migration](getting-started.md#the-same-steps-with-just) lists them. |
 | `yodel mcp` | read-only tools for a coding agent, over MCP ([Set up with a coding agent](agents.md#read-only-tools-yodel-mcp)). |
 | the JSON Schemas | for anything that parses `yodel`'s output: [JSON output](#json-output). |
+
+yodel runs [chant](https://intentius.io/chant/)'s CLI underneath (`chant init`, `chant emulator`, `chant run`, `chant approve`), so you never need to; [chant's CLI reference](https://intentius.io/chant/cli/overview/) is there for the curious.
 
 ## yodel --help
 
@@ -29,7 +30,9 @@ Usage: yodel <command> [options]
 Schema management and migrations for ClickHouse and Postgres.
 
 Commands:
+  create      make a new project from SQL Yodeler's template
   init        adopt a live database, or record its baseline in another env
+  emulator    start, stop or check the local ClickHouse and Postgres (Docker)
   plan        show what apply would change in an environment
   apply       bring an environment to its declared schema or pending migrations
   approve     approve the plan yodel apply would run (a person at a terminal)
@@ -107,4 +110,4 @@ With `--json`, a command prints one JSON document on stdout. Each document has a
 | `yodel repair <env> <id> --reason <text> --json` | [`repair`](https://intentius.io/sql-yodeler/schemas/v1/repair.schema.json) |
 | `yodel cleanup <env> --json` | [`cleanup`](https://intentius.io/sql-yodeler/schemas/v1/cleanup.schema.json) |
 
-The version is in each schema's `$id` (`v1`). Within a version, fields are only added, so a reader ignores fields it does not know; removing a field or changing what one means is a new version. The exit code is the same with or without `--json`. `yodel mcp` serves the read-only commands to a coding agent, with these schemas: [Set up with a coding agent](agents.md#read-only-tools-yodel-mcp).
+Where a document asks for an approval, `approve` is the command a person runs, `yodel approve <env> --plan <digest>`, and `chantApprove` is chant's own command for the same approval, for a script that records approvals itself. The version is in each schema's `$id` (`v1`). Within a version, fields are only added, so a reader ignores fields it does not know; removing a field or changing what one means is a new version. The exit code is the same with or without `--json`. `yodel mcp` serves the read-only commands to a coding agent, with these schemas: [Set up with a coding agent](agents.md#read-only-tools-yodel-mcp).

@@ -40,7 +40,7 @@ import { WAVES_PIPELINE, type WaveRecord } from "./record.js";
 import { enforcePromotion, promotionEvidence, readPromotions, requiredEnvironments, type Promotion } from "./promotion.js";
 import { baseEnvironment, splitTarget } from "../tenants/target.js";
 import { heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
-import { describeApprovalMode, portFor, signFlag, waveApproval, type ApprovalMode } from "../approval-mode/index.js";
+import { approveCommand, describeApprovalMode, portFor, signFlag, waveApproval, type ApprovalMode } from "../approval-mode/index.js";
 
 export * from "./promotion.js";
 export * from "./record.js";
@@ -318,7 +318,7 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
     } catch {
       throw new YodelError(
         `refused: ${env}'s before step${held.length === 1 ? "" : "s"} ${held.join(", ")} failed with onFailure approve, so wave ${String(k)} (${name}) waits for a person under any gate. Nothing was applied. ` +
-          `Approve it with: chant approve ${spec.name} ${decision.gate} --plan ${decision.digest}${signFlag(policy.approval)}`,
+          `Approve it at a terminal with: ${approveCommand(baseEnvironment(env), decision.digest, policy.approval)}`,
         NOT_APPROVED,
       );
     }
@@ -354,8 +354,8 @@ export interface WaveForecast {
   base: string;
   /** No approval of `digest` stands and the policy asks for one: chant exits 3. */
   waits: boolean;
-  /** `chant approve <op> <gate> --plan <digest>`, with `--sign` when the wave is sealed. */
-  approve: string;
+  /** `chant approve <op> <gate> --plan <digest>`, with `--sign` when the wave is sealed: for scripts; a person runs `yodel approve` (#202). */
+  chantApprove: string;
   /** Which approvals count (#48), read at the base with the policy. */
   approval: ApprovalMode;
 }
@@ -402,7 +402,7 @@ export async function forecastWave(cwd: string, specFile: string, plan: Pick<Wav
       // No approval of this digest that counts: chant waits (under pr-review, unless the merged pull request's review approves it).
     }
   }
-  return { wave: k, name, gate, digest, policy: policy.policy, base: policy.base, waits, approve: `chant approve ${spec.name} ${gate} --plan ${digest}${signFlag(policy.approval)}`, approval: policy.approval };
+  return { wave: k, name, gate, digest, policy: policy.policy, base: policy.base, waits, chantApprove: `chant approve ${spec.name} ${gate} --plan ${digest}${signFlag(policy.approval)}`, approval: policy.approval };
 }
 
 /** Reads a plan file `--wave-plan` wrote. */
@@ -426,8 +426,10 @@ export interface WaveView {
   /** The wave plan digest and the set digest the wave's gate binds. */
   planDigest: string;
   digest: string;
-  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, with `--sign` when the wave is sealed. */
+  /** `yodel approve <env> --plan <digest>`, with `--sign` when the wave is sealed: what a person runs (#202). */
   approve: string;
+  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, the same approval, for scripts. */
+  chantApprove: string;
   /** Which approvals of the digest count (#48), as the base commit's yodel.config.ts has the wave; absent, `ledger`. */
   approval?: ApprovalMode | undefined;
   /** What each required environment's history records of the pending migrations. */
@@ -466,7 +468,8 @@ export async function waveView(project: Project, env: string, ordered: readonly 
     waits,
     planDigest,
     digest,
-    approve: `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${digest}${signFlag(approval)}`,
+    approve: approveCommand(env, digest, approval),
+    chantApprove: `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${digest}${signFlag(approval)}`,
     ...(approval !== "ledger" ? { approval } : {}),
     promotions,
     blocked,

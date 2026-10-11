@@ -5,8 +5,10 @@ import { config } from "./config.js";
 import { approve } from "./approve.js";
 import { checkpoint } from "./checkpoint.js";
 import { cleanup } from "./cleanup.js";
+import { create } from "./create.js";
 import { docs } from "./docs.js";
 import { drift } from "./drift.js";
+import { emulator } from "./emulator.js";
 import { init } from "./init.js";
 import { lint } from "./lint.js";
 import { mcp } from "./mcp.js";
@@ -22,7 +24,9 @@ import { test } from "./test.js";
 
 /** Every verb, in the order `yodel --help` lists them. */
 export const commands: readonly Command[] = [
+  create,
   init,
+  emulator,
   plan,
   apply,
   approve,

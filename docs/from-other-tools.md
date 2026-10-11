@@ -43,15 +43,15 @@ Adoption keeps the database as it is. The migrations the old tool ran are not im
 
 ### The project
 
-`yodel init` needs a project around it: `chant.config.ts` with a profile for the environment, `yodel.config.ts`, a migrations Op, and a `package.json` from which chant and the `sql` lexicon resolve. It does not write these. The quickest way to get them is a starter template, with the parameter set to the database (ClickHouse) or schema (Postgres) you already have:
+`yodel init` needs a project around it: `chant.config.ts` with a profile for the environment, `yodel.config.ts`, a migrations Op, and a `package.json` from which chant and the `sql` lexicon resolve. It does not write these. The quickest way to get them is a starter template, made with `yodel create` and the database (ClickHouse) or schema (Postgres) you already have:
 
 ```sh
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events events-schema
-npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app app-schema
+npx @intentius/sql-yodeler@latest create events-schema --clickhouse --database events
+npx @intentius/sql-yodeler@latest create app-schema --postgres --schema app
 cd app-schema && npm install
 ```
 
-The history goes in its own database or schema (`--param history_database=...` on ClickHouse, `--param history_schema=...` on Postgres, `yodeler` by default); it must not be one of the project's. When the project owns more than one database or schema, list each in `databases` (ClickHouse) or `schemas` (Postgres) of every profile in `chant.config.ts`. [Starting a project](adoption.md#a-new-project-from-a-template) has the rest of what the template writes.
+The history goes in its own database or schema (`--history <name>` on `yodel create`, `yodeler` by default); it must not be one of the project's. When the project owns more than one database or schema, list each in `databases` (ClickHouse) or `schemas` (Postgres) of every profile in `chant.config.ts`. [Starting a project](adoption.md#a-new-project-from-a-template) has the rest of what the template writes.
 
 ### Moving the old tool's files
 

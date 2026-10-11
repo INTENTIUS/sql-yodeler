@@ -34,7 +34,7 @@ Versioned project (a migrations/ directory): shows the pending migrations,
 each step with its rule and class (an Op step with the Op that makes it, a
 manual step with what it needs), integrity problems (directory problems,
 checksum mismatches, out-of-order migrations), and the plan digest yodel
-apply asks approval for, with the chant approve command that approves it.
+apply asks approval for, with the yodel approve command that approves it.
 When chant's gate ledger holds an approval of the migrations Op's gate for
 another digest, it says what moved since. Reads only.
 

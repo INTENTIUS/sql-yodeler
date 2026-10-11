@@ -41,6 +41,14 @@ npm install ./vendor/intentius-sql-yodeler-<version>.tgz
 
 Installing the tarball rewrites the dependency in `package.json` to `file:vendor/...`. The projects in `examples/` take `file:../..`, the clone they sit in.
 
+`yodel create` copies the template released with the yodel that runs it, the tag `v<version>`, which an unreleased version does not have yet. To make a project from a clone's templates instead, give it the clone with `--from`, which is for developing yodel only:
+
+```sh
+npx --package ../sql-yodeler yodel create my-schema --clickhouse --database events --from ../sql-yodeler
+```
+
+`--from` takes a `<repo>@<ref>` too (`INTENTIUS/sql-yodeler@main`); yodel adds `#templates/<dialect>`.
+
 ## Tests against a server
 
 `npm run check` needs no server. The suites in `test/e2e/` run against chant's emulator (`npx chant emulator up --lexicon sql`) when its addresses are set, and skip otherwise:

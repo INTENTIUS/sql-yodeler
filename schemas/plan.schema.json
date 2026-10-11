@@ -305,6 +305,7 @@
           "description": "The command a person runs to approve this plan. An agent prints it and never runs it.",
           "type": "string"
         },
+        "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
         "approvalMode": {
           "description": "Which approvals of the migrations Op's gate count, as yodel.config.ts at the base commit has it, when not ledger: sealed counts only an approval sealed by a key the signers file at base lists for its approver.",
           "enum": ["sealed"]
@@ -432,9 +433,10 @@
               "type": "string"
             },
             "approve": {
-              "description": "The chant approve command for the wave, for a person to run.",
+              "description": "The yodel approve command for the wave, for a person to run at a terminal.",
               "type": "string"
             },
+            "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
             "approval": {
               "description": "Which approvals of the wave's digest count, as yodel.config.ts at the base commit has the wave, when not ledger.",
               "enum": ["pr-review", "sealed"]

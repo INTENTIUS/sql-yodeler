@@ -193,7 +193,7 @@ describe("a tenant set's plan comment", () => {
       dialect: "postgres",
       template: "app",
       tenants: [tenant("acme", ["m2"]), tenant("globex", ["m2"]), tenant("initech", [])],
-      wave: { wave: 2, gate: "always", base: "0123456789abcdef", baseSource: "first-parent", runs: [], refused: [], blocked: [], waits: true, digest: "jcs1-sha256:set", approve: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:set" },
+      wave: { wave: 2, gate: "always", base: "0123456789abcdef", baseSource: "first-parent", runs: [], refused: [], blocked: [], waits: true, digest: "jcs1-sha256:set", approve: "yodel approve prod --plan jcs1-sha256:set", chantApprove: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:set" },
       notes: [],
     };
     const md = renderTenantSetMarkdown(plan);
@@ -202,7 +202,7 @@ describe("a tenant set's plan comment", () => {
     expect(md).toContain("##### `m2`");
     expect(md).toContain("#### 1 tenant: up to date\n\n`initech`");
     expect(md).toContain("one approval of `jcs1-sha256:set`, for all 3 tenants");
-    expect(md).toContain("chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:set");
-    expect(md).toContain("`yodel approve prod`");
+    expect(md).toContain("```sh\nnpx yodel approve prod --plan jcs1-sha256:set\n```");
+    expect(md).not.toContain("chant approve");
   });
 });

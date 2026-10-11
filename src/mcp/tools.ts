@@ -21,7 +21,7 @@ import { status } from "../commands/status.js";
 export const READ_VERBS: Readonly<Record<string, Command>> = { status, plan, lint, drift };
 
 /** Never a tool, and never run by one: each writes to a database, a history, the migrations directory or the gate ledger. */
-export const WRITE_VERBS = ["apply", "approve", "override", "repair", "revert", "rebase", "new", "checkpoint", "init", "test"] as const;
+export const WRITE_VERBS = ["apply", "approve", "override", "repair", "revert", "rebase", "new", "checkpoint", "init", "create", "emulator", "test"] as const;
 
 /** Flags that make a read verb write: a replay database, a checksum, a forge comment, the Op's Apply step. */
 const WRITE_FLAGS = ["--replay", "--reset", "--reset-shared", "--keep", "--update-checksum", "--comment", "--execute"];

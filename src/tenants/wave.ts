@@ -29,7 +29,7 @@ import { statusReport, type StatusReport } from "../versioned/index.js";
 import { gateAtBase, planWave, viewWavePlan, WAVES_PIPELINE, WavePlanMoved, type PlanWaveOptions, type WavePlanFile } from "../waves/index.js";
 import { listTenants, tenantSetOf } from "./index.js";
 import { splitTarget, tenantTarget } from "./target.js";
-import { describeApprovalMode, signFlag, waveApproval, type ApprovalMode } from "../approval-mode/index.js";
+import { approveCommand, describeApprovalMode, signFlag, waveApproval, type ApprovalMode } from "../approval-mode/index.js";
 
 /** A slot's tenant part: `@<i>of<n>`. */
 const SLOT = /^@([1-9][0-9]*)of([1-9][0-9]*)$/;
@@ -227,8 +227,10 @@ export interface TenantSetWaveView {
   blocked: string[];
   /** Under the gate at the base, the wave waits for an approval of `digest`. */
   waits: boolean;
-  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, with `--sign` when the wave is sealed. */
+  /** `yodel approve <set> --plan <digest>`, with `--sign` when the wave is sealed: what a person runs (#202). */
   approve?: string | undefined;
+  /** `chant approve yodel-apply yodel-apply-wave-<k> --plan <digest>`, the same approval, for scripts. */
+  chantApprove?: string | undefined;
   /** Which approvals count (#48), as the base commit has the wave; absent, `ledger`. */
   approval?: ApprovalMode | undefined;
 }
@@ -271,7 +273,8 @@ export async function viewTenantSetWave(project: Project, set: string, tenants: 
   view.digest = waveSetDigest(members);
   view.waits = blocked.length === 0 && opWaveNeedsApproval(gate, members);
   const approval = waveApproval(at.config, set);
-  view.approve = `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${view.digest}${signFlag(approval)}`;
+  view.approve = approveCommand(set, view.digest, approval);
+  view.chantApprove = `chant approve ${WAVES_PIPELINE} ${waveGateName(WAVES_PIPELINE, k)} --plan ${view.digest}${signFlag(approval)}`;
   if (approval !== "ledger") view.approval = approval;
   return view;
 }

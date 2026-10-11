@@ -62,7 +62,8 @@
     },
     "op": { "type": "string" },
     "gate": { "type": "string" },
-    "approve": { "description": "The chant approve command that approves this revert.", "type": "string" },
+    "approve": { "description": "The yodel approve command that approves this revert, for a person to run at a terminal.", "type": "string" },
+    "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
     "gatePlanDigest": { "type": "string" },
     "exitCode": { "type": "integer" }
   }

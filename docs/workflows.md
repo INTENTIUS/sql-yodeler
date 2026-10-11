@@ -30,7 +30,7 @@ The Op builds the project first with `npm run build`, so `package.json` needs a 
 
 Without it the Op fails at its Build step (`npm error Missing script: "build"`).
 
-The run below is the ClickHouse example's first apply. The Op stops at its gate and `yodel apply` exits 3 with the command that approves this plan:
+The run below is the ClickHouse example's first apply. The Op stops at its gate and `yodel apply` exits 3 with the command that approves this plan. Today that command is `npx yodel approve dev --plan <digest>`, which shows the plan, asks you to type `dev`, and records the approval of the digest the gate waits on; the runs below were recorded before yodel printed it, so they show and run chant's `chant approve`, which records the same approval:
 
 <!-- quote: clickhouse#declarative-apply -->
 ```console

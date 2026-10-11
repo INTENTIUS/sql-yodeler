@@ -5,13 +5,13 @@
  *
  * The digest is `statusReport`'s, the value `yodel apply <env> --digest` (the
  * migrations Op's Plan step) prints and the gate binds, so the
- * `chant approve <op> <gate> --plan <digest>` the comment prints is the one
- * the post-merge apply needs. Nothing here writes: no lock, no history row,
+ * `yodel approve <env> --plan <digest>` the comment prints (#202) records
+ * the approval the post-merge apply needs. Nothing here writes: no lock, no history row,
  * no ledger entry.
  */
 
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { migrationsApprovalAtBase, portFor, signFlag, type EnvironmentApprovalMode } from "../approval-mode/index.js";
+import { approveCommand, migrationsApprovalAtBase, portFor, signFlag, type EnvironmentApprovalMode } from "../approval-mode/index.js";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { migrationChecks, scanMigrations, type Migration, type MigrationCheck } from "../migrations/index.js";
@@ -71,8 +71,10 @@ export type ApprovalView =
       kind: "op";
       op: string;
       gate: string;
-      /** The command that approves this plan; absent when there is no digest. */
+      /** The command a person runs to approve this plan (`yodel approve <env> --plan <digest>`); absent when there is no digest. */
       command?: string | undefined;
+      /** chant's own command for the same approval, for scripts (`--json`'s `chantApprove`). */
+      chantCommand?: string | undefined;
       /** The newest approval of the gate in chant's ledger, when it could be read. */
       latest?: (LatestApproval & { moved?: MoveExplanation | undefined }) | undefined;
       /** Why the ledger was not read. */
@@ -240,7 +242,8 @@ async function approvalView(project: Project, env: Environment, venv: VersionedE
     kind: "op",
     op: op.name,
     gate: op.gate,
-    command: plan.digest ? `chant approve ${op.name} ${op.gate} --plan ${plan.digest}${signFlag(mode.mode)}` : undefined,
+    command: plan.digest ? approveCommand(env.name, plan.digest, mode.mode) : undefined,
+    chantCommand: plan.digest ? `chant approve ${op.name} ${op.gate} --plan ${plan.digest}${signFlag(mode.mode)}` : undefined,
     ...(mode.mode !== "ledger" ? { mode: mode.mode } : {}),
   };
   if (options.ledger === null) return view;

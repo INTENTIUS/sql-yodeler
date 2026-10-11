@@ -5,7 +5,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { buildSchema } from "../chant/build.js";
 import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, unreadableOf, PLAN_NEEDS_OP } from "../chant/plan.js";
-import { findApplyOp, GATED, runApplyOp } from "../chant/apply.js";
+import { findApplyOp, GATED, gatedCommands, runApplyOp } from "../chant/apply.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
@@ -19,7 +19,8 @@ import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
 import { describeStep, heldSteps, runApplySteps, stepsAtBase, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
 import type { ApplyStep } from "../config/define.js";
-import { migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
+import { approveCommand, migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
+import { baseEnvironment } from "../tenants/target.js";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { enforcePromotion, forecastWave, planWave, RECORD_PLANS_ENV, readWavePlan, verifyWaveDecision, WavePlanMoved, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
 import { applySlot, splitSlot, writeSlotPlan } from "../tenants/wave.js";
@@ -88,14 +89,14 @@ export type VersionedOutcome =
   | { status: "refused"; preChecks?: { migration: string; checks: CheckOutcome[] }; refusal?: { exitCode: number; message: string } }
   | { status: "denied"; policy: RuleResult[] }
   | { status: "stood-down"; stoodDown: string; op?: string }
-  | { status: "gated"; op: string; gate: string; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; gatePlanDigest?: string }
+  | { status: "gated"; op: string; gate: string; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; chantApprove?: string; gatePlanDigest?: string }
   | { status: "failed"; op: string; exitCode: number; chantExitCode: number }
   | { status: "applied"; op: string; appliedNow: string[] };
 
 /** What a declarative run (the ApplyOp) did; `plan` is the plan before the run. */
 export type DeclarativeOutcome = { plan: Record<string, unknown> } & (
   | { status: "refused" | "unchanged" | "applied" }
-  | { status: "gated"; gate: string; approve?: string; planDigest?: string }
+  | { status: "gated"; gate: string; approve?: string; chantApprove?: string; planDigest?: string }
   | { status: "failed"; exitCode: number }
   | { status: "incomplete"; remaining: Record<string, unknown> }
 );
@@ -132,10 +133,10 @@ Two paths, chosen by the project:
   single) as it is sent. Runs the project's migrations Op for the
   environment (chant run <op>), whose gate is bound to the plan digest: the
   pending migrations' checksums, the topology, the history and the live
-  schema. A run that stops at the gate prints the chant approve command;
-  approve, then run yodel apply again. At a terminal, yodel approve <env>
-  approves the same plan without the digest to copy: yodel approve <env>,
-  then yodel apply <env>. If anything the digest covers changes after
+  schema. A run that stops at the gate prints the command that approves
+  its plan, yodel approve <env> --plan <digest>; a person runs it at a
+  terminal, then runs yodel apply again (--json also gives chant's own
+  approve command, chantApprove, for scripts). If anything the digest covers changes after
   approval, the gate asks again.
 
   A migration that failed part way resumes at the statement that failed; a
@@ -364,7 +365,7 @@ async function slotWave(project: Project, a: ApplyArgs, io: Io): Promise<number>
     const forecast = forReview ? undefined : await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
       const set = splitSlot(a.env)?.env ?? a.env;
-      log(`${set}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`}) for every tenant. Approve it with yodel approve ${set}${forecast.approval === "sealed" ? " --sign" : ""}, or: ${forecast.approve}`);
+      log(`${set}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`}) for every tenant. Approve it with ${approveCommand(set, forecast.digest, forecast.approval)}`);
     }
     if (a.json) io.out(`${JSON.stringify(plan, null, 2)}\n`);
     return 0;
@@ -496,12 +497,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const forecast = forReview ? undefined : await forecastWave(process.cwd(), a.spec, plan);
     if (forecast?.waits) {
       // A tenant set's wave (#56) is approved once for every tenant.
-      const sign = forecast.approval === "sealed" ? " --sign" : "";
-      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with yodel approve ${env.tenant.env}${sign}, or: ` : `. Approve it with yodel approve ${env.name}${sign}, or: `;
+      const approve = approveCommand(baseEnvironment(env.name), forecast.digest, forecast.approval);
+      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with ` : `. Approve it with `;
       const mode = forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`;
-      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${mode})${how}${forecast.approve}\n`);
+      io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${mode})${how}${approve}\n`);
       if (forecast.approval === "pr-review") io.err(`${env.name}: under pr-review, an approving review of the merged pull request's head by a writer other than its author approves it too, when that head's pipeline recorded this plan (chant run wave --record-plans).\n`);
-      outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve: forecast.approve };
+      outcome.doc = { environment: env.name, status: "gated", pending: plan.pending.map((id) => ({ id })), gatePlanDigest: forecast.digest, approve, chantApprove: forecast.chantApprove };
     }
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "wave-plan", plan }), null, 2)}\n`);
     return 0;
@@ -707,18 +708,16 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (stale && !a.json) io.out(`\n${stale.line}\n`);
     if (!a.json) {
       io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
-      if (run.approve) {
-        // A sealed gate (#48) counts only a sealed approval, which --execute checks.
-        const sealed = (await migrationsApprovalAtBase(project, env.name)).mode === "sealed";
-        const approve = sealed && !/ --sign\b/.test(run.approve) ? `${run.approve} --sign` : run.approve;
-        io.out(
-          `Approve it with:\n  ${runnable(approve, project.dir)}\n` +
-            `or, at a terminal, with ${runnable(`yodel approve ${env.name}${sealed ? " --sign" : ""}`, project.dir)}, which shows the plan and asks you first;\n` +
-            `then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`,
-        );
-      }
     }
-    return emit({ status: "gated", op: op.name, gate: op.gate, ...(stale ? { moved: stale.moved } : {}), ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, GATED);
+    // A sealed gate (#48) counts only a sealed approval, which --execute checks.
+    const commands = gatedCommands(run, env.name, (await migrationsApprovalAtBase(project, env.name)).mode);
+    if (!a.json && commands.approve) {
+      io.out(
+        `Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\n` +
+          `which shows the plan and asks you first; then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`,
+      );
+    }
+    return emit({ status: "gated", op: op.name, gate: op.gate, ...(stale ? { moved: stale.moved } : {}), ...commands, ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, GATED);
   }
 
   const after = await statusReport(venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
@@ -795,11 +794,12 @@ async function declarativeRun(
     if (!json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
     const run = await runApplyOp(project, op, { onOutput: (t) => { io.err(t); } });
     if (run.status === "gated") {
+      const commands = gatedCommands(run, env.name);
       if (!json) {
-        io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan.\n`);
-        if (run.approve) io.out(`Approve it with:\n  ${runnable(run.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`);
+        io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
+        if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nwhich shows the plan and asks you first; then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`);
       }
-      return report({ status: "gated", gate: op.gate, ...(run.approve ? { approve: run.approve } : {}), ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before) }, GATED);
+      return report({ status: "gated", gate: op.gate, ...commands, ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before) }, GATED);
     }
     if (run.status === "failed") {
       if (!json) io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})\n`);
