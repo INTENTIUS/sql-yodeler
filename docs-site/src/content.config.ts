@@ -18,6 +18,9 @@ export const collections = {
 				claims: z.array(z.string()).default([]),
 				// A draft page whose claims do not all hold yet: llms.txt leaves it out.
 				unproven: z.boolean().optional(),
+				// A page written as MDX for its tabs keeps its Markdown here (pages.mjs
+				// writes it); llms-full.txt and "Copy page as Markdown" use it in place of the body.
+				markdown: z.string().optional(),
 			}),
 		}),
 	}),

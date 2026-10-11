@@ -5,7 +5,7 @@ type: tutorial
 
 # Your first migration
 
-This page takes you from an empty directory to two migrations applied to a ClickHouse database on your own machine. It needs Node 22.12 or later, npm, git, and Docker for the local database. Every command below ran as shown, and the output under it is what it printed; `<my-schema>` stands for the project's path.
+This page takes you from an empty directory to two migrations applied to a ClickHouse or Postgres database on your own machine. It needs Node 22.12 or later, npm, git, and Docker for the local database. Every command below ran as shown, and the output under it is what it printed; `<my-schema>` stands for the project's path.
 
 ## What chant is
 
@@ -19,6 +19,9 @@ You approve a plan before `yodel apply` runs it with `yodel approve <env>`: it s
 The chant CLI is the npm package `@intentius/chant`. Before your project exists, run it as `npx @intentius/chant@latest` (with `@latest`, npx does not reuse an older copy it cached). Inside the project, `npm install` puts the version the project pins in `node_modules`, so `npx chant` works there. (Plain `npx chant` outside a project runs an unrelated package with the same name.)
 
 ## 1. Make the project
+
+<!-- tabs: dialect -->
+#### ClickHouse
 
 ```sh
 npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/clickhouse --param name=events-schema --param database=events my-schema
@@ -45,7 +48,33 @@ export const events = table`
   COMMENT 'One row per event'`;
 ```
 
-For Postgres, use `templates/postgres` with `--param name=app-schema --param schema=app`; [Postgres](#postgres) below lists what changes.
+#### Postgres
+
+```sh
+npx @intentius/chant@latest init --from INTENTIUS/sql-yodeler@main#templates/postgres --param name=app-schema --param schema=app my-schema
+cd my-schema
+npm install
+```
+
+`schema=app` is the Postgres schema your objects live in. The template declares a table and an index in it, in `src/schema.ts`:
+
+```ts
+export const app = schema`
+  CREATE SCHEMA app;
+  COMMENT ON SCHEMA app IS 'Declared in src/schema.ts'`;
+
+export const events = table`
+  CREATE TABLE ${app}.events (
+    id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kind text NOT NULL,
+    at   timestamptz NOT NULL DEFAULT now()
+  )`;
+
+export const eventsKind = index`
+  CREATE INDEX events_kind_idx ON ${events} (${events.columns.kind})`;
+```
+
+<!-- /tabs -->
 
 `yodel` finds the Op that applies migrations through git, and chant keeps approvals on a git branch, so the project must be a git repository:
 
@@ -64,9 +93,12 @@ This starts ClickHouse on `http://127.0.0.1:8123` (user `default`, no password) 
 
 ## 3. Point the dev environment at it
 
-`chant.config.ts` names the `dev` environment's server and credentials by environment variable, and never holds a value. `dev` defaults to `http://127.0.0.1:8123`, so only the users and passwords are needed.
+`chant.config.ts` names the `dev` environment's server and credentials by environment variable, and never holds a value. `dev` defaults to the emulator's address, so only the users and passwords are needed.
 
-The template gives each environment two users: a reader (the default, used by plans, pull request comments and drift checks) and a writer, picked with `YODEL_CREDENTIALS=writer` (only CI's apply job sets it, and `just apply` on your machine). yodel refuses an environment whose reader and writer are the same user, so give the emulator a read-only user for the reader, and keep its `default` user, which can do everything, as the writer:
+The template gives each environment two users: a reader (the default, used by plans, pull request comments and drift checks) and a writer, picked with `YODEL_CREDENTIALS=writer` (only CI's apply job sets it, and `just apply` on your machine). yodel refuses an environment whose reader and writer are the same user, so give the emulator a read-only user for the reader, and keep its admin user, which can do everything, as the writer:
+
+<!-- tabs: dialect -->
+#### ClickHouse
 
 ```sh
 curl -s http://127.0.0.1:8123 --data-binary "CREATE USER IF NOT EXISTS reader IDENTIFIED WITH no_password SETTINGS readonly = 1"
@@ -75,7 +107,7 @@ export DEV_CLICKHOUSE_READER_USER=reader DEV_CLICKHOUSE_READER_PASSWORD=
 export DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
 ```
 
-Without them, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set`. The reader cannot write, so `yodel apply` runs with `YODEL_CREDENTIALS=writer`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 4) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_CREDENTIALS=writer:dev npx yodel apply dev`). The variables for every environment:
+The variables for every environment:
 
 | Variable | Meaning |
 |---|---|
@@ -83,9 +115,39 @@ Without them, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_C
 | `<ENV>_CLICKHOUSE_READER_USER`, `<ENV>_CLICKHOUSE_READER_PASSWORD` | the read-only user |
 | `<ENV>_CLICKHOUSE_WRITER_USER`, `<ENV>_CLICKHOUSE_WRITER_PASSWORD` | the user that applies, read when `YODEL_CREDENTIALS=writer` |
 
-`<ENV>` is `DEV` or `PROD`.
+#### Postgres
+
+The reader is a role of its own on the emulator, made once as `postgres`:
+
+```sql
+CREATE ROLE reader LOGIN PASSWORD 'reader';
+ALTER ROLE reader SET default_transaction_read_only = on;
+GRANT pg_read_all_data TO reader;
+```
+
+```sh
+export DEV_POSTGRES_URL=postgres://127.0.0.1:5432/postgres
+export DEV_POSTGRES_READER_USER=reader DEV_POSTGRES_READER_PASSWORD=reader
+export DEV_POSTGRES_WRITER_USER=postgres DEV_POSTGRES_WRITER_PASSWORD=chant
+```
+
+The variables for every environment:
+
+| Variable | Meaning |
+|---|---|
+| `<ENV>_POSTGRES_URL` | the server and the database, as `postgres://host:5432/database`; `dev` defaults to `postgres://127.0.0.1:5432/postgres` |
+| `<ENV>_POSTGRES_READER_USER`, `<ENV>_POSTGRES_READER_PASSWORD` | the read-only role |
+| `<ENV>_POSTGRES_WRITER_USER`, `<ENV>_POSTGRES_WRITER_PASSWORD` | the role that applies, read when `YODEL_CREDENTIALS=writer` |
+
+If a Postgres of your own already listens on `127.0.0.1:5432` (Homebrew's, for example), that address reaches it rather than the emulator. `just up` warns when it does. Stop that server, or reach the emulator through another address of this machine: `DEV_POSTGRES_URL=postgres://<address>:5432/postgres`, with the address from `ipconfig getifaddr en0` on macOS.
+
+<!-- /tabs -->
+
+`<ENV>` is `DEV` or `PROD`. Without the users, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set` (`DEV_POSTGRES_READER_USER` on Postgres). The reader cannot write, so `yodel apply` runs with `YODEL_CREDENTIALS=writer`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 4) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_CREDENTIALS=writer:dev npx yodel apply dev`).
 
 ## 4. Write the first migration
+
+The output on the rest of this page is from a run of the ClickHouse template; on Postgres the commands are the same.
 
 `yodel new` writes the next migration from the change in `src/` since the last one. The first one creates everything. `yodel lint` checks the migrations offline:
 
@@ -339,7 +401,7 @@ Each template has a `justfile` for these steps. [just](https://github.com/casey/
 
 | just | Runs |
 |---|---|
-| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator, makes the read-only user `reader` there (the statements in step 3, or for Postgres below), and prints the reader and writer lines for a `.env` file |
+| `just up` | `npx @intentius/chant emulator up --lexicon sql`, then `npx tsx scripts/local.ts`, which checks that `dev` reaches the emulator, makes the read-only user `reader` there (the statements in step 3), and prints the reader and writer lines for a `.env` file |
 | `just down` | `npx @intentius/chant emulator down --lexicon sql` |
 | `just new <name>` | `npx yodel new <name>` |
 | `just lint` | `npx yodel lint` |
@@ -352,26 +414,6 @@ Each template has a `justfile` for these steps. [just](https://github.com/casey/
 | `just ci` | `npm run ci`, which renders the CI pipelines again |
 
 The justfile reads a `.env` file in the project when there is one, so the variables from step 3 can go there in place of `export`; `.gitignore` keeps it out of git. Only `just` reads it: the plain `npx yodel ...` commands above see only the shell's environment, so to run them with the variables in `.env`, load it first with `set -a; . ./.env; set +a`.
-
-## Postgres
-
-The steps are the same with `templates/postgres`. The variables are `<ENV>_POSTGRES_URL`, `<ENV>_POSTGRES_READER_USER` and so on, and the URL names the database:
-
-```sh
-export DEV_POSTGRES_URL=postgres://127.0.0.1:5432/postgres
-export DEV_POSTGRES_READER_USER=reader DEV_POSTGRES_READER_PASSWORD=reader
-export DEV_POSTGRES_WRITER_USER=postgres DEV_POSTGRES_WRITER_PASSWORD=chant
-```
-
-The reader is a role of its own on the emulator, made once as `postgres`:
-
-```sql
-CREATE ROLE reader LOGIN PASSWORD 'reader';
-ALTER ROLE reader SET default_transaction_read_only = on;
-GRANT pg_read_all_data TO reader;
-```
-
-If a Postgres of your own already listens on `127.0.0.1:5432` (Homebrew's, for example), that address reaches it rather than the emulator. `just up` warns when it does. Stop that server, or reach the emulator through another address of this machine: `DEV_POSTGRES_URL=postgres://<address>:5432/postgres`, with the address from `ipconfig getifaddr en0` on macOS.
 
 ## Next
 

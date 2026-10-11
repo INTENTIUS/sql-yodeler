@@ -17,7 +17,7 @@ export async function pages() {
 			description: d.data.description ?? '',
 			url: pageUrl(d.id),
 			prompt: d.data.prompt,
-			body: d.body ?? '',
+			body: d.data.markdown ?? d.body ?? '',
 		}));
 }
 
