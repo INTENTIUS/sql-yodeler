@@ -59,6 +59,23 @@ An environment that cannot be read (its server does not answer) is reported with
 
 `--html report.html` writes a self-contained page with no external resources, safe to upload as a CI artifact. It has one row per migration (each merge that added one) and one column per environment, in the order they were read, so a change's progress from dev to prod reads left to right. Each cell shows the state, when, who applied it and who approved its digest. The gaps and the audit log follow.
 
+## The release ledger
+
+Each run that changes an environment's schema also appends one release record to chant's release ledger, `<env>/releases.jsonl` on the `chant/lifecycle` branch: an apply that applied a migration, a revert, a baseline recorded by `yodel init --baseline`, and a declarative apply. The record's digest is the SHA-256 of the schema the environment now holds. That is the recorded schema of the newest migration it has applied, or the declared schema after a declarative apply. Every environment that applied the same migrations records the same digest, so chant answers which schema is in prod and whether it is the one staging tested:
+
+```text
+$ npx chant components status prod --compare-to staging
+...
+Cross-check: prod vs staging
+  schema: sha256:4f0c... vs sha256:4f0c... — same build
+```
+
+The component is the project's directory in its repository, or `schema` for a project at the root. A tenant is recorded on its environment's ledger as `<component>/<tenant>`. The record also names the commit, the CI run, who ran it and, when a gate approved it, who approved it. The apply prints a `release:` line on stderr saying what it recorded.
+
+The schema is already applied when the record is written, so a record that cannot be written is a `release:` line, not a failed run. That happens when the project is not in a git repository, when the `chant/lifecycle` branch cannot be fetched or has forked from the remote's, or when an out-of-order apply leaves the environment at a schema no migration recorded. The history table stays the record of what ran. The release ledger only says which schema each environment reached.
+
+**Promotion stays in SQL Yodeler.** `chant components promote` deploys a digest another environment recorded, running the component's deploy without its build. A schema is not an artifact that can be put in place that way: prod reaches staging's schema by applying its own pending migrations against its own history, under its own lock, gate, policy and pre-migration checks. `waves[].requires` already refuses a migration the environment before has not applied ([waves](workflows.md)). The release ledger is for reading. Moving a schema between environments is still `yodel apply` in the apply pipeline, and going back is `yodel revert`, not `chant components rollback`.
+
 ## The JSON
 
 `yodel report --json` prints the report described by [schemas/report.schema.json](../schemas/report.schema.json). Within version 1 fields are only added.

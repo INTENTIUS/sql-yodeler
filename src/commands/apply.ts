@@ -61,6 +61,7 @@ import type { StatusReport } from "../versioned/report.js";
 import type { RuleResult } from "../versioned/policy.js";
 import { BASELINE_ENV } from "../versioned/op.js";
 import { baselineFromEnv, executeBaseline, planBaseline, projectBaseline } from "../init/second.js";
+import { appliedHead, recordReleaseLines } from "../release/index.js";
 
 /** When the gate's newest approval does not hold: what moved since (or that approval was asked for again), in one line. */
 async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered: readonly Migration[], op: MigrateOpRef, digest: string | undefined) {
@@ -423,14 +424,17 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (!approved) throw new YodelError(`--execute records a baseline only under the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel init --baseline ${env.name}`);
     const op = await findMigrateOp(project, env, a.op);
     const ledger = await migrationsLedger(project, env.name, io);
+    let approver: string | undefined;
     await executeBaseline(project, env, venv, baseline, {
       approvedDigest: approved,
       approve: async (digest) => {
         const by = await verifyApproval(ledger, op, digest);
+        approver = by.resolvedBy;
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
       },
       log: (l) => { io.err(`${l}\n`); },
     });
+    await recordApplied(project, env, venv, ordered, io, approver);
     io.out(`Recorded: ${baseline.id}, as ${env.name}'s baseline\n`);
     return 0;
   }
@@ -446,6 +450,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (!approved) throw new YodelError(`--execute reverts only the plan its Op's gate approved, and ${APPROVED_PLAN_ENV} is not set; run yodel revert ${env.name} ${revert.id}`);
     const op = await findMigrateOp(project, env, a.op);
     const ledger = await migrationsLedger(project, env.name, io);
+    let approver: string | undefined;
     // The policy over the revert (#97), as the base commit has it (#73), as yodel revert judged it before the gate.
     const { policy: basePolicy, note: policyNote } = await policyAtBase(project);
     if (policyNote) io.err(`${policyNote}\n`);
@@ -456,6 +461,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
       approve: async (digest) => {
         const by = await verifyApproval(ledger, op, digest);
+        approver = by.resolvedBy;
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}\n`);
       },
       ...(basePolicy
@@ -471,6 +477,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         : {}),
       log: (l) => { io.err(`${l}\n`); },
     });
+    await recordApplied(project, env, venv, ordered, io, approver);
     io.out(`Reverted: ${plan.migration.id}, back to ${plan.to ?? "an empty schema"}\n`);
     return 0;
   }
@@ -563,6 +570,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       log: (l) => { io.err(`${l}\n`); },
       silences: migrationSilences,
     });
+    if (result.applied.length > 0) await recordApplied(project, env, venv, ordered, io, wave?.review?.approvers.join(", "));
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "execute", environment: env.name, planDigest: planned.migrations, wavePlanDigest: planned.planDigest, result }), null, 2)}\n`);
     else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
     return 0;
@@ -579,6 +587,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const steps = await stepsAtBase(project, env.name);
     if (steps.note) io.err(`${steps.note}\n`);
     let before: StepOutcome[] = [];
+    let approver: string | undefined;
     const result = await executeApply(venv, ordered, {
       runNote: () => (before.length > 0 ? { steps: before } : undefined),
       ...afterSteps(project, venv, env, steps.steps?.after, io),
@@ -590,6 +599,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
         // Under the lock: every pending migration ran first where this environment requires (exit 4 otherwise).
         await enforcePromotion(project, env.name, ordered, (await inspect(venv, ordered)).status.pending);
         const by = await verifyApproval(ledger, op, digest);
+        approver = by.resolvedBy;
         io.err(`approval: ${op.name} / ${op.gate} for ${digest}, by ${by.resolvedBy} at ${by.timestamp}${by.signer !== undefined ? `, sealed by ${by.signer}` : ""}\n`);
         // The before steps (#64), under the lock: one that fails refuses; a held one is let through by the Op's approval, which every run of it asks for.
         before = await runBeforeSteps(project, venv, env, steps.steps?.before, "under the lock", io);
@@ -608,6 +618,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
           }
         : {}),
     });
+    if (result.applied.length > 0) await recordApplied(project, env, venv, ordered, io, approver);
     if (a.json) io.out(`${JSON.stringify(applyJson({ mode: "execute", environment: env.name, planDigest: approved, result }), null, 2)}\n`);
     else io.out(result.stoodDown ? `${result.stoodDown}\n` : result.applied.length === 0 ? "Nothing to apply.\n" : `Applied: ${result.applied.join(", ")}\n`);
     return 0;
@@ -813,11 +824,19 @@ async function declarativeRun(
       if (!json) io.err(`yodel apply: ${op.name} completed but ${String(remaining.length)} change(s) to declared objects are still planned (a drop the Op's delete mode withholds, or a change it did not attempt):\n${await renderPlan(after, `Plan for ${env.name} after apply`)}\n`);
       return report({ status: "incomplete", plan: planJson(before), remaining: planJson(after) }, 1);
     }
+    for (const line of await recordReleaseLines(project, env, build.output)) io.err(`${line}\n`);
     if (!json) io.out(`\nApplied: ${env.name} matches the declared schema.\n`);
     return report({ status: "applied", plan: planJson(before) }, 0);
   } finally {
     build.dispose();
   }
+}
+
+/** Records the schema `env` holds now on chant's release ledger (#208), told on stderr. */
+async function recordApplied(project: Project, env: Environment, venv: VersionedEnv, ordered: readonly Migration[], io: Io, approver: string | undefined): Promise<void> {
+  const { status } = await inspect(venv, ordered);
+  const lines = await recordReleaseLines(project, env, appliedHead(ordered, status)?.document.schema, approver ? { approver } : {});
+  for (const line of lines) io.err(`${line}\n`);
 }
 
 /** `--stand-down`'s question: the line to stand down with, when a newer commit on the run's branch will apply `env`. */
