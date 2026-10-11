@@ -1,0 +1,33 @@
+# Binary files go in Git LFS. test/binaries.test.ts fails on a binary file
+# that is not an LFS pointer, and on a binary type with no line here.
+*.png   filter=lfs diff=lfs merge=lfs -text
+*.jpg   filter=lfs diff=lfs merge=lfs -text
+*.jpeg  filter=lfs diff=lfs merge=lfs -text
+*.gif   filter=lfs diff=lfs merge=lfs -text
+*.webp  filter=lfs diff=lfs merge=lfs -text
+*.avif  filter=lfs diff=lfs merge=lfs -text
+*.ico   filter=lfs diff=lfs merge=lfs -text
+*.pdf   filter=lfs diff=lfs merge=lfs -text
+*.woff  filter=lfs diff=lfs merge=lfs -text
+*.woff2 filter=lfs diff=lfs merge=lfs -text
+*.ttf   filter=lfs diff=lfs merge=lfs -text
+*.otf   filter=lfs diff=lfs merge=lfs -text
+*.zip   filter=lfs diff=lfs merge=lfs -text
+*.gz    filter=lfs diff=lfs merge=lfs -text
+*.tgz   filter=lfs diff=lfs merge=lfs -text
+*.mp4   filter=lfs diff=lfs merge=lfs -text
+*.webm  filter=lfs diff=lfs merge=lfs -text
+*.mov   filter=lfs diff=lfs merge=lfs -text
+*.sqlite filter=lfs diff=lfs merge=lfs -text
+*.parquet filter=lfs diff=lfs merge=lfs -text
+
+# The brand images committed before this file stay plain files.
+docs-site/public/brand/hat-160.png    -filter binary
+docs-site/public/brand/hat-small.png  -filter binary
+docs-site/public/brand/hat-source.png -filter binary
+docs-site/public/brand/hat.png        -filter binary
+docs-site/public/favicon-32.png       -filter binary
+docs-site/public/favicon.ico          -filter binary
+docs-site/public/hat-share.png        -filter binary
+docs-site/public/social-preview.png   -filter binary
+docs-site/src/assets/brand/hat.png    -filter binary

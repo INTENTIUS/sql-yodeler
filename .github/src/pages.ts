@@ -36,7 +36,7 @@ export const workflow = new Workflow({
       "runs-on": "ubuntu-latest",
       "timeout-minutes": 10,
       steps: [
-        checkout(),
+        checkout({ lfs: true }),
         ...siteBuildSteps(),
         new Step({ name: "Upload the site", uses: uploadPagesArtifact, with: { path: "docs-site/dist" } }),
       ],

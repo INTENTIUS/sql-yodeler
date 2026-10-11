@@ -15,6 +15,8 @@ npx yodel --help
 npm run check     # typecheck, lint and test
 ```
 
+Binary files (images, fonts, PDFs, archives) go in [Git LFS](https://git-lfs.com): run `git lfs install` once, and `.gitattributes` sends each binary type there. `npm run check` fails on a binary file committed without LFS (`test/binaries.test.ts`). The brand images committed before LFS stay plain files, listed by name in `.gitattributes`.
+
 ## Running an unreleased yodel in a project
 
 A project normally installs `@intentius/sql-yodeler` from npm. To try a commit that is not released yet:

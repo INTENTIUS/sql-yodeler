@@ -7,7 +7,8 @@ import { Step } from "@intentius/chant-lexicon-github";
 
 type AStep = InstanceType<typeof Step>;
 
-export const checkout = (): AStep => new Step({ uses: "actions/checkout@v4" });
+/** The repository; `lfs` also fetches the files kept in Git LFS (.gitattributes), which a site build needs. */
+export const checkout = (opts: { lfs?: boolean } = {}): AStep => new Step({ uses: "actions/checkout@v4", ...(opts.lfs ? { with: { lfs: true } } : {}) });
 
 export const setupNode = (version: number, cache = true): AStep =>
   new Step({ uses: "actions/setup-node@v4", with: { "node-version": version, ...(cache ? { cache: "npm" } : {}) } });
