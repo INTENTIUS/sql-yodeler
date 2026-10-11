@@ -67,4 +67,47 @@ export const pagePrompts = {
 		`\`yodel lint\` reports a fork on this branch. Following ${pageUrl('migrations')} (Forks and yodel rebase), run \`npx yodel rebase\` with \`--env\` for each environment I name, so a migration that ran is never moved, then \`npx yodel lint\`, and push the branch.`,
 		neverLine,
 	].join('\n'),
+	steps: [
+		`Write the data change I describe as a step of a migration, following ${pageUrl('steps')}.`,
+		'For a backfill, run `npx yodel new <name> --backfill`, fill in `backfills/<name>.json` (the table, the key, the batch size and the SQL of one batch between `{from}` and `{to}`), and run the same command again. For a Postgres column rename, write `-- previously: <old name>` on the new column\'s line in src/ before `npx yodel new <name>`.',
+		'Run `npx yodel lint`, and open a pull request with src/, backfills/ and the new migration.',
+		neverLine,
+	].join('\n'),
+	access: [
+		`Declare the access I describe in src/, next to the tables it is about, following ${pageUrl('access')}: row-level security, policies, roles and grants on Postgres; users, roles, row policies and grants on ClickHouse. Keep to what the page says the schema owns.`,
+		'Set `access: true` in yodel.config.ts for the environments I name, run `npx yodel new <name>` and `npx yodel lint`, and open a pull request with src/, the config and the new migration.',
+		neverLine,
+	].join('\n'),
+	drift: [
+		`The drift watch reported drift in the environment I name. Following ${pageUrl('drift')}, run \`npx yodel drift <env>\` with the reader's credentials and tell me what changed out of band.`,
+		'Then ask me whether to put the live object back by hand or keep the change. To keep it, declare it in src/, run `npx yodel new <name>` and `npx yodel lint`, and open a pull request.',
+		neverLine,
+	].join('\n'),
+	audit: [
+		`Following ${pageUrl('audit')}, fetch the \`chant/lifecycle\` branch and run \`npx yodel report\` with the readers' credentials.`,
+		'Tell me which migrations are applied where, who approved each apply, and each gap the report lists, with what the page says it means.',
+		neverLine,
+	].join('\n'),
+	forges: [
+		`Prepare this repository's pipelines for the forges I name, following ${pageUrl('forges')}: set \`ci.forges\` in yodel.config.ts, run \`npm run ci\`, and check that \`npx yodel ci --check\` passes.`,
+		'In the pull request description, list by name every secret, variable, environment, protection, token and runner the matrix says each forge needs. Put no secret\'s value in a file or in the description; I add them.',
+		'Open a pull request with the result.',
+		neverLine,
+	].join('\n'),
+	orm: [
+		`Bring the tables our ORM defines into SQL Yodeler, following ${pageUrl('orm')}: add a source under \`sources\` in yodel.config.ts with the command that prints the ORM's DDL, and remove any declaration in src/ of a table the ORM now owns.`,
+		'Run `npx yodel new <name>` and `npx yodel lint`, and open a pull request with the config, src/ and the new migration.',
+		neverLine,
+	].join('\n'),
+	notify: [
+		`Turn on SQL Yodeler's webhook events, following ${pageUrl('notify')}: add \`notify\` to yodel.config.ts with the names of the variables that hold the webhook's URL and the signing key, never the URL or the key themselves.`,
+		'Write a receiver\'s check of the signature as the page shows, in the language I name, and list the variables the pipelines need in the pull request description.',
+		'Open a pull request with the result.',
+		neverLine,
+	].join('\n'),
+	'schema-docs': [
+		`Following ${pageUrl('schema-docs')}, run \`npx yodel docs\` and open a pull request with schema-docs/.`,
+		'In its description, name the tables and relations the diagram shows that the pull request changes.',
+		neverLine,
+	].join('\n'),
 };
