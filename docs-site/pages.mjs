@@ -277,8 +277,8 @@ function claimsSections(front, rows) {
 	return { top, bottom };
 }
 
-/** The hat's art at a whole multiple of its 78x72, so every art pixel stays square (components/Hat.astro does the same). */
-const hatImg = (n) => `<img class="sy-hero-hat" src="${base}/brand/hat.svg" width="${78 * n}" height="${72 * n}" alt="">`;
+/** The hat, `h` CSS pixels tall (brand/hat.png is drawn at 336, twice the largest size shown; components/Hat.astro does the same). */
+const hatImg = (h) => `<img class="sy-hero-hat" src="${base}/brand/hat.png" width="${Math.round((h * 728) / 672)}" height="${h}" alt="">`;
 
 /** The 404 page: the hat, the news, and the way back. */
 const notFound = `---
@@ -291,7 +291,7 @@ hero:
   title: "Page not found"
   tagline: ${JSON.stringify(`This address has no page. Start again from <a href="${base}/">the home page</a>, or find the page in <a href="${base}/llms.txt">llms.txt</a>, which lists every page.`)}
   image:
-    html: ${JSON.stringify(hatImg(2))}
+    html: ${JSON.stringify(hatImg(144))}
 ---
 `;
 
@@ -344,10 +344,11 @@ const roomItems = () => [...STARTS, ...ROLES].map((x) => ({ label: x.label, slug
 
 /**
  * The sidebar: "Start here" with the rooms, then one group per page type, in
- * the order of `groups`.
+ * the order of `groups`. Every group starts collapsed; Starlight opens the
+ * one that holds the current page.
  */
 export function sidebar() {
-	return [{ label: 'Start here', items: roomItems() }, ...docGroups()];
+	return [{ label: 'Start here', collapsed: true, items: roomItems() }, ...docGroups()];
 }
 
 /**
@@ -366,16 +367,17 @@ function docGroups() {
 		if (!items.some((i) => i.slug === slug)) items.push({ label: splitTitle(read(new URL(file, docsDir)), file).title, slug });
 	}
 	return groups
-		.map(([type, label]) => ({ label, items: items.filter((i) => types[i.slug] === type) }))
+		.map(([type, label]) => ({ label, collapsed: true, items: items.filter((i) => types[i.slug] === type) }))
 		.filter((g) => g.items.length);
 }
 
 // ── Rooms ────────────────────────────────────────────────────────────────────
 //
-// One page per starting point and role, from docs-site/rooms.mjs, written as
-// Markdown with tabs blocks and passed through the same transform as a docs
-// page. The sections are the same on every room, in this order: the lede,
-// Works, Differs, First step, Proof, Then read.
+// One page per starting point and role, from docs-site/rooms.mjs: the page is
+// src/components/Room.astro (the lede, cards for Works, Differs and First
+// step, then Proof and Then read), and roomMarkdown() is the same content as
+// Markdown, kept in the front matter for llms-full.txt and "Copy page as
+// Markdown". The sections are the same on every room, in this order.
 
 const roomsFile = 'docs-site/rooms.mjs';
 const roomsEditUrl = 'https://github.com/INTENTIUS/sql-yodeler/edit/main/docs-site/rooms.mjs';
@@ -483,16 +485,47 @@ export function roomMarkdown(r, rows) {
 }
 
 /**
- * The home page, index.mdx: the picker (src/components/Picker.astro, which
- * reads rooms.mjs and the claims record) over docs/README.md's text, made
- * valid MDX. The Markdown is kept in the front matter for llms-full.txt, as
- * on a page with tabs.
+ * The home page, index.mdx: the landing (src/components/Landing.astro: the
+ * hat, the wordmark, the picker and the highlights), the pipelines and the
+ * waves, then docs/README.md's text made valid MDX, then the setup prompt.
+ * The Markdown is kept in the front matter for llms-full.txt, as on a page
+ * with tabs.
  */
 function writeHome(head, md, source) {
 	tabsToMdx(source, (i) => `docs/README.md:${i + 1}`);
 	const { mdx } = tabsToMdx(md, () => 'docs/README.md');
 	const front = head.replace(/\n---\n\n$/, `\nmarkdown: ${JSON.stringify(md)}\n---\n\n`);
-	writeFileSync(`${outDir}index.mdx`, `${front}${mdxImport}import Picker from '../../components/Picker.astro';\n\n<Picker />\n\n${mdx}`);
+	const body = `import Landing from '../../components/Landing.astro';
+import Pipelines from '../../components/Pipelines.astro';
+import Waves from '../../components/Waves.astro';
+
+<Landing />
+
+## The pipelines yodel ci writes
+
+\`npm run ci\` renders them for GitHub Actions, GitLab CI and Forgejo Actions, from the environments and the Ops the project declares. [The two workflows](${base}/workflows/#the-pipelines-yodel-ci).
+
+<Pipelines />
+
+## A gate per environment
+
+Each environment is one wave of the apply pipeline, applied after the wave before it. Its gate policy decides when it waits for a person, and an approval covers exactly the plan it was shown, by its digest.
+
+<Waves />
+
+[Approval](${base}/approval/) has the policies, the digest and what happens when it moves.
+
+## The docs
+
+${mdx}
+
+## Hand the setup to your agent
+
+[Your first migration](${base}/getting-started/) has the same steps by hand. Or paste this into a coding agent in your repository. [The agent page](${base}/agents/) says what the agent does; it never applies and never approves.
+
+<Landing part="agent" />
+`;
+	writeFileSync(`${outDir}index.mdx`, `${front}${mdxImport}${body}`);
 }
 
 /** Writes every room under for/, after checking its links and claims. */
@@ -503,9 +536,12 @@ function writeRooms(slugs, rows, order) {
 	for (const r of ROOMS) {
 		checkRoom(r, slugs, rows);
 		const slug = `for/${r.id}`;
-		const fields = { title: r.title, description: r.lede, rank: order.indexOf(slug), claims: r.claims, editUrl: roomsEditUrl };
 		const md = roomMarkdown(r, rows);
-		writePage(slug, frontmatter(fields), rewriteLinks(md, slugs), md, `${roomsFile} (room ${r.id})`);
+		// The tabs blocks are checked as on any page; the page itself is the Room
+		// component, with the Markdown in the front matter for llms-full.txt.
+		tabsToMdx(md, () => `${roomsFile} (room ${r.id})`);
+		const fields = { title: r.title, description: r.lede, rank: order.indexOf(slug), claims: r.claims, editUrl: roomsEditUrl, tableOfContents: false, markdown: rewriteLinks(md, slugs) };
+		writeFileSync(`${outDir}${slug}.mdx`, `${frontmatter(fields)}import Room from '../../../components/Room.astro';\n\n<Room id=${JSON.stringify(r.id)} />\n`);
 	}
 }
 
@@ -544,15 +580,6 @@ head:
 description: "What SQL Yodeler is, and the docs pages"
 editUrl: ${JSON.stringify(`${editBase}README.md`)}
 template: splash
-hero:
-  tagline: ${JSON.stringify(tagline())}
-  image:
-    html: ${JSON.stringify(hatImg(3))}
-  actions:
-    - text: "@intentius/sql-yodeler on npm"
-      link: "https://www.npmjs.com/package/@intentius/sql-yodeler"
-      variant: minimal
-      icon: external
 ---
 
 `;

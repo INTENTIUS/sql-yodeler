@@ -2,10 +2,10 @@
 // Starlight's page title, then the tools for an agent reading the page: a
 // "Copy page as Markdown" button (the same text llms-full.txt carries for
 // this page), a pointer to llms.txt, and, on a page with a prompt, the prompt
-// with its own Copy button.
+// card (AgentPrompt.astro).
 import Default from '@astrojs/starlight/components/PageTitle.astro';
 import { pageMarkdown, pageUrl } from '../markdown';
-import Hat from './Hat.astro';
+import AgentPrompt from './AgentPrompt.astro';
 
 const { entry } = Astro.locals.starlightRoute;
 const real = entry.id !== '404';
@@ -16,24 +16,15 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 <Default />
 {real && (
 	<div class="sy-page-tools not-content">
-		<button type="button" class="sy-copy" data-copy={markdown} data-label="Copy page as Markdown">Copy page as Markdown</button>
+		<button type="button" class="sy-page-copy" data-copy={markdown} data-label="Copy page as Markdown">Copy page as Markdown</button>
 		<a href={`${base}/llms.txt`}>llms.txt</a>
 		<span>lists every page for an agent</span>
 	</div>
 )}
-{real && prompt && (
-	<figure class="sy-prompt not-content">
-		<figcaption>
-			<span class="sy-prompt-label"><Hat scale="small" />Optional: hand this page to your coding agent</span>
-			<button type="button" class="sy-copy" data-copy={prompt} data-label="Copy">Copy</button>
-		</figcaption>
-		<p>The steps below work by hand, with no agent.</p>
-		<pre><code>{prompt}</code></pre>
-	</figure>
-)}
+{real && prompt && <AgentPrompt />}
 
 <script>
-	for (const button of document.querySelectorAll<HTMLButtonElement>('.sy-copy')) {
+	for (const button of document.querySelectorAll<HTMLButtonElement>('.sy-page-copy')) {
 		const label = button.dataset.label ?? button.textContent ?? '';
 		button.addEventListener('click', async () => {
 			try {
@@ -62,52 +53,16 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 		font-weight: 500;
 		color: var(--sl-color-white);
 		background: var(--sl-color-gray-6);
-		border: 1px solid var(--sl-color-gray-5);
+		border: 1px solid var(--sy-rule);
 		border-radius: 0.4rem;
 		padding: 0.2rem 0.7rem;
 		cursor: pointer;
 	}
 	button:hover {
-		border-color: var(--sl-color-accent);
+		border-color: var(--sy-brass);
 	}
 	a {
 		color: var(--sl-color-accent-high);
 		font-weight: 500;
-	}
-	.sy-prompt {
-		margin: 1.25rem 0 0;
-		max-width: 44rem;
-		border: 1px solid var(--sl-color-gray-5);
-		border-radius: 0.6rem;
-		overflow: hidden;
-	}
-	.sy-prompt figcaption {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		gap: 1rem;
-		padding: 0.5rem 0.9rem;
-		border-bottom: 1px solid var(--sl-color-gray-5);
-		font-size: var(--sl-text-sm);
-		color: var(--sl-color-gray-3);
-	}
-	.sy-prompt-label {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
-	.sy-prompt p {
-		margin: 0;
-		padding: 0.5rem 0.9rem 0;
-		font-size: var(--sl-text-sm);
-		color: var(--sl-color-gray-3);
-	}
-	.sy-prompt pre {
-		margin: 0;
-		padding: 0.75rem 0.9rem;
-		font-family: var(--sl-font-mono);
-		font-size: var(--sl-text-sm);
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
 	}
 </style>

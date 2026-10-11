@@ -1,0 +1,157 @@
+---
+// The home page's two ends. `part="top"` (the default) is the hat, which opens
+// the docs, the wordmark, the one-line claim, the starting-point picker and the
+// eight highlights. `part="agent"` is the setup prompt for a coding agent, last
+// on the page: the same prompt the agents page and llms.txt carry.
+import AgentPrompt from './AgentPrompt.astro';
+import Hat from './Hat.astro';
+import Picker from './Picker.astro';
+import { setupPrompt } from '../../prompts.mjs';
+
+interface Props {
+	part?: 'top' | 'agent';
+}
+const { part = 'top' } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+// The eight highlights: each card is one link, its title the whole label.
+const pillars = [
+	{ title: 'Declarative or versioned migrations', href: '/workflows/' },
+	{ title: 'ClickHouse and Postgres', href: '/topology/' },
+	{ title: 'GitHub, GitLab or Forgejo', href: '/forges/' },
+	{ title: 'Approvals bound to the plan', href: '/approval/' },
+	{ title: 'Data steps that resume', href: '/steps/' },
+	{ title: 'Lint and the replay check', href: '/lint/' },
+	{ title: 'Drift watched on a schedule', href: '/drift/' },
+	{ title: 'An audit log from the history', href: '/audit/' },
+];
+---
+{part === 'top' ? (
+	<section class="sy-landing not-content">
+		<a class="hero-link" href={`${base}/getting-started/`} aria-label="The docs"><Hat size={132} /></a>
+		<h1 class="wordmark">SQL YODELER</h1>
+		<p class="claim">Schema migrations for ClickHouse and Postgres</p>
+	</section>
+	<Picker />
+	<ul class="sy-pillars not-content">
+		{pillars.map((p) => (
+			<li>
+				<a href={`${base}${p.href}`}>
+					<Hat size="small" />
+					<span>{p.title}</span>
+				</a>
+			</li>
+		))}
+	</ul>
+) : (
+	<section class="sy-landing sy-agent not-content">
+		<AgentPrompt text={setupPrompt} label="Hand the setup to your coding agent" note="Or set up by hand: Your first migration has the same steps." />
+	</section>
+)}
+
+<style>
+	.sy-landing {
+		display: grid;
+		justify-items: center;
+		gap: 0.9rem;
+		padding-block: clamp(1.5rem, 4vw, 2.5rem) 1.5rem;
+		text-align: center;
+	}
+	.hero-link {
+		line-height: 0;
+		transition: transform 0.2s;
+	}
+	.hero-link:hover {
+		transform: translateY(-3px) rotate(-3deg);
+	}
+	.sy-landing h1.wordmark {
+		margin: 0.25rem 0 0;
+		font-family: var(--sy-western);
+		font-weight: 400;
+		font-size: clamp(1.6rem, 4.5vw, 2.3rem);
+		letter-spacing: 0.16em;
+		line-height: 1;
+		color: var(--sl-color-white);
+		/* Optical centre: the tracking adds space after the last letter. */
+		padding-left: 0.16em;
+	}
+	.claim {
+		display: grid;
+		justify-items: center;
+		gap: 0.9rem;
+		margin: 0;
+		font-family: var(--sy-display);
+		font-size: 0.78rem;
+		line-height: 1.3;
+		letter-spacing: 0.22em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+	}
+	@media (max-width: 30rem) {
+		.claim {
+			letter-spacing: 0.14em;
+		}
+	}
+	/* The boot between two brass hairlines, under the wordmark. */
+	.claim::before {
+		content: '';
+		width: 8rem;
+		height: 21px;
+		background:
+			var(--sy-boot) center / 23px 21px no-repeat,
+			linear-gradient(var(--sy-brass), var(--sy-brass)) left center / 2.6rem 1px no-repeat,
+			linear-gradient(var(--sy-brass), var(--sy-brass)) right center / 2.6rem 1px no-repeat;
+		image-rendering: pixelated;
+	}
+	.sy-agent {
+		padding-block: 0;
+	}
+	.sy-pillars {
+		list-style: none;
+		max-width: 64rem;
+		margin: 0 auto;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 0.75rem;
+	}
+	.sy-pillars li {
+		margin: 0;
+		min-width: 0;
+	}
+	.sy-pillars a {
+		display: grid;
+		gap: 0.7rem;
+		justify-items: start;
+		height: 100%;
+		padding: 1.1rem 1.15rem;
+		font-family: var(--sy-display);
+		font-size: var(--sl-text-sm);
+		font-weight: 600;
+		line-height: 1.3;
+		color: var(--sl-color-white);
+		text-decoration: none;
+		border: 1px solid var(--sy-rule);
+		border-top: 1px solid var(--sy-brass);
+		border-radius: 0.5rem;
+		background: var(--sy-panel);
+		transition: border-color 0.15s;
+	}
+	.sy-pillars a :global(.sy-hat) {
+		width: 30px;
+		height: auto;
+	}
+	.sy-pillars a:hover,
+	.sy-pillars a:focus-visible {
+		border-color: var(--sy-brass);
+	}
+	@media (max-width: 50rem) {
+		.sy-pillars {
+			grid-template-columns: repeat(2, 1fr);
+			gap: 0.5rem;
+		}
+		.sy-pillars a {
+			padding: 0.85rem;
+			font-size: var(--sl-text-xs);
+		}
+	}
+</style>

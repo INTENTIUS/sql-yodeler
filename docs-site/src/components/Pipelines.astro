@@ -1,0 +1,72 @@
+---
+// The pipelines `yodel ci` writes, in the order a change meets them: each
+// job's name as the forge shows it, when it runs, and what it does. The words
+// follow docs/workflows.md ("The pipelines: yodel ci") and docs/approval.md.
+const stages = [
+	{ name: 'lint', when: 'every pull request', what: 'yodel lint, the replay check on a throwaway server, and yodel ci --check on the rendered pipelines.' },
+	{ name: 'plan-<env>', when: 'every pull request', what: 'The plan as one comment per environment, made with the reader, after a write probe that fails a job that could write.' },
+	{ name: 'yodel-apply', when: 'on a push to main', what: 'One wave per environment, in order, each behind its gate policy as main had it.' },
+	{ name: 'yodel approve', when: 'when a wave waits', what: 'A person reads the plan, types the environment, and the waiting job resumes.' },
+	{ name: 'watch-<env>', when: 'on a schedule', what: 'Drift between the declared schema and the live one, kept in one issue.' },
+];
+---
+<ol class="sy-pipelines not-content">
+	{stages.map((s) => (
+		<li>
+			<code class="name">{s.name}</code>
+			<span class="when">{s.when}</span>
+			<p>{s.what}</p>
+		</li>
+	))}
+</ol>
+
+<style>
+	.sy-pipelines {
+		list-style: none;
+		margin: 2rem 0 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(11.5rem, 100%), 1fr));
+		border-top: 1px solid var(--sy-rule);
+	}
+	li {
+		position: relative;
+		padding: 1.25rem 1.25rem 1.25rem 0;
+		margin: 0;
+		display: grid;
+		gap: 0.35rem;
+		align-content: start;
+		border-bottom: 1px solid var(--sy-rule);
+		min-width: 0;
+	}
+	li::before {
+		content: '';
+		position: absolute;
+		top: -4px;
+		left: 0;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--sy-accent);
+	}
+	.name {
+		font-family: var(--sl-font-mono);
+		font-size: 1rem;
+		color: var(--sl-color-white);
+		background: none;
+		border: 0;
+		padding: 0;
+	}
+	.when {
+		font-family: var(--sl-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--sy-accent);
+	}
+	p {
+		margin: 0;
+		color: var(--sl-color-gray-2);
+		font-size: 0.92rem;
+	}
+</style>

@@ -1,0 +1,122 @@
+---
+// The apply pipeline's waves, one per environment, each with its gate policy
+// (docs/approval.md, "Waves: a gate per environment"). An approval covers the
+// plan by its digest; the hat marks the wave that applied.
+import Hat from './Hat.astro';
+const waves = [
+	{ env: 'dev', gate: 'gate: never', digest: 'jcs1-sha256:6a1f…c09e', state: 'applied', note: 'applied on the push to main' },
+	{ env: 'staging', gate: 'gate: on-destructive', digest: 'jcs1-sha256:b77d…12a4', state: 'waiting', note: 'npx yodel approve staging' },
+	{ env: 'prod', gate: 'gate: always', digest: 'planned when staging applies', state: 'next', note: 'waits for its own approval' },
+];
+---
+<div class="sy-waves not-content">
+	<ol>
+		{waves.map((w) => (
+			<li class={w.state}>
+				<span class="label">{w.env}</span>
+				<span class="gate">{w.gate}</span>
+				<code class="digest">{w.digest}</code>
+				<span class="state">{w.state === 'applied' && <Hat size="small" />}{w.state}</span>
+				<span class="note">{w.note}</span>
+			</li>
+		))}
+	</ol>
+	<p class="refusal">
+		<span>refused</span>
+		A migration changed after staging's approval, so staging applied nothing and named both digests.
+	</p>
+</div>
+
+<style>
+	.sy-waves {
+		display: grid;
+		gap: 1rem;
+		margin-top: 1.5rem;
+	}
+	ol {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+	}
+	li {
+		margin: 0;
+		padding: 1rem 1.25rem 1rem 0;
+		display: grid;
+		gap: 0.3rem;
+		align-content: start;
+		border-top: 2px solid var(--sy-rule);
+		min-width: 0;
+	}
+	li.applied {
+		border-top-color: var(--sy-brass);
+	}
+	li.waiting {
+		border-top-color: var(--sy-accent);
+	}
+	.label {
+		font-family: var(--sy-display);
+		font-size: 1.4rem;
+		font-weight: 600;
+		color: var(--sl-color-white);
+	}
+	.gate {
+		font-family: var(--sl-font-mono);
+		font-size: 0.85rem;
+		color: var(--sl-color-gray-2);
+	}
+	.digest {
+		font-family: var(--sl-font-mono);
+		font-size: 0.8rem;
+		background: none;
+		border: 0;
+		padding: 0;
+		color: var(--sl-color-gray-3);
+		overflow-wrap: anywhere;
+	}
+	.state {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-family: var(--sl-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+	}
+	.applied .state {
+		color: var(--sy-brass);
+	}
+	.waiting .state {
+		color: var(--sy-accent);
+	}
+	.note {
+		font-size: 0.85rem;
+		color: var(--sl-color-gray-2);
+		overflow-wrap: anywhere;
+	}
+	.waiting .note {
+		font-family: var(--sl-font-mono);
+		font-size: 0.8rem;
+	}
+	.refusal {
+		margin: 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		align-items: baseline;
+		color: var(--sl-color-gray-2);
+		font-size: 0.92rem;
+	}
+	.refusal span {
+		font-family: var(--sl-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--sy-warn);
+		border: 1px solid var(--sy-warn);
+		border-radius: 99rem;
+		padding: 0.05rem 0.5rem;
+	}
+</style>
