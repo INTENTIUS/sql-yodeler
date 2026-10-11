@@ -64,11 +64,23 @@ function rows(): HistoryRow[] {
   ];
 }
 
-function ledger(): LedgerInput {
+/** An op's ledger lines, short: the pending facts and the resolutions. */
+interface Lines {
+  pending: Array<{ gate: string; timestamp: string; planDigest?: string; runId?: string }>;
+  resolutions: Array<{ gate: string; timestamp: string; resolvedBy: string; planDigest?: string; note?: string }>;
+}
+
+/** The records a GateLedgerPort reads for `op`'s `lines`. */
+const records = (op: string, l: Lines) => ({ pending: l.pending.map((p) => ({ version: 1, kind: "pending", op, expiresAt: "", ...p })), resolutions: l.resolutions.map((r) => ({ version: 1, op, ...r })) });
+
+/** `l` as chant's reader (readGateAuditLedgers) gives it. */
+const linesOf = (op: string, l: Lines) => {
+  const r = records(op, l);
+  return [...r.pending, ...r.resolutions].map((record) => ({ record }));
+};
+
+function devLines(): Lines {
   return {
-    op: "migrate-dev",
-    gate: "approve-migrate-dev",
-    path: "_gates/migrate-dev.jsonl",
     pending: [
       { gate: "approve-migrate-dev", timestamp: "2026-10-10T08:59:00.000Z", planDigest: D1, runId: "r1" },
       { gate: "approve-migrate-dev", timestamp: "2026-10-10T09:00:03.500Z", planDigest: D2, runId: "r2" },
@@ -80,6 +92,10 @@ function ledger(): LedgerInput {
       { gate: "some-other-gate", timestamp: "2026-10-10T09:00:05.000Z", resolvedBy: "eve" },
     ],
   };
+}
+
+function ledger(l: Lines = devLines()): LedgerInput {
+  return { op: "migrate-dev", gate: "approve-migrate-dev", path: "_gates/migrate-dev.jsonl", lines: linesOf("migrate-dev", l) };
 }
 
 const derive = (r: HistoryRow[] = rows(), l: LedgerInput | undefined = ledger()) => deriveAudit({ environment: "dev", history: "yodeler.history", rows: r, ledger: l });
@@ -120,8 +136,8 @@ describe("the audit log", () => {
   });
 
   it("names a removed approval line as a gap: a migration applied under a digest the ledger does not approve", () => {
-    const l = ledger();
-    const { gaps } = derive(rows(), { ...l, resolutions: l.resolutions.filter((r) => r.planDigest !== D2 || r.gate !== l.gate) });
+    const l = devLines();
+    const { gaps } = derive(rows(), ledger({ ...l, resolutions: l.resolutions.filter((r) => r.planDigest !== D2 || r.gate !== "approve-migrate-dev") }));
     expect(gaps).toEqual([{ environment: "dev", kind: "approval", detail: `m2 was applied under ${D2} (yodeler.history seq 8), but _gates/migrate-dev.jsonl holds no approval of migrate-dev / approve-migrate-dev for that digest` }]);
   });
 
@@ -143,10 +159,12 @@ describe("the audit log of a waves project (#87)", () => {
     op: "yodel-apply",
     path: "_gates/yodel-apply.jsonl",
     gate: "yodel-apply-wave-2",
-    pending: [{ gate: "yodel-apply-wave-2", timestamp: "2026-10-10T08:59:00.000Z", planDigest: WAVE }],
-    resolutions: resolutions.map((r) => ({ ...r, timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice" })),
+    lines: linesOf("yodel-apply", {
+      pending: [{ gate: "yodel-apply-wave-2", timestamp: "2026-10-10T08:59:00.000Z", planDigest: WAVE }],
+      resolutions: resolutions.map((r) => ({ ...r, timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice" })),
+    }),
   });
-  const migrationsGateOnly: LedgerInput = { op: "migrate-dev", gate: "approve-migrate-dev", path: "_gates/migrate-dev.jsonl", pending: [], resolutions: [] };
+  const migrationsGateOnly = ledger({ pending: [], resolutions: [] });
 
   it("finds a wave's approval on the wave's gate, for the set digest its started row records", () => {
     const { entries, gaps } = deriveAudit({ environment: "dev", history: "h", rows: waveRows("approved"), ledger: migrationsGateOnly, waves: waves([{ gate: "yodel-apply-wave-2", planDigest: WAVE }]) });
@@ -163,7 +181,7 @@ describe("the audit log of a waves project (#87)", () => {
       environment: "dev",
       history: "h",
       rows: waveRows("approved"),
-      ledger: { ...migrationsGateOnly, resolutions: [{ gate: "approve-migrate-dev", timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice", planDigest: D1 }] },
+      ledger: ledger({ pending: [], resolutions: [{ gate: "approve-migrate-dev", timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice", planDigest: D1 }] }),
       waves: waves([]),
     });
     expect(onMigrations.gaps).toHaveLength(1);
@@ -195,8 +213,8 @@ describe("audit.jsonl", () => {
     const lines = readFileSync(path, "utf8");
 
     // A pending line removed from the ledger.
-    const l = ledger();
-    const noPending = derive(rows(), { ...l, pending: l.pending.slice(1) }).entries;
+    const l = devLines();
+    const noPending = derive(rows(), ledger({ ...l, pending: l.pending.slice(1) })).entries;
     expect(kinds(compareAudit(readAuditFile(path), noPending, ["dev"]).missing)).toEqual(["approval-requested"]);
     // A history row removed.
     const noRow = derive(rows().filter((r) => r.seq !== 5)).entries;
@@ -209,14 +227,14 @@ describe("audit.jsonl", () => {
 
 const chain = [{ id: "m1" }, { id: "m2" }, { id: "m3" }] as unknown as Migration[];
 const project = { dir: "/work/shop", dialect: "clickhouse", config: {}, configPath: "/work/shop/chant.config.ts", sourceDir: "src" } as unknown as Project;
-const port = (l: LedgerInput): GateLedgerPort => ({
-  read: () => Promise.resolve({ pending: l.pending.map((p) => ({ version: 1, kind: "pending", op: l.op, expiresAt: "", ...p })), resolutions: l.resolutions.map((r) => ({ version: 1, op: l.op, ...r })) }) as ReturnType<GateLedgerPort["read"]>,
+const port = (l: Lines): GateLedgerPort => ({
+  read: () => Promise.resolve(records("migrate-dev", l)) as ReturnType<GateLedgerPort["read"]>,
   appendPending: () => Promise.reject(new Error("read only")),
 });
 const sources: ReportSources = {
   rows: (_p, env) => (env === "prod" ? Promise.reject(new Error("connect ECONNREFUSED 10.0.0.9:8123")) : Promise.resolve({ rows: env === "dev" ? rows() : rows().slice(0, 3), history: `yodel_${env}.history` })),
   op: (_p, env) => Promise.resolve({ name: `migrate-${env}`, gate: `approve-migrate-${env}`, filePath: "", quorum: false }),
-  ledger: () => Promise.resolve(port(ledger())),
+  ledger: () => Promise.resolve(port(devLines())),
 };
 
 describe("the report across environments", async () => {
@@ -231,6 +249,60 @@ describe("the report across environments", async () => {
     expect(r.environments[1]?.migrations.map((m) => m.state)).toEqual(["applied", "pending", "pending"]);
     expect(r.environments[2]).toMatchObject({ name: "prod", error: "the history could not be read: connect ECONNREFUSED 10.0.0.9:8123", migrations: [] });
     expect(r.gaps.map((g) => `${g.environment}:${g.kind}`)).toEqual(["staging:approval"]);
+  });
+
+  // The text and the entries' ids as yodel 0.7.0 wrote them, before chant read the ledger (#212): an audit.jsonl from then still matches.
+  it("says what it said before chant read the ledger, with the same ids", () => {
+    expect(derive().entries.map((e) => e.id)).toEqual([
+      "sha256:b9f98bbf4f866529a67e670e",
+      "sha256:c082956ace6c58c028925df2",
+      "sha256:d6abcfa52c5a76ad60df240e",
+      "sha256:bcfa90a4407dc175862f5db3",
+      "sha256:ecd59d3ade2298fb938ea87d",
+      "sha256:d64d099dc63dd0ab79797c40",
+      "sha256:42710b2f2363a359bceb2349",
+      "sha256:5c3c2dcf5bc5cfa55216debe",
+      "sha256:ecaa58143bb4e81be9b16202",
+      "sha256:b213a5fd00589e22de80ff31",
+    ]);
+    const wave = { op: "yodel-apply", path: "_gates/yodel-apply.jsonl", gate: "yodel-apply-wave-2", lines: linesOf("yodel-apply", { pending: [{ gate: "yodel-apply-wave-2", timestamp: "2026-10-10T08:59:00.000Z", planDigest: "jcs1-sha256:wave", runId: "w1" }], resolutions: [{ gate: "yodel-apply-wave-2", planDigest: "jcs1-sha256:wave", timestamp: "2026-10-10T08:59:30.000Z", resolvedBy: "alice", note: "ok" }] }) };
+    const waveRows = rows().map((x) => (x.seq === 1 ? { ...x, note: JSON.stringify({ wave: { wave: 2, op: "yodel-apply", gate: "yodel-apply-wave-2", digest: "jcs1-sha256:wave", status: "approved" } }) } : x));
+    const fromWaves = deriveAudit({ environment: "dev", history: "yodeler.history", rows: waveRows, ledger: ledger(), waves: wave }).entries.filter((e) => "ledger" in e.source && e.source.op === "yodel-apply");
+    expect(fromWaves.map((e) => [e.kind, e.id, e.detail])).toEqual([
+      ["approval-requested", "sha256:72228ff46fe57edc2f830df6", "run w1"],
+      ["approved", "sha256:9c3c995d6fd3835da71341a6", "ok"],
+    ]);
+    expect(renderReportText(r)).toBe(
+      [
+        "Report for /work/shop (clickhouse, 3 environments)",
+        "",
+        "migration  dev                       staging                   prod",
+        "m1         applied 2026-10-10 09:00  applied 2026-10-10 09:00  unread",
+        "m2         applied 2026-10-10 09:00  pending                   unread",
+        "m3         pending                   pending                   unread",
+        "",
+        "prod: the history could not be read: connect ECONNREFUSED 10.0.0.9:8123",
+        "",
+        "Gaps (1):",
+        "  staging: m1 was applied under jcs1-sha256:1111 (yodel_staging.history seq 3), but _gates/migrate-staging.jsonl holds no approval of migrate-staging / approve-migrate-staging for that digest",
+        "",
+        "Audit (13 entries):",
+        "  2026-10-10T08:59:00.000Z  dev  approval-requested  jcs1-sha256:1111  (run r1)",
+        "  2026-10-10T08:59:30.000Z  dev  approved  by alice  jcs1-sha256:1111",
+        "  2026-10-10T09:00:01.000000Z  dev  silenced  m1  by ci@host  jcs1-sha256:1111  (step 0: destructive TICKET-1)",
+        "  2026-10-10T09:00:01.000000Z  staging  silenced  m1  by ci@host  jcs1-sha256:1111  (step 0: destructive TICKET-1)",
+        "  2026-10-10T09:00:03.000000Z  dev  applied  m1  by ci@host  jcs1-sha256:1111",
+        "  2026-10-10T09:00:03.000000Z  staging  applied  m1  by ci@host  jcs1-sha256:1111",
+        "  2026-10-10T09:00:03.500Z  dev  approval-requested  jcs1-sha256:2222  (run r2)",
+        "  2026-10-10T09:00:04.000Z  dev  approved  by alice  jcs1-sha256:2222",
+        "  2026-10-10T09:00:04.500Z  dev  override  by alice  jcs1-sha256:2222  (no-drops: nothing reads it)",
+        "  2026-10-10T09:00:04.500Z  staging  override  by alice  jcs1-sha256:2222  (no-drops: nothing reads it)",
+        "  2026-10-10T09:00:05.000000Z  dev  refused  m2  by ci@host  jcs1-sha256:2222  (check table-empty failed: 1 row)",
+        "  2026-10-10T09:00:08.000000Z  dev  applied  m2  by ci@host  jcs1-sha256:2222",
+        "  2026-10-10T09:00:09.000000Z  dev  repaired  m2  by bob@laptop  jcs1-sha256:2222  (whitespace only)",
+        "",
+      ].join("\n"),
+    );
   });
 
   it("renders as text and as a self-contained page", () => {

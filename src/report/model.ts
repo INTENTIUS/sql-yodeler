@@ -5,6 +5,7 @@
  * lock and writes nothing to a server or the ledger.
  */
 
+import { readGateAuditLedgers } from "@intentius/chant/lifecycle/gate-audit";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { deriveState, type HistoryRow } from "../history/index.js";
 import type { Migration } from "../migrations/index.js";
@@ -118,8 +119,8 @@ export async function collectReport(project: Project, chain: readonly Migration[
       const op = await sources.op(project, name);
       env.op = { name: op.name, gate: op.gate };
       if (!port) throw new Error(portError ?? "no ledger");
-      const lines = await port.read(op.name);
-      ledger = { op: op.name, gate: op.gate, path: gateLedgerPath(op.name), pending: lines.pending, resolutions: lines.resolutions };
+      const [read] = await readGateAuditLedgers(port, [op.name]);
+      ledger = { op: op.name, gate: op.gate, path: gateLedgerPath(op.name), lines: read?.lines ?? [] };
     } catch (e) {
       env.notes.push(env.op ? `chant's gate ledger could not be read (${firstLine(e)}); approvals are not shown and not checked` : `no migrations Op for ${name} (${firstLine(e)}); approvals are not shown and not checked`);
     }
@@ -130,8 +131,8 @@ export async function collectReport(project: Project, chain: readonly Migration[
     if (port && (k > 0 || rows.some((r) => r.kind === "migration" && r.note.includes('"wave"')))) {
       try {
         const { waveGateName } = await import("@intentius/chant/gated-waves");
-        const lines = await port.read(WAVES_PIPELINE);
-        waves = { op: WAVES_PIPELINE, path: gateLedgerPath(WAVES_PIPELINE), ...(k > 0 ? { gate: waveGateName(WAVES_PIPELINE, k) } : {}), pending: lines.pending, resolutions: lines.resolutions };
+        const [read] = await readGateAuditLedgers(port, [WAVES_PIPELINE]);
+        waves = { op: WAVES_PIPELINE, path: gateLedgerPath(WAVES_PIPELINE), ...(k > 0 ? { gate: waveGateName(WAVES_PIPELINE, k) } : {}), lines: read?.lines ?? [] };
       } catch (e) {
         env.notes.push(`the waves' gate ledger could not be read (${firstLine(e)}); wave approvals are not shown and not checked`);
       }
