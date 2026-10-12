@@ -30,7 +30,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import type { OpWaveApplyHooksRun, OpWaveHook, OpWaveHookMoment, OpWaveHooks, OpWaveHooksFile, runOpWaveApplyHooks as RunHooks } from "@intentius/chant/op";
+import type { OpWaveApplyHooksRun, OpWaveExec, OpWaveHook, OpWaveHookMoment, OpWaveHooks, OpWaveHooksFile } from "@intentius/chant/op";
 import type { ApplyStep, ApplySteps } from "../config/define.js";
 import { loadYodelConfigAtBase } from "../config/base.js";
 import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
@@ -132,9 +132,6 @@ export function stepsHooksFile(steps: ApplySteps | undefined, env: string, optio
     outcomes: [],
   };
 }
-
-/** How chant's runner runs one hook. */
-type OpWaveExec = NonNullable<NonNullable<Parameters<typeof RunHooks>[2]>["exec"]>;
 
 const lastLine = (text: string): string => text.trim().split("\n").at(-1)?.slice(0, 200) ?? "";
 
