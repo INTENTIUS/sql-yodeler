@@ -155,6 +155,43 @@ The declaration says what the schema should be; some changes also move data. Whe
 
 Names written as plain text for objects the project does not declare, and column names inside expressions, are left to the server. Lint rules then flag what the server would accept but should not: a primary key that is not a prefix of the sort key, a partition finer than a day, a timestamp without time zone, a foreign key no index leads with. [Lint](lint.md) has yodel's own rules on migrations, and chant's [lint rules page](https://intentius.io/chant/lexicons/sql/lint-rules/) has the build's.
 
+## Typed columns
+
+The build catches a misspelled `${events.columns.knd}`, but only when it runs. To have the editor and `tsc` catch it as you type, give the table its qualified name as a type argument and generate the types:
+
+```ts
+// src/schema.ts
+export const orders = table<"shop.orders">`
+  CREATE TABLE ${shop}.orders (
+    id    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email text NOT NULL
+  )`;
+```
+
+```sh
+npx chant sql types   # writes src/sql-types.d.ts; commit it
+```
+
+`tsc` then knows each column, with its type:
+
+```ts
+${orders.columns.emial}
+// error TS2551: Property 'emial' does not exist on type '{ id: ...; email: ...; }'. Did you mean 'email'?
+```
+
+The name is `schema.table` in Postgres and `database.table` in ClickHouse. It also checks a Postgres foreign key's column types and a Nullable column in a ClickHouse sort key. A declaration without the type argument keeps working as before, so a project can adopt it one table at a time.
+
+`RowOf` gives the row type of a table for application code, as the database driver returns it:
+
+```ts
+import type { RowOf } from "@intentius/chant-lexicon-sql/postgres";
+import type { orders } from "./schema.js";
+
+type Order = RowOf<typeof orders>; // { id: string; email: string }
+```
+
+Run `chant sql types` again after each schema change. When a project commits `sql-types.d.ts`, the pull request job `yodel ci` renders runs `chant sql types --check`, which fails when the file no longer matches the schema. Tables a composite builds get their `RowOf` type, but their `.columns` stay unchecked until [chant#3787](https://github.com/INTENTIUS/chant/issues/3787). The examples (`examples/clickhouse`, `examples/postgres`) use typed columns, and chant's [typed columns page](https://intentius.io/chant/lexicons/sql/typed-columns/) has the type mapping for each dialect.
+
 ## In the editor
 
 chant's language server (`chant serve lsp`, set up as [chant's LSP page](https://intentius.io/chant/cli/lsp/) shows) completes inside the templates from the same catalog: engines after `ENGINE =`, column types, codecs, settings and functions, and after `${` the tables and views the project declares and their columns. Hovering a type, an engine or a `${}` reference shows what it is, and chant's lint findings appear as you type.
