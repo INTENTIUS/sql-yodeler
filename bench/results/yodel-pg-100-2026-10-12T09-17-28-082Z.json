@@ -1,0 +1,510 @@
+{
+  "schema": 1,
+  "bench": "sql-yodeler",
+  "scenario": "yodel-postgres-100",
+  "arm": "yodel",
+  "run": {
+    "id": "yodel-pg-100-2026-10-12T09-17-28-082Z",
+    "finished_at": "2026-10-12T09:27:06.910Z",
+    "harness_commit": "3b2b2b0",
+    "harness_dirty": false,
+    "substrate": "emulator",
+    "measurements": [
+      "new",
+      "plan",
+      "apply",
+      "pr",
+      "resume",
+      "backfill",
+      "replay",
+      "fanout"
+    ],
+    "sizes": [
+      10,
+      100,
+      1000,
+      10000
+    ],
+    "machine": {
+      "platform": "darwin",
+      "release": "25.6.0",
+      "arch": "arm64",
+      "cpu": "Apple M5 Pro",
+      "cpus": 18,
+      "memory_gb": 64,
+      "node": "v24.13.1"
+    },
+    "emulator": {
+      "started_with": "chant emulator up --lexicon sql",
+      "clickhouse": "26.8.15.10",
+      "postgres": "PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+    },
+    "oracle_clients": {
+      "clickhouse": "the HTTP interface (clickhouse-client is not installed here)",
+      "postgres": "psql (PostgreSQL) 16.14 (Homebrew)"
+    },
+    "versions": {
+      "@intentius/sql-yodeler": "3b2b2b0",
+      "@intentius/chant": "0.124.15",
+      "@intentius/chant-lexicon-sql": "0.124.15"
+    }
+  },
+  "agent": {
+    "name": "none",
+    "model": null,
+    "k": 1
+  },
+  "score": {
+    "trials": 8,
+    "expected_trials": 8,
+    "passed": 8,
+    "pass_rate": 1,
+    "by_task": {
+      "new": [
+        1
+      ],
+      "plan": [
+        1
+      ],
+      "apply": [
+        1
+      ],
+      "pr": [
+        1
+      ],
+      "resume": [
+        1
+      ],
+      "backfill": [
+        1
+      ],
+      "replay": [
+        1
+      ],
+      "fanout": [
+        1
+      ]
+    }
+  },
+  "gates": {
+    "audit": true,
+    "tool_missing": false,
+    "exceptions": {},
+    "errored_trials": 0,
+    "complete": true
+  },
+  "independence": {
+    "account_reads": null,
+    "account_reads_status": "not_applicable",
+    "account_reads_reason": "a schema-migration bench: no cloud account is read; the oracle figures in measurement are this bench's comparison"
+  },
+  "effort": {
+    "wall_seconds": 578.821,
+    "stage_seconds": {
+      "new": 2.563,
+      "plan": 1.899,
+      "apply": 7.995,
+      "pr": 1.003,
+      "resume": 24.771,
+      "backfill": 35.781,
+      "replay": 133.675,
+      "fanout": 368.439
+    }
+  },
+  "measurement": {
+    "objects": 101,
+    "new": {
+      "what": "yodel new, wall seconds: `create` declares every object from nothing; `incremental` adds a column to every table",
+      "objects": 101,
+      "create_seconds": 1.27,
+      "create_statements": 202,
+      "oracle": null,
+      "oracle_reason": "yodel new reads the declarations and the migrations directory and sends nothing to the server; there is no statement to send straight",
+      "incremental_seconds": 1.259,
+      "incremental_statements": 100
+    },
+    "plan": {
+      "what": "yodel plan <env> --json, wall seconds, versioned project: `create_pending` is every object pending on an empty history; `incremental_pending` is a column added to every table pending after the create applied",
+      "create_pending_seconds": 0.848,
+      "oracle": null,
+      "oracle_reason": "yodel plan reads the history and changes nothing; there is no statement it would send to time straight",
+      "incremental_pending_seconds": 1.051
+    },
+    "apply": {
+      "what": "the create migration (every object) through yodel apply: the Op to its gate, chant approve, the Op's yodel apply --execute; lock and statement figures from the history's recorded_at",
+      "statements": 202,
+      "wall": {
+        "code": 0,
+        "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+        "gate_seconds": 3.098,
+        "approve_seconds": 0.609,
+        "execute_seconds": 4.163,
+        "seconds": 7.87
+      },
+      "runs": 1,
+      "history_rows": 406,
+      "lock_held_lower_bound_seconds": 0.352601,
+      "per_migration": {
+        "n": 1,
+        "total": 0.352601,
+        "mean": 0.352601,
+        "p50": 0.352601,
+        "p95": 0.352601,
+        "max": 0.352601
+      },
+      "per_statement": {
+        "n": 202,
+        "total": 0.20155,
+        "mean": 0.000998,
+        "p50": 0.00102,
+        "p95": 0.00127,
+        "max": 0.001801
+      },
+      "per_step": null,
+      "oracle": {
+        "client": "psql -f (\\timing on)",
+        "statements": 202,
+        "wall_seconds": 0.102,
+        "per_statement": {
+          "n": 202,
+          "total": 0.080603,
+          "mean": 0.000399,
+          "p50": 0.000437,
+          "p95": 0.000679,
+          "max": 0.00127
+        }
+      },
+      "overhead_seconds": {
+        "lock_held_minus_oracle": 0.251,
+        "apply_wall_minus_oracle": 7.768,
+        "execute_wall_minus_oracle": 4.061
+      }
+    },
+    "pr": {
+      "what": "the pull request job's local equivalent, not a forge run: yodel plan <env> --format markdown, which plans and renders the comment `yodel plan --comment` posts; no push, no runner, no forge API",
+      "pending_statements": 100,
+      "plan_and_render_seconds": 1.003,
+      "comment_bytes": 19436,
+      "oracle": null,
+      "oracle_reason": "the job sends nothing to the database; there is no statement to send straight"
+    },
+    "resume": {
+      "what": "a migration adding a column to every table, failing at the middle table's statement (its column made by hand first), resumed once the column is gone; against another migration of the same shape run clean",
+      "statements": 100,
+      "failed_at_statement": 50,
+      "interrupted": {
+        "wall": {
+          "code": 1,
+          "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+          "gate_seconds": 3.306,
+          "approve_seconds": 0.61,
+          "execute_seconds": 3.749,
+          "seconds": 7.665
+        },
+        "runs": 1,
+        "history_rows": 104,
+        "lock_held_lower_bound_seconds": 0.094231,
+        "per_migration": {
+          "n": 1,
+          "total": 0.094231,
+          "mean": 0.094231,
+          "p50": 0.094231,
+          "p95": 0.094231,
+          "max": 0.094231
+        },
+        "per_statement": {
+          "n": 51,
+          "total": 0.052291,
+          "mean": 0.001025,
+          "p50": 0.000941,
+          "p95": 0.001545,
+          "max": 0.002281
+        },
+        "per_step": null
+      },
+      "resumed": {
+        "wall": {
+          "code": 0,
+          "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+          "gate_seconds": 3.231,
+          "approve_seconds": 0.626,
+          "execute_seconds": 3.911,
+          "seconds": 7.768
+        },
+        "runs": 1,
+        "history_rows": 102,
+        "lock_held_lower_bound_seconds": 0.093634,
+        "per_migration": {
+          "n": 1,
+          "total": 0.093634,
+          "mean": 0.093634,
+          "p50": 0.093634,
+          "p95": 0.093634,
+          "max": 0.093634
+        },
+        "per_statement": {
+          "n": 50,
+          "total": 0.046528,
+          "mean": 0.000931,
+          "p50": 0.000894,
+          "p95": 0.001124,
+          "max": 0.001538
+        },
+        "per_step": null,
+        "statements_resent": 0
+      },
+      "clean": {
+        "wall": {
+          "code": 0,
+          "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+          "gate_seconds": 3.273,
+          "approve_seconds": 0.626,
+          "execute_seconds": 3.992,
+          "seconds": 7.891
+        },
+        "runs": 1,
+        "history_rows": 202,
+        "lock_held_lower_bound_seconds": 0.169571,
+        "per_migration": {
+          "n": 1,
+          "total": 0.169571,
+          "mean": 0.169571,
+          "p50": 0.169571,
+          "p95": 0.169571,
+          "max": 0.169571
+        },
+        "per_statement": {
+          "n": 100,
+          "total": 0.094447,
+          "mean": 0.000944,
+          "p50": 0.000907,
+          "p95": 0.001173,
+          "max": 0.002308
+        },
+        "per_step": null
+      },
+      "interrupted_plus_resumed_minus_clean_seconds": 7.542,
+      "oracle": {
+        "client": "psql -f (\\timing on)",
+        "statements": 100,
+        "wall_seconds": 0.045,
+        "per_statement": {
+          "n": 100,
+          "total": 0.025502,
+          "mean": 0.000255,
+          "p50": 0.000242,
+          "p95": 0.000345,
+          "max": 0.000806
+        }
+      },
+      "oracle_of": "the clean migration's statements sent straight"
+    },
+    "backfill": {
+      "what": "a hand-written backfill step over every row of bf, in batches by id; clean, then another column's backfill interrupted at its middle batch and resumed from its receipts",
+      "rows": 100000,
+      "batches": 10,
+      "clean": {
+        "wall": {
+          "code": 0,
+          "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+          "gate_seconds": 3.283,
+          "approve_seconds": 0.644,
+          "execute_seconds": 4.106,
+          "seconds": 8.033
+        },
+        "runs": 1,
+        "history_rows": 6,
+        "lock_held_lower_bound_seconds": 0.220272,
+        "per_migration": {
+          "n": 1,
+          "total": 0.220272,
+          "mean": 0.220272,
+          "p50": 0.220272,
+          "p95": 0.220272,
+          "max": 0.220272
+        },
+        "per_statement": {
+          "n": 1,
+          "total": 0.00224,
+          "mean": 0.00224,
+          "p50": 0.00224,
+          "p95": 0.00224,
+          "max": 0.00224
+        },
+        "per_step": {
+          "n": 1,
+          "total": 0.213639,
+          "mean": 0.213639,
+          "p50": 0.213639,
+          "p95": 0.213639,
+          "max": 0.213639
+        },
+        "rows_per_second": 468079
+      },
+      "interrupted": {
+        "wall": {
+          "code": 1,
+          "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+          "gate_seconds": 3.343,
+          "approve_seconds": 0.632,
+          "execute_seconds": 3.874,
+          "seconds": 7.849
+        },
+        "failed_at_batch": 5,
+        "runs": 1,
+        "history_rows": 6,
+        "lock_held_lower_bound_seconds": 0.153974,
+        "per_migration": {
+          "n": 1,
+          "total": 0.153974,
+          "mean": 0.153974,
+          "p50": 0.153974,
+          "p95": 0.153974,
+          "max": 0.153974
+        },
+        "per_statement": {
+          "n": 1,
+          "total": 0.002223,
+          "mean": 0.002223,
+          "p50": 0.002223,
+          "p95": 0.002223,
+          "max": 0.002223
+        },
+        "per_step": {
+          "n": 1,
+          "total": 0.146311,
+          "mean": 0.146311,
+          "p50": 0.146311,
+          "p95": 0.146311,
+          "max": 0.146311
+        }
+      },
+      "resumed": {
+        "wall": {
+          "code": 0,
+          "lock": "held in Postgres advisory lock (1498367052, 1327960617) for history schema yodel_35_pg_100_history",
+          "gate_seconds": 3.202,
+          "approve_seconds": 0.637,
+          "execute_seconds": 4.03,
+          "seconds": 7.869
+        },
+        "runs": 1,
+        "history_rows": 4,
+        "lock_held_lower_bound_seconds": 0.154283,
+        "per_migration": {
+          "n": 1,
+          "total": 0.154283,
+          "mean": 0.154283,
+          "p50": 0.154283,
+          "p95": 0.154283,
+          "max": 0.154283
+        },
+        "per_statement": null,
+        "per_step": {
+          "n": 1,
+          "total": 0.140657,
+          "mean": 0.140657,
+          "p50": 0.140657,
+          "p95": 0.140657,
+          "max": 0.140657
+        }
+      },
+      "oracle": {
+        "client": "psql -f (\\timing on)",
+        "statements": 10,
+        "wall_seconds": 0.169,
+        "per_statement": {
+          "n": 10,
+          "total": 0.149069,
+          "mean": 0.014907,
+          "p50": 0.0136,
+          "p95": 0.029928,
+          "max": 0.029928
+        },
+        "rows_per_second": 591716
+      },
+      "oracle_of": "the clean backfill's batch statements sent straight to a copy of bf with the same rows"
+    },
+    "replay": {
+      "what": "yodel lint --replay <env>: every migration applied in order to a fresh database on the env's server, each compared with the schema it recorded",
+      "migrations": 100,
+      "capped": null,
+      "generate_seconds": 123.663,
+      "replay_seconds": 9.807,
+      "oracle": {
+        "client": "psql -f (\\timing on)",
+        "statements": 202,
+        "wall_seconds": 0.1,
+        "per_statement": {
+          "n": 202,
+          "total": 0.077746,
+          "mean": 0.000385,
+          "p50": 0.000422,
+          "p95": 0.000603,
+          "max": 0.002265
+        }
+      },
+      "overhead_seconds": 9.707
+    },
+    "fanout": {
+      "what": "a tenant set of `tenants` empty tenants (#56), one table each, applied by its wave through chant run wave: decide (plans every tenant and waits), one chant approve of the set digest, apply (plans again and applies each tenant under its own lock). `list` renders a run per tenant; `query` reads the set from a registry table when the wave runs, one run for every tenant. `plan_comment` is yodel plan <set> --format markdown, the one comment for the set",
+      "tenants": 100,
+      "statements_per_tenant": 4,
+      "list": {
+        "runs": 100,
+        "plan_comment": {
+          "seconds": 13.71,
+          "bytes": 2445
+        },
+        "decide_seconds": 84.196,
+        "approve_seconds": 0.662,
+        "apply_seconds": 191.846,
+        "wall_seconds": 276.704,
+        "per_tenant_wall_seconds": 2.76,
+        "lock_held_per_tenant": {
+          "n": 100,
+          "total": 1.341108,
+          "mean": 0.013411,
+          "p50": 0.013377,
+          "p95": 0.015461,
+          "max": 0.042143
+        }
+      },
+      "query": {
+        "runs": 1,
+        "plan_comment": {
+          "seconds": 14.311,
+          "bytes": 2445
+        },
+        "decide_seconds": 7.829,
+        "approve_seconds": 0.621,
+        "apply_seconds": 50.707,
+        "wall_seconds": 59.157,
+        "per_tenant_wall_seconds": 0.585,
+        "lock_held_per_tenant": {
+          "n": 100,
+          "total": 1.188605,
+          "mean": 0.011886,
+          "p50": 0.012346,
+          "p95": 0.014172,
+          "max": 0.015194
+        }
+      },
+      "oracle": {
+        "client": "psql -f (\\timing on)",
+        "statements": 400,
+        "wall_seconds": 0.139,
+        "per_statement": {
+          "n": 400,
+          "total": 0.116614,
+          "mean": 0.000292,
+          "p50": 0.000226,
+          "p95": 0.000516,
+          "max": 0.001192
+        }
+      },
+      "oracle_of": "every tenant's statements sent straight to a copy of it, one after another"
+    }
+  },
+  "reproduce": "bench/README.md: npm run bench -- new plan apply pr resume backfill replay fanout --sizes 100 --dialects pg"
+}
