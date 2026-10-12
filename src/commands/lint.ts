@@ -8,6 +8,8 @@ import { scanMigrations } from "../migrations/index.js";
 import { inspect, migrationsDir, openVersioned } from "../versioned/index.js";
 import { chantLevel, CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
+import { loadPolicies, policyRules } from "../lint/policies.js";
+import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
 const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json | --format <format> [--output <file>]] [--dir <project>] [--update-checksum <id>]... [--rules]";
@@ -188,12 +190,13 @@ function parseLintArgs(args: string[]): LintArgs {
   };
 }
 
-function allRules(): Record<string, LintRule> {
-  return { ...LINT_RULES, ...Object.fromEntries(projectRules.map((r) => [r.rule.id, r.rule])), [REPLAY_RULE.id]: REPLAY_RULE, ...SCHEMA_RULES };
+/** Every rule `lint.rules` can name: yodel's, the replay check, the lexicon's schema checks and the project's own checks (#227). */
+function allRules(policies: readonly PostSynthCheck[] = []): Record<string, LintRule> {
+  return { ...LINT_RULES, ...Object.fromEntries(projectRules.map((r) => [r.rule.id, r.rule])), [REPLAY_RULE.id]: REPLAY_RULE, ...SCHEMA_RULES, ...policyRules(policies) };
 }
 
-function listRules(io: Io, json: boolean, project: Project): number {
-  const rules = allRules();
+function listRules(io: Io, json: boolean, project: Project, policies: readonly PostSynthCheck[]): number {
+  const rules = allRules(policies);
   const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, rules, project.yodel?.path);
   // The schema checks of the project's dialect only: the other dialect's never run on its migrations.
   // One not set in yodel.config.ts takes chant.config.ts lint.rules' level, else the level the check gives each finding.
@@ -223,11 +226,12 @@ export const lint: Command = {
     guarded("lint", io, args, help, async () => {
       const a = parseLintArgs(args);
       const project = await loadProject(a.dir);
-      if (a.rules) return listRules(io, a.json, project);
-      const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, allRules(), project.yodel?.path);
+      const policies = await loadPolicies(project);
+      if (a.rules) return listRules(io, a.json, project, policies);
+      const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, allRules(policies), project.yodel?.path);
       const dir = migrationsDir(project);
 
-      const options: LintOptions = { dialect: project.dialect, project, settings, rules: projectRules };
+      const options: LintOptions = { dialect: project.dialect, project, settings, rules: projectRules, policies };
       if (a.env !== undefined) {
         const env = resolveEnvironment(project, a.env);
         const ordered = scanMigrations(dir).ordered;

@@ -458,8 +458,13 @@ export interface PolicyStep {
   op?: string;
 }
 
-/** The rules `lint.rules` can set: every lint rule, the replay check's, and the sql lexicon's schema checks (`SQLPG101`, `SQLCH113`). */
-export type LintRuleName = LintRuleId | "replay" | `SQLPG${number}` | `SQLCH${number}`;
+/**
+ * The rules `lint.rules` can set: every lint rule, the replay check's, the
+ * sql lexicon's schema checks (`SQLPG101`, `SQLCH113`), and the project's own
+ * checks from `chant.config.ts` `lint.policies`, whose ids are upper case
+ * with a dash (`ORG-CREATED-AT`). `yodel lint` refuses an id no rule has.
+ */
+export type LintRuleName = LintRuleId | "replay" | `SQLPG${number}` | `SQLCH${number}` | `${Uppercase<string>}-${Uppercase<string>}`;
 
 /** A naming rule: a preset, or a regular expression the whole name must match. */
 export type NamingRuleConfig = "snake_case" | "camelCase" | "PascalCase" | (string & {});

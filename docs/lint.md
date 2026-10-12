@@ -216,6 +216,71 @@ A finding is reported once, in the migration whose recorded schema first has it:
 
 A check's level is, in order: `lint.rules` in `yodel.config.ts`; else `lint.rules` in `chant.config.ts`, the level `chant lint` uses (`info` counts as a warning); else the level the check gives the finding. `"off"` in either file turns it off. The checks read the objects as `chant build` writes them, with their columns, keys and engine besides the DDL; that is what `yodel new` records.
 
+## Your own column rules
+
+A team often has rules of its own: every table has a `created_at`, no column in a ClickHouse sort key can be `Nullable`. You write each one as a small TypeScript check, list its file in `chant.config.ts`, and `yodel lint` runs it next to the schema checks above, on each migration's recorded schema. `chant build` and `chant lint` run the same checks on the declared schema, so a rule holds in both places.
+
+A check doesn't parse SQL. The `sql` lexicon has already read every statement into tables and columns, with each column's type, whether it can be null, and whether it's in the primary or sort key. The check reads that through `@intentius/chant-lexicon-sql/read` and returns a finding for each table that breaks the rule.
+
+Postgres: every table has `created_at timestamptz NOT NULL`. `canonicalPostgresType` matches however the type is spelled (`timestamptz` or `timestamp with time zone`):
+
+```ts
+// policies/rules.ts
+import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
+import { canonicalPostgresType, readPostgres } from "@intentius/chant-lexicon-sql/read";
+
+const TZ = canonicalPostgresType("timestamptz");
+
+export const createdAt: PostSynthCheck = {
+  id: "ORG-CREATED-AT",
+  description: "every table has created_at timestamptz NOT NULL",
+  check: (ctx) =>
+    readPostgres(ctx).tables
+      .filter((t) => {
+        const c = t.column("created_at");
+        return !c || c.typeName !== TZ || c.nullable;
+      })
+      .map((t) => ({ checkId: "ORG-CREATED-AT", severity: "error", entity: t.export, message: `${t.qualifiedName} needs created_at timestamptz NOT NULL` })),
+};
+```
+
+ClickHouse: no `Nullable` column in a sort key. `nullable` is true for `Nullable(...)` and for `LowCardinality(Nullable(...))`:
+
+```ts
+// policies/rules.ts
+import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
+import { readClickHouse } from "@intentius/chant-lexicon-sql/read";
+
+export const sortKey: PostSynthCheck = {
+  id: "ORG-SORT-KEY",
+  description: "no Nullable column in a sort key",
+  check: (ctx) =>
+    readClickHouse(ctx).tables.flatMap((t) =>
+      t.columns
+        .filter((c) => c.inSortKey && c.nullable)
+        .map((c) => ({ checkId: "ORG-SORT-KEY", severity: "error", entity: t.export, message: `${t.qualifiedName}.${c.name} is Nullable and in the sort key` })),
+    ),
+};
+```
+
+Then name the file in `chant.config.ts`:
+
+```ts
+export default {
+  lexicons: ["sql"],
+  lint: { policies: ["policies/rules.ts"] },
+  // ...
+} satisfies ChantConfig;
+```
+
+Each check is a rule named by its id, which is upper case with a dash (`ORG-CREATED-AT`). Everything above about schema checks applies to it as well:
+- it is reported in the migration that first breaks it;
+- `-- yodel:allow ORG-CREATED-AT <reason>` silences it;
+- its level comes from `lint.rules` in `yodel.config.ts`, else `chant.config.ts`, else the `severity` the check gives;
+- `yodel lint --rules` lists it as a project policy.
+
+`yodel lint` refuses a `lint.rules` entry that names no check. A check that throws is reported as a finding of its own. Under `--env <env>`, `ctx.env` is that environment's name, so a rule can apply to prod only.
+
 ## Naming rules
 
 `lint.naming` in `yodel.config.ts` sets a rule per kind of object: `table`, `column`, `index`, `constraint`. A rule is a preset, `snake_case`, `camelCase` or `PascalCase`, or a regular expression the whole name must match:

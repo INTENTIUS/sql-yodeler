@@ -21,6 +21,8 @@ import { routineFindings } from "./routines.js";
 import { accessFindings } from "./access.js";
 import { namingFindings } from "./naming.js";
 import { SCHEMA_RULES, schemaFindings } from "./schema-checks.js";
+import { policyRules } from "./policies.js";
+import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
 
 /** One thing a rule found. */
 export interface Finding {
@@ -72,6 +74,8 @@ export interface LintOptions {
   history?: { environment: string; status: VersionedStatus };
   /** More rules: the replay check (#11) plugs in here. */
   rules?: readonly ProjectRule[];
+  /** The project's own checks, `chant.config.ts` `lint.policies` (#227), run with the schema checks. */
+  policies?: readonly PostSynthCheck[];
 }
 
 export interface LintReport {
@@ -232,7 +236,7 @@ const stepName = (s: MigrationStep): string | undefined => (typeof (s as { name?
 export async function lintMigrations(dir: string, options: LintOptions = {}): Promise<LintReport> {
   const scan = scanMigrations(dir);
   const extra = options.rules ?? [];
-  const rules: Record<string, LintRule> = { ...LINT_RULES, ...SCHEMA_RULES, ...Object.fromEntries(extra.map((r) => [r.rule.id, r.rule])) };
+  const rules: Record<string, LintRule> = { ...LINT_RULES, ...SCHEMA_RULES, ...policyRules(options.policies ?? []), ...Object.fromEntries(extra.map((r) => [r.rule.id, r.rule])) };
   const dialect = options.dialect;
   const raw: RawFinding[] = [...directoryFindings(scan.problems, options.history, scan.migrations), ...recordedSchemaFindings(scan.migrations, dialect), ...checkpointFindings(scan.migrations)];
 
@@ -240,7 +244,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
   const chantRules = (options.project?.config as { lint?: { rules?: Record<string, unknown> } } | undefined)?.lint?.rules;
   const configured = new Set(Object.keys(options.settings?.levels ?? {}));
   const bySchema = new Map<string, RawFinding[]>();
-  for (const f of [...schemaFindings(scan.migrations, { dialect, configured, chantRules }), ...namingFindings(scan.migrations, options.settings?.naming ?? {})]) {
+  for (const f of [...schemaFindings(scan.migrations, { dialect, configured, chantRules, ...(options.policies ? { policies: options.policies } : {}), env: options.history?.environment }), ...namingFindings(scan.migrations, options.settings?.naming ?? {})]) {
     bySchema.set(f.migration, [...(bySchema.get(f.migration) ?? []), f]);
   }
 

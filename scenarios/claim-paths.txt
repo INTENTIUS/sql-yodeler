@@ -81,6 +81,8 @@ src/init/                              declarative forge
 src/lint/index.ts                      ALL
 src/lint/silences.ts                   ALL
 src/commands/lint.ts                   migrations forge
+# A project's own column rules (#227): the migrations claim's policy part.
+src/lint/policies.ts                   migrations forge
 src/lint/                              migrations forge
 src/replay/                            migrations forge
 
