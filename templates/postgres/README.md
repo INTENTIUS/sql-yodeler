@@ -30,6 +30,8 @@ just apply                  # applies the approved plan to dev
 
 Then create the users and the forge's secrets (below), and push. Every change after that is a pull request: edit `src/schema.ts`, run `just new <name>`, commit both.
 
+`npx yodel new <name> --backfill` adds a backfill, which runs once when that migration applies.
+
 ### When schema `{{chant:schema}}` already exists
 
 To adopt a database that already holds the schema (one another migration tool managed, or one made by hand), run `yodel init` in place of `just new init`, as the environment's writer, since it writes the baseline's row to the history:

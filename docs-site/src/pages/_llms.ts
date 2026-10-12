@@ -23,7 +23,7 @@ export async function pages() {
 
 export const PREAMBLE = `# SQL Yodeler
 
-> Schema management and migrations for ClickHouse and Postgres. The schema is declared in TypeScript with chant's sql lexicon; the yodel CLI writes versioned migrations from it, lints them, and applies them behind an approval bound to a digest of the plan.
+> Schema changes for ClickHouse and Postgres, and the ops they imply. The schema is declared in TypeScript with chant's sql lexicon; the yodel CLI writes versioned migrations from it, lints them, and applies them behind an approval bound to a digest of the plan. Rebuilds, renames and backfills run once, inside the migration. No recurring jobs. Not an ORM; it works next to one (${SITE}/orm/).
 
 Agents setting SQL Yodeler up in a repository: start with ${SITE}/agents/. A person new to it: ${SITE}/getting-started/.
 

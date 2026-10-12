@@ -5,6 +5,14 @@ type: concepts
 
 # Data migrations
 
+Some schema changes imply work beyond one statement, and yodel does that work as a step of the migration:
+
+- **ClickHouse rebuild.** Some changes, such as a new sort key, engine or partitioning, can't be made with `ALTER`. yodel creates a new table, copies the rows into it, checks that they match, and swaps it in.
+- **Postgres safe rename.** Renaming a column or table in one step breaks the app that is still using the old name. yodel adds the new name, keeps both in sync, moves readers over, and drops the old name later. This is called expand and contract.
+- **Backfill.** A new column often needs values for the rows already there. You write the fill once, and yodel runs it in batches, resuming where it stopped if it is interrupted.
+
+Each step runs once, when its migration applies. For a recurring job, use your own scheduler.
+
 A migration changes data as well as schema. Most of a migration is statements; a change that is not one statement, such as a backfill, a ClickHouse rebuild or a Postgres rename that readers must survive, is a data step of the migration, behind the same approval and recorded in the same history as the DDL: `yodel new` writes it into `migration.json` with the Op that makes it, and into `migration.sql` as a comment. `yodel apply` runs three kinds of Op step itself, in their place among the statements (the statements before a step first, the ones after it only once it succeeded), under the same lock and behind the same approval:
 
 | Step | Dialect | Written by `yodel new` for |
@@ -109,6 +117,8 @@ The topology the rebuild renders for is the environment's, the same as the state
 ## Backfills
 
 A backfill is a data migration in the same history as the DDL: "fill this column, a range of ids at a time". You write it as a form of a few fields, and yodel runs it as batches, each with its own receipt, so an apply that stops part way resumes at the first batch that has none.
+
+A backfill runs once. For rows that arrive later, write another backfill in a new migration.
 
 ### Writing one
 
@@ -410,7 +420,7 @@ Plan digest: jcs1-sha256:...
 then run yodel cleanup prod again.
 ```
 
-The drop is approved the way an apply is: the digest covers each due object by its identity on the server (a table by its UUID, a column by its table and attribute number) and its date, and the approval is of that digest on the migrations Op's cleanup gate: the Op's gate name with `-cleanup` (`approve-migrate-prod-cleanup`), a gate of its own, so an apply's approval and a cleanup's never stand in for each other, and `yodel plan` never names a cleanup's approval when it explains an apply's. With it, `yodel cleanup prod` takes the apply lock, reads the objects again, checks the approval against what it reads, and drops them: a ClickHouse table with `DROP TABLE ... SYNC` (rendered for the environment's topology), a Postgres column with its trigger and function in one transaction under the lock timeout, and the column migration's receipts after it. If anything due changed since the approval (another table came due, a table was rebuilt again), the digest differs and nothing is dropped. `--list` lists and never drops; `--json` prints the list, the digest and what was dropped. It exits 3 while something due waits for its approval, so a scheduled job can run it and fail visibly. The environment's approval mode counts as it does for an apply ([Approval](approval.md)): under `sealed`, only an approval sealed with `yodel approve --sign` by a key the signers file at the base commit lists for its approver drops anything, and the command `yodel cleanup` prints ends in `--sign`.
+The drop is approved the way an apply is: the digest covers each due object by its identity on the server (a table by its UUID, a column by its table and attribute number) and its date, and the approval is of that digest on the migrations Op's cleanup gate: the Op's gate name with `-cleanup` (`approve-migrate-prod-cleanup`), a gate of its own, so an apply's approval and a cleanup's never stand in for each other, and `yodel plan` never names a cleanup's approval when it explains an apply's. With it, `yodel cleanup prod` takes the apply lock, reads the objects again, checks the approval against what it reads, and drops them: a ClickHouse table with `DROP TABLE ... SYNC` (rendered for the environment's topology), a Postgres column with its trigger and function in one transaction under the lock timeout, and the column migration's receipts after it. If anything due changed since the approval (another table came due, a table was rebuilt again), the digest differs and nothing is dropped. `--list` lists and never drops; `--json` prints the list, the digest and what was dropped. It exits 3 while something due waits for its approval, so a job that runs it fails where you can see it. `yodel ci` renders no cleanup job. The environment's approval mode counts as it does for an apply ([Approval](approval.md)): under `sealed`, only an approval sealed with `yodel approve --sign` by a key the signers file at the base commit lists for its approver drops anything, and the command `yodel cleanup` prints ends in `--sign`.
 
 ## Manual steps
 

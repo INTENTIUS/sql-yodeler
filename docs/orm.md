@@ -7,6 +7,8 @@ type: howto
 
 When an ORM defines some of the tables, yodel can read them from the DDL the ORM prints instead of having them rewritten as declarations. The ORM's tables then go through the same plan, approval and apply as the ones in `src/`.
 
+yodel is a CLI. Your app keeps its ORM or query client and never imports yodel.
+
 ## Plain .sql files in src/
 
 The simplest way to keep schema as DDL is a `.sql` file in `src/`. chant's build reads every `.sql` file in the source directory beside the TypeScript declarations, so yodel needs no configuration for it:

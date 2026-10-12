@@ -21,7 +21,7 @@ const pillars = [
 	{ title: 'Declarative or versioned migrations', href: '/workflows/' },
 	{ title: 'GitHub, GitLab or Forgejo', href: '/forges/' },
 	{ title: 'Approvals bound to the plan', href: '/approval/' },
-	{ title: 'Data steps that resume', href: '/steps/' },
+	{ title: 'Rebuilds, renames and backfills, run once', href: '/steps/' },
 	{ title: 'Lint and the replay check', href: '/lint/' },
 	{ title: 'Drift watched on a schedule', href: '/drift/' },
 	{ title: 'An audit log from the history', href: '/audit/' },
@@ -31,10 +31,10 @@ const pillars = [
 	<section class="sy-landing not-content">
 		<a class="hero-link" href={`${base}/getting-started/`} aria-label="The docs"><Hat size={132} /></a>
 		<h1 class="wordmark">SQL YODELER</h1>
-		<p class="claim">Declarative schema migrations for ClickHouse and Postgres</p>
+		<p class="claim">Schema changes for ClickHouse and Postgres, and the ops they imply</p>
 	</section>
 	<section class="sy-declare not-content">
-		<p class="lede">Declare what the database should be, in TypeScript. yodel works out the change and applies it, or writes it as a migration, behind an approval of the exact plan.</p>
+		<p class="lede">Declare what the database should be, in TypeScript. yodel works out the change and applies it, or writes it as a migration, behind an approval of the exact plan. Rebuilds, renames and backfills run once, inside the migration. No recurring jobs. Not an ORM; it <a href={`${base}/orm/`}>works next to one</a>.</p>
 		<SchemaShowcase />
 		<a class="more" href={`${base}/schema/`}>Declaring the schema</a>
 	</section>

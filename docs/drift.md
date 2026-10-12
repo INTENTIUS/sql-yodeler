@@ -49,7 +49,7 @@ The output quoted here is from the examples' runs.
 
 ## On a schedule: the WatchOp
 
-`ops/watch-<env>.op.ts` declares the same check as a chant `WatchOp` with a cron schedule:
+`ops/watch-<env>.op.ts` declares the same check as a chant `WatchOp` with a cron schedule. The watch only reads. With the [resume job](approval.md#the-scheduled-resume-job), it is all yodel runs on a schedule.
 
 <!-- quote: clickhouse#watch-op -->
 ```ts

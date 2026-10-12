@@ -69,6 +69,8 @@ export default {
 
 ## Credentials: a reader and a writer
 
+The package is imported by `chant.config.ts` and `yodel.config.ts`, never by app code.
+
 Each environment has two database users. The reader can only read: pull request jobs, the drift watch and anyone at a terminal use it. The writer applies migrations, and only the environment's wave job after a merge holds it. `credentials()` gives a profile both:
 
 ```ts

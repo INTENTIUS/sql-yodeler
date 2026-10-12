@@ -27,7 +27,7 @@ yodel runs [chant](https://intentius.io/chant/)'s CLI underneath (`chant init`, 
 $ yodel --help
 Usage: yodel <command> [options]
 
-Schema management and migrations for ClickHouse and Postgres.
+Schema changes for ClickHouse and Postgres, and the ops they imply.
 
 Commands:
   create      make a new project from SQL Yodeler's template

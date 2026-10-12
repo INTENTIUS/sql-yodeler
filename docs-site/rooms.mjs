@@ -40,7 +40,7 @@ export const DIALECTS = [
 		record: 'ch',
 		works: [
 			'Sort-key and engine changes as rebuilds into a new table, swapped in by the migration',
-			'Backfills as steps that resume where they stopped',
+			'Backfills that run once inside a migration, and resume if stopped',
 			'A single node, a cluster, a Replicated database or ClickHouse Cloud',
 		],
 		differs: [

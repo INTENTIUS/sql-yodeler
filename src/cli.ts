@@ -16,7 +16,7 @@ export function help(list: readonly Command[] = commands): string {
   return [
     "Usage: yodel <command> [options]",
     "",
-    "Schema management and migrations for ClickHouse and Postgres.",
+    "Schema changes for ClickHouse and Postgres, and the ops they imply.",
     "",
     "Commands:",
     ...lines,
