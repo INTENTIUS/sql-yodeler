@@ -2,7 +2,8 @@
  * Each starter template, made into a project the way a user makes one, with
  * the @intentius/sql-yodeler that its range resolves to on npm (#131).
  *
- *   npm run templates:check
+ *   npm run templates:check               both templates
+ *   npm run templates:check -- postgres   one (ci.yml runs one per job)
  *
  * Inside this repository the templates are checked against ./src
  * (tsconfig.json's paths), and the template claims pack this checkout into
@@ -44,6 +45,24 @@ function run(cmd: string, args: string[], cwd: string, capture = false, extraEnv
   const ran = spawnSync(cmd, args, { cwd, env: { ...env, NO_COLOR: "1", ...extraEnv }, encoding: "utf8", stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit" });
   if (ran.status !== 0) throw new Failed(`${cmd} ${args.join(" ")} exited ${String(ran.status ?? ran.signal)}`);
   return capture ? ran.stdout : "";
+}
+
+/**
+ * `npm install args` in dir, again after a pause when npm answers E404 or
+ * ETARGET: a chant release is listed before its tarballs are served, so a
+ * range that takes it fails for a few minutes after a publish. Three tries.
+ */
+async function npmInstall(args: string[], dir: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    process.stdout.write(`$ npm install ${args.join(" ")}\n`);
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("npm_") && k !== "INIT_CWD"));
+    const ran = spawnSync("npm", ["install", "--no-audit", "--no-fund", ...args], { cwd: dir, env: { ...env, NO_COLOR: "1" }, encoding: "utf8", stdio: ["ignore", "inherit", "pipe"] });
+    process.stderr.write(ran.stderr);
+    if (ran.status === 0) return;
+    if (attempt === 3 || !/\b(E404|ETARGET)\b/.test(ran.stderr)) throw new Failed(`npm install exited ${String(ran.status ?? ran.signal)}`);
+    process.stdout.write(`npm has not served a package yet (try ${String(attempt)} of 3); trying again in 45s\n`);
+    await sleep(45_000);
+  }
 }
 
 /** The released versions on npm that satisfy range; none when the registry has none. */
@@ -125,13 +144,13 @@ async function check(template: string): Promise<void> {
     const versions = released(range);
     if (versions.length > 0) {
       process.stdout.write(`${PKG}@${range} resolves on npm (${versions.join(", ")})\n`);
-      run("npm", ["install", "--no-audit", "--no-fund"], dir);
+      await npmInstall([], dir);
     } else if (range.slice(1) === ownVersion) {
       process.stdout.write(`${PKG}@${range} is not on npm yet, and this checkout is ${ownVersion}, the release that ships it: the project takes npm pack of this checkout\n`);
       run("npm", ["pack", "--ignore-scripts", "--silent", "--pack-destination", work], root, true);
       const tgz = readdirSync(work).find((f) => f.endsWith(".tgz"));
       if (tgz === undefined) throw new Failed("npm pack of this checkout wrote no .tgz");
-      run("npm", ["install", "--no-audit", "--no-fund", join(work, tgz)], dir);
+      await npmInstall([join(work, tgz)], dir);
     } else {
       throw new Failed(`no release of ${PKG} on npm satisfies ${range}, and this checkout is ${ownVersion}, not the release that ships it`);
     }
@@ -150,8 +169,15 @@ async function check(template: string): Promise<void> {
   }
 }
 
+const TEMPLATES = ["clickhouse", "postgres"];
+const asked = process.argv.slice(2);
+const unknown = asked.filter((t) => !TEMPLATES.includes(t));
+if (unknown.length > 0) {
+  process.stderr.write(`templates:check: no template ${unknown.join(", ")}; the templates are ${TEMPLATES.join(", ")}\n`);
+  process.exit(2);
+}
 const failed: string[] = [];
-for (const template of ["clickhouse", "postgres"]) {
+for (const template of asked.length > 0 ? asked : TEMPLATES) {
   process.stdout.write(`\n== templates/${template}\n`);
   try {
     await check(template);

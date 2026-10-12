@@ -42,7 +42,10 @@ const install = [
   `mkdir -p ${PREFIX}`,
   `cd ${PREFIX}`,
   "echo '{\"name\":\"yodel-image\",\"private\":true}' > package.json",
-  'npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS',
+  // npm lists a release before it serves its tarballs, so an install right
+  // after a publish can answer E404 or ETARGET for a few minutes: three
+  // tries, 45s apart, on those two errors only.
+  '{ ok=; for try in 1 2 3; do if npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS 2>/tmp/npm.err; then ok=1; break; fi; cat /tmp/npm.err >&2; grep -qE "E404|ETARGET" /tmp/npm.err || break; [ "$try" = 3 ] || sleep 45; done; test -n "$ok"; }',
   "npm cache clean --force",
   `ln -s ${PREFIX}/node_modules /node_modules`,
   // The image holds the version it is tagged with, or the build fails.

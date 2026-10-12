@@ -11,8 +11,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: '${{ github.event_name == ''pull_request'' }}'
+
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +25,82 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
       - run: npx yodel --version
-      - run: npm run check
-      - name: The templates work with the published yodel
-        run: npm run templates:check
+      - run: npm run typecheck
+      - run: npm run lint
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 1
+          - 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run --shard=${{ matrix.shard }}/2
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      templates: '${{ steps.diff.outputs.templates }}'
+    steps:
+      - uses: actions/checkout@v4
+      - id: diff
+        env:
+          EVENT: '${{ github.event_name }}'
+          BASE: '${{ github.event.pull_request.base.sha }}'
+        run: |
+          if [ "$EVENT" != pull_request ]; then echo templates=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          git fetch -q --depth=1 origin "$BASE"
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(templates/|scripts/templates-check\.ts$|package\.json$|package-lock\.json$|\.github/src/(ci|templates)\.ts$)'; then
+            echo templates=true >> "$GITHUB_OUTPUT"
+          else
+            echo "templates=false: the pull request changes nothing the templates check reads" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo templates=false >> "$GITHUB_OUTPUT"
+          fi
+  templates:
+    needs:
+      - changes
+    if: needs.changes.outputs.templates == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        template:
+          - clickhouse
+          - postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: The template works with the published yodel
+        run: npm run templates:check -- ${{ matrix.template }}
+  check:
+    needs:
+      - lint
+      - test
+      - changes
+      - templates
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          LINT: '${{ needs.lint.result }}'
+          TEST: '${{ needs.test.result }}'
+          CHANGES: '${{ needs.changes.result }}'
+          TEMPLATES: '${{ needs.templates.result }}'
+        run: |
+          echo "lint: $LINT, test: $TEST, changes: $CHANGES, templates: $TEMPLATES"
+          [ "$LINT" = success ] && [ "$TEST" = success ] && [ "$CHANGES" = success ] && { [ "$TEMPLATES" = success ] || [ "$TEMPLATES" = skipped ]; }
   docs-site:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -53,7 +128,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Build the image from npm pack of this checkout
         run: |
           version=$(node -p 'require("./package.json").version')

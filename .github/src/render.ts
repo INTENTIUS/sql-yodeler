@@ -26,6 +26,7 @@ import * as claimsWeekly from "./claims-weekly.js";
 import * as image from "./image.js";
 import * as pages from "./pages.js";
 import * as publish from "./publish.js";
+import * as templates from "./templates.js";
 import { rendered } from "./shared.js";
 
 interface Declared {
@@ -33,7 +34,7 @@ interface Declared {
 }
 
 /** Output file name (without .yml) to its declaration. publish must stay publish: npm's trusted publisher names the file. */
-const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claimsWeekly, pages, publish };
+const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claimsWeekly, pages, publish, templates };
 
 const repoDir = fileURLToPath(new URL("../../", import.meta.url));
 
