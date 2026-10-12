@@ -23,7 +23,7 @@ ARG CHANT_PINS
 ENV PATH=/opt/yodel/node_modules/.bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates openssh-client && rm -rf /var/lib/apt/lists/*
 RUN git config --system --add safe.directory '*'
-RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"yodel-image","private":true}' > package.json && npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version
+RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"yodel-image","private":true}' > package.json && { ok=; for try in 1 2 3; do if npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS 2>/tmp/npm.err; then ok=1; break; fi; cat /tmp/npm.err >&2; grep -qE "E404|ETARGET" /tmp/npm.err || break; [ "$try" = 3 ] || sleep 45; done; test -n "$ok"; } && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version
 LABEL org.opencontainers.image.title="sql-yodeler"
 LABEL org.opencontainers.image.description="yodel, chant and the sql lexicon on Node 22, for CI jobs"
 LABEL org.opencontainers.image.version="${YODEL_VERSION}"
