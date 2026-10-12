@@ -39,10 +39,12 @@ export function describeImported(ir: TemplateIR): string[] {
 
 /**
  * Reads the environment's live database and generates its declarations,
- * exactly as `chant import --from <env>` does. Nothing is written.
+ * exactly as `chant import --from <env>` does. Nothing is written. An object
+ * of a kind chant cannot declare fails it with chant's
+ * `UndeclarableObjectsError`, unless `skipUndeclarable`.
  */
-export async function importLive(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv = process.env): Promise<LiveImport> {
-  const options = { environment: env.name, config: project.config as never, cwd: project.dir, env: processEnv };
+export async function importLive(project: Project, env: Environment, processEnv: NodeJS.ProcessEnv = process.env, skipUndeclarable = false): Promise<LiveImport> {
+  const options = { environment: env.name, config: project.config as never, cwd: project.dir, env: processEnv, skipUndeclarable };
   let exported: { resources: TemplateIR["resources"]; parameters?: TemplateIR["parameters"]; warnings?: string[] };
   try {
     if (project.dialect === "postgres") {
@@ -53,6 +55,8 @@ export async function importLive(project: Project, env: Environment, processEnv:
       exported = await exportResources(options);
     }
   } catch (e) {
+    // chant's refusal of objects no declaration holds (#3911) is the caller's to word.
+    if (e instanceof Error && e.name === "UndeclarableObjectsError") throw e;
     throw new YodelError(`reading ${env.name}'s live schema failed: ${e instanceof Error ? e.message : String(e)}`);
   }
   const warnings = [...(exported.warnings ?? [])];

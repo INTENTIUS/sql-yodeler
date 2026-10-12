@@ -12,7 +12,7 @@ What the server is compared with (`--against`):
 - `history`, the default when the project has migrations: the schema recorded by the newest migration the environment's history records as applied (`migration.json`'s `schema`). A migration merged but not applied yet, waiting at its gate or refused, is not drift; a change made by hand is. With no migration applied yet there is no recorded schema, and nothing is reported.
 - `src`, the default without migrations: the declared schema in `src/`.
 
-Objects on the server of a kind yodel cannot declare (a composite type, an aggregate, a cast, and the others [Adopting a database](adoption.md#what-adopts-and-what-refuses) lists) are reported apart, under "Unmanaged", and in `--json` as `unmanaged`. They never count as drift.
+Objects on the server of a kind yodel cannot declare (an operator, a foreign table, a publication, and the others [Adopting a database](adoption.md#what-adopts-and-what-refuses) names) are reported apart, under "Unmanaged", and in `--json` as `unmanaged`. They never count as drift.
 
 Exit codes: 0 no drift, 2 drift, 1 the drift could not be read, or a declared object could not be read (its state is then unknown, not clean). `--json` prints the report as JSON, with what it was compared with (`against`) and a `fingerprint` of the drift: a hash of the environment and what drifted, the same for the same drift, which the tracking issue uses to tell an unchanged drift from a new one.
 

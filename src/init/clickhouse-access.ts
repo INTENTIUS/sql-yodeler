@@ -1,10 +1,10 @@
 /**
  * ClickHouse access control adopted by `yodel init --from` (#46), where the
  * environment manages access: chant's ClickHouse import writes databases,
- * tables, views, dictionaries and functions, and no user, role, row policy
- * or grant, so yodel reads those itself and writes them as `user`, `role`,
- * `policy` and `grant` declarations in `access.ts`, beside the import's
- * `schema.ts`.
+ * tables, views, dictionaries and functions, and no user, role, row policy,
+ * quota, settings profile or grant, so yodel reads those itself and writes
+ * them as `user`, `role`, `policy`, `quota`, `settingsProfile` and `grant`
+ * declarations in `access.ts`, beside the import's `schema.ts`.
  *
  * What is adopted, read from the server's catalog:
  *
@@ -12,6 +12,8 @@
  * - the grantees: each user or role holding a privilege in those databases,
  *   each role a policy applies to, and each user or role those roles are
  *   granted to. The `default` user is the server's own and is left out;
+ * - every quota and settings profile made with SQL (INTENTIUS/chant#3911);
+ *   those in the server's users.xml are the server's own and are left out;
  * - for each grantee, its `CREATE USER` or `CREATE ROLE` and all of its
  *   grants (`SHOW GRANTS FOR`), not only those in the databases: chant
  *   compares a grantee's grants as a whole and revokes what is not
@@ -43,12 +45,14 @@ export interface AdoptedAccess {
 }
 
 interface Statement {
-  kind: "user" | "role" | "policy" | "grant";
+  kind: "user" | "role" | "policy" | "quota" | "settingsProfile" | "grant";
   exportName: string;
   /** The object's own name, never interpolated in its own statement. */
   own?: string;
   sql: string;
 }
+
+const KIND_LABEL: Record<Exclude<Statement["kind"], "grant">, string> = { user: "User", role: "Role", policy: "RowPolicy", quota: "Quota", settingsProfile: "SettingsProfile" };
 
 const quote = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 const ident = (s: string) => `\`${s.replace(/`/g, "``")}\``;
@@ -105,7 +109,7 @@ export function templateOf(s: Pick<Statement, "kind" | "own" | "sql">, tables: R
     if (tok === undefined) break;
     if (tok.kind === "ident") {
       const word = tok.text.toUpperCase();
-      if (s.kind === "policy" && word === "TO") zone = true;
+      if ((s.kind === "policy" || s.kind === "quota" || s.kind === "settingsProfile") && word === "TO") zone = true;
       if (s.kind === "user" && word === "DEFAULT" && t[i + 2]?.text.toUpperCase() === "ROLE") zone = true;
       if (s.kind === "user" && zone && ["SETTINGS", "GRANTEES", "HOST", "VALID", "IN"].includes(word)) zone = false;
       // db.table
@@ -136,7 +140,7 @@ export function templateOf(s: Pick<Statement, "kind" | "own" | "sql">, tables: R
   return { body, refs };
 }
 
-/** The users, roles, row policies and grants to adopt from `env`, as `access.ts`; see the module comment. */
+/** The users, roles, row policies, quotas, settings profiles and grants to adopt from `env`, as `access.ts`; see the module comment. */
 export async function clickhouseAccessDeclarations(project: Project, env: Environment, ir: TemplateIR, processEnv: NodeJS.ProcessEnv): Promise<AdoptedAccess> {
   const { bindClickHouse } = await import("@intentius/chant-lexicon-sql/clickhouse/live/bind");
   const { clickhouseQuery } = await import("@intentius/chant-lexicon-sql/clickhouse/http");
@@ -206,6 +210,13 @@ export async function clickhouseAccessDeclarations(project: Project, env: Enviro
     const sql = await first(`SHOW CREATE ROW POLICY ${ident(p.name)} ON ${ident(p.database)}.${ident(p.table)}`);
     statements.push({ kind: "policy", exportName: exportFor(`${p.table}_${p.name}`), own: p.name, sql });
   }
+  // Quotas and settings profiles name the users and roles they apply to after TO, so they come after them.
+  for (const { name } of await q<{ name: string }>("SELECT name FROM system.quotas WHERE storage <> 'users_xml' ORDER BY name")) {
+    statements.push({ kind: "quota", exportName: exportFor(name), own: name, sql: await first(`SHOW CREATE QUOTA ${ident(name)}`) });
+  }
+  for (const { name } of await q<{ name: string }>("SELECT name FROM system.settings_profiles WHERE storage <> 'users_xml' ORDER BY name")) {
+    statements.push({ kind: "settingsProfile", exportName: exportFor(name), own: name, sql: await first(`SHOW CREATE SETTINGS PROFILE ${ident(name)}`) });
+  }
   for (const [grantee, lines] of grants) {
     lines.forEach((sql, i) => {
       statements.push({ kind: "grant", exportName: exportFor(`${grantee}_grant${lines.length > 1 ? `_${String(i + 1)}` : ""}`), sql });
@@ -220,11 +231,11 @@ export async function clickhouseAccessDeclarations(project: Project, env: Enviro
   const lines = [`import { ${tags.join(", ")} } from "@intentius/chant-lexicon-sql/clickhouse";`];
   if (fromSchema.length > 0) lines.push(`import { ${fromSchema.join(", ")} } from "./schema.js";`);
   lines.push("");
-  // Roles, then users (whose default role names a role), then policies and grants, so each comes after what it interpolates.
+  // Roles, then users (whose default role names a role), then policies, quotas, settings profiles and grants, so each comes after what it interpolates.
   for (const b of bodies) lines.push(`export const ${b.s.exportName} = ${b.s.kind}\`${b.body}\`;`, "");
   return {
     file: { path: "access.ts", content: `${lines.join("\n").trimEnd()}\n` },
-    objects: statements.map((s) => (s.kind === "grant" ? `Grant ${s.sql}` : `${s.kind === "policy" ? "RowPolicy" : s.kind === "user" ? "User" : "Role"} ${s.own ?? ""}`)),
+    objects: statements.map((s) => (s.kind === "grant" ? `Grant ${s.sql}` : `${KIND_LABEL[s.kind]} ${s.own ?? ""}`)),
     warnings,
   };
 }

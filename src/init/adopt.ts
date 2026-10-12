@@ -6,12 +6,12 @@
  *     environment's history already records any; and when the environment
  *     names no `databases` (ClickHouse) or `schemas` (Postgres), or names
  *     the history's own.
- *  2. Refuse when the database holds an object of a kind chant's sql
- *     lexicon cannot declare (`./unsupported.ts`, #251), unless
- *     `skipUnsupported`, which adopts the rest and records what it left.
- *  3. Read the live database with chant's import (`chant import --from`'s
- *     library functions) and write the declarations into the source
- *     directory.
+ *  2. Read the live database with chant's import (`chant import --from`'s
+ *     library functions). It refuses an object of a kind chant's sql
+ *     lexicon cannot declare (INTENTIUS/chant#3911), and so does this
+ *     (#251), unless `skipUnsupported`, which adopts the rest and records
+ *     what it left in the baseline's note.
+ *  3. Write the declarations into the source directory.
  *  4. Build them and plan the build against the same database. The plan
  *     must be empty: the declarations are the database. If it is not, the
  *     import does not round-trip, and everything written is taken back.
@@ -37,7 +37,7 @@ import type { HistoryRow } from "../history/index.js";
 import { BASELINE_NAME, checkHistoryEmpty, recordBaseline } from "./baseline.js";
 import { declarationFiles, Journal } from "./files.js";
 import { describeImported, importLive } from "./live.js";
-import { describeUnsupported, findUnsupported } from "./unsupported.js";
+import { describeUnsupported, type Unsupported } from "./unsupported.js";
 
 export interface AdoptOptions {
   /** Overwrite declaration files the source directory already has. */
@@ -143,11 +143,19 @@ export async function adopt(project: Project, env: Environment, options: AdoptOp
 }
 
 async function adoptWith(project: Project, env: Environment, venv: VersionedEnv, options: AdoptOptions, processEnv: NodeJS.ProcessEnv, log: (line: string) => void): Promise<Adopted> {
-  const unsupported = (await findUnsupported(project, env, processEnv)).map(describeUnsupported);
-  const refusal = unsupportedRefusal(env.name, unsupported, options.skipUnsupported === true);
-  if (refusal) throw refusal;
-  if (unsupported.length > 0) log(`left out, of kinds yodel cannot declare: ${unsupported.join(", ")}`);
-  const live = await importLive(project, env, processEnv);
+  let unsupported: string[] = [];
+  let live: Awaited<ReturnType<typeof importLive>>;
+  try {
+    live = await importLive(project, env, processEnv);
+  } catch (e) {
+    const objects = (e as { objects?: readonly Unsupported[] } | null)?.objects;
+    if (!(e instanceof Error) || e.name !== "UndeclarableObjectsError" || !objects) throw e;
+    unsupported = objects.map(describeUnsupported);
+    const refusal = unsupportedRefusal(env.name, unsupported, options.skipUnsupported === true);
+    if (refusal) throw refusal;
+    log(`left out, of kinds yodel cannot declare: ${unsupported.join(", ")}`);
+    live = await importLive(project, env, processEnv, true);
+  }
   if (live.ir.resources.length === 0) {
     throw new YodelError(`refused: ${env.name} holds no objects in its scope (sql.profiles.${env.name}); there is nothing to adopt. Declare a schema and run yodel new instead. Nothing was written.`, REFUSED);
   }

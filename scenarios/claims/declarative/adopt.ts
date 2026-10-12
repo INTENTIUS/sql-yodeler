@@ -138,24 +138,25 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
 }
 
 /**
- * An object of a kind yodel cannot declare (#251): the schema holds a
- * composite type, which chant's sql lexicon has no declaration for. yodel
- * init --from refuses (exit 4) naming it, and writes nothing, so nothing is
- * left out of an adopted schema in silence. It runs before the shared
- * adoption, on the claim's schema, and drops what it made.
- * BREAK: yodel built to find no such object, so init goes on without naming
- * the composite type.
+ * An object of a kind yodel cannot declare (#251): the schema holds an
+ * operator, which chant's sql lexicon has no declaration for (its import
+ * refuses it, INTENTIUS/chant#3911). yodel init --from refuses (exit 4)
+ * naming it, and writes nothing, so nothing is left out of an adopted schema
+ * in silence. It runs before the shared adoption, on the claim's schema, and
+ * drops what it made.
+ * BREAK: yodel built to go on past the refusal, adopting the rest without
+ * naming the operator.
  */
 async function unsupportedPart(ctx: Ctx): Promise<void> {
   const n = ctx.db.name;
-  await ctx.db.exec(`CREATE SCHEMA ${n}; CREATE TYPE ${n}.pair AS (a integer, b text)`);
+  await ctx.db.exec(`CREATE SCHEMA ${n}; CREATE FUNCTION ${n}.same(integer, integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT $1 = $2'; CREATE OPERATOR ${n}.=== (LEFTARG = integer, RIGHTARG = integer, FUNCTION = ${n}.same)`);
   try {
     const p = await Project.create(ctx, { noSource: true, name: "unsupported" });
-    const yodel = ctx.broken ? yodelBuild(ctx, p, "yodel-finds-nothing-unsupported", { file: "init/unsupported.js", from: "return found.sort(", to: "return [].sort(" }) : undefined;
-    if (ctx.broken) ctx.log("BREAK: yodel built to find no object of a kind it cannot declare");
+    const yodel = ctx.broken ? yodelBuild(ctx, p, "yodel-skips-the-refusal", { file: "init/adopt.js", from: "throw refusal;", to: "void refusal;" }) : undefined;
+    if (ctx.broken) ctx.log("BREAK: yodel built to go on past the refusal of an object it cannot declare");
     const args = ["init", "--from", p.env];
     const ran = yodel ? await yodel.ask("", args) : await p.yodel(args);
-    hold(ran.code === 4 && ran.err.includes(`composite type ${n}.pair`), `yodel init --from exited ${String(ran.code)} without naming the composite type ${n}.pair it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
+    hold(ran.code === 4 && ran.err.includes(`operator ${n}.===(integer,integer)`), `yodel init --from exited ${String(ran.code)} without naming the operator ${n}.=== it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
     hold(p.migrationIds().length === 0, "yodel init --from wrote a migration although it refused");
   } finally {
     await ctx.db.exec(`DROP SCHEMA IF EXISTS ${n} CASCADE`);
