@@ -86,7 +86,7 @@ When yodel's findings are what you want on every change, take the database into 
 
 ## The concepts, side by side
 
-The main difference in day-to-day work: you do not write the migration's SQL. You change the declared schema in `src/` (chant's `sql` lexicon), and `yodel new <name>` writes the migration from the difference between that and the schema the previous migration recorded. You can still edit `migration.sql` by hand before it is applied anywhere; `yodel lint --update-checksum <id>` then records the new checksum.
+The main difference in day-to-day work: you do not write the migration's SQL. You change the declared schema in `src/` (chant's `sql` lexicon), and `yodel new <name>` writes the migration from the difference between that and the schema the previous migration recorded. Before it is applied anywhere you can still change a statement by hand: edit it in `migration.json`, which is what apply runs, and the same text in `migration.sql` (lint checks the two match); `yodel lint --update-checksum <id>` then records the new checksum.
 
 | In golang-migrate, goose, Flyway, dbmate | In SQL Yodeler |
 |---|---|
@@ -190,4 +190,4 @@ A revert carries the schema back, not the data. A dropped column comes back empt
 
 ### A migration that failed part way
 
-It is not rolled back. Statements that succeeded stay, and the next `yodel apply` resumes at the one that failed. Fix the cause on the server (the row a constraint rejects, a lock someone holds), or edit that statement in `migration.sql` and record the files' new checksum with `yodel lint --update-checksum <id>`; then approve and apply again. `yodel repair` is for a migration that applied completely and whose files were edited afterwards; it refuses one that failed part way. On Postgres, each statement that can run in a transaction runs in its own, so a failed statement leaves nothing half done.
+It is not rolled back. Statements that succeeded stay, and the next `yodel apply` resumes at the one that failed. Fix the cause on the server (the row a constraint rejects, a lock someone holds), or edit that statement in `migration.json` and `migration.sql` and record the files' new checksum with `yodel lint --update-checksum <id>`; then approve and apply again. `yodel repair` is for a migration that applied completely and whose files were edited afterwards; it refuses one that failed part way. On Postgres, each statement that can run in a transaction runs in its own, so a failed statement leaves nothing half done.
