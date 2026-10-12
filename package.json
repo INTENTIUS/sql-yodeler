@@ -1,8 +1,18 @@
 {
   "name": "@intentius/sql-yodeler",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Schema changes for ClickHouse and Postgres, and the ops they imply, on chant's sql lexicon",
-  "keywords": ["clickhouse", "postgres", "postgresql", "schema", "migrations", "declarative", "ddl", "backfill", "cli"],
+  "keywords": [
+    "clickhouse",
+    "postgres",
+    "postgresql",
+    "schema",
+    "migrations",
+    "declarative",
+    "ddl",
+    "backfill",
+    "cli"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
