@@ -51,6 +51,18 @@ export const ordersByStatus = index`
 
 The export name is the object's identity, and the name in the SQL is its name on the server. Keep the export name when you change the name in the SQL, and the change is planned as a rename, not as a drop and a create.
 
+## Why plain SQL
+
+Each object is written as the statement the server runs. That choice gives you:
+
+- A pull request shows the DDL the server will see, with nothing translated in between, so anyone who reads SQL can review it.
+- Any clause the server accepts goes in, with no attribute vocabulary to wait for when the server adds a clause or a setting. A clause chant's parser does not know is kept as written: the build warns and names it, the catalog check and the server decide, and a change to that clause is planned as one a person reviews. The build still fails on statements that are not schema (`INSERT`, `DROP`, `SET`), on kinds of object chant does not declare, on access statements, on a near-miss spelling of a known clause, and on unbalanced parentheses or a query inside the clause.
+- The schema is still a model. The build parses every statement into objects, columns, types and keys, so plans, lint, renames and column lineage work on it, and your own lint rules can read it ([Lint](lint.md)).
+- ClickHouse changes are classified and linted like Postgres ones, and a change `ALTER` cannot make, such as a new sort key, is planned as a rebuild ([Data changes](#data-changes)).
+- There is no second language whose meaning has to be kept in step with the database's, so nothing drifts from the server.
+- The build checks the schema offline against the catalog of a pinned server release, with no development database ([What the build checks](#what-the-build-checks)).
+- Every feature is in the open-source CLI.
+
 ## Schema as data
 
 The build reads `src/` as data: it reduces each file to the objects it declares, without running it. So the same source gives the same schema on any machine and in every environment, the schema at two commits can be compared with no database, and nothing in it depends on where or when it was built.
