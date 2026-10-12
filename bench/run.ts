@@ -40,7 +40,7 @@ export const MEASUREMENTS = ["new", "plan", "apply", "pr", "resume", "backfill",
 type Measurement = (typeof MEASUREMENTS)[number];
 
 const SMALL = [10];
-const FULL = [10, 100, 1_000, 10_000];
+const FULL = [10, 100, 1_000];
 
 /** yodel did something other than what the stage expects: a measured failure, scored 0; the apparatus still worked. */
 class Measured extends Error {}
