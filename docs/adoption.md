@@ -49,6 +49,7 @@ Created:
   README.md
   scripts/local.ts
   src/schema.ts
+  src/sql-types.d.ts
   tsconfig.json
   yodel-waves.json
   yodel.config.ts

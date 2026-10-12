@@ -115,6 +115,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       forges: ["github", "gitlab", "forgejo"],
       // The profiles are made with credentials(): a reader and a writer each, by the default variables.
       credentials: { dev: roles("DEV"), prod: roles("PROD") },
+      // The template commits src/sql-types.d.ts, so the lint job checks it (#228).
+      typedColumns: true,
     });
     for (const env of envs.names) {
       const migrate = (await import(pathToFileURL(join(dir, "ops", `migrate-${env}.op.ts`)).href)) as { op: { props: OpConfig } };

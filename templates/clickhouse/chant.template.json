@@ -25,6 +25,7 @@
     "chant.config.ts",
     "yodel.config.ts",
     "src/schema.ts",
+    "src/sql-types.d.ts",
     "README.md"
   ]
 }

@@ -46,6 +46,8 @@ jobs:
         run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: The pipelines are up to date
         run: yodel ci --check
+      - name: sql-types.d.ts is up to date
+        run: chant sql types --check
       - name: yodel lint
         run: yodel lint --format github
       - name: Wait for the replay server (replay-postgres)

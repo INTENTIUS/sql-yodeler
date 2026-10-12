@@ -7,7 +7,7 @@ export const db = database`
   ENGINE = Atomic
   COMMENT 'Declared in src/schema.ts'`;
 
-export const events = table`
+export const events = table<"{{chant:database}}.events">`
   CREATE TABLE ${db}.events (
     id       UInt64,
     kind     LowCardinality(String),
