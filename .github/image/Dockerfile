@@ -10,16 +10,20 @@
 #                  @intentius/sql-yodeler@$YODEL_VERSION. The build context is
 #                  mounted at /ctx, so a tarball from `npm pack` in the
 #                  context installs as /ctx/<file>.tgz.
+#   CHANT_PINS     @intentius/chant packages at exact versions, installed
+#                  beside yodel so its chant ranges resolve to them (ci.yml
+#                  and publish.yml pass package-lock.json's)
 #
 #   docker build -f .github/image/Dockerfile --build-arg YODEL_VERSION=0.1.0 .github/image
 
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 ARG YODEL_VERSION
 ARG YODEL_PACKAGE
+ARG CHANT_PINS
 ENV PATH=/opt/yodel/node_modules/.bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates openssh-client && rm -rf /var/lib/apt/lists/*
 RUN git config --system --add safe.directory '*'
-RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"yodel-image","private":true}' > package.json && npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version
+RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"yodel-image","private":true}' > package.json && npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version
 LABEL org.opencontainers.image.title="sql-yodeler"
 LABEL org.opencontainers.image.description="yodel, chant and the sql lexicon on Node 22, for CI jobs"
 LABEL org.opencontainers.image.version="${YODEL_VERSION}"

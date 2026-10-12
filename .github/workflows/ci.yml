@@ -59,8 +59,9 @@ jobs:
           version=$(node -p 'require("./package.json").version')
           ctx=$(mktemp -d)
           npm pack --silent --pack-destination "$ctx"
+          CHANT_PINS=$(node -p 'const l=require("./package-lock.json");Object.entries(l.packages).filter(([k,v])=>/^node_modules\/@intentius\/chant[^/]*$/.test(k)&&!v.dev).map(([k,v])=>k.slice(13)+"@"+v.version).join(" ")')
           docker build -f .github/image/Dockerfile --build-arg "YODEL_VERSION=$version" \
-            --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" -t yodel-ci "$ctx"
+            --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" --build-arg "CHANT_PINS=$CHANT_PINS" -t yodel-ci "$ctx"
       - name: yodel --version from the image
         run: docker run --rm yodel-ci yodel --version
       - name: The ClickHouse example builds and lints in the image, with no npm ci
