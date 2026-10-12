@@ -76,6 +76,7 @@ describe("yodel ci", () => {
       return (pr.jobs.lint?.steps ?? []).map((s) => s.run);
     };
     const plain = project('{ forges: ["github", "gitlab"] }');
+    rmSync(join(plain, "src", "sql-types.d.ts"), { force: true });
     expect((await yodel(["ci", "--dir", plain])).code).toBe(0);
     expect(lintRuns(plain)).not.toContain("chant sql types --check");
 

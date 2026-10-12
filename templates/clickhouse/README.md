@@ -7,6 +7,7 @@ The ClickHouse schema of database `{{chant:database}}`, managed with SQL Yodeler
 | `chant.config.ts` | the dialect and one profile per environment (`dev`, `prod`): the server and the credentials, by environment variable; and `replay`, the lint job's throwaway server |
 | `yodel.config.ts` | the apply pipeline's waves; `ci`, the forges `yodel ci` renders pipelines for and the project's own jobs; per environment: the ClickHouse topology the migrations are rendered for, and the history's database |
 | `src/schema.ts` | the declared schema |
+| `src/sql-types.d.ts` | the declared tables' column types, written by `npx chant sql types` |
 | `migrations/` | the versioned migrations, written by `yodel new` |
 | `ops/migrate-<env>.op.ts` | the Op `yodel apply <env>` runs: plan, a gate bound to the plan digest, apply |
 | `ops/watch-<env>.op.ts` | the drift watch, a chant `WatchOp` on a schedule |
@@ -31,6 +32,8 @@ just apply                  # applies the approved plan to dev
 Then create the users and the forge's secrets (below), and push. Every change after that is a pull request: edit `src/schema.ts`, run `just new <name>`, commit both.
 
 `npx yodel new <name> --backfill` adds a backfill, which runs once when that migration applies.
+
+`src/sql-types.d.ts` types each table's columns, so a misspelled column name fails `npm run typecheck`. Run `npx chant sql types` after you change a table; the pull request job fails while the file is out of date.
 
 ### When database `{{chant:database}}` already exists
 
@@ -149,4 +152,4 @@ Add its profile to `chant.config.ts`, its entry to `yodel.config.ts` `environmen
 
 ## The sql-yodeler dependency
 
-`package.json` takes `@intentius/sql-yodeler` from npm, `^0.8.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.9.0 after 0.8.x) needs the range changed, since `^0.8.0` stops at 0.8.x.
+`package.json` takes `@intentius/sql-yodeler` from npm, `^0.9.0`, and `package-lock.json` pins the version `npm install` resolved. A newer sql-yodeler is `npm install @intentius/sql-yodeler@latest`; a minor release (0.10.0 after 0.9.x) needs the range changed, since `^0.9.0` stops at 0.9.x.

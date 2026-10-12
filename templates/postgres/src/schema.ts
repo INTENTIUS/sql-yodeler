@@ -6,7 +6,7 @@ export const app = schema`
   CREATE SCHEMA {{chant:schema}};
   COMMENT ON SCHEMA {{chant:schema}} IS 'Declared in src/schema.ts'`;
 
-export const events = table`
+export const events = table<"{{chant:schema}}.events">`
   CREATE TABLE ${app}.events (
     id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     kind text NOT NULL,

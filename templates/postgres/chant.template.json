@@ -20,5 +20,5 @@
       "description": "The schema for yodel's history table"
     }
   },
-  "files": ["package.json", "chant.config.ts", "yodel.config.ts", "src/schema.ts", "README.md"]
+  "files": ["package.json", "chant.config.ts", "yodel.config.ts", "src/schema.ts", "src/sql-types.d.ts", "README.md"]
 }
