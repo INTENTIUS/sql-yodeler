@@ -96,13 +96,9 @@ It refuses (exit 4, nothing written) when the source directory already declares 
 
 ### What adopts, and what refuses
 
-`init` adopts every kind chant's `sql` lexicon declares. On Postgres: schemas, tables, views and materialized views, indexes, sequences, enum types, domains, extensions, functions, procedures, triggers, and, where the environment manages access, roles, policies and grants. On ClickHouse: databases, tables, views, materialized views, dictionaries and functions, and, where the environment manages access, users, roles, row policies and grants.
+`init` adopts every kind chant's `sql` lexicon declares. On Postgres: schemas, tables, views and materialized views, indexes, sequences, enum, composite and range types, domains, collations, casts, aggregates, extensions, functions, procedures, triggers, event triggers, and, where the environment manages access, roles, policies and grants. On ClickHouse: databases, tables, views, materialized views, dictionaries and functions, and, where the environment manages access, users, roles, row policies, quotas, settings profiles and grants.
 
-Before it reads anything else, `init` looks for objects of the kinds the lexicon cannot declare, and refuses when it finds one, listing each by kind and name:
-
-- Postgres, in the profile's schemas: composite types, range types, aggregates, collations, operators, operator classes and families, text search configurations and dictionaries, conversions, foreign tables, extended statistics and rules.
-- Postgres, in the database: casts, event triggers, foreign-data wrappers, foreign servers, publications and subscriptions.
-- ClickHouse, where the environment manages access: settings profiles and quotas made with SQL.
+chant's import reads every other kind the server holds too, and `init` refuses when it finds an object of one, listing each by kind and name. On Postgres these include operators, operator classes and families, text search objects, conversions, foreign-data wrappers, servers and tables, extended statistics, rules, publications and subscriptions. On ClickHouse they include live and window views, named collections, masking policies, workloads and resources. chant's [object coverage](https://intentius.io/chant/lexicons/sql/object-coverage/) page lists every kind each dialect has, declared or refused, and why.
 
 An object an extension owns belongs to the extension and is adopted with it. `--skip-unsupported` adopts the rest, prints what it left, and records that list in the baseline's history note. `yodel drift` then lists those objects as unmanaged, apart from drift.
 
