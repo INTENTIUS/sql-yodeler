@@ -253,7 +253,8 @@ const parts: ReadonlyArray<PartEntry<Adoption>> = [
   ["access", accessPart, ["pg"]],
   ["ch-access", chAccessPart, ["ch"]],
   ["init", initPart],
-  ["second-env", secondEnvPart],
+  // The baseline is the same on both dialects.
+  ["second-env", secondEnvPart, ["pg"]],
 ];
 
 async function body(ctx: Ctx): Promise<void> {

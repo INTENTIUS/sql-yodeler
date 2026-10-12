@@ -141,21 +141,6 @@
     },
     {
       "claim": "waves",
-      "dialect": "ch",
-      "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate; a sealed wave counts only an approval sealed by a signer the base commit lists",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 636,
-        "break": 412
-      },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
-      "dirty": false
-    },
-    {
-      "claim": "waves",
       "dialect": "pg",
       "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate; a sealed wave counts only an approval sealed by a signer the base commit lists",
       "needs": null,
@@ -170,7 +155,7 @@
       "dirty": false
     },
     {
-      "claim": "forgejo",
+      "claim": "forge",
       "dialect": "ch",
       "says": "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
       "needs": null,
@@ -181,36 +166,6 @@
         "break": 422
       },
       "recorded": "2026-10-10T21:57:06.233Z",
-      "commit": "868ff97",
-      "dirty": false
-    },
-    {
-      "claim": "forgejo",
-      "dialect": "pg",
-      "says": "a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 426,
-        "break": 430
-      },
-      "recorded": "2026-10-10T21:57:06.233Z",
-      "commit": "868ff97",
-      "dirty": false
-    },
-    {
-      "claim": "github",
-      "dialect": "ch",
-      "says": "a project from the ClickHouse starter template, on GitHub Actions (act and a mock GitHub): apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue",
-      "needs": null,
-      "plain": "pass",
-      "break": "caught",
-      "seconds": {
-        "plain": 345,
-        "break": 396
-      },
-      "recorded": "2026-10-10T21:55:51.425Z",
       "commit": "868ff97",
       "dirty": false
     }

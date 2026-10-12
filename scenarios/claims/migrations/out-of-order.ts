@@ -56,5 +56,6 @@ async function body(ctx: Ctx): Promise<void> {
 export const outOfOrder: Claim = {
   name: "out-of-order",
   says: "a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
-  dialects: { ch: body, pg: body },
+  // History ordering, the same on both dialects.
+  dialects: { pg: body },
 };

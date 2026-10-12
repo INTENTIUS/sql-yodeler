@@ -16,9 +16,10 @@ describe("the claims behind each docs page", () => {
     expect(docsClaimProblems(docsPages(join(repoRoot, "docs")), claims)).toEqual([]);
   });
 
-  it("every page names at least one claim, except the ones that describe no behaviour", () => {
+  it("every page names at least one claim, except the ones that describe no behaviour or only chant's", () => {
     const none = docsPages(join(repoRoot, "docs")).filter((p) => frontMatter(p.text).claims?.length === 0).map((p) => p.file);
-    expect(none.sort()).toEqual(["README.md", "agents.md", "claims.md", "cli.md", "glossary.md", "schema-docs.md"]);
+    // notify.md: sending and signing are chant's notify (#211), proven by chant; test/notify.test.ts covers yodel's part.
+    expect(none.sort()).toEqual(["README.md", "agents.md", "claims.md", "cli.md", "glossary.md", "notify.md", "schema-docs.md"]);
   });
 
   describe("the check, on fixture pages", () => {

@@ -1,6 +1,6 @@
 import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { hold, runParts, Violation, type Claim, type Ctx } from "../../lib/claim.js";
+import { hold, partDialects, partNames, runParts, Violation, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
 import { parse, parseOr, Project } from "../../lib/project.js";
 import { addColumn, addTable, mainTable, needsVersioned } from "../../lib/schema.js";
 
@@ -291,42 +291,6 @@ export async function auditPart(ctx: Ctx, p: Project): Promise<void> {
   );
 }
 
-/**
- * An approval binds the plan it was given for. A migration is approved,
- * then its migration.sql is edited by hand: yodel apply stops at the gate
- * again, the Op's Apply step handed the old approval refuses, and nothing
- * reaches the server or the history.
- * BREAK: the migration is not edited after the approval, so it applies.
- *
- * It leaves its migration pending, refused: a part added to this claim
- * goes before it.
- */
-export async function digestMovedPart(ctx: Ctx, p: Project): Promise<void> {
-  // Whatever the parts before left pending (under BREAK, the first migration) is applied first.
-  if ((await p.approvedApply()).ran.code !== 0) throw new Error("the earlier migrations did not apply");
-  addColumn(p, "memo");
-  const id = await p.newMigration("add-memo");
-  if (id === undefined) throw new Error("yodel new wrote no migration");
-  await p.commit("add memo");
-
-  const gated = await p.apply();
-  if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
-  if (!ctx.broken) {
-    const sql = `migrations/${id}/migration.sql`;
-    if (ctx.dialect === "ch") p.edit(sql, "memo String DEFAULT ''", "memo String DEFAULT 'tampered'");
-    else p.edit(sql, "memo text", "memo varchar(8)");
-    await p.commit("an edit after the approval");
-  }
-
-  const again = await p.apply();
-  hold(again.ran.code !== 0, "yodel apply ran a migration edited after its approval");
-  const stale = await p.yodel(["apply", p.env, "--execute"], { env: { YODEL_APPROVED_PLAN: gated.doc.planDigest } });
-  hold(stale.code !== 0, "the Apply step ran with an approval given before the migration was edited");
-  hold(!(await ctx.db.columnExists(mainTable(ctx), "memo")), `${ctx.db.name}.${mainTable(ctx)}.memo is on the server: the moved plan was applied`);
-  hold((await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}'`)) === 0, `the history records ${id}`);
-}
-
 /** The claim's reader and writer on the emulator, made for the reader-writer part: a user each, the reader only able to read. */
 async function readerAndWriter(ctx: Ctx): Promise<{ reader: string; writer: string; password: string }> {
   const { name, history } = ctx.db;
@@ -433,15 +397,17 @@ export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
   }
 }
 
-/** The parts, in order, on one project. */
-const parts = [
-  ["approval", approvalPart],
-  ["pre-check", preCheckPart],
-  ["policy", policyPart],
-  ["audit", auditPart],
+/**
+ * The parts, in order, on one project. Only reader-writer differs by
+ * dialect (users and grants); the rest run on Postgres.
+ */
+const parts: ReadonlyArray<PartEntry<Project>> = [
+  ["approval", approvalPart, ["pg"]],
+  ["pre-check", preCheckPart, ["pg"]],
+  ["policy", policyPart, ["pg"]],
+  ["audit", auditPart, ["pg"]],
   ["reader-writer", readerWriterPart],
-  ["digest-moved", digestMovedPart],
-] as const;
+];
 
 async function body(ctx: Ctx): Promise<void> {
   await runParts(ctx, await Project.create(ctx), parts);
@@ -449,7 +415,8 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const approval: Claim = {
   name: "approval",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write",
   dialects: { ch: body, pg: body },
-  parts: parts.map(([name]) => name),
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };

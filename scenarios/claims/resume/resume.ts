@@ -1,4 +1,4 @@
-import { hold, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
 import { endpoints, clickhouseAt } from "../../lib/db.js";
 import { Project } from "../../lib/project.js";
 import { addColumn, addColumnByHand, addTable, createTableByHand, forgetMigration, insertEvents, mainTable } from "../../lib/schema.js";
@@ -183,10 +183,11 @@ export async function statementPart(ctx: Ctx, p: Project): Promise<void> {
  * interrupted and resumed from its receipts, then one whose statement
  * fails and is resumed from the history.
  */
-const parts = [
+const parts: ReadonlyArray<PartEntry<Project>> = [
   ["backfill", backfillPart],
-  ["statement", statementPart],
-] as const;
+  // Resuming at a statement is the history's, the same on both dialects.
+  ["statement", statementPart, ["pg"]],
+];
 
 async function body(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx);
@@ -199,5 +200,6 @@ export const resume: Claim = {
   name: "resume",
   says: "an interrupted apply resumes where it stopped: a backfill step written as yodel's form (table, key, batch size, SQL) from its receipts, running each batch once, and a failed statement at that statement, never resending one that ran",
   dialects: { ch: body, pg: body },
-  parts: parts.map(([name]) => name),
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };

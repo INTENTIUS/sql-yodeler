@@ -394,7 +394,8 @@ export async function dataDependentPart(ctx: Ctx, s: Lint): Promise<void> {
 /** The parts, in order, on one project: two migrations replayed, a second branch forking them, a checkpoint on one chain, a revert, tests on the replayed database, then (Postgres) a unique index over duplicate rows. */
 const parts = [
   ["replay", replayPart],
-  ["fork", forkPart],
+  // The fork is in the migrations graph alone, the same on both dialects.
+  ["fork", forkPart, ["pg"]],
   ["checkpoint", checkpointPart],
   ["revert", revertPart],
   ["test", testPart],

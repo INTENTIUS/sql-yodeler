@@ -39,9 +39,9 @@ describe("docs/claims.md", () => {
   });
 
   it("shows a claim the record lacks as not recorded", () => {
-    const one = claims.find((c) => c.name === "forgejo");
+    const one = claims.find((c) => c.name === "forge");
     expect(one).toBeDefined();
     if (!one) return;
-    expect(renderPage(undefined, [one])).toMatch(/\| forgejo \| \w+ \| .* \| not recorded \| not recorded \| \| \|/);
+    expect(renderPage(undefined, [one])).toMatch(/\| forge \| \w+ \| .* \| not recorded \| not recorded \| \| \|/);
   });
 });

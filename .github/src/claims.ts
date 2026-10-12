@@ -2,10 +2,8 @@ import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { checkout, claimsEnv, emulatorSteps, rendered, setupNode } from "./shared.js";
 
 const comment = `The scenario claims (scenarios/run.ts): every claim against the sql
-emulator, plain and under BREAK=1. The forge claims need a forge with a
-runner (forgejo a Forgejo, github act and a mock GitHub,
-gitlab a GitLab), which this job has not, so they are skipped
-here. The record and every run's log are kept as the run's artifacts.
+emulator, plain and under BREAK=1. The forge claim needs a Forgejo with
+a runner, which this job has not, so it is skipped here. The record and every run's log are kept as the run's artifacts.
 It runs only when a person starts it (between development cycles), never
 on a pull request or a push: nothing merges or releases on the claims.`;
 
@@ -24,7 +22,7 @@ export const workflow = new Workflow({
         setupNode(22),
         new Step({ run: "npm ci" }),
         ...emulatorSteps(),
-        new Step({ name: "Claims", run: "timeout 3000 npm run claims -- --record claims-record.json --skip forgejo,github,gitlab" }),
+        new Step({ name: "Claims", run: "timeout 3000 npm run claims -- --record claims-record.json --skip forge" }),
         new Step({
           if: "always()",
           uses: "actions/upload-artifact@v4",

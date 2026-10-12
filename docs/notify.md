@@ -1,5 +1,5 @@
 ---
-claims: [forgejo, github, gitlab]
+claims: []
 type: howto
 draft: true
 ---
@@ -116,4 +116,4 @@ In another language, compute HMAC-SHA256 over the timestamp header, a `.`, and t
 
 ## What proves it
 
-The forge claims (`forgejo`, `github`, `gitlab`) configure `notify` in the project, hold the URL and the key as the forge's secrets, and run a receiver that checks each delivery with `verifyWebhook`. The first push's apply stops at the gate, and the receiver must accept a `waiting` event for the environment that names the approve command. Under `BREAK=1` the receiver checks with another key and rejects it. The part runs once the template installs a release of `@intentius/sql-yodeler` with `notify` and its rendered apply jobs pass the two variables; until then the claims say they skipped it, and this page is a draft.
+Sending and signing are chant's notify, which chant's own tests prove. `test/notify.test.ts` checks which events yodel sends and what they carry, and that an event signed the way 0.7.0 signed it still verifies. `test/bin.test.ts` imports `@intentius/sql-yodeler/webhook` in plain Node and verifies an event with it.

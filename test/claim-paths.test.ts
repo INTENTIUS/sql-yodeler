@@ -57,7 +57,7 @@ describe("scenarios/claim-paths.txt", () => {
   it("picks no claim for docs and tests, and every claim for the runner", () => {
     expect(affected(["docs/lint.md", "README.md", "test/lint.test.ts"], entries, names).claims).toEqual([]);
     expect(affected(["scenarios/lib/db.ts"], entries, names).claims).toEqual(names);
-    expect(affected(["src/replay/postgres.ts"], entries, names).claims).toEqual(["migrations", "forgejo", "github", "gitlab"]);
+    expect(affected(["src/replay/postgres.ts"], entries, names).claims).toEqual(["migrations", "forge"]);
     expect(affected(["src/lint/silences.ts"], entries, names).claims).toEqual(names);
   });
 });
