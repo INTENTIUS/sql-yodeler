@@ -38,7 +38,7 @@ async function body(ctx: Ctx): Promise<void> {
   });
   const digest = /Plan digest the apply gate binds: `(jcs1-sha256:[0-9a-f]{64})`/.exec(body)?.[1];
   hold(digest !== undefined, "the comment gives no plan digest");
-  hold(body.includes(`chant approve migrate-${p.env} approve-migrate-${p.env} --plan ${digest}`), "the comment gives no chant approve command for its digest");
+  hold(body.includes(`yodel approve ${p.env} --plan ${digest}`), "the comment gives no yodel approve command for its digest");
   const gate = await p.apply();
   hold(gate.ran.code === 3 && gate.doc.planDigest === digest, `the gate asks for ${String(gate.doc.planDigest)}, the comment shows ${digest}`);
   hold(!(await ctx.db.columnExists(mainTable(ctx), "note")) && !(await ctx.db.tableExists("audit")), "planning changed the server");

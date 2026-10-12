@@ -183,7 +183,7 @@ export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
   await p.commit("its revert step");
   const gated = await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 });
   hold(gated.code === 3, `yodel revert ${p.env} ${id} exited ${String(gated.code)}, not 3 at the gate: ${gated.err.split("\n").filter((l) => l.startsWith("yodel revert")).join(" ").slice(0, 300)}`);
-  await p.approve(parse<{ approve?: string }>(gated).approve);
+  await p.approve(parse<{ chantApprove?: string }>(gated).chantApprove);
   const ran = await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 });
   hold(ran.code === 0, `yodel revert after approval exited ${String(ran.code)}`);
 

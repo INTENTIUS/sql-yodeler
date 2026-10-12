@@ -35,7 +35,10 @@ export interface ProjectOptions {
 /** What `yodel apply --json` and `yodel status --json` print, the parts claims read. */
 export interface ApplyDoc {
   status?: string;
+  /** `yodel approve <env> --plan <digest>`, the command a person runs. */
   approve?: string;
+  /** chant's own command for the same approval, which a script (this harness) runs. */
+  chantApprove?: string;
   planDigest?: string;
   gatePlanDigest?: string;
   applied?: Array<{ id: string; checksum: string }>;
@@ -187,7 +190,7 @@ export class Project {
     return doc.written ? doc.id : undefined;
   }
 
-  /** Runs a `chant approve ...` command as printed by yodel. */
+  /** Runs a `chant approve ...` command, as `--json` outputs give it in `chantApprove`. */
   async approve(command: string | undefined): Promise<void> {
     if (!command?.startsWith("chant approve ")) throw new Error(`no chant approve command to run: ${String(command)}`);
     const ran = await this.chant(command.split(" ").slice(1));
@@ -208,7 +211,7 @@ export class Project {
   async approvedApply(extra: string[] = [], env: Record<string, string | undefined> = {}): Promise<{ ran: Ran; doc: ApplyDoc; approved?: string }> {
     const first = await this.apply(extra, env);
     if (first.ran.code !== 3) return first;
-    await this.approve(first.doc.approve);
+    await this.approve(first.doc.chantApprove);
     const second = await this.apply(extra, env);
     return { ...second, ...(first.doc.planDigest ? { approved: first.doc.planDigest } : {}) };
   }

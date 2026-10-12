@@ -45,6 +45,7 @@ interface CleanupDoc {
   retained?: Array<{ name: string; due: boolean }>;
   planDigest?: string;
   approve?: string;
+  chantApprove?: string;
   dropped?: string[];
 }
 
@@ -85,7 +86,7 @@ export async function cleanupPart(ctx: Ctx, p: Project): Promise<void> {
   const gated = await cleanup();
   if (gated.doc.approve) {
     hold(gated.code === 3 && (await ctx.db.tableExists("events__chant_old")), `yodel cleanup dropped ${name} without an approval (exit ${String(gated.code)})`);
-    await p.approve(gated.doc.approve);
+    await p.approve(gated.doc.chantApprove);
     if (gated.doc.planDigest) cleanupApproved.set(p, gated.doc.planDigest);
   }
   const done = await cleanup();

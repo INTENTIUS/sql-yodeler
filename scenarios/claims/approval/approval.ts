@@ -22,7 +22,7 @@ export async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
   hold(gated.ran.code === 3 && gated.doc.status === "gated", `yodel apply did not stop at the gate (exit ${String(gated.ran.code)}, status ${String(gated.doc.status)})`);
   hold(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists before the approval`);
 
-  if (!ctx.broken) await p.approve(gated.doc.approve);
+  if (!ctx.broken) await p.approve(gated.doc.chantApprove);
   const applied = await p.apply();
   hold(applied.ran.code === 0, `yodel apply after the approval exited ${String(applied.ran.code)}, status ${String(applied.doc.status)}`);
   hold(await ctx.db.tableExists(table), `${ctx.db.name}.${table} is not on the server after the approved apply`);
@@ -61,7 +61,7 @@ export async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
 
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate with the table empty (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
   await ctx.db.exec(ctx.dialect === "ch" ? `INSERT INTO ${table} (id, kind, ts) VALUES (1, 'k', now())` : `INSERT INTO ${table} (amount) VALUES (1)`);
 
   const step = await p.yodel(["apply", p.env, "--execute"], { env: { YODEL_APPROVED_PLAN: gated.doc.planDigest } });
@@ -185,9 +185,9 @@ async function policyOverRevert(ctx: Ctx, p: Project): Promise<void> {
   const over = await p.yodel(["override", p.env, "--revert", id, "--rule", "no-drops", "--reason", "added by mistake in TICKET-8", "--by", "alice"]);
   if (over.code !== 0) throw new Error(`yodel override --revert exited ${String(over.code)}: ${over.err.slice(-400)}`);
   const gated = await revert();
-  const gatedDoc = parseOr<{ status?: string; approve?: string }>(gated, {});
+  const gatedDoc = parseOr<{ status?: string; approve?: string; chantApprove?: string }>(gated, {});
   hold(gated.code === 3 && gatedDoc.status === "gated", `yodel revert with the override for its digest exited ${String(gated.code)}, status ${String(gatedDoc.status)}, not at the gate`);
-  await p.approve(gatedDoc.approve);
+  await p.approve(gatedDoc.chantApprove);
   const ran = await revert();
   hold(ran.code === 0, `yodel revert after the approval exited ${String(ran.code)}`);
   hold(!(await there()), "the table is still there after the overridden revert");

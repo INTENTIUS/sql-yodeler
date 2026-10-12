@@ -14,7 +14,7 @@ export async function declared(ctx: Ctx): Promise<Project> {
   const first = await p.apply();
   if (first.ran.code !== 3 || first.doc.status !== "gated") throw new Error(`yodel apply did not stop at the ApplyOp's gate (exit ${String(first.ran.code)})`);
   if (await ctx.db.tableExists(mainTable(ctx))) throw new Error("the table exists before the approval");
-  await p.approve(first.doc.approve);
+  await p.approve(first.doc.chantApprove);
   const applied = await p.apply();
   if (applied.ran.code !== 0 || !(await ctx.db.tableExists(mainTable(ctx)))) throw new Error(`the approved plan did not apply (exit ${String(applied.ran.code)})`);
   return p;
@@ -34,7 +34,7 @@ async function column(ctx: Ctx, { p }: Declarative): Promise<void> {
   hold(plan.code === 0 && planned.changes.length === 1, `yodel plan shows ${String(planned.changes.length)} changes for one added column`);
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
   if (ctx.broken) addColumn(p, "extra");
   await p.apply();
   hold(await ctx.db.columnExists(mainTable(ctx), "note"), "the approved column is not on the server");
@@ -60,7 +60,7 @@ async function routines(ctx: Ctx, { p }: Declarative): Promise<void> {
   }
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
   const applied = await p.apply();
   hold(applied.ran.code === 0, `the approved routines did not apply (exit ${String(applied.ran.code)})`);
   const on = await routinesOnServer(ctx);
@@ -82,7 +82,7 @@ interface AccessPlan {
 async function approvedApply(p: Project): Promise<number> {
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)}): ${gated.ran.err.slice(-600)}`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
   return (await p.apply()).ran.code;
 }
 
@@ -268,7 +268,7 @@ async function orm(ctx: Ctx): Promise<void> {
   const first = await p.apply();
   if (first.ran.code !== 3) throw new Error(`yodel apply did not stop at the ApplyOp's gate (exit ${String(first.ran.code)}): ${first.ran.err.slice(-600)}`);
   await p.commit("the ORM's declarations");
-  await p.approve(first.doc.approve);
+  await p.approve(first.doc.chantApprove);
   const created = await p.apply();
   if (created.ran.code !== 0 || !(await ctx.db.tableExists("invoices"))) throw new Error(`the ORM's tables were not created (exit ${String(created.ran.code)})`);
 
@@ -278,7 +278,7 @@ async function orm(ctx: Ctx): Promise<void> {
   hold(plan.code === 0 && planned.changes.length === 1 && planned.changes.every((c) => c.object.includes("customers")), `yodel plan shows ${JSON.stringify(planned.changes)} for one column added to the ORM's customers model`);
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
   if (ctx.broken) addOrmColumn(p, "fax");
   await p.apply();
   hold(await ctx.db.columnExists("customers", "phone"), "the approved column of the ORM's model is not on the server");

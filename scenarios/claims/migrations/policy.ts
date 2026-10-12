@@ -40,11 +40,13 @@ interface LintDoc {
  */
 async function body(ctx: Ctx): Promise<void> {
   const p = await Project.create(ctx);
-  p.write("policies/rules.ts", ctx.broken ? WEAKENED : POLICY);
-  p.edit("chant.config.ts", 'lexicons: ["sql"],', 'lexicons: ["sql"],\n  lint: { policies: ["policies/rules.ts"] },');
+  // The migration is written first: chant's own build runs the project's policies too, so with the
+  // rule in place `yodel new` would refuse the table. The rule then arrives for the migrations to meet.
   const id = await p.newMigration("create");
   if (id === undefined) throw new Error("yodel new wrote no migration");
-  await p.commit("create, with a column rule");
+  p.write("policies/rules.ts", ctx.broken ? WEAKENED : POLICY);
+  p.edit("chant.config.ts", 'lexicons: ["sql"],', 'lexicons: ["sql"],\n  lint: { policies: ["policies/rules.ts"] },');
+  await p.commit("create, then a column rule");
 
   const ran = await p.yodel(["lint", "--json"]);
   const found = parse<LintDoc>(ran).findings.find((f) => f.rule === "ORG-CREATED-AT" && f.migration === id);
