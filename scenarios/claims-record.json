@@ -1,38 +1,38 @@
 {
   "format": 1,
-  "recorded": "2026-10-12T16:22:41.009Z",
-  "commit": "bb8cccc",
-  "dirty": false,
+  "recorded": "2026-10-12T17:25:36.737Z",
+  "commit": "f188da6",
+  "dirty": true,
   "rows": [
     {
       "claim": "migrations",
       "dialect": "ch",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a project's own column rule from chant.config.ts lint.policies fails yodel lint on the migration that breaks it, and a yodel:allow line silences it; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a project's own column rule from chant.config.ts lint.policies fails yodel lint on the migration that breaks it, and a yodel:allow line silences it; yodel check runs a goose directory's migrations into a throwaway schema and fails the one a pull request adds when it drops a column, on that file's line; a yodel:allow line in the file silences it; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 82,
-        "break": 54
+        "plain": 93,
+        "break": 60
       },
-      "recorded": "2026-10-12T16:22:41.009Z",
-      "commit": "bb8cccc",
-      "dirty": false
+      "recorded": "2026-10-12T17:25:36.737Z",
+      "commit": "f188da6",
+      "dirty": true
     },
     {
       "claim": "migrations",
       "dialect": "pg",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a project's own column rule from chant.config.ts lint.policies fails yodel lint on the migration that breaks it, and a yodel:allow line silences it; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a project's own column rule from chant.config.ts lint.policies fails yodel lint on the migration that breaks it, and a yodel:allow line silences it; yodel check runs a goose directory's migrations into a throwaway schema and fails the one a pull request adds when it drops a column, on that file's line; a yodel:allow line in the file silences it; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 78,
-        "break": 47
+        "plain": 96,
+        "break": 65
       },
-      "recorded": "2026-10-12T16:22:41.009Z",
-      "commit": "bb8cccc",
-      "dirty": false
+      "recorded": "2026-10-12T17:25:36.737Z",
+      "commit": "f188da6",
+      "dirty": true
     },
     {
       "claim": "declarative",

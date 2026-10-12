@@ -194,6 +194,7 @@ export default defineConfig({
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
 | access control: Postgres row-level security, policies, roles, grants; ClickHouse users, roles, row policies, grants ([Access control](access.md)) | `environments.<env>.access` | `sql.profiles.<env>.access` | | off |
 | lint rule levels | `lint.rules` | | | each rule's own |
+| another tool's migrations directory, for `yodel check` ([Try it without switching](from-other-tools.md#try-it-without-switching)) | `check: { dir, tool, env }` | | | none |
 | the apply pipeline's waves and their gates | `waves` | | | none: every environment waits for an approval |
 | a tenant set: one environment over many databases or schemas | `environments.<env>.tenants` | | | none |
 | checks and commands run before and after an apply | `environments.<env>.steps` (read at the base commit) | | | none |

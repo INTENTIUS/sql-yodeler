@@ -3,6 +3,7 @@ import { apply } from "./apply.js";
 import { ci } from "./ci.js";
 import { config } from "./config.js";
 import { approve } from "./approve.js";
+import { check } from "./check.js";
 import { checkpoint } from "./checkpoint.js";
 import { cleanup } from "./cleanup.js";
 import { create } from "./create.js";
@@ -34,6 +35,7 @@ export const commands: readonly Command[] = [
   newCommand,
   checkpoint,
   lint,
+  check,
   test,
   status,
   report,

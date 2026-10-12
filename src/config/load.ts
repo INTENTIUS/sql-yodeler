@@ -215,6 +215,17 @@ function checkCi(value: unknown, where: string): void {
   if (value.jobs !== undefined && (typeof value.jobs !== "string" || value.jobs === "")) throw new YodelError(`${where}.jobs: the path of the module that declares the project's own jobs, such as "ci/jobs.ts"`);
 }
 
+/** `check` (#1): another tool's migrations directory. */
+function checkCheck(value: unknown, where: string, profiles?: readonly string[]): void {
+  const tools = ["golang-migrate", "goose", "flyway", "dbmate"];
+  if (!isRecord(value) || typeof value.dir !== "string" || value.dir === "") throw new YodelError(`${where}: { dir } with the migrations directory, relative to the project, such as { dir: "db/migrations" }`);
+  for (const k of Object.keys(value)) if (!["dir", "tool", "env"].includes(k)) throw new YodelError(`${where}: unknown setting ${k} (expected dir, tool, env)`);
+  if (value.tool !== undefined && !tools.includes(value.tool as string)) throw new YodelError(`${where}.tool: one of ${tools.join(", ")}`);
+  if (value.env !== undefined && (typeof value.env !== "string" || (profiles !== undefined && !profiles.includes(value.env)))) {
+    throw new YodelError(`${where}.env: a profile chant.config.ts declares${profiles ? notDeclared(profiles) : ""}`);
+  }
+}
+
 /**
  * Checks a loaded config's shape. `environments` names each environment by
  * its `sql.profiles` name; one that chant.config.ts does not declare is an
@@ -223,8 +234,9 @@ function checkCi(value: unknown, where: string): void {
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
-    if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci)`);
+    if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci", "check"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci, check)`);
   }
+  if (value.check !== undefined) checkCheck(value.check, `${path}: check`, profiles);
   if (value.ci !== undefined) checkCi(value.ci, `${path}: ci`);
   if (value.sources !== undefined) checkSources(value.sources, `${path}: sources`);
   if (value.notify !== undefined) {

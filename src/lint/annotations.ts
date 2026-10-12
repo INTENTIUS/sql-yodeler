@@ -39,7 +39,8 @@ function real(p: string): string {
 const fromRoot = (root: string, to: string): string => relative(real(root), real(to)).split(sep).join("/");
 
 /** The file a finding is about, relative to `root`; undefined for one about the directory as a whole. */
-export function findingPath(report: Pick<LintReport, "dir">, f: Pick<Finding, "migration">, root: string): string | undefined {
+export function findingPath(report: Pick<LintReport, "dir">, f: Pick<Finding, "migration" | "file">, root: string): string | undefined {
+  if (f.file !== undefined) return fromRoot(root, join(report.dir, f.file));
   if (f.migration === undefined) return undefined;
   return `${fromRoot(root, join(report.dir, f.migration))}/${MIGRATION_SQL}`;
 }
