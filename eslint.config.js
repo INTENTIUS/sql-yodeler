@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   // docs-site/ is its own Astro project, with its own dependencies and build.
-  { ignores: ["dist/", "coverage/", "node_modules/", "docs-site/"] },
+  { ignores: ["dist/", "coverage/", "node_modules/", "docs-site/", ".claude/"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
