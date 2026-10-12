@@ -13,7 +13,7 @@ import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
 import { accessItems, clickhouseAccessManaged, describeAccessSteps, isAccessChange, renderAccessReview, takesAccessAway } from "../src/chant/access.js";
 import { declaredChanges, planExitCode, type Plan } from "../src/chant/plan.js";
 import { recordedAccessSource } from "../src/chant/drift.js";
-import { templateOf, withoutAuthentication } from "../src/init/clickhouse-access.js";
+import { ordered, templateOf, withoutAuthentication } from "../src/init/clickhouse-access.js";
 import { lintMigrations } from "../src/lint/index.js";
 import { createMigration, newestMigration, readMigrations, writeMigration, type CreatedMigration } from "../src/migrations/index.js";
 import { declarativeRefusal } from "../src/config/settings.js";
@@ -193,5 +193,42 @@ describe("yodel init --from: ClickHouse access", () => {
     expect(templateOf({ kind: "policy", own: "clicks", sql: "CREATE ROW POLICY clicks ON yodel_46.events FOR SELECT USING kind = 'reader' TO reader" }, tables, principals).body).toBe(
       "CREATE ROW POLICY clicks ON ${events} FOR SELECT USING kind = 'reader' TO ${reader}",
     );
+  });
+
+  it("interpolates the settings profile a user, role or profile names, never the profile's own name (#256)", () => {
+    const none = new Map<string, string>();
+    const principals = new Map([["analyst", "analyst"]]);
+    const profiles = new Map([
+      ["base", "base"],
+      ["wide", "wide"],
+    ]);
+    expect(templateOf({ kind: "user", own: "svc", sql: "CREATE USER svc SETTINGS PROFILE `base`" }, none, principals, profiles).body).toBe("CREATE USER svc SETTINGS PROFILE ${base}");
+    expect(templateOf({ kind: "role", own: "analyst", sql: "CREATE ROLE analyst SETTINGS PROFILE `base`" }, none, principals, profiles).body).toBe("CREATE ROLE analyst SETTINGS PROFILE ${base}");
+    expect(templateOf({ kind: "settingsProfile", own: "wide", sql: "CREATE SETTINGS PROFILE `wide` SETTINGS INHERIT `base` TO analyst" }, none, principals, profiles).body).toBe(
+      "CREATE SETTINGS PROFILE \\`wide\\` SETTINGS INHERIT ${base} TO ${analyst}",
+    );
+    expect(templateOf({ kind: "settingsProfile", own: "base", sql: "CREATE SETTINGS PROFILE `base` SETTINGS max_threads = 4" }, none, principals, profiles).body).toBe("CREATE SETTINGS PROFILE \\`base\\` SETTINGS max_threads = 4");
+  });
+
+  it("lists each declaration after the ones it names, and breaks a profile assigned TO a user that names it (#256)", () => {
+    const none = new Map<string, string>();
+    const principals = new Map([["svc", "svc"]]);
+    const profiles = new Map([["base", "base"]]);
+    const stmts = [
+      { kind: "user" as const, exportName: "svc", own: "svc", sql: "CREATE USER svc SETTINGS PROFILE `base`" },
+      { kind: "quota" as const, exportName: "q", own: "q", sql: "CREATE QUOTA q FOR INTERVAL 1 hour MAX queries = 100 TO svc" },
+      { kind: "settingsProfile" as const, exportName: "base", own: "base", sql: "CREATE SETTINGS PROFILE `base` SETTINGS max_threads = 4 TO svc" },
+    ];
+    const warnings: string[] = [];
+    const out = ordered(
+      stmts.map((s) => ({ s, ...templateOf(s, none, principals, profiles) })),
+      (b, cut) => ({ s: b.s, ...templateOf(b.s, none, new Map([...principals].filter(([, e]) => e !== cut)), profiles) }),
+      warnings,
+    );
+    expect(out.map((b) => b.s.exportName)).toEqual(["base", "svc", "q"]);
+    expect(out[0]?.body).toBe("CREATE SETTINGS PROFILE \\`base\\` SETTINGS max_threads = 4 TO svc");
+    expect(out[2]?.body).toBe("CREATE QUOTA q FOR INTERVAL 1 hour MAX queries = 100 TO ${svc}");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("SettingsProfile base is assigned TO svc");
   });
 });
