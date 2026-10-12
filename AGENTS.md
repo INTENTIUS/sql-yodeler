@@ -22,7 +22,7 @@ The workflows in `.github/workflows/` are rendered, not written by hand: each is
 
 ## Claims and the bench are not part of development
 
-The scenario claims (`npm run claims`, `scenarios/`) and the bench (`npm run bench`) run between development cycles, when a person starts them. Nothing merges or releases on them, and nobody waits on them. A coding agent never runs them: both refuse to start without a real terminal, and ask a person to type `run`. `.github/workflows/claims.yml` and `claims-weekly.yml` (the published package) run only when started by hand. A change that needs a new claim part writes it; a person runs it with the next cycle's claims.
+The scenario claims (`npm run claims`, `scenarios/`) and the bench (`npm run bench`) run between development cycles, when a person starts them. Nothing merges or releases on them, and nobody waits on them. A coding agent runs them only under a person's grant: both refuse to start without a real terminal, and ask a person to type `run`. `npm run grant -- <name>...` (a claim, `claims` for all, or `bench`; `--runs`, default 2, `--hours`, default 4) is how a person lets an agent start those, from their own terminal; an agent never runs `grant`, writes the grant file, or starts what the grant does not name, and reports a failed granted run to the person instead of starting it again past its runs. `.github/workflows/claims.yml` and `claims-weekly.yml` (the published package) run only when started by hand. A change that needs a new claim part writes it; a person runs it with the next cycle's claims.
 
 ## chant
 

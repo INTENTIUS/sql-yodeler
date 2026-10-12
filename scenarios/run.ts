@@ -382,7 +382,7 @@ process.on("SIGTERM", () => {
   process.exit(143);
 });
 
-await humanGate("claims");
+await humanGate("claims", selected.map((c) => c.name));
 await reachable();
 process.stderr.write(`[claims] ${String(queue.length)} runs, ${String(jobs)} at a time; logs in ${relative(process.cwd(), logDir) || logDir}\n`);
 const began = Date.now();
