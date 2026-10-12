@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintSettings, renderLint, workflowCommands, type LintFormat } from "../lint/index.js";
 import { loadPolicies, policyRules } from "../lint/policies.js";
-import { detectTool, readForeign, TOOLS, type Tool } from "../check/readers.js";
+import { detectTool, readForeignDir, TOOLS, type Tool } from "../check/readers.js";
 import { openCheckServer, runCheck } from "../check/run.js";
 
 const usage = "usage: yodel check [<dir>] [--tool <tool>] [--env <env>] [--base <ref> | --all] [--reset] [--keep] [--json | --format <format> [--output <file>]] [--dir <project>]";
@@ -29,9 +29,12 @@ Tools (detected from the file names when --tool is not given):
   goose           <version>_<name>.sql, the -- +goose Up section; a
                   StatementBegin/StatementEnd block is one statement.
                   Go migrations are refused: their code is not SQL
-  flyway          V<version>__<description>.sql by version, then the
-                  R__<description>.sql files by description; undo files
-                  are not read
+  flyway          the locations of the flyway.toml or flyway.conf in <dir>
+                  or above it (else <dir>), subfolders included: the newest
+                  B<version>__ baseline, then V<version>__<description>.sql
+                  by version, then R__<description>.sql by description,
+                  placeholders substituted. Undo files and callbacks are
+                  not read; Java and Kotlin migrations are refused
   dbmate          <version>_<name>.sql, the -- migrate:up section
 
 Silencing: a line in the migration file,
@@ -169,12 +172,9 @@ export const check: Command = {
       const dirArg = a.dir ?? configured?.dir;
       if (dirArg === undefined) throw new YodelError(`no directory: name it (yodel check <dir>) or set yodel.config.ts check.dir\n${usage}`);
       const dir = resolve(a.dir !== undefined ? process.cwd() : project.dir, dirArg);
-      const tool = a.tool ?? configured?.tool ?? detectTool(dir);
+      const tool = a.tool ?? configured?.tool ?? detectTool(dir, project.dir);
       if (tool === undefined) throw new YodelError(`${dir}: its files are not golang-migrate's, goose's, Flyway's or dbmate's as yodel reads them; name the tool with --tool`);
-      const migrations = readForeign(dir, tool, await splitter(project));
-      if (migrations.length === 0) throw new YodelError(`${dir}: no ${tool} migrations`);
-      const fresh = a.all ? undefined : changedSince(dir, a.base);
-      const isNew = (m: { file: string }) => fresh === undefined || fresh.has(m.file);
+      const split = await splitter(project);
 
       const policies = await loadPolicies(project);
       const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, { ...LINT_RULES, ...SCHEMA_RULES, ...policyRules(policies) }, project.yodel?.path);
@@ -182,9 +182,16 @@ export const check: Command = {
       const server = await openCheckServer(project, env);
       let result;
       try {
-        if (!a.json) io.err(`yodel check: ${tool}, ${String(migrations.length)} migration${migrations.length === 1 ? "" : "s"} in ${dir}, ${String(migrations.filter(isNew).length)} new; replaying into ${server.where}\n`);
+        // Flyway's ${flyway:defaultSchema} falls back to the replay scope's.
+        const read = readForeignDir(dir, tool, split, { stopAt: project.dir, defaults: { defaultSchema: server.defaults.defaultSchema ?? server.defaults.defaultDatabase ?? server.scope[0] } });
+        const root = read.root;
+        const { migrations } = read;
+        if (migrations.length === 0) throw new YodelError(`${dir}: no ${tool} migrations`);
+        const fresh = a.all ? undefined : changedSince(root, a.base);
+        const isNew = (m: { file: string }) => fresh === undefined || fresh.has(m.file);
+        if (!a.json) io.err(`yodel check: ${tool}${read.config ? ` (${relative(process.cwd(), read.config) || read.config})` : ""}, ${String(migrations.length)} migration${migrations.length === 1 ? "" : "s"} in ${root}, ${String(migrations.filter(isNew).length)} new; replaying into ${server.where}\n`);
         result = await runCheck(project, env, server, migrations, {
-          dir,
+          dir: root,
           isNew,
           reset: a.reset,
           keep: a.keep,
