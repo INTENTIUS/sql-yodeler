@@ -24,7 +24,7 @@
       ]
     },
     "environment": {
-      "description": "With --env: the environment whose history the migrations were compared with.",
+      "description": "With --env: the environment whose history the migrations were compared with, or on a declarative project the one the declared schema was planned against.",
       "type": "string"
     },
     "dialect": {
@@ -36,6 +36,10 @@
           "type": "null"
         }
       ]
+    },
+    "declarative": {
+      "description": "A project with no migrations: the findings are over the declared schema (src/), and with --env over the plan against that environment. Nothing is silenced on this path.",
+      "const": true
     },
     "migrations": {
       "description": "Every migration read, sorted by id.",

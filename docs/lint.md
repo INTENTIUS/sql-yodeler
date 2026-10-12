@@ -402,9 +402,13 @@ A `yodel:allow` line that is malformed, names a rule that cannot be silenced, ha
 
 `yodel rebase` keeps each `yodel:allow` line above the same statement in the migration.sql it writes again, and the new checksum covers it, so lint passes after a rebase and apply records the same step, rule and reason. When the statement a line silenced is gone from the rebased migration, or changed (the other branch already made that change, say), the rebase refuses, names the line, and writes nothing ([Migrations](migrations.md#forks-and-yodel-rebase)).
 
+## A project with no migrations
+
+On the declarative path there are no migrations to check. `yodel lint` runs the schema checks, the project's own checks and `lint.naming` over the build of `src/`, offline, and `yodel lint --env <env>` also plans `src/` against that environment and checks each planned change against `destructive`, `pg-rewrite`, `pg-access`, `ch-mutation`, `ch-rebuild` and `ch-access`, with `refused-step` for a change that needs its own Op. The plan says each change's rule and class but not its statement, so the rules that read a statement (`pg-lock`, `data-dependent`, `pg-signature`) run on migrations only. Nothing is silenced; `lint.rules` sets the levels. `yodel plan <env>` shows the same findings, and its pull request comment carries them ([The two workflows](workflows.md#review-on-a-pull-request)). `--replay` and `--update-checksum` read a migrations directory, and are refused.
+
 ## Against an environment's history: --env
 
-`yodel lint --env <env>` also reads that environment's history. A `checksum` finding is then an applied migration whose files changed since it ran (an error) or a pending migration's edit (a warning). It needs the server; a server that does not answer exits 1.
+`yodel lint --env <env>` also reads that environment's history (on the declarative path, its plan: [above](#a-project-with-no-migrations)). A `checksum` finding is then an applied migration whose files changed since it ran (an error) or a pending migration's edit (a warning). It needs the server; a server that does not answer exits 1.
 
 ## The replay check: --replay
 

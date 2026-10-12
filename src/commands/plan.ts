@@ -3,12 +3,11 @@ import { eventFromRun, sendEvent } from "../notify/index.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
-import { declarativeRefusal, describeSettingsTopology, environmentSettings } from "../config/settings.js";
+import { declarativeRefusal } from "../config/settings.js";
 import { buildSchema } from "../chant/build.js";
-import { planEnvironment, planExitCode, planJson, renderPlan } from "../chant/plan.js";
-import { accessReview, renderAccessReview } from "../chant/access.js";
+import { planEnvironment } from "../chant/plan.js";
 import { hasMigrations } from "../versioned/index.js";
-import { describeServer, probeServer } from "../server.js";
+import { collectDeclarativePlan, declarativePlanExitCode, declarativePlanJson, renderDeclarativeMarkdown, renderDeclarativeText } from "../declarative/plan.js";
 import { runnable } from "../chant/runnable.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
@@ -27,7 +26,11 @@ const help = `${usage}
 
 Declarative project (no migrations/ directory): shows the classified change
 from the environment's live database (sql.profiles.<env>) to the declared
-schema, as chant sql plan reports it.
+schema, as chant sql plan reports it, with the lint findings over the
+planned changes, each policy rule's outcome (yodel.config.ts policy, at the
+base commit) and how the ApplyOp's gate is approved. --comment posts it.
+--allow-out-of-order is for versioned migrations: the declarative path has
+no history of migrations to be out of order with.
 
 Versioned project (a migrations/ directory): shows the pending migrations,
 each step with its rule and class (an Op step with the Op that makes it, a
@@ -51,7 +54,9 @@ Options:
                         would run
   --op <name>           versioned: the migrations Op, when more than one
                         applies <env>
-  --comment             versioned: post the markdown as one comment on the
+  --op <name>           declarative: the ApplyOp, when more than one applies
+                        <env>
+  --comment             post the markdown as one comment on the
                         pull (merge) request, updating the one posted before;
                         prints the text plan. The forge, repository, request
                         and API come from the CI job's environment
@@ -92,6 +97,7 @@ interface PlanArgs {
   allowOutOfOrder: boolean;
   op: string | undefined;
   forge: ForgeFlags;
+  /** The flags only a versioned project takes. */
   versionedOnly: string[];
 }
 
@@ -137,12 +143,7 @@ function parsePlanArgs(args: string[]): PlanArgs {
     allowOutOfOrder: v["allow-out-of-order"] === true,
     op: str("op"),
     forge,
-    versionedOnly: [
-      ...(format === "markdown" ? ["--format markdown"] : []),
-      ...(v.comment === true ? ["--comment"] : []),
-      ...(v["allow-out-of-order"] === true ? ["--allow-out-of-order"] : []),
-      ...(str("op") !== undefined ? ["--op"] : []),
-    ],
+    versionedOnly: v["allow-out-of-order"] === true ? ["--allow-out-of-order"] : [],
   };
 }
 
@@ -157,27 +158,26 @@ export const plan: Command = {
       const project = await loadProject(a.dir);
       const env = resolveEnvironment(project, a.env);
       if (hasMigrations(project)) return versionedPlan(project, env, a, io);
-      if (a.versionedOnly.length > 0) throw new YodelError(`${a.versionedOnly.join(", ")} ${a.versionedOnly.length === 1 ? "is" : "are"} for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
-      return declarativePlan(project, env, a.format === "json", io);
+      if (a.versionedOnly.length > 0) throw new YodelError(`${a.versionedOnly.join(", ")} ${a.versionedOnly.length === 1 ? "is" : "are"} for versioned migrations, and ${project.dir} has no migrations/ directory with a migration (see docs/workflows.md for what each path has)`);
+      return declarativePlan(project, env, a, io);
     }),
 };
 
-async function declarativePlan(project: Project, env: Environment, json: boolean, io: Io): Promise<number> {
+/** `yodel plan <env>` with no migrations (#249): chant's plan, with its lint findings, policy and approval, and the comment. */
+async function declarativePlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
   const refusal = declarativeRefusal(project, env.name);
   if (refusal) throw refusal;
-  const topology = project.dialect === "clickhouse" ? `, topology ${describeSettingsTopology(environmentSettings(project, env.name))}` : "";
+  const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
   const build = await buildSchema(project);
   try {
-    const result = await planEnvironment(project, env, build);
-    const server = await probeServer(project, env);
-    const access = await accessReview(project, env.name, result.diff.changes, build.output);
-    if (json) io.out(`${JSON.stringify({ ...planJson(result), access, ...(server ? { server } : {}) }, null, 2)}\n`);
-    else {
-      const text = await renderPlan(result, `Plan for ${env.name} (${server ? describeServer(server) : project.dialect}, sql.profiles.${env.name}${topology})`);
-      const review = renderAccessReview(access, env.name);
-      io.out(`${text}\n${review.length > 0 ? `\n${review.join("\n")}\n` : ""}`);
-    }
-    return planExitCode(result);
+    const result = await collectDeclarativePlan(project, env, build, await planEnvironment(project, env, build), { opName: a.op });
+    if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result), io);
+    const doc = declarativePlanJson(result);
+    if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
+    else if (a.format === "markdown") io.out(renderDeclarativeMarkdown(result));
+    else io.out(renderDeclarativeText(result));
+    await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
+    return declarativePlanExitCode(result);
   } finally {
     build.dispose();
   }

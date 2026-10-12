@@ -528,3 +528,15 @@ npx yodel override prod --revert 20261010T0900-add-coupons --rule no-drops-in-pr
 With `--step <file>` as well when the revert has a hand-written step. An override of the apply's plan never counts for a revert, nor the other way round. The revert's Apply step writes the overrides it relied on into the note of the migration's `reverted` row.
 
 A revert always stops at the migrations Op's gate, whatever the wave's gate policy in an environment `waves` names: under `on-destructive`, a destructive revert waits for an approval, and so does any other revert. `yodel revert --json` says what the wave's gate, at the base commit, makes of the revert (`wave`: its destructive statements, counted as a wave plan counts them, and whether the policy asks for an approval).
+
+### The declarative path
+
+A project with no migrations is judged by the same policy. A rule sees one entry in `pending`, `declared`, whose steps are the changes chant plans from the live database to `src/`: each a `statement` with its object, class, rule and `destructive`, and no `sql`. `plan.declarative` is `true`, and `silences` is empty, since nothing on this path holds a `-- yodel:allow` line. `refuse.classes` and `refuse.destructive` read the planned changes as they read a migration's steps:
+
+```sh
+npx yodel plan prod      # each rule's outcome, with the override command for a denial
+npx yodel override prod --rule no-drops-in-prod --reason "the column has been unused since OPS-418" --by alice
+npx yodel apply prod     # past the policy, then the ApplyOp's gate
+```
+
+`yodel apply` judges the plan before it runs the ApplyOp and refuses a denial with exit 4. The override is recorded under the ApplyOp's name, for a digest yodel takes over the environment, the dialect and the declared changes, so it stops counting when the live database or `src/` moves. It is spent once the ApplyOp applies: a run that stops at the gate, or one whose Op leaves the change unapplied, has not used it. There is no history, so the override is on `chant/lifecycle` only. [The two workflows](workflows.md#review-on-a-pull-request) has the rest of the declarative review.

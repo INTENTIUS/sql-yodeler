@@ -274,8 +274,10 @@
           "type": "string"
         },
         "status": {
+          "description": "refused (a change needs its own Op), denied (a policy rule denies the plan, with no override; the ApplyOp did not run), unchanged, gated, failed, incomplete, applied.",
           "enum": [
             "refused",
+            "denied",
             "unchanged",
             "gated",
             "failed",
@@ -301,6 +303,10 @@
         "plan": {
           "description": "The plan before the run.",
           "$ref": "plan.schema.json#/$defs/declarative"
+        },
+        "policy": {
+          "description": "Each policy rule's outcome over the plan, when yodel.config.ts declares a policy and there was something to apply.",
+          "$ref": "common.schema.json#/$defs/policy"
         },
         "remaining": {
           "description": "incomplete: the plan after the Op completed.",

@@ -43,7 +43,8 @@ describe("yodel lint (the command)", () => {
     const p = project();
     const none = await yodel(p.at());
     expect(none.code, none.err).toBe(0);
-    expect(none.out).toContain("0 migrations: 0 errors, 0 warnings, 0 silenced.");
+    // No migrations/: the declarative path's lint, over a src/ that declares nothing yet (#249).
+    expect(none.out).toContain("The declared schema: 0 errors, 0 warnings.");
 
     add(p.migrations, "create", ch("id UInt64"), 0);
     const ran = await yodel(p.at("--json"));
@@ -141,6 +142,10 @@ describe("yodel lint (the command)", () => {
     const bad = await yodel(p.at("prod"));
     expect(bad.code).toBe(1);
     expect(bad.err).toContain("usage: yodel lint");
+    const declarative = await yodel(p.at("--update-checksum", "20260101T0000-nope"));
+    expect(declarative.code).toBe(1);
+    expect(declarative.err).toContain("--update-checksum reads a migrations directory");
+    add(p.migrations, "create", ch("id UInt64"), 0);
     const unknown = await yodel(p.at("--update-checksum", "20260101T0000-nope"));
     expect(unknown.code).toBe(1);
     expect(unknown.err).toContain("no such migration");

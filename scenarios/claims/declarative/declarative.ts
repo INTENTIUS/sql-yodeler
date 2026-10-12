@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
 import { parse, Project } from "../../lib/project.js";
@@ -286,6 +286,53 @@ async function orm(ctx: Ctx): Promise<void> {
   hold(after.code === 0 && parse<{ changes: unknown[] }>(after).changes.length === 0, `yodel plan after the apply is not empty: ${after.out.slice(0, 600)}`);
 }
 
+/** A policy that refuses destructive changes, as yodel.config.ts declares it. */
+const NO_DROPS = `import { defineConfig } from "@intentius/sql-yodeler";\n\nexport default defineConfig({\n  policy: { rules: [{ id: "no-drops", refuse: { destructive: true } }] },\n});\n`;
+
+/**
+ * The declarative path's review (#249). yodel.config.ts at the base commit
+ * declares a policy that refuses destructive changes, and the change drops
+ * a column (ClickHouse: events.id; Postgres: orders.amount). yodel lint,
+ * offline, passes; yodel lint --env flags the drop destructive (exit 3);
+ * yodel plan --format markdown, what --comment posts, carries the plan
+ * comment's marker, the finding, the denied rule and the override command;
+ * and yodel apply refuses before the gate (exit 4, status denied), so the
+ * column is still on the server. The schema and config are put back after.
+ * BREAK: the policy arrives with the change rather than before it, so the
+ * base commit has none, nothing denies, and yodel apply goes on to the gate.
+ */
+async function review(ctx: Ctx, { p }: Declarative): Promise<void> {
+  const [table, column] = ctx.dialect === "ch" ? ["events", "id"] : ["orders", "amount"];
+  const before = p.read("src/schema.ts");
+  if (!ctx.broken) {
+    p.write("yodel.config.ts", NO_DROPS);
+    await p.commit("a policy that refuses drops");
+  }
+  if (ctx.dialect === "ch") p.edit("src/schema.ts", "    id   UInt64,\n", "");
+  else p.edit("src/schema.ts", /,\n\s+amount numeric\(12, 2\) NOT NULL/, "");
+  if (ctx.broken) p.write("yodel.config.ts", NO_DROPS);
+  await p.commit(`drop ${table}.${column}`);
+  try {
+    const offline = await p.yodel(["lint", "--json"]);
+    hold(offline.code === 0 && parse<{ declarative?: boolean }>(offline).declarative === true, `yodel lint, offline, exited ${String(offline.code)} on the declared schema: ${offline.out.slice(0, 600)}`);
+    const linted = await p.yodel(["lint", "--env", p.env, "--json"]);
+    const findings = parse<{ findings: Array<{ rule: string; message: string }> }>(linted).findings;
+    hold(linted.code === 3 && findings.some((f) => f.rule === "destructive" && f.message.includes(column)), `yodel lint --env exited ${String(linted.code)} with no destructive finding on ${table}.${column}: ${JSON.stringify(findings)}`);
+    const md = await p.yodel(["plan", p.env, "--format", "markdown"]);
+    for (const want of [`<!-- yodel:plan env=${p.env} -->`, "| **error** | `destructive` |", "| `no-drops` | **denied** |", `yodel override ${p.env} --rule no-drops`]) {
+      hold(md.out.includes(want), `the plan comment does not carry ${want}:\n${md.out.slice(0, 1500)}`);
+    }
+    const applied = await p.yodel(["apply", p.env, "--json"]);
+    const status = parse<{ status?: string }>(applied).status;
+    hold(applied.code === 4 && status === "denied", `yodel apply exited ${String(applied.code)} (${String(status)}) on a plan the policy at base denies`);
+    hold(await ctx.db.columnExists(table, column), `${table}.${column} is gone from the server after a denied apply`);
+  } finally {
+    p.write("src/schema.ts", before);
+    rmSync(p.path("yodel.config.ts"), { force: true });
+    await p.commit("the schema and config put back");
+  }
+}
+
 /** The project the src/ parts run on: declarative, applied once. */
 interface Declarative {
   p: Project;
@@ -294,8 +341,9 @@ interface Declarative {
 /**
  * The parts, in order: the src/ declarations, a column added, on Postgres
  * the routines (#44) and access control (#45), and on ClickHouse a
- * dictionary, a function and access control (#46), on one project; then an
- * ORM's DDL (#67) on a project of its own.
+ * dictionary, a function and access control (#46), and the review a pull
+ * request gets (#249), on one project; then an ORM's DDL (#67) on a project
+ * of its own.
  */
 const parts: ReadonlyArray<PartEntry<Declarative>> = [
   ["column", column],
@@ -304,6 +352,7 @@ const parts: ReadonlyArray<PartEntry<Declarative>> = [
   ["dictionary", dictionaryPart, ["ch"]],
   ["function", functionPart, ["ch"]],
   ["ch-access", chAccess, ["ch"]],
+  ["review", review],
   ["orm", orm],
 ];
 
@@ -313,7 +362,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const declarative: Claim = {
   name: "declarative",
-  says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL",
+  says: "the declarative path: yodel plan shows the change against the live server and yodel apply makes it behind the plan-bound gate, for src/ declarations (on Postgres, functions, procedures and triggers, and access control: a role, a policy and grants, with a grant made by hand revoked; on ClickHouse, a dictionary, a function, and access control: a role, a user, a row policy and grants, with a grant made by hand revoked) and for an ORM's exported DDL; a pull request on that path gets lint over the planned changes and the plan comment with them, and a policy rule at the base commit that denies the plan refuses yodel apply before the gate",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),
