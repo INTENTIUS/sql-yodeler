@@ -239,7 +239,7 @@ export const ROOMS = [
 			command: { any: 'npm run ci' },
 			link: { label: 'The pipelines: yodel ci', href: 'workflows#the-pipelines-yodel-ci' },
 		},
-		claims: ['waves', 'forgejo'],
+		claims: ['waves', 'forge'],
 		tasks: [
 			{ label: 'Setting up each forge', href: 'forges' },
 			{ label: 'Lint and plan on pull requests only', href: 'lint-and-plan' },
@@ -332,7 +332,7 @@ export const ROOMS = [
 			command: { clickhouse: template(clickhouse), postgres: template(postgres) },
 			link: { label: 'Your first migration', href: 'getting-started' },
 		},
-		claims: ['migrations', 'forgejo', 'github'],
+		claims: ['migrations', 'forge'],
 		tasks: [
 			{ label: 'Your first migration', href: 'getting-started' },
 		],

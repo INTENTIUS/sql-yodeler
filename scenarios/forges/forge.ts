@@ -1,17 +1,16 @@
 /**
- * What the forge claims need from a forge: a fresh repository with the
+ * What the forge claim needs from a forge: a fresh repository with the
  * pipelines' secrets, the runs a push and a pull request start, the pull
  * request's comments, a merge, a run of the drift watch and the issues it
- * keeps. Forgejo and GitLab run the pipelines
- * themselves on a push; on GitHub, act runs them for the mock GitHub.
+ * keeps. Forgejo runs the pipelines itself on a push.
  */
 
 import type { Ctx, Dialect } from "../lib/claim.js";
 
-/** The job image: node and git, as the templates' Forgejo and GitLab jobs use. */
+/** The job image: node and git, as the templates' Forgejo jobs use. */
 export const NODE_IMAGE = "node:22-bookworm";
 
-/** A finished run: a workflow run, a set of act jobs, or a pipeline. */
+/** A finished run: a workflow run, or a pull request's runs joined. */
 export interface ForgeRun {
   ok: boolean;
   /** The forge's word for how it ended (success, failure, ...). */
@@ -33,15 +32,6 @@ export interface ForgeRepo {
   applyAgain(sha: string): Promise<ForgeRun>;
   /** Opens a pull request from the pushed branch `head` (at `sha`) into main, and waits for its checks: every pull request workflow the project has. */
   openPr(head: string, sha: string, title: string): Promise<{ id: number; checks: ForgeRun }>;
-  /**
-   * Approves pull request `id`'s head `sha` in a review (#48): as its author,
-   * or as `reviewer`, another user with write access to the repository. A
-   * forge that refuses the author's own approval says so, and the caller
-   * goes on with no review. Without it, the claim skips the pr-review part.
-   */
-  review?(id: number, sha: string, as: "author" | "reviewer"): Promise<void>;
-  /** Sets these secrets (variables on GitLab) to new values; the runs started after see them. */
-  setSecrets?(secrets: Record<string, string>): Promise<void>;
   /** The bodies of the pull request's comments. */
   comments(id: number): Promise<string[]>;
   /** Merges the pull request; main's sha after the merge. */
@@ -50,18 +40,6 @@ export interface ForgeRepo {
   watch(sha: string): Promise<ForgeRun>;
   /** The repository's issues, open and closed (not pull requests). */
   issues(): Promise<ForgeIssue[]>;
-  /**
-   * What `yodel approve` resumes a waiting job with (#47): the token, with
-   * the least access the forge's resume needs, and whatever else the
-   * approver's machine needs to reach the forge's API as the job named it.
-   * A forge without it is approved with chant approve and run again by hand.
-   */
-  resumeEnv?(): Promise<Record<string, string>>;
-  /**
-   * The run the forge started again for `waited` after its approval
-   * resumed it, once finished; undefined when none started within `withinMs`.
-   */
-  resumed?(sha: string, waited: ForgeRun, withinMs: number): Promise<ForgeRun | undefined>;
 }
 
 export interface ForgeIssue {
@@ -72,7 +50,7 @@ export interface ForgeIssue {
 }
 
 export interface Forge {
-  /** For messages: Forgejo, GitHub, GitLab. */
+  /** For messages: Forgejo. */
   name: string;
   /** The claim's server as the forge's jobs reach it. */
   jobUrl(dialect: Dialect): string;

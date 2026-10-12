@@ -1,5 +1,5 @@
 ---
-claims: [forgejo, github, gitlab]
+claims: [forge]
 type: howto
 ---
 

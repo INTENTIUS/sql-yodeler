@@ -1,29 +1,16 @@
 /**
- * The template claim's forge: a local Forgejo (the one terragucci's stack
+ * The forge claim's forge: a local Forgejo (the one terragucci's stack
  * runs at http://localhost:3300, whose runner puts job containers on the
  * network where the emulator answers as `clickhouse` and `pgdb`). Its
  * Actions run .forgejo/workflows on each push and pull request.
  *
  *   YODEL_CLAIMS_FORGEJO_URL        default http://localhost:3300
  *   YODEL_CLAIMS_FORGEJO_USER       default yodel34
- *   YODEL_CLAIMS_FORGEJO_PASSWORD   required: without it the claim fails (--skip template skips it)
- *   YODEL_CLAIMS_FORGEJO_REVIEWER   the second writer who reviews pull requests (#48), default <user>-reviewer
- *   YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD
- *                                   its password. Without it the claim makes the reviewer (or resets
- *                                   its password) through the admin API, which needs <user> to be a
- *                                   Forgejo admin. Otherwise make the account once, e.g.
- *                                   `docker exec -u git <forgejo container> forgejo admin user create
- *                                   --username yodel34-reviewer --password <p> --email
- *                                   yodel34-reviewer@example.invalid --must-change-password=false`,
- *                                   and set both variables.
+ *   YODEL_CLAIMS_FORGEJO_PASSWORD   required: without it the claim fails (--skip forge skips it)
  *   YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL  the emulator as a job sees it, default http://clickhouse:8123
  *   YODEL_CLAIMS_FORGEJO_POSTGRES_URL    default postgres://pgdb:5432/postgres
  */
 
-import { randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { Ctx } from "../lib/claim.js";
 import type { Forge, ForgeIssue, ForgeRepo, ForgeRun } from "./forge.js";
 
@@ -33,21 +20,13 @@ export const forgejo = {
   password: process.env.YODEL_CLAIMS_FORGEJO_PASSWORD ?? "",
 };
 
-const basic = (user: string, password: string) => `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`;
-const auth = () => basic(forgejo.user, forgejo.password);
-
-/** The second writer (#48): approves the pull requests the claim's user opens. */
-const reviewer = {
-  user: process.env.YODEL_CLAIMS_FORGEJO_REVIEWER ?? `${forgejo.user}-reviewer`,
-  password: process.env.YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD ?? `Rv-${randomBytes(12).toString("hex")}`,
-  given: process.env.YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD !== undefined,
-};
+const auth = () => `Basic ${Buffer.from(`${forgejo.user}:${forgejo.password}`).toString("base64")}`;
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the response's shape
-async function api<T = unknown>(method: string, path: string, body?: unknown, as = auth()): Promise<{ status: number; json: T }> {
+async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<{ status: number; json: T }> {
   const res = await fetch(`${forgejo.url}/api/v1${path}`, {
     method,
-    headers: { Authorization: as, "Content-Type": "application/json" },
+    headers: { Authorization: auth(), "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(60_000),
   });
@@ -175,44 +154,12 @@ async function waitAll(ctx: Ctx, repo: string, sha: string, event: string): Prom
   }
 }
 
-/** The reviewer (#48) as a user of the forge: made, or its password set, through the admin API unless its password is given. */
-async function ensureReviewer(): Promise<void> {
-  if (reviewer.given) return;
-  const made = await api("POST", "/admin/users", { username: reviewer.user, email: `${reviewer.user}@example.invalid`, password: reviewer.password, must_change_password: false });
-  if (made.status === 201) return;
-  if (made.status === 422) {
-    const reset = await api("PATCH", `/admin/users/${encodeURIComponent(reviewer.user)}`, { login_name: reviewer.user, source_id: 0, password: reviewer.password, must_change_password: false });
-    if (reset.status < 300) return;
-  }
-  throw new Error(`the pr-review part needs a second Forgejo user: ${forgejo.user} could not make ${reviewer.user} (${String(made.status)}${made.status === 403 ? ", not a Forgejo admin" : ""}); make the account once and set YODEL_CLAIMS_FORGEJO_REVIEWER and YODEL_CLAIMS_FORGEJO_REVIEWER_PASSWORD (scenarios/forges/forgejo.ts says how)`);
-}
-
-/**
- * A module for node's --import that sends fetches of the forge's own URL (the
- * ROOT_URL its jobs see, such as http://forgejo:3000, which names the
- * forge's API in the pending record a waiting job writes) to the URL this
- * host reaches it at: what a hosts entry would do on an approver's machine.
- */
-function hostsPreload(work: string, from: string, to: string): string {
-  const file = join(work, "forgejo-hosts.mjs");
-  writeFileSync(
-    file,
-    `const [from, to] = ${JSON.stringify([from, to])};
-const fetch0 = globalThis.fetch;
-globalThis.fetch = (input, init) => fetch0(typeof input === "string" && input.startsWith(from) ? to + input.slice(from.length) : input, init);
-`,
-  );
-  return pathToFileURL(file).href;
-}
-
 export function forgejoForge(): Forge {
-  /** The tokens made for a resume, removed on close. */
-  const tokens: string[] = [];
   return {
     name: "Forgejo",
     jobUrl: (d) => (d === "ch" ? (process.env.YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL ?? "http://clickhouse:8123") : (process.env.YODEL_CLAIMS_FORGEJO_POSTGRES_URL ?? "postgres://pgdb:5432/postgres")),
     async repo(ctx, name, secrets): Promise<ForgeRepo> {
-      if (!forgejo.password) throw new Error("YODEL_CLAIMS_FORGEJO_PASSWORD is not set; the forgejo claim needs the local Forgejo");
+      if (!forgejo.password) throw new Error("YODEL_CLAIMS_FORGEJO_PASSWORD is not set; the forge claim needs the local Forgejo");
       const repo = `${forgejo.user}/${name}`;
       await api("DELETE", `/repos/${repo}`);
       const made = await api("POST", "/user/repos", { name, private: false, auto_init: false });
@@ -225,24 +172,8 @@ export function forgejoForge(): Forge {
       return {
         remote: `${forgejo.url.replace("://", `://${encodeURIComponent(forgejo.user)}:${encodeURIComponent(forgejo.password)}@`)}/${repo}.git`,
         pushed: (sha) => waitRun(ctx, repo, sha, "push"),
-        /** A token with write:repository alone, which a dispatch needs (#47). */
-        async resumeEnv() {
-          const tokenName = `yodel-47-resume-${randomBytes(4).toString("hex")}`;
-          const made = await api<{ sha1?: string }>("POST", `/users/${encodeURIComponent(forgejo.user)}/tokens`, { name: tokenName, scopes: ["write:repository"] });
-          if (made.status !== 201 || !made.json.sha1) throw new Error(`making a write:repository token: ${String(made.status)} ${JSON.stringify(made.json)}`);
-          tokens.push(tokenName);
-          // The jobs see the forge at its ROOT_URL, which this host may not resolve.
-          const { json: info } = await api<{ html_url?: string }>("GET", `/repos/${repo}`);
-          const root = info.html_url?.slice(0, info.html_url.length - repo.length - 1) ?? forgejo.url;
-          const env: Record<string, string> = { CHANT_FORGE_TOKEN: made.json.sha1 };
-          if (root.replace(/\/+$/, "") !== forgejo.url) env.NODE_OPTIONS = `--import ${hostsPreload(ctx.work, root.replace(/\/+$/, ""), forgejo.url)}`;
-          return env;
-        },
-        async resumed(sha, waited, withinMs) {
-          return waitRun(ctx, repo, sha, "workflow_dispatch", waited.id ?? (await lastRunId(repo, sha)), withinMs);
-        },
         async applyAgain(sha) {
-          // A dispatch again on the same commit (#48): wait for the run after the ones already there.
+          // A dispatch again on the same commit: wait for the run after the ones already there.
           const after = await lastRunId(repo, sha);
           const dispatched = await api("POST", `/repos/${repo}/actions/workflows/yodel-apply.yml/dispatches`, { ref: "main" });
           if (dispatched.status >= 300) throw new Error(`dispatching yodel-apply: ${String(dispatched.status)} ${JSON.stringify(dispatched.json)}`);
@@ -251,31 +182,8 @@ export function forgejoForge(): Forge {
         async openPr(head, sha, title) {
           const pr = await api<{ number: number }>("POST", `/repos/${repo}/pulls`, { title, head, base: "main" });
           if (pr.status !== 201) throw new Error(`opening the pull request: ${String(pr.status)}`);
-          // Every pull request workflow: yodel-pr, and a pr-review wave's yodel-apply-plans (#48).
+          // Every pull request workflow.
           return { id: pr.json.number, checks: await waitAll(ctx, repo, sha, "pull_request") };
-        },
-        async review(id, sha, as) {
-          if (as === "reviewer") {
-            await ensureReviewer();
-            const added = await api("PUT", `/repos/${repo}/collaborators/${encodeURIComponent(reviewer.user)}`, { permission: "write" });
-            if (added.status >= 300) throw new Error(`adding ${reviewer.user} as a writer: ${String(added.status)} ${JSON.stringify(added.json)}`);
-          }
-          const by = as === "author" ? auth() : basic(reviewer.user, reviewer.password);
-          const done = await api("POST", `/repos/${repo}/pulls/${String(id)}/reviews`, { event: "APPROVED", commit_id: sha, body: "" }, by);
-          if (done.status >= 300) {
-            // Forgejo refuses an author's approval of their own pull request.
-            if (as === "author") {
-              ctx.log(`Forgejo refused ${forgejo.user}'s approval of their own pull request #${String(id)}: ${String(done.status)} ${JSON.stringify(done.json)}`);
-              return;
-            }
-            throw new Error(`${reviewer.user}'s review of #${String(id)}: ${String(done.status)} ${JSON.stringify(done.json)}`);
-          }
-        },
-        async setSecrets(values) {
-          for (const [k, v] of Object.entries(values)) {
-            const put = await api("PUT", `/repos/${repo}/actions/secrets/${k}`, { data: v });
-            if (put.status >= 300) throw new Error(`setting secret ${k}: ${String(put.status)}`);
-          }
         },
         async comments(id) {
           const { json } = await api<Array<{ body: string }>>("GET", `/repos/${repo}/issues/${String(id)}/comments`);
@@ -299,8 +207,6 @@ export function forgejoForge(): Forge {
         },
       };
     },
-    async close() {
-      for (const name of tokens.splice(0)) await api("DELETE", `/users/${encodeURIComponent(forgejo.user)}/tokens/${encodeURIComponent(name)}`);
-    },
+    close: () => Promise.resolve(),
   };
 }

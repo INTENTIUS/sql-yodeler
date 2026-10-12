@@ -47,5 +47,6 @@ async function body(ctx: Ctx): Promise<void> {
 export const prComment: Claim = {
   name: "pr-comment",
   says: "the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
-  dialects: { ch: body, pg: body },
+  // The comment is the same on both dialects.
+  dialects: { pg: body },
 };

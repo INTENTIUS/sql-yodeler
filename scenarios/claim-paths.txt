@@ -60,48 +60,41 @@ scenarios/claims/resume/               resume
 scenarios/claims/clickhouse.ts         clickhouse
 scenarios/claims/clickhouse/           clickhouse
 scenarios/claims/waves.ts              waves
-scenarios/claims/forgejo.ts            forgejo
-scenarios/claims/github.ts             github
-scenarios/claims/gitlab.ts             gitlab
+scenarios/claims/forge.ts              forge
 
-# The forges the forge claims run on, and the template body they share.
-scenarios/forges/forgejo.ts            forgejo
-scenarios/forges/github.ts             github
-scenarios/forges/github.compose.ts     github
-scenarios/forges/mock-github.ts        github
-scenarios/forges/gitlab.ts             gitlab
-scenarios/forges/gitlab.compose.ts     gitlab
-scenarios/forges/                      forgejo github gitlab
+# The forge the forge claim runs on, and its template body.
+scenarios/forges/forgejo.ts            forge
+scenarios/forges/                      forge
 
-# The starter templates: only the forge claims make a project from them.
+# The starter templates: only the forge claim makes a project from them.
 # yodel ci renders their pipelines, and the waves claim renders its pipeline with it.
-src/ci/                                waves forgejo github gitlab
-src/commands/ci.ts                     forgejo github gitlab
-templates/                             forgejo github gitlab
+src/ci/                                waves forge
+src/commands/ci.ts                     forge
+templates/                             forge
 
 # yodel init, and what --from adopts with.
-src/commands/init.ts                   declarative forgejo github gitlab
-src/init/                              declarative forgejo github gitlab
+src/commands/init.ts                   declarative forge
+src/init/                              declarative forge
 
 # yodel lint. apply and rebase read a migration's yodel:allow lines through
 # lint/index.ts and lint/silences.ts, so those two reach every claim.
 src/lint/index.ts                      ALL
 src/lint/silences.ts                   ALL
-src/commands/lint.ts                   migrations forgejo github gitlab
-src/lint/                              migrations forgejo github gitlab
-src/replay/                            migrations forgejo github gitlab
+src/commands/lint.ts                   migrations forge
+src/lint/                              migrations forge
+src/replay/                            migrations forge
 
 # yodel plan and the pull request comment it posts.
-src/commands/plan.ts                   declarative approval forgejo github gitlab waves
+src/commands/plan.ts                   declarative approval forge waves
 src/pr/tenants.ts                      waves
-src/pr/                                approval declarative forgejo github gitlab
+src/pr/                                approval declarative forge
 
 # yodel report and the audit log (#57).
 src/commands/report.ts                 approval waves
 src/report/                            approval waves
 
 # The apply pipeline's waves.
-src/waves/                             waves forgejo github gitlab
+src/waves/                             waves forge
 # Tenant sets (#56): only a target named <env>/<tenant> runs them, and only the waves claim names one.
 src/tenants/                           waves
 # Approval modes (#48): every --execute and --wave-apply reads the mode before it checks the approval.
@@ -110,12 +103,12 @@ src/approval-mode/                     ALL
 src/apply-steps/                       waves
 
 # yodel drift, which the templates' watch runs (--issue).
-src/commands/drift.ts                  declarative forgejo github gitlab
-src/chant/drift.ts                     declarative forgejo github gitlab
+src/commands/drift.ts                  declarative forge
+src/chant/drift.ts                     declarative forge
 
-# Webhook events (#61): sent by apply, plan and drift only when yodel.config.ts
-# names a webhook, which only the forge claims' projects do.
-src/notify/                            forgejo github gitlab
+# Webhook events (#61): sent through chant's notify (#211), which chant
+# proves; no claim's project names a webhook.
+src/notify/                            -
 # yodel docs (#62): offline, and no claim runs it; test/schema-docs.test.ts
 # and the docs-site build prove it.
 src/commands/docs.ts                   -
@@ -129,7 +122,7 @@ src/commands/revert.ts                 migrations
 
 # yodel cleanup (#16): the clickhouse claim drops the old table it kept; every plan names what is kept.
 src/commands/cleanup.ts                clickhouse
-src/cleanup/                           clickhouse approval declarative forgejo github gitlab
+src/cleanup/                           clickhouse approval declarative forge
 
 # yodel test (#54): the migrations claim runs tests on the replayed database.
 src/commands/test.ts                   migrations
@@ -161,8 +154,8 @@ src/sources/                           ALL
 
 # Credentials (#50): yodel config check and its write probe, which the
 # approval claim runs and every forge pull request job runs first.
-src/commands/config.ts                 approval forgejo github gitlab
-src/probe.ts                           approval forgejo github gitlab
+src/commands/config.ts                 approval forge
+src/probe.ts                           approval forge
 
 # The core every claim runs: yodel new, apply and status, the migrations
 # directory, the history, the versioned engine and its gate, the topology

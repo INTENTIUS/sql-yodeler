@@ -6,7 +6,7 @@ import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { applyPipelines, withTenants, type Wave } from "../../src/ci/render.js";
 import type { WaveGate } from "../../src/config/define.js";
-import { hold, runParts, Violation, type Claim, type Ctx, type Part as RunPart } from "../lib/claim.js";
+import { hold, partDialects, partNames, runParts, Violation, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { parse, Project } from "../lib/project.js";
@@ -23,29 +23,22 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  * each), on ClickHouse the emulator and a scratch server (the same database
  * name in each, as two environments have).
  *
- * Parts, each broken on its own under BREAK=1:
+ * Which approvals count (read at the base, sealed, stale) and the order the
+ * jobs run in are chant's op-waves, proven by chant. The parts, each broken
+ * on its own under BREAK=1; only tenants differs by dialect, so the rest
+ * run on Postgres:
  *
  * - gate-policy: under `on-destructive` a new table applies with no
  *   approval, and a column drop waits (exit 3) with the column still there;
- *   approved, it applies. BREAK: the pipeline is rendered with `gate:
- *   never`, so the drop applies unapproved.
- * - wave-order: with staging waiting for an approval, prod (gate `never`)
- *   does not run; approved, both apply. BREAK: prod's job does not need
- *   staging's, so prod applies first.
- * - approval-at-base: a change that sets prod's gate to `never` merges and
- *   prod still waits under the base's `always`. BREAK: the policy is read
- *   from the change itself (`--base HEAD`, YODEL_BASE=HEAD), so prod applies.
+ *   `yodel approve <staging>` at a terminal (#87, the answer typed is the
+ *   environment's name) approves the wave's gate, and it applies. BREAK: the
+ *   pipeline is rendered with `gate: never`, so the drop applies unapproved.
  * - promotion (#43): prod requires staging (the wave before, by default).
  *   prod's wave run on its own, and `yodel apply` of prod, refuse (exit 4,
  *   nothing applied) a migration staging has not applied; `yodel plan` of
  *   prod shows it has not run on staging; once staging has applied it, prod
  *   applies it. BREAK: the requirement is removed (`requires: false`), so the
  *   column reaches prod first.
- * - yodel-approve (#87): with staging's wave waiting, `yodel approve
- *   <staging>` at a terminal (the answer typed is the environment's name)
- *   approves the wave's gate for its set digest, and the wave job run again
- *   applies, then prod's. BREAK: yodel built to approve the migrations Op's
- *   gate, as before waves, so the wave still waits.
  * - report (#87): after the waves above applied, `yodel report` of both
  *   environments finds every applied migration's approval, on the wave's
  *   gate, or none needed by the wave's policy, and shows no gap. BREAK:
@@ -56,39 +49,22 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  *   split into a deciding job and two share jobs. The wave waits once, on
  *   one approval of the set digest, with nothing applied; approved, every
  *   tenant gets every migration, each in its own history, and `yodel
- *   status` counts them up to date. A tenant whose plan moved after the
- *   decision (a table made by hand) is refused by its share job, named,
- *   exit 4, while the others in the share apply; `yodel status` and `yodel
- *   report` show it behind. Then the set is read by a query (a registry
- *   table): the pipeline is rendered once, and a tenant added to the
- *   registry afterwards renders the same files. A migration with a backfill
- *   step: `yodel plan <set> --format markdown` is one comment for every
- *   tenant, naming the digest the deciding job then waits on; `yodel
+ *   status` counts them up to date. Then the set is read by a query (a
+ *   registry table): the pipeline is rendered once, and a tenant added to
+ *   the registry afterwards renders the same files. A migration with a
+ *   backfill step: `yodel plan <set> --format markdown` is one comment for
+ *   every tenant, naming the digest the deciding job then waits on; `yodel
  *   approve <set>` approves it; the wave applies to all four tenants, the
  *   new one from its first migration, and the backfill runs on each
  *   tenant's own table. BREAK: the wave is rendered with the first tenant
  *   alone, so the others never get the migrations.
- * - pre-check (#64): staging has steps around apply, read at the base
- *   commit, as chant's stage hooks (#206): a before step that fails with
- *   `onFailure: "approve"`, a before command that appends a line to a
- *   file, and an after step. Under gate `never`, the wave is held: nothing
- *   is applied, the command has not run, and the job prints the approval it
- *   needs. Approved, it applies, the command having run once (#107), and
- *   the history records the steps' outcomes, which `yodel report` lists.
- *   BREAK: the waves spec runs the command as a before-plan hook too, so
- *   it runs when the wave is planned.
- * - sealed (#48): staging's wave is `approval: "sealed"`, and the base
- *   commit's `.chant/allowed_signers` lists alice's ssh key. The change
- *   adding a column also adds mallory's key to that file. The wave waits,
- *   printing a `chant approve ... --sign` command; an unsigned approval by
- *   alice, and one sealed by mallory with the key the change added, leave it
- *   waiting with nothing applied; one sealed by alice applies, and the
- *   history records alice as the signer. BREAK: the wave is rendered without
- *   `approval` (ledger), so the unsigned approval applies.
+ * - steps (#64): staging has steps around apply, read at the base commit,
+ *   as chant's stage hooks (#206): a before command that appends a line to
+ *   a file, and an after step. The wave applies, the command having run
+ *   once (#107), and the history records the steps' outcomes, which `yodel
+ *   report` lists. BREAK: the waves spec runs the command as a before-plan
+ *   hook too, so it runs when the wave is planned as well.
  */
-
-const PARTS = ["gate-policy", "wave-order", "approval-at-base", "promotion", "yodel-approve", "report", "tenants", "pre-check", "sealed"] as const;
-type Part = (typeof PARTS)[number];
 
 interface Envs {
   staging: string;
@@ -110,7 +86,7 @@ const ENV_KEYS = ["staging", "prod"] as const;
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noNeeds?: string; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; commandsWhenPlanning?: boolean } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; commandsWhenPlanning?: boolean } = {}): Promise<void> {
   const { p } = st;
   p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps, options.tenantQuery));
   // A tenant set's wave has a run per tenant, as yodel ci renders it.
@@ -119,12 +95,6 @@ async function render(st: State, waves: readonly Wave[], options: { allNever?: b
   const files = await applyPipelines(p.dir, { dialect: p.ctx.dialect === "ch" ? "clickhouse" : "postgres", names: ws.map((w) => w.env), replay: false, waves: ws });
   for (const f of files) {
     let content = f.content;
-    if (options.noNeeds && f.path === ".github/workflows/yodel-apply.yml") {
-      const job = `wave-2-${options.noNeeds}`;
-      const before = content;
-      content = content.replace(new RegExp(`(\\n {2}${job}:\\n(?: {4}.*\\n)*?) {4}needs:\\n(?: {6}- .*\\n)+`), "$1");
-      if (content === before) throw new Error(`could not remove ${job}'s needs from the rendered workflow`);
-    }
     if (options.commandsWhenPlanning && f.path === "yodel-waves.json") {
       const spec = JSON.parse(content) as { waves: Array<{ hooks?: { before?: { plan?: Array<{ command: string[] }>; apply?: Array<{ command: string[] }> } } }> };
       let moved = 0;
@@ -179,15 +149,6 @@ function approveCommand(result: JobResult | undefined): string {
 }
 
 const job = (st: State, k: number, env: keyof Envs) => `wave-${String(k)}-${st.envs[env]}`;
-
-/** Runs one job of the rendered workflow, whatever its needs. */
-async function runJob(st: State, name: string): Promise<JobResult> {
-  const doc = parseYAMLDocument(st.p.read(".github/workflows/yodel-apply.yml")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
-  const command = doc.jobs[name]?.steps.map((s) => s.run ?? "").find((r) => r.startsWith("chant run wave "));
-  if (!command) throw new Error(`the workflow has no job ${name} running chant run wave`);
-  const ran = await run("chant", command.split(" ").slice(1), { cwd: st.p.dir, env: st.p.envFor(), timeoutMs: 600_000 });
-  return { ok: ran.code === 0, code: ran.code, out: `${ran.out}\n${ran.err}` };
-}
 
 // ── The project ──────────────────────────────────────────────────────────────
 
@@ -374,46 +335,16 @@ async function gatePolicy(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const staging = drop.get(job(st, 1, "staging"));
   hold(staging?.code === 3, `the column drop did not wait at staging under on-destructive (exit ${String(staging?.code)})`);
   hold(await st.columnOn("staging", "gone"), "the column was dropped on staging with no approval");
-  await st.p.approve(approveCommand(staging));
+  const approved = await yodelBuild(ctx, st.p, "yodel").ask(st.envs.staging, ["approve", st.envs.staging]);
+  if (approved.code !== 0) throw new Error(`yodel approve ${st.envs.staging} exited ${String(approved.code)}:\n${approved.out}\n${approved.err}`);
   const after = await pipeline(st, drop);
-  hold(after.get(job(st, 1, "staging"))?.ok === true, "the approved drop did not apply at staging");
+  hold(after.get(job(st, 1, "staging"))?.ok === true, `after yodel approve ${st.envs.staging}, the drop did not apply at staging`);
   hold(!(await st.columnOn("staging", "gone")), "the column is still on staging after the approved drop");
   // prod waits on its own gate for the same drop; approve it so the parts after start level.
   const prod = after.get(job(st, 2, "prod"));
   hold(prod?.code === 3, `the drop did not wait at prod under on-destructive (exit ${String(prod?.code)})`);
   await st.p.approve(approveCommand(prod));
   hold((await pipeline(st, after)).get(job(st, 2, "prod"))?.ok === true, "the approved drop did not apply at prod");
-}
-
-async function waveOrder(ctx: Ctx, st: State, broken: boolean): Promise<void> {
-  await render(st, waves(st, "always", "never"), broken ? { noNeeds: st.envs.prod } : {});
-  await st.p.commit("the waves: staging always, prod never");
-  addColumn(st.p, "note");
-  await migrate(st, "add-note", "feat: a note column");
-  const ran = await pipeline(st);
-  const staging = ran.get(job(st, 1, "staging"));
-  hold(staging?.code === 3, `staging did not wait under always (exit ${String(staging?.code)})`);
-  hold(!(await st.columnOn("prod", "note")), "prod applied the change while staging waited for its approval");
-  hold(!ran.has(job(st, 2, "prod")), "prod's job ran while staging's waited");
-  await st.p.approve(approveCommand(staging));
-  const again = await pipeline(st, ran);
-  hold(again.get(job(st, 1, "staging"))?.ok === true && again.get(job(st, 2, "prod"))?.ok === true, "after staging's approval, the waves did not both apply");
-  hold((await st.columnOn("staging", "note")) && (await st.columnOn("prod", "note")), "the column is not on both servers after the approval");
-}
-
-async function approvalAtBase(ctx: Ctx, st: State, broken: boolean): Promise<void> {
-  await render(st, waves(st, "never", "always"));
-  await st.p.commit("the waves: staging never, prod always");
-  // The change: sets prod to never, and adds a column.
-  await render(st, waves(st, "never", "never"));
-  addColumn(st.p, "extra");
-  await migrate(st, "add-extra", "feat: an extra column, and prod's gate never");
-  const env = broken ? { YODEL_BASE: "HEAD" } : {};
-  const ran = await pipeline(st, new Map(), env, broken ? ["--base", "HEAD"] : []);
-  hold(ran.get(job(st, 1, "staging"))?.ok === true && (await st.columnOn("staging", "extra")), "staging (never at the base) did not apply the change");
-  const prod = ran.get(job(st, 2, "prod"));
-  hold(prod?.code === 3, `prod did not wait under its base policy, always, with the change setting it to never (exit ${String(prod?.code)})`);
-  hold(!(await st.columnOn("prod", "extra")), "prod applied the change under the gate the change itself set");
 }
 
 async function promotion(ctx: Ctx, st: State, broken: boolean): Promise<void> {
@@ -481,25 +412,6 @@ process.exitCode = await main(args, {
   };
 }
 
-async function yodelApprove(ctx: Ctx, st: State, broken: boolean): Promise<void> {
-  await render(st, waves(st, "always", "never"));
-  await st.p.commit("the waves: staging always, prod never");
-  addColumn(st.p, "memo");
-  await migrate(st, "add-memo", "feat: a memo column");
-  const ran = await pipeline(st);
-  const staging = ran.get(job(st, 1, "staging"));
-  hold(staging?.code === 3, `staging did not wait under always (exit ${String(staging?.code)})`);
-  const yodel = broken
-    ? yodelBuild(ctx, st.p, "yodel-approves-the-migrations-gate", { file: "commands/approve.js", from: "if ((project.yodel?.config.waves ?? []).some((w) => w.env === env.name)) {", to: "if (false) {" })
-    : yodelBuild(ctx, st.p, "yodel");
-  if (broken) ctx.log("BREAK: yodel approve built to approve the migrations Op's gate");
-  const approved = await yodel.ask(st.envs.staging, ["approve", st.envs.staging]);
-  if (approved.code !== 0) throw new Error(`yodel approve ${st.envs.staging} exited ${String(approved.code)}:\n${approved.out}\n${approved.err}`);
-  const again = await pipeline(st, ran);
-  hold(again.get(job(st, 1, "staging"))?.ok === true, `after yodel approve ${st.envs.staging}, staging's wave still did not apply (exit ${String(again.get(job(st, 1, "staging"))?.code)})`);
-  hold(again.get(job(st, 2, "prod"))?.ok === true && (await st.columnOn("staging", "memo")) && (await st.columnOn("prod", "memo")), "after yodel approve, the column is not on both servers");
-}
-
 interface ReportDoc {
   gaps: Array<{ environment: string; detail: string }>;
   audit: Array<{ kind: string; environment: string; migration?: string; wave?: { status: string } }>;
@@ -532,12 +444,13 @@ async function onTenant(ctx: Ctx, t: string, column?: string, table = mainTable(
 
 async function tenants(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const names = tenantNames(ctx);
-  const [t1, t2, t3] = names as [string, string, string];
   const set = st.envs.tenants;
   const tenantWave: Wave = { env: set, gate: "always", shares: 2 };
   if (broken) ctx.log("BREAK: the tenant set's wave is rendered with its first tenant alone");
   await render(st, [{ env: st.envs.staging, gate: "never" }, tenantWave], { firstTenantOnly: broken });
   await st.p.commit("the waves: staging never, a tenant set always, in two shares");
+  // On ClickHouse no part runs before this one: the schema's first migration.
+  if (!existsSync(st.p.path("migrations"))) await migrate(st, "create", "feat: the schema");
   const decide = `wave-2-${set}-decide`;
 
   // One gate for the whole set: the deciding job waits, nothing applied anywhere.
@@ -559,31 +472,16 @@ async function tenants(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   hold(status.code === 0 && doc.upToDate === 3 && doc.total === 3, `yodel status ${set} does not count 3 of 3 tenants up to date (exit ${String(status.code)}, ${String(doc.upToDate)} of ${String(doc.total)})`);
   hold(new Set(doc.tenants.map((t) => t.history)).size === 3, "the tenants do not each have a history of their own");
 
-  // A migration decided for every tenant; then t2's plan moves before its share applies.
+  // A migration decided for every tenant, applied by both shares.
   addColumn(st.p, "tenanted");
   await migrate(st, "add-tenanted", "feat: a column for every tenant");
   const second = await pipeline(st);
   const waits = second.get(decide);
   hold(waits?.code === 3, `the tenant set's wave did not wait for the new column (exit ${String(waits?.code)})`);
   await st.p.approve(approveCommand(waits));
-  hold((await runJob(st, decide)).ok, "the approved tenant wave's deciding job did not decide");
-  await (ctx.dialect === "ch"
-    ? clickhouseAt(endpoints.clickhouse, `CREATE TABLE ${t2}.by_hand (id UInt64) ENGINE = MergeTree ORDER BY id`)
-    : postgresQuery(`CREATE TABLE ${t2}.by_hand (id bigint)`));
-  // The tenants sorted, cut in two: share 1 is t1 and t2, share 2 is t3.
-  const share1 = await runJob(st, `wave-2-${set}-share-1`);
-  const share2 = await runJob(st, `wave-2-${set}-share-2`);
-  hold(share1.code === 4 && share1.out.includes(`${set}/${t2}: its plan moved`), `share 1 did not refuse ${t2}, whose plan moved since the decision, with exit 4 (exit ${String(share1.code)})`);
-  hold(!(await onTenant(ctx, t2, "tenanted")), `${t2} applied a plan that moved since the decision`);
-  hold(share2.ok && (await onTenant(ctx, t1, "tenanted")) && (await onTenant(ctx, t3, "tenanted")), "the tenants whose plans did not move did not apply");
-  const behind = parse<{ upToDate: number; tenants: Array<{ environment: string; pending: unknown[] }> }>(await st.p.yodel(["status", set, "--json"]));
-  hold(behind.upToDate === 2 && behind.tenants.find((t) => t.environment === `${set}/${t2}`)?.pending.length === 1, `yodel status ${set} does not show ${t2} alone behind`);
-  const report = parse<{ environments: Array<{ name: string; migrations: Array<{ state: string }> }> }>(await st.p.yodel(["report", set, "--json"]));
-  hold(
-    report.environments.map((e) => e.name).join(",") === names.map((t) => `${set}/${t}`).join(",") &&
-      report.environments.find((e) => e.name === `${set}/${t2}`)?.migrations.some((m) => m.state === "pending") === true,
-    `yodel report ${set} does not show a column per tenant with ${t2} behind`,
-  );
+  const shared = await pipeline(st, second);
+  hold([...shared.values()].every((r) => r.ok), `a job of the approved tenant wave failed: ${[...shared].filter(([, r]) => !r.ok).map(([n, r]) => `${n} exit ${String(r.code)}`).join(", ")}`);
+  for (const t of names) hold(await onTenant(ctx, t, "tenanted"), `${t} does not have the new column after its share applied`);
 
   await tenantsByQuery(ctx, st, names);
 }
@@ -655,128 +553,50 @@ export const op = Op({
   hold(status.upToDate === 4 && status.total === 4, `yodel status ${set} does not count 4 of 4 tenants up to date (${String(status.upToDate)} of ${String(status.total)})`);
 }
 
-async function preCheck(ctx: Ctx, st: State, broken: boolean): Promise<void> {
+async function steps(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const db = ctx.db.name;
   const table = mainTable(ctx);
-  // "SELECT 1" returns a row, and a step expects none by default: the before step fails, every time.
   // A command with a side effect (#107): a line in a file outside the project, each time it runs.
   const notified = join(ctx.work, "notify.log");
   const notify = `echo "$YODEL_ENV" >> ${notified}`;
   const runs = () => (existsSync(notified) ? readFileSync(notified, "utf8").split("\n").filter(Boolean).length : 0);
-  const steps = `{ before: [{ name: "replication-lag", sql: "SELECT 1", onFailure: "approve" }, { name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
+  const steps = `{ before: [{ name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
   // Broken: the rendered spec runs the before command when the wave is planned too, as it runs under the lock.
   if (broken) ctx.log("BREAK: the waves spec runs the before command as a before-plan hook too");
   await render(st, waves(st, "never", "never"), { steps, commandsWhenPlanning: broken });
-  const env: Record<string, string> = {};
   await st.p.commit("the waves: both never, staging with steps around apply");
   addColumn(st.p, "checked");
   await migrate(st, "add-checked", "feat: a checked column");
 
-  // Held at staging under gate never: nothing applied, the approval it needs printed, prod not run.
-  const ran = await pipeline(st, new Map(), env);
-  const staging = ran.get(job(st, 1, "staging"));
-  hold(staging?.ok === false, `staging's wave applied with its before step failing (exit ${String(staging?.code)})`);
-  hold(runs() === 0, `the before command ran ${String(runs())} time(s) for a wave that was held, with nothing applied`);
-  hold(/before step notify will run under the lock/.test(staging.out), "the wave plan did not say the before command will run under the lock");
-  hold(!(await st.columnOn("staging", "checked")), "staging applied the column with its before step failing and no approval");
-  hold(/replication-lag failed with onFailure approve/.test(staging.out), "staging's wave did not say which before step held it");
-  hold(!ran.has(job(st, 2, "prod")), "prod's wave ran while staging's was held");
-
-  await st.p.approve(approveCommand(staging));
-  const again = await pipeline(st, ran, env);
-  hold(again.get(job(st, 1, "staging"))?.ok === true && (await st.columnOn("staging", "checked")), "staging's wave did not apply once its held plan was approved");
+  const ran = await pipeline(st);
+  hold(ran.get(job(st, 1, "staging"))?.ok === true && (await st.columnOn("staging", "checked")), "staging's wave did not apply with its steps around it");
   hold(runs() === 1, `the before command ran ${String(runs())} times for one apply, not once`);
-  hold(again.get(job(st, 2, "prod"))?.ok === true, "prod's wave did not apply after staging's");
+  hold(ran.get(job(st, 2, "prod"))?.ok === true, "prod's wave did not apply after staging's");
 
   // The history records both steps, and yodel report lists them.
   const report = parse<{ audit: Array<{ kind: string; environment: string; detail?: string }> }>(await st.p.yodel(["report", st.envs.staging, "--json"]));
   const recorded = report.audit.filter((e) => e.kind === "step").map((e) => e.detail ?? "");
-  hold(recorded.some((d) => d.startsWith("before step replication-lag failed, held for approval")), "the history does not record the held before step");
-  hold(recorded.some((d) => d.startsWith("after step smoke passed")), "the history does not record the after step");
   hold(recorded.some((d) => d.startsWith("before step notify passed")), "the history does not record the before command");
+  hold(recorded.some((d) => d.startsWith("after step smoke passed")), "the history does not record the after step");
 }
-
-/** An ssh key for sealing approvals (#48), outside the project: its private file and its public line. */
-function sshKey(ctx: Ctx, name: string): { file: string; pub: string } {
-  const file = join(ctx.work, `key-${name}`);
-  if (!existsSync(file)) {
-    const made = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", name, "-f", file], { encoding: "utf8" });
-    if (made.status !== 0) throw new Error(`ssh-keygen could not make ${name}'s key: ${made.stderr}`);
-  }
-  return { file, pub: readFileSync(`${file}.pub`, "utf8").trim().split(" ").slice(0, 2).join(" ") };
-}
-
-async function sealed(ctx: Ctx, st: State, broken: boolean): Promise<void> {
-  const alice = sshKey(ctx, "alice");
-  const mallory = sshKey(ctx, "mallory");
-  // The base: staging sealed (BREAK: ledger), and the signers file listing alice.
-  if (broken) ctx.log("BREAK: staging's wave is rendered without approval: sealed, so any approval counts");
-  await render(st, [{ env: st.envs.staging, gate: "always", ...(broken ? {} : { approval: "sealed" as const }) }, { env: st.envs.prod, gate: "never" }]);
-  st.p.write(".chant/allowed_signers", `alice ${alice.pub}\n`);
-  await st.p.commit("the waves: staging sealed, alice signs");
-  // The change: a column, and mallory's key added to the signers file.
-  st.p.write(".chant/allowed_signers", `alice ${alice.pub}\nmallory ${mallory.pub}\n`);
-  addColumn(st.p, "sealed_note");
-  await migrate(st, "add-sealed-note", "feat: a sealed_note column, and mallory signs");
-
-  const ran = await pipeline(st);
-  const staging = ran.get(job(st, 1, "staging"));
-  hold(staging?.code === 3, `staging's sealed wave did not wait (exit ${String(staging?.code)})`);
-  const printed = /chant approve \S+ \S+ --plan \S+( --sign)?/.exec(staging.out)?.[0] ?? "";
-  const plain = printed.replace(/ --sign$/, "");
-  const approveAs = async (actor: string, key?: string) => {
-    const ran = await st.p.chant([...plain.split(" ").slice(1), "--actor", actor, ...(key ? ["--sign", key] : [])]);
-    if (ran.code !== 0) throw new Error(`chant approve as ${actor} exited ${String(ran.code)}: ${ran.err}`);
-  };
-  const rerun = async (what: string) => {
-    const again = await runJob(st, job(st, 1, "staging"));
-    ctx.log(`staging's wave after ${what}: exit ${String(again.code)}`);
-    return again;
-  };
-
-  // Unsigned, by alice: still waiting, nothing applied (BREAK: ledger counts it, and the column is applied).
-  await approveAs("alice");
-  const unsigned = await rerun("an unsigned approval");
-  hold(unsigned.code === 3 && !(await st.columnOn("staging", "sealed_note")), `an unsigned approval let staging's sealed wave apply (exit ${String(unsigned.code)})`);
-  hold(/ --sign\b/.test(printed), "the sealed wave's approve command does not ask for --sign");
-
-  // Sealed by mallory, whose key the change itself added: still waiting.
-  await approveAs("mallory", mallory.file);
-  const added = await rerun("a seal by a key the change added");
-  hold(added.code === 3 && !(await st.columnOn("staging", "sealed_note")), `a seal by a key the change itself added let staging's wave apply (exit ${String(added.code)})`);
-
-  // Sealed by alice, listed at base: it applies, and the history names her as the signer.
-  await approveAs("alice", alice.file);
-  const signed = await rerun("alice's seal");
-  hold(signed.ok && (await st.columnOn("staging", "sealed_note")), `a seal by alice, listed at base, did not apply staging's wave (exit ${String(signed.code)})`);
-  hold(/approved by alice at \S+, approval sealed/.test(signed.out), "the wave did not say it was approved under sealed, by alice");
-  hold((await runJob(st, job(st, 2, "prod"))).ok, "prod's wave did not apply after staging's");
-}
-
-const RUN: Record<Part, (ctx: Ctx, st: State, broken: boolean) => Promise<void>> = {
-  "gate-policy": gatePolicy,
-  "wave-order": waveOrder,
-  "approval-at-base": approvalAtBase,
-  promotion,
-  "yodel-approve": yodelApprove,
-  report,
-  tenants,
-  "pre-check": preCheck,
-  sealed,
-};
 
 /** The parts, run by runParts; a part that caught its break leaves the servers where its break took them, so they are levelled for the parts after. */
-const parts = PARTS.map((name): readonly [string, RunPart<State>] => [
-  name,
-  async (ctx, st) => {
-    try {
-      await RUN[name](ctx, st, ctx.broken);
-    } catch (e) {
-      if (e instanceof Violation && ctx.broken) await level(st);
-      throw e;
-    }
-  },
-]);
+const levelled = (part: (ctx: Ctx, st: State, broken: boolean) => Promise<void>) => async (ctx: Ctx, st: State) => {
+  try {
+    await part(ctx, st, ctx.broken);
+  } catch (e) {
+    if (e instanceof Violation && ctx.broken) await level(st);
+    throw e;
+  }
+};
+
+const parts: ReadonlyArray<PartEntry<State>> = [
+  ["gate-policy", levelled(gatePolicy), ["pg"]],
+  ["promotion", levelled(promotion), ["pg"]],
+  ["report", levelled(report), ["pg"]],
+  ["tenants", levelled(tenants)],
+  ["steps", levelled(steps), ["pg"]],
+];
 
 async function body(ctx: Ctx): Promise<void> {
   const prod = await prodServer(ctx);
@@ -803,7 +623,8 @@ async function level(st: State): Promise<void> {
 
 export const wavesClaim: Claim = {
   name: "waves",
-  says: "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate; a sealed wave counts only an approval sealed by a signer the base commit lists",
+  says: "the apply pipeline runs one wave per environment, each behind its gate policy, approved with yodel approve; a wave applies only what the wave before applied, yodel report finds each wave's approvals, a tenant set's migrations reach every tenant behind one gate, and the steps around apply run once under the lock and are recorded",
   dialects: { ch: body, pg: body },
-  parts: PARTS,
+  parts: partNames(parts),
+  partDialects: partDialects(parts),
 };
