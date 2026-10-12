@@ -5,6 +5,7 @@ import { parse, Project } from "../../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../../lib/access.js";
 import { chAccessOnServer, chNames } from "../../lib/clickhouse-objects.js";
 import { secondServer, type SecondServer } from "../../lib/second-server.js";
+import { yodelBuild } from "../../lib/yodel-build.js";
 
 /** The database a team already has, made by hand: no ownership markers, and data. `exec` runs SQL on the server it is made on (default the claim's). */
 async function handMade(claim: Ctx, exec?: (sql: string) => Promise<void>): Promise<void> {
@@ -136,6 +137,31 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
   hold((await ctx.db.scalar(`SELECT auth_type[1] FROM system.users WHERE name = '${svc}'`)) === "sha256_password", "the user's password changed during the adoption");
 }
 
+/**
+ * An object of a kind yodel cannot declare (#251): the schema holds a
+ * composite type, which chant's sql lexicon has no declaration for. yodel
+ * init --from refuses (exit 4) naming it, and writes nothing, so nothing is
+ * left out of an adopted schema in silence. It runs before the shared
+ * adoption, on the claim's schema, and drops what it made.
+ * BREAK: yodel built to find no such object, so init goes on without naming
+ * the composite type.
+ */
+async function unsupportedPart(ctx: Ctx): Promise<void> {
+  const n = ctx.db.name;
+  await ctx.db.exec(`CREATE SCHEMA ${n}; CREATE TYPE ${n}.pair AS (a integer, b text)`);
+  try {
+    const p = await Project.create(ctx, { noSource: true, name: "unsupported" });
+    const yodel = ctx.broken ? yodelBuild(ctx, p, "yodel-finds-nothing-unsupported", { file: "init/unsupported.js", from: "return found.sort(", to: "return [].sort(" }) : undefined;
+    if (ctx.broken) ctx.log("BREAK: yodel built to find no object of a kind it cannot declare");
+    const args = ["init", "--from", p.env];
+    const ran = yodel ? await yodel.ask("", args) : await p.yodel(args);
+    hold(ran.code === 4 && ran.err.includes(`composite type ${n}.pair`), `yodel init --from exited ${String(ran.code)} without naming the composite type ${n}.pair it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
+    hold(p.migrationIds().length === 0, "yodel init --from wrote a migration although it refused");
+  } finally {
+    await ctx.db.exec(`DROP SCHEMA IF EXISTS ${n} CASCADE`);
+  }
+}
+
 /** Every declaration file yodel init --from wrote, as one text. A tag may carry a type argument (`table<"db.t">`). */
 const declared = (p: Project): string =>
   readdirSync(p.path("src"))
@@ -258,6 +284,8 @@ async function secondEnvPart(ctx: Ctx, s: Adoption): Promise<void> {
  * and ClickHouse each have their own. Then the adoption's own checks.
  */
 const parts: ReadonlyArray<PartEntry<Adoption>> = [
+  // Before the shared adoption: it makes and drops the claim's schema itself.
+  ["unsupported", unsupportedPart, ["pg"]],
   ["access", accessPart, ["pg"]],
   ["ch-access", chAccessPart, ["ch"]],
   ["init", initPart],
@@ -271,7 +299,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const adopt: Claim = {
   name: "adopt",
-  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
+  says: "yodel init --from adopts a live database without touching it, and yodel plan then shows no change; on Postgres its policies, row-level security and grants too, on ClickHouse its dictionaries, functions, roles, users, row policies and grants; it refuses a database holding an object of a kind it cannot declare, naming it; yodel init --baseline records the baseline, behind the gate, in a second environment that holds the same schema, and refuses one that differs",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

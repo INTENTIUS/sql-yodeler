@@ -14,6 +14,7 @@
         "status": { "const": "adopted" },
         "objects": { "description": "The objects read, as <kind> <name>.", "$ref": "common.schema.json#/$defs/stringList" },
         "schemaFiles": { "description": "The declaration files written, relative to the project.", "$ref": "common.schema.json#/$defs/stringList" },
+        "unsupported": { "description": "Objects of a kind yodel cannot declare, left out with --skip-unsupported, as `<kind> <name>`.", "$ref": "common.schema.json#/$defs/stringList" },
         "migration": {
           "description": "The baseline migration.",
           "type": "object",

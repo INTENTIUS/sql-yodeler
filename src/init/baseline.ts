@@ -41,7 +41,7 @@ export const isBaselineRow = (row: Pick<HistoryRow, "kind" | "note">): boolean =
   row.kind === "migration" && (row.note === BASELINE_NOTE || row.note.startsWith(`${BASELINE_NOTE}:`));
 
 /** The one row that records `m` applied as a baseline. */
-export function baselineRow(m: Pick<Migration, "id" | "parent" | "checksum">, input: { seq: number; runId: string; appliedBy: string; environment: string }): HistoryRow {
+export function baselineRow(m: Pick<Migration, "id" | "parent" | "checksum">, input: { seq: number; runId: string; appliedBy: string; environment: string; skipped?: readonly string[] }): HistoryRow {
   if (m.parent !== null) throw new YodelError(`${m.id} follows ${m.parent}; only a first migration can be a baseline`);
   return {
     seq: input.seq,
@@ -57,7 +57,7 @@ export function baselineRow(m: Pick<Migration, "id" | "parent" | "checksum">, in
     applied_by: input.appliedBy,
     plan_digest: "",
     silences: "[]",
-    note: baselineNote(input.environment),
+    note: input.skipped?.length ? `${baselineNote(input.environment)}; not adopted, of kinds yodel cannot declare: ${input.skipped.join(", ")}` : baselineNote(input.environment),
   };
 }
 
@@ -83,7 +83,7 @@ export async function checkHistoryEmpty(venv: VersionedEnv): Promise<void> {
  * history when it is not there, checks again that it records nothing, and
  * appends the one row.
  */
-export async function recordBaseline(venv: VersionedEnv, m: Migration, processEnv: NodeJS.ProcessEnv = process.env): Promise<{ row: HistoryRow; lock: { kind: string; where: string; notice?: string } }> {
+export async function recordBaseline(venv: VersionedEnv, m: Migration, processEnv: NodeJS.ProcessEnv = process.env, skipped: readonly string[] = []): Promise<{ row: HistoryRow; lock: { kind: string; where: string; notice?: string } }> {
   const by = appliedBy(processEnv);
   const lock = await venv.driver.acquireLock(by);
   return withLock(lock, venv.lockTtlMs, async () => {
@@ -91,7 +91,7 @@ export async function recordBaseline(venv: VersionedEnv, m: Migration, processEn
     const state = await venv.store.state();
     const refusal = historyRefusal(state, `${venv.location.database}.history`);
     if (refusal) throw refusal;
-    const row = baselineRow(m, { seq: state.maxSeq + 1, runId: randomUUID(), appliedBy: by, environment: venv.environment });
+    const row = baselineRow(m, { seq: state.maxSeq + 1, runId: randomUUID(), appliedBy: by, environment: venv.environment, skipped });
     await venv.store.append([row]);
     return { row, lock: { kind: lock.kind, where: lock.where, ...(lock.notice ? { notice: lock.notice } : {}) } };
   });

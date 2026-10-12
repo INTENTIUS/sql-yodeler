@@ -92,7 +92,19 @@ What it needs first:
 - The writer's credentials. `init` writes the history row, and creates the history's database or schema and table when they are not there. The templates read the reader's credentials, which their READMEs create read-only, unless `YODEL_CREDENTIALS=writer`, so with a template it is `YODEL_CREDENTIALS=writer npx yodel init --from <env> --force`.
 - No subdirectory in `migrations/`. Move another tool's migration files out of it first.
 
-It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, or the environment holds nothing.
+It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, the environment holds nothing, or the environment holds an object of a kind yodel cannot declare.
+
+### What adopts, and what refuses
+
+`init` adopts every kind chant's `sql` lexicon declares. On Postgres: schemas, tables, views and materialized views, indexes, sequences, enum types, domains, extensions, functions, procedures, triggers, and, where the environment manages access, roles, policies and grants. On ClickHouse: databases, tables, views, materialized views, dictionaries and functions, and, where the environment manages access, users, roles, row policies and grants.
+
+Before it reads anything else, `init` looks for objects of the kinds the lexicon cannot declare, and refuses when it finds one, listing each by kind and name:
+
+- Postgres, in the profile's schemas: composite types, range types, aggregates, collations, operators, operator classes and families, text search configurations and dictionaries, conversions, foreign tables, extended statistics and rules.
+- Postgres, in the database: casts, event triggers, foreign-data wrappers, foreign servers, publications and subscriptions.
+- ClickHouse, where the environment manages access: settings profiles and quotas made with SQL.
+
+An object an extension owns belongs to the extension and is adopted with it. `--skip-unsupported` adopts the rest, prints what it left, and records that list in the baseline's history note. `yodel drift` then lists those objects as unmanaged, apart from drift.
 
 `init` adopts every object in the profile's databases or schemas, except the history tables of other migration tools (golang-migrate's and dbmate's `schema_migrations`, goose's `goose_db_version`, Flyway's `flyway_schema_history`, and others), which it leaves out with a warning. There is no exclude list: a table the project should not own belongs in a database or schema the profile does not list. [Coming from another migration tool](from-other-tools.md) covers adopting a database another tool manages: the old tool's files and table, more than one environment, cutting CI over, and rollback.
 

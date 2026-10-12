@@ -6,19 +6,22 @@
  *     environment's history already records any; and when the environment
  *     names no `databases` (ClickHouse) or `schemas` (Postgres), or names
  *     the history's own.
- *  2. Read the live database with chant's import (`chant import --from`'s
+ *  2. Refuse when the database holds an object of a kind chant's sql
+ *     lexicon cannot declare (`./unsupported.ts`, #251), unless
+ *     `skipUnsupported`, which adopts the rest and records what it left.
+ *  3. Read the live database with chant's import (`chant import --from`'s
  *     library functions) and write the declarations into the source
  *     directory.
- *  3. Build them and plan the build against the same database. The plan
+ *  4. Build them and plan the build against the same database. The plan
  *     must be empty: the declarations are the database. If it is not, the
  *     import does not round-trip, and everything written is taken back.
- *  4. Write the baseline migration: the first migration (parent `null`),
+ *  5. Write the baseline migration: the first migration (parent `null`),
  *     whose statements create everything, from an empty schema to the build.
- *  5. Record it applied in the history without running it (`./baseline.ts`),
+ *  6. Record it applied in the history without running it (`./baseline.ts`),
  *     on ClickHouse in `<history database>.history`, on Postgres in
  *     `<history schema>.history` (#13), under the apply lock.
  *
- * Any failure in 2 to 5 takes back every file written. The live database
+ * Any failure in 3 to 6 takes back every file written. The live database
  * is only read; the one write to the server is the history row, and the
  * history database (schema) and table when they were not there.
  */
@@ -34,10 +37,13 @@ import type { HistoryRow } from "../history/index.js";
 import { BASELINE_NAME, checkHistoryEmpty, recordBaseline } from "./baseline.js";
 import { declarationFiles, Journal } from "./files.js";
 import { describeImported, importLive } from "./live.js";
+import { describeUnsupported, findUnsupported } from "./unsupported.js";
 
 export interface AdoptOptions {
   /** Overwrite declaration files the source directory already has. */
   force?: boolean;
+  /** Adopt the rest when the database holds objects of kinds the lexicon cannot declare, and record them in the baseline's note. */
+  skipUnsupported?: boolean;
   /** The baseline migration's name. Default {@link BASELINE_NAME}. */
   name?: string;
   now?: Date;
@@ -52,6 +58,8 @@ export interface Adopted {
   objects: string[];
   /** The declaration files written, relative to the project. */
   schemaFiles: string[];
+  /** Objects of kinds the lexicon cannot declare, left out with --skip-unsupported, as `<kind> <name>`. */
+  unsupported: string[];
   /** The baseline migration's directory, relative to the project. */
   migrationPath: string;
   baseline: { id: string; checksum: string; statements: number };
@@ -107,6 +115,18 @@ export function preflight(project: Project, env: Environment, options: { force?:
 const planIsEmpty = (plan: Plan, leftOut: readonly string[] = []): boolean =>
   plan.diff.changes.every((c) => leftOut.includes(c.object)) && plan.refused.length === 0;
 
+/** The refusal for objects of kinds the lexicon cannot declare (#251), or `undefined` when there are none or `skip` adopts the rest. */
+export function unsupportedRefusal(environment: string, unsupported: readonly string[], skip: boolean): YodelError | undefined {
+  if (unsupported.length === 0 || skip) return undefined;
+  return new YodelError(
+    `refused: ${environment} holds ${String(unsupported.length)} object${unsupported.length === 1 ? "" : "s"} of a kind chant's sql lexicon cannot declare:\n` +
+      unsupported.map((u) => `  ${u}`).join("\n") +
+      `\nAdopting without them would leave them out of the declared schema, and drift would never report them. ` +
+      `Pass --skip-unsupported to adopt the rest and record these in the baseline's note. Nothing was written.`,
+    REFUSED,
+  );
+}
+
 /** Adopts `env`'s live database into the project; see the module comment. */
 export async function adopt(project: Project, env: Environment, options: AdoptOptions = {}): Promise<Adopted> {
   const processEnv = options.processEnv ?? process.env;
@@ -123,6 +143,10 @@ export async function adopt(project: Project, env: Environment, options: AdoptOp
 }
 
 async function adoptWith(project: Project, env: Environment, venv: VersionedEnv, options: AdoptOptions, processEnv: NodeJS.ProcessEnv, log: (line: string) => void): Promise<Adopted> {
+  const unsupported = (await findUnsupported(project, env, processEnv)).map(describeUnsupported);
+  const refusal = unsupportedRefusal(env.name, unsupported, options.skipUnsupported === true);
+  if (refusal) throw refusal;
+  if (unsupported.length > 0) log(`left out, of kinds yodel cannot declare: ${unsupported.join(", ")}`);
   const live = await importLive(project, env, processEnv);
   if (live.ir.resources.length === 0) {
     throw new YodelError(`refused: ${env.name} holds no objects in its scope (sql.profiles.${env.name}); there is nothing to adopt. Declare a schema and run yodel new instead. Nothing was written.`, REFUSED);
@@ -174,11 +198,12 @@ async function adoptWith(project: Project, env: Environment, venv: VersionedEnv,
       dialect: project.dialect,
       objects,
       schemaFiles,
+      unsupported,
       migrationPath: relative(project.dir, path),
       baseline: { id: made.id, checksum: made.document.checksum, statements },
       warnings: live.warnings,
     };
-    const { row, lock } = await recordBaseline(venv, migration, processEnv);
+    const { row, lock } = await recordBaseline(venv, migration, processEnv, unsupported);
     if (lock.notice) log(`lock: ${lock.notice}`);
     log(`recorded ${made.id} applied in ${venv.location.database}.history as a baseline; none of its statements was run`);
     return { ...base, recorded: { database: venv.location.database, row, lock } };
