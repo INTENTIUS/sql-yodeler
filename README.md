@@ -20,7 +20,7 @@ export const events = table`
   ORDER BY (kind, at)`;
 ```
 
-Each export is one object in the database's own DDL; `${db}` is a reference, so the build orders the objects and checks them against a pinned server's catalog. [Declaring the schema](docs/schema.md) has the whole form, both dialects.
+Each export is one object in the database's own DDL; `${db}` is a reference, so the build orders the objects and checks them against a pinned server's catalog. [Declaring the schema](docs/schema.md) has the whole form, both dialects, and [why it is plain SQL](docs/schema.md#why-plain-sql).
 
 Some schema changes imply work beyond one statement, and yodel does that work as part of the migration:
 
