@@ -1,37 +1,37 @@
 {
   "format": 1,
-  "recorded": "2026-10-10T21:02:27.350Z",
-  "commit": "9329873",
+  "recorded": "2026-10-12T16:22:41.009Z",
+  "commit": "bb8cccc",
   "dirty": false,
   "rows": [
     {
       "claim": "migrations",
       "dialect": "ch",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a project's own column rule from chant.config.ts lint.policies fails yodel lint on the migration that breaks it, and a yodel:allow line silences it; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 192,
-        "break": 117
+        "plain": 82,
+        "break": 54
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
       "claim": "migrations",
       "dialect": "pg",
-      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
+      "says": "yodel new writes the next migration offline, with no dev database, and it applies; on Postgres, functions, procedures and triggers too, which lint checks; yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent; a project's own column rule from chant.config.ts lint.policies fails yodel lint on the migration that breaks it, and a yodel:allow line silences it; a migration merged late, before one already applied, is refused unless --allow-out-of-order, and never skipped",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 224,
-        "break": 109
+        "plain": 78,
+        "break": 47
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
@@ -42,11 +42,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 350,
-        "break": 272
+        "plain": 180,
+        "break": 159
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
@@ -57,41 +57,41 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 344,
-        "break": 224
+        "plain": 154,
+        "break": 118
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
       "claim": "approval",
       "dialect": "ch",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied; the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 292,
-        "break": 243
+        "plain": 5,
+        "break": 3
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
       "claim": "approval",
       "dialect": "pg",
-      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; an approval is refused once the migration changed after it, and nothing is applied; the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
+      "says": "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write; the pull request comment lists the pending migrations with each statement's class, and the digest the gate asks for",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 248,
-        "break": 259
+        "plain": 80,
+        "break": 74
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
@@ -102,11 +102,11 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 79,
-        "break": 108
+        "plain": 26,
+        "break": 27
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
@@ -117,41 +117,56 @@
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 156,
-        "break": 258
+        "plain": 69,
+        "break": 80
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
       "claim": "clickhouse",
       "dialect": "ch",
-      "says": "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row, and without an approval it does not run; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own, sealed under a sealed environment; ClickHouse: one migrations directory applies to a single node and to a Replicated database, and one to a sharded cluster with drift read there, each rendered for its topology",
+      "says": "ClickHouse: a sort-key change is a ClickHouseRebuildOp step inside the migration, never an ALTER or a drop; approved, it runs and keeps every row; yodel cleanup drops the old table it kept only after its retention date, behind an approval on a gate of its own; ClickHouse: one migrations directory applies to a single node and to a Replicated database, and one to a sharded cluster with drift read there, each rendered for its topology",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 212,
-        "break": 154
+        "plain": 73,
+        "break": 39
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
+      "dirty": false
+    },
+    {
+      "claim": "waves",
+      "dialect": "ch",
+      "says": "the apply pipeline runs one wave per environment, each behind its gate policy, approved with yodel approve; a wave applies only what the wave before applied, yodel report finds each wave's approvals, a tenant set's migrations reach every tenant behind one gate, and the steps around apply run once under the lock and are recorded",
+      "needs": null,
+      "plain": "pass",
+      "break": "caught",
+      "seconds": {
+        "plain": 78,
+        "break": 20
+      },
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
       "claim": "waves",
       "dialect": "pg",
-      "says": "the apply pipeline runs one wave per environment, in order, each behind its gate policy read from the base commit, applies only what the wave before applied, and applies a tenant set's migrations to every tenant behind one gate; a sealed wave counts only an approval sealed by a signer the base commit lists",
+      "says": "the apply pipeline runs one wave per environment, each behind its gate policy, approved with yodel approve; a wave applies only what the wave before applied, yodel report finds each wave's approvals, a tenant set's migrations reach every tenant behind one gate, and the steps around apply run once under the lock and are recorded",
       "needs": null,
       "plain": "pass",
       "break": "caught",
       "seconds": {
-        "plain": 626,
-        "break": 418
+        "plain": 121,
+        "break": 71
       },
-      "recorded": "2026-10-10T20:29:45.726Z",
-      "commit": "c6f58a4",
+      "recorded": "2026-10-12T16:22:41.009Z",
+      "commit": "bb8cccc",
       "dirty": false
     },
     {
