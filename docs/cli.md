@@ -16,6 +16,7 @@ Everything a SQL Yodeler project needs is a `yodel` command, and the starter tem
 | `yodel` | everything about the schema and the migrations: `plan`, `new`, `lint`, `apply`, `status`, `drift`, `report`, `ci` and the rest of the commands `yodel --help` lists below. Inside a project, run it as `npx yodel`. |
 | `yodel approve <env>` | a person's approval of the plan `yodel apply` would run, at a terminal: it shows the plan and asks you to type the environment's name. Every message that asks for an approval prints it with the digest, `yodel approve <env> --plan <digest>` ([Approval](approval.md)). |
 | the template's `just` targets | optional shortcuts that print the command they run; [the table in Your first migration](getting-started.md#the-same-steps-with-just) lists them. |
+| `yodel check` | lints another tool's migrations (golang-migrate, goose, Flyway, dbmate) on your pull requests while that tool keeps applying them ([Try it without switching](from-other-tools.md#try-it-without-switching)). |
 | `yodel mcp` | read-only tools for a coding agent, over MCP ([Set up with a coding agent](agents.md#read-only-tools-yodel-mcp)). |
 | the JSON Schemas | for anything that parses `yodel`'s output: [JSON output](#json-output). |
 
@@ -40,6 +41,7 @@ Commands:
   new         write the next migration from the declared schema
   checkpoint  write a checkpoint: the newest recorded schema from nothing
   lint        check the migrations against the lint rules
+  check       lint a golang-migrate, goose, Flyway or dbmate directory
   test        run tests/*.test.ts on databases built from the migrations
   status      list applied, pending and out-of-order migrations
   report      each environment's migrations side by side, and the audit log

@@ -184,6 +184,14 @@ export interface Environments {
   login?: CiLogin;
   /** yodel.config.ts `ci.apply: false` (#175): no apply pipeline, so no job holds a writer. */
   apply?: false;
+  /** yodel.config.ts `check` (#1): the lint job runs yodel check on another tool's migrations too. */
+  check?: true;
+  /**
+   * The project declares no environment, only the `replay` profile, and
+   * `check`: it keeps another tool for its migrations and tries yodel on
+   * pull requests. The pipeline is one job, yodel check, and nothing else.
+   */
+  checkOnly?: true;
 }
 
 /** Whether the apply pipeline is rendered: unless yodel.config.ts `ci.apply` is false. */
@@ -383,6 +391,14 @@ export const LINT = "yodel lint";
 export const lintCommand = (forge: Forge): string => (forge === "gitlab" ? `${LINT} --format gitlab --output ${CODE_QUALITY_FILE}` : `${LINT} --format github`);
 export const REPLAY = `yodel lint --replay ${REPLAY_PROFILE} --reset`;
 
+/**
+ * yodel check (#1): another tool's migrations, replayed into the `replay`
+ * profile's throwaway server and linted, the new ones since the pull
+ * request's base, with findings where the forge shows them.
+ */
+export const checkCommand = (forge: Forge): string =>
+  `yodel check --env ${REPLAY_PROFILE} --reset --base origin/${MAIN} ${forge === "gitlab" ? `--format gitlab --output ${CODE_QUALITY_FILE}` : "--format github"}`;
+
 /** yodel test (#54), after the replay check on the same throwaway server, its outcome as JUnit XML. */
 export const TEST = `yodel test --env ${REPLAY_PROFILE} --reset --junit yodel-test.xml`;
 
@@ -478,10 +494,11 @@ function reportSteps(forge: Actions, env: string, job: string, tc: Toolchain): A
 }
 
 /** `inContainer`: the job runs in the toolchain's image, which has node, so it needs no setup-node. */
-function setupSteps(inContainer: boolean, tc: Toolchain): AStep[] {
+function setupSteps(inContainer: boolean, tc: Toolchain, approvals = true): AStep[] {
   const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": 0 } })];
   if (!inContainer) steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": 22, cache: "npm" } }));
-  steps.push(...installLines(tc, "github").map((run) => new Step({ run })), new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }));
+  steps.push(...installLines(tc, "github").map((run) => new Step({ run })));
+  if (approvals) steps.push(new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }));
   return steps;
 }
 
@@ -494,7 +511,40 @@ function commentToken(forge: Actions): Record<string, string> {
   return forge === "github" ? { GITHUB_TOKEN: "${{ github.token }}" } : { FORGEJO_TOKEN: "${{ github.token }}" };
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false): AJob {
+/** The replay server's service and variables, for a job that replays into it. */
+function replayService(dialect: Dialect) {
+  const svc = REPLAY_SERVICE[dialect];
+  return {
+    svc,
+    services: {
+      [svc.name]: new ActionsService({
+        image: svc.image,
+        env: svc.env,
+        options: `--health-cmd "${svc.health}" --health-interval 2s --health-timeout 5s --health-retries 45`,
+      }),
+    },
+    env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+  };
+}
+
+/** A project that only tries yodel on another tool's migrations (#1): one job, yodel check. */
+function checkJob(forge: Actions, dialect: Dialect, tc: Toolchain): AJob {
+  const { svc, services, env } = replayService(dialect);
+  return new ActionsJob({
+    ...runner(true, tc),
+    services,
+    env,
+    steps: [
+      // No approvals to read: nothing in this job runs behind a gate.
+      ...setupSteps(true, tc, false),
+      new Step({ name: "The pipelines are up to date", run: CI_CHECK }),
+      new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }),
+      new Step({ name: "yodel check", run: checkCommand(forge) }),
+    ],
+  });
+}
+
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false): AJob {
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
@@ -508,30 +558,48 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
     new Step({ name: "yodel lint", run: lintCommand(forge) }),
   ];
   if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
-  const svc = REPLAY_SERVICE[dialect];
+  const { svc, services, env } = replayService(dialect);
   return new ActionsJob({
     ...runner(container, tc),
-    services: {
-      [svc.name]: new ActionsService({
-        image: svc.image,
-        env: svc.env,
-        options: `--health-cmd "${svc.health}" --health-interval 2s --health-timeout 5s --health-retries 45`,
-      }),
-    },
-    env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+    services,
+    env,
     steps: [
       ...steps,
       new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }),
       new Step({ name: "yodel lint --replay", run: REPLAY }),
       ...(tests ? [new Step({ name: "yodel test", run: TEST })] : []),
+      ...(check ? [new Step({ name: "yodel check", run: checkCommand(forge) })] : []),
     ],
   });
+}
+
+/** The pull request workflow of a project that only runs yodel check (#1). */
+function checkOnlyActions(forge: Actions, envs_: Environments): RenderedFile {
+  const jobs: Record<string, AJob> = { check: checkJob(forge, envs_.dialect, toolchainOf(envs_)) };
+  Object.assign(jobs, ownJobs<AJob>(envs_.jobs?.actions, jobs, "actions"));
+  const header = [
+    ...HEADER,
+    "#",
+    "# Pull requests: yodel check replays the migrations another tool keeps into a",
+    "# throwaway server the job starts, and lints the new ones. No job here reads",
+    "# or writes an environment.",
+  ];
+  const workflow = new ActionsWorkflow({
+    comment: asComment(header),
+    name: "yodel-pr",
+    on: { pull_request: { branches: [MAIN] } },
+    permissions: new Permissions({ contents: "read" }),
+    concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
+    jobs,
+  });
+  return { path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-pr.yml`, content: renderActions(forge, workflow) };
 }
 
 export function actionsReview(forge: Actions, envs_: Environments): RenderedFile {
   const { dialect, names: envs, replay, waves, jobs: own } = envs_;
   const tc = toolchainOf(envs_);
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true) };
+  if (envs_.checkOnly) return checkOnlyActions(forge, envs_);
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true) };
   for (const env of envs) {
     const read = [env, ...requiredOf(waves, env)];
     jobs[`plan-${env}`] = new ActionsJob({
@@ -613,6 +681,33 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   );
   const svc = REPLAY_SERVICE[dialect];
   const types = envs_.typedColumns === true ? [TYPES_CHECK] : [];
+  if (envs_.checkOnly) {
+    jobs.set(
+      "check",
+      new GitLabJob({
+        extends: ".yodel",
+        stage: "review",
+        rules: mr(),
+        script: [CI_CHECK, waitFor(svc.name, svc.port), checkCommand("gitlab")],
+        services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
+        variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+        artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
+      }),
+    );
+    for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, Object.fromEntries(jobs), "gitlab"))) jobs.set(name, job);
+    const header = [
+      ...HEADER,
+      "#",
+      "# Merge requests: yodel check replays the migrations another tool keeps into a",
+      "# throwaway server the job starts, and lints the new ones (stage review). No",
+      "# job here reads or writes an environment.",
+    ];
+    const jobStages = [...jobs.values()].map((job) => (job as { props?: { stage?: unknown } }).props?.stage).filter((stage) => typeof stage === "string");
+    const pipeline = new GitLabPipeline({ comment: asComment(header), stages: [...new Set(jobStages)], variables: { GIT_DEPTH: "0" } });
+    const entities = new Map<string, Declarable>([["pipeline", pipeline], ["workflow", workflow], ...jobs]);
+    return { path: ".gitlab-ci.yml", content: oneFile("gitlab", gitlabSerializer.serialize(entities)) };
+  }
+  const check = envs_.check === true ? [checkCommand("gitlab")] : [];
   jobs.set(
     "lint",
     new GitLabJob({
@@ -621,7 +716,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : [])],
+            script: [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
@@ -1156,13 +1251,34 @@ export async function environments(dir: string): Promise<Environments> {
   const all = Object.keys(sql?.profiles ?? {});
   const replay = all.includes(REPLAY_PROFILE);
   const envs = all.filter((name) => name !== REPLAY_PROFILE);
+  const yodelConfig = await readConfig(dir);
+  const check = yodelConfig?.check;
+  if (check) {
+    if (!replay) throw new Error(`yodel.config.ts: check runs in CI against the ${REPLAY_PROFILE} profile's throwaway server, which chant.config.ts does not declare`);
+    if (check.env !== undefined && check.env !== REPLAY_PROFILE) throw new Error(`yodel.config.ts: check.env is ${check.env}; in CI yodel check runs against the ${REPLAY_PROFILE} profile's throwaway server, so leave check.env out or set it to ${REPLAY_PROFILE}`);
+  }
+  if (envs.length === 0 && check) {
+    const ci0 = yodelConfig.ci;
+    return {
+      dialect,
+      names: [],
+      replay,
+      waves: [],
+      check: true,
+      checkOnly: true,
+      forges: ci0?.forges ?? FORGES,
+      ...(ci0?.jobs ? { jobs: await loadProjectJobs(dir, ci0.jobs) } : {}),
+      ...(ci0?.image ? { image: ci0.image } : {}),
+      apply: false,
+    };
+  }
   if (envs.length === 0) throw new Error("chant.config.ts declares no sql.profiles");
   for (const env of envs) {
     for (const op of [`migrate-${env}`, `watch-${env}`]) {
       if (!existsSync(join(dir, "ops", `${op}.op.ts`))) throw new Error(`sql.profiles.${env} has no ops/${op}.op.ts`);
     }
   }
-  const ci = (await readConfig(dir))?.ci;
+  const ci = yodelConfig?.ci;
   const credentials = credentialsIn(sql?.profiles ?? {}, envs);
   return {
     dialect,
@@ -1178,6 +1294,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.resume ? { resume: { schedule: ci.resume.schedule } } : {}),
     ...(ci?.login ? { login: ci.login } : {}),
     ...(ci?.apply === false ? { apply: false as const } : {}),
+    ...(check ? { check: true as const } : {}),
   };
 }
 
@@ -1265,6 +1382,7 @@ export function forgeOf(path: string): Forge | undefined {
 export async function render(dir: string): Promise<RenderedFile[]> {
   const envs = await environments(dir);
   const forges = envs.forges ?? FORGES;
+  if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
   const files = [...review(envs), ...(rendersApply(envs) ? await applyPipelines(dir, envs) : []), ...(await watchPipelines(dir, envs))];
   return files.filter((f) => {

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://intentius.io/sql-yodeler/schemas/v1/check.schema.json",
+  "title": "yodel check --json",
+  "description": "Version 1. Another tool's migrations, replayed and linted (#1): each finding on the migration file that made the change. Within a version, fields are only added; a reader ignores fields it does not know.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tool",
+    "status",
+    "dialect",
+    "migrations",
+    "errors",
+    "warnings",
+    "silenced",
+    "findings",
+    "silences",
+    "checked"
+  ],
+  "properties": {
+    "tool": {
+      "enum": [
+        "golang-migrate",
+        "goose",
+        "flyway",
+        "dbmate"
+      ]
+    },
+    "status": {
+      "description": "failed when a finding at level error is not silenced: the command exits 3.",
+      "enum": [
+        "passed",
+        "failed"
+      ]
+    },
+    "dialect": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/dialect"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "migrations": {
+      "description": "The files linted: the ones new since the base that change the schema.",
+      "$ref": "common.schema.json#/$defs/stringList"
+    },
+    "errors": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warnings": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "silenced": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "lint.schema.json#/properties/findings/items"
+      }
+    },
+    "silences": {
+      "description": "Empty: a file's yodel:allow lines show on the findings they silence.",
+      "type": "object",
+      "maxProperties": 0
+    },
+    "checked": {
+      "description": "The files new since the base, in the tool's order.",
+      "$ref": "common.schema.json#/$defs/stringList"
+    }
+  }
+}

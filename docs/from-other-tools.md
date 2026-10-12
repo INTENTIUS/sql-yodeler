@@ -5,7 +5,84 @@ type: howto
 
 # Coming from another migration tool
 
-This page is for a database that golang-migrate, goose, Flyway or dbmate manages today. It maps their concepts onto SQL Yodeler's, takes the database into versioned migrations with its current schema as the starting point, and says how rollback works.
+This page is for a database that golang-migrate, goose, Flyway or dbmate manages today. It starts with trying yodel on your pull requests while you keep your tool, then maps their concepts onto SQL Yodeler's, takes the database into versioned migrations with its current schema as the starting point, and says how rollback works.
+
+## Try it without switching
+
+`yodel check` reads your tool's migrations directory and lints the migrations a pull request adds. Your tool keeps applying them; yodel applies nothing to any environment.
+
+For each pull request it:
+
+1. Runs every migration in your tool's order into a throwaway database: the emulator on your machine, a container in CI.
+2. Reads the schema the migrations already on `main` leave, then the schema after each new one.
+3. Classifies each new migration's change the way yodel classifies its own: a drop that removes data, a Postgres statement that rewrites a table or blocks writes while an index builds, a constraint that can fail on the rows already there, a ClickHouse mutation that rewrites parts. Every [yodel lint](lint.md) rule runs on it, your own [column rules](lint.md#your-own-column-rules) included.
+
+A finding points at the migration file and the statement's line, so the forge shows it on the pull request.
+
+What it reads from each tool, the up direction only:
+
+| Tool | Files | What is read |
+|---|---|---|
+| golang-migrate | `<version>_<title>.up.sql` | the whole file; `.down.sql` files are not read |
+| goose | `<version>_<name>.sql` | the `-- +goose Up` section. A `-- +goose StatementBegin` ... `StatementEnd` block is one statement. Go migrations are refused, since their code is not SQL |
+| Flyway | `V<version>__<description>.sql`, `R__<description>.sql` | the versioned files by version (1.10 after 1.9), then the repeatable ones by description; undo files are not read |
+| dbmate | `<version>_<name>.sql` | the `-- migrate:up` section |
+
+### Set it up
+
+The project is a `chant.config.ts` with one profile, `replay`, for the throwaway database, and a `yodel.config.ts` naming your directory. The profile's `schemas` (Postgres) or `databases` (ClickHouse) are the ones your migrations create objects in; `yodel check` empties them before and after each run.
+
+```ts
+// chant.config.ts
+import type { ChantConfig } from "@intentius/chant/config";
+import "@intentius/chant-lexicon-sql";
+
+export default {
+  lexicons: ["sql"],
+  sql: {
+    dialect: "postgres",
+    profiles: {
+      replay: {
+        url: process.env.REPLAY_POSTGRES_URL ?? "postgres://127.0.0.1:5432/postgres",
+        user: { env: "REPLAY_POSTGRES_USER" },
+        password: { env: "REPLAY_POSTGRES_PASSWORD" },
+        schemas: ["app"],
+      },
+    },
+  },
+} satisfies ChantConfig;
+```
+
+```ts
+// yodel.config.ts
+export default { check: { dir: "db/migrations", tool: "goose" } };
+```
+
+`tool` is optional: yodel tells the four apart by their file names and markers. On your machine, with the emulator running (`npx yodel emulator up`):
+
+```sh
+npx yodel check --base main
+```
+
+`--base` picks the new migrations: the files added or changed since that commit. `--all` lints every migration.
+
+### On every pull request
+
+`npx yodel ci` renders one pull request job for GitHub Actions, GitLab CI and Forgejo Actions. It starts a throwaway database as a service and runs `yodel check` against it, with the findings annotated on the migration files. No job reads or writes one of your environments, so it needs no secrets.
+
+### Silencing a finding
+
+A line in the migration file silences one rule for that file, with a reason:
+
+```sql
+-- +goose Up
+-- yodel:allow destructive nickname was never read
+ALTER TABLE app.users DROP COLUMN nickname;
+```
+
+### Moving over
+
+When yodel's findings are what you want on every change, take the database into yodel's own migrations: the rest of this page.
 
 ## The concepts, side by side
 

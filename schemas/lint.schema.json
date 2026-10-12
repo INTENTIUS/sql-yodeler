@@ -88,6 +88,10 @@
           "line": {
             "type": "integer"
           },
+          "file": {
+            "description": "yodel check: the file of the other tool's migrations directory the finding is on, relative to that directory.",
+            "type": "string"
+          },
           "silenced": {
             "description": "A -- yodel:allow line silenced it: the reason given. A silenced finding fails nothing.",
             "type": "string"

@@ -376,6 +376,21 @@ export interface YodelConfig {
   sources?: Record<string, DdlSource>;
   /** `yodel ci`: the forges to render the pipelines for, and the project's own jobs; see {@link CiConfig}. */
   ci?: CiConfig;
+  /**
+   * `yodel check` (#1): another tool's migrations directory, linted on each
+   * pull request. `{ dir: "db/migrations" }`; see {@link CheckConfig}.
+   */
+  check?: CheckConfig;
+}
+
+/** Another tool's migrations, as `yodel check` reads them (#1). */
+export interface CheckConfig {
+  /** The migrations directory, relative to the project. */
+  dir: string;
+  /** The tool that owns it. Default: detected from the file names. */
+  tool?: "golang-migrate" | "goose" | "flyway" | "dbmate";
+  /** The profile bound to the throwaway server the migrations run in. Default: `replay`. */
+  env?: string;
 }
 
 /**

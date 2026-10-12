@@ -35,8 +35,10 @@ export interface Finding {
   step?: number;
   /** The step's object on the server (`database.table`, `schema.table`). */
   object?: string;
-  /** A line in migration.sql. */
+  /** A line in migration.sql, or in {@link file}. */
   line?: number;
+  /** A file of another tool's migrations directory the finding is on (yodel check, #1), relative to the report's `dir`. */
+  file?: string;
   /** Set when a `-- yodel:allow` line silenced it: the reason given. A silenced finding fails nothing. */
   silenced?: string;
 }
