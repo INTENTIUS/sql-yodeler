@@ -2,7 +2,7 @@
 
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { siteBuildSteps } from "./pages.js";
-import { checkout, rendered, setupNode } from "./shared.js";
+import { chantPins, checkout, rendered, setupNode } from "./shared.js";
 
 export const workflow = new Workflow({
   comment: rendered("ci.ts"),
@@ -47,8 +47,9 @@ export const workflow = new Workflow({
           run: `version=$(node -p 'require("./package.json").version')
 ctx=$(mktemp -d)
 npm pack --silent --pack-destination "$ctx"
+${chantPins}
 docker build -f .github/image/Dockerfile --build-arg "YODEL_VERSION=$version" \\
-  --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" -t yodel-ci "$ctx"
+  --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" --build-arg "CHANT_PINS=$CHANT_PINS" -t yodel-ci "$ctx"
 `,
         }),
         new Step({ name: "yodel --version from the image", run: "docker run --rm yodel-ci yodel --version" }),

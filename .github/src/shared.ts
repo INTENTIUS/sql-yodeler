@@ -74,3 +74,11 @@ exit 1
 /** A rendered file's comment: where it is rendered from, then the declaration's own comment. */
 export const rendered = (source: string, comment?: string): string =>
   [`Rendered from .github/src/${source} by \`npm run workflows\`. Edit that file, not this one.`, ...(comment ? ["", comment] : [])].join("\n");
+
+/**
+ * Shell: sets CHANT_PINS to each @intentius/chant package yodel runs with, at
+ * the version package-lock.json holds. An image build installs those beside
+ * yodel, so it gets the chant this checkout tested and not the newest one
+ * npm lists, whose tarballs can 404 for minutes after a publish.
+ */
+export const chantPins = `CHANT_PINS=$(node -p 'const l=require("./package-lock.json");Object.entries(l.packages).filter(([k,v])=>/^node_modules\\/@intentius\\/chant[^/]*$/.test(k)&&!v.dev).map(([k,v])=>k.slice(13)+"@"+v.version).join(" ")')`;

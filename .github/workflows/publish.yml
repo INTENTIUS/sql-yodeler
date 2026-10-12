@@ -134,8 +134,9 @@ jobs:
             echo "$IMAGE is already pushed; nothing to build"
             exit 0
           fi
+          CHANT_PINS=$(node -p 'const l=require("./package-lock.json");Object.entries(l.packages).filter(([k,v])=>/^node_modules\/@intentius\/chant[^/]*$/.test(k)&&!v.dev).map(([k,v])=>k.slice(13)+"@"+v.version).join(" ")')
           docker buildx build --push --platform linux/amd64,linux/arm64 --provenance=mode=max --sbom=true \
-            --build-arg "YODEL_VERSION=$VERSION" -f .github/image/Dockerfile -t "$IMAGE" .github/image
+            --build-arg "YODEL_VERSION=$VERSION" --build-arg "CHANT_PINS=$CHANT_PINS" -f .github/image/Dockerfile -t "$IMAGE" .github/image
       - name: yodel --version from the pushed image
         run: |
           printed=$(docker run --rm --pull always "$IMAGE" yodel --version)

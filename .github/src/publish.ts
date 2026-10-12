@@ -5,7 +5,7 @@
 
 import { Job, Step, Workflow } from "@intentius/chant-lexicon-github";
 import { IMAGE_REPOSITORY } from "./image.js";
-import { checkout, rendered, setupNode } from "./shared.js";
+import { chantPins, checkout, rendered, setupNode } from "./shared.js";
 
 const comment = `Publishes @intentius/sql-yodeler to npm when a v<version> tag is pushed.
 \`npm run release -- <version>\` (scripts/release.sh) pushes the tag, and only
@@ -133,8 +133,9 @@ if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
   echo "$IMAGE is already pushed; nothing to build"
   exit 0
 fi
+${chantPins}
 docker buildx build --push --platform linux/amd64,linux/arm64 --provenance=mode=max --sbom=true \\
-  --build-arg "YODEL_VERSION=$VERSION" -f .github/image/Dockerfile -t "$IMAGE" .github/image
+  --build-arg "YODEL_VERSION=$VERSION" --build-arg "CHANT_PINS=$CHANT_PINS" -f .github/image/Dockerfile -t "$IMAGE" .github/image
 `,
     }),
     new Step({

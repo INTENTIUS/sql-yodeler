@@ -24,6 +24,9 @@ Build arguments:
                  @intentius/sql-yodeler@$YODEL_VERSION. The build context is
                  mounted at /ctx, so a tarball from \`npm pack\` in the
                  context installs as /ctx/<file>.tgz.
+  CHANT_PINS     @intentius/chant packages at exact versions, installed
+                 beside yodel so its chant ranges resolve to them (ci.yml
+                 and publish.yml pass package-lock.json's)
 
   docker build -f .github/image/Dockerfile --build-arg YODEL_VERSION=0.1.0 .github/image`;
 
@@ -39,7 +42,7 @@ const install = [
   `mkdir -p ${PREFIX}`,
   `cd ${PREFIX}`,
   "echo '{\"name\":\"yodel-image\",\"private\":true}' > package.json",
-  'npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}"',
+  'npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS',
   "npm cache clean --force",
   `ln -s ${PREFIX}/node_modules /node_modules`,
   // The image holds the version it is tagged with, or the build fails.
@@ -49,7 +52,7 @@ const install = [
 
 export const image = new Dockerfile({
   from: NODE_IMAGE,
-  arg: ["YODEL_VERSION", "YODEL_PACKAGE"],
+  arg: ["YODEL_VERSION", "YODEL_PACKAGE", "CHANT_PINS"],
   env: [`PATH=${PREFIX}/node_modules/.bin:$PATH`],
   run: [
     // Jobs check out and fetch with git, as the template's pipelines do; a sealed wave (#48) verifies seals with ssh-keygen.
