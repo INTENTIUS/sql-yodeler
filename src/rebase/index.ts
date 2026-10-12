@@ -51,6 +51,7 @@ import type { BuildOutput, BuiltObject } from "../chant/build.js";
 import {
   computeChecksum,
   emptyBuild,
+  isHandWritten,
   MIGRATION_ID,
   MIGRATION_JSON,
   MIGRATION_SQL,
@@ -311,6 +312,7 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
     throw new YodelError(`${m.id} was rendered for ClickHouse topology ${m.document.topology}; yodel writes migrations for a single node and renders them per environment when applied, so it cannot rebase one written for a topology`);
   }
   const schema = mergeChange(base0, m.document.schema, base1, { migration: m.id, theirs });
+  if (isHandWritten(m.document)) return rebaseHandWritten(m, newParent, schema);
   let statements: SchemaStatements;
   try {
     statements = diffStatements(base1, schema, {
@@ -355,6 +357,32 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
     statements,
     silences,
     handEdited: !asWritten(m),
+  };
+}
+
+/**
+ * A hand-written migration (#248) onto a new parent: its statements are the
+ * person's, so they move as they are; its recorded schema is its change
+ * merged onto the new parent's, and its migration.sql header names the new
+ * parent.
+ */
+function rebaseHandWritten(m: Migration, newParent: string, schema: BuildOutput): RebasedMigration {
+  const unsigned = { ...m.document, parent: newParent, checksum: "", schema } as MigrationDocument;
+  const sql = normalizeLineEndings(m.files.sql).replace(/^-- parent: .*$/m, `-- parent: ${newParent}`);
+  const document: MigrationDocument = { ...unsigned, checksum: computeChecksum({ sql, json: unsigned, extra: m.files.extra }) };
+  const statements = statementsOf(document);
+  return {
+    id: m.id,
+    dir: m.dir,
+    oldParent: m.parent,
+    parent: newParent,
+    oldChecksum: m.checksum,
+    checksum: document.checksum,
+    document,
+    files: { sql, json: serializeDocument(document), ...(m.files.extra ? { extra: m.files.extra } : {}) },
+    statements,
+    silences: silencesOf({ files: { sql, json: "" }, document }),
+    handEdited: false,
   };
 }
 

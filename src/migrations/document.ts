@@ -74,6 +74,12 @@ export interface MigrationDocument {
    * the chain skips it.
    */
   checkpoint?: { schema: string };
+  /**
+   * `"sql"` for a hand-written migration (#248, `yodel new --sql`):
+   * migration.sql is its source, and `yodel lint --update-checksum` records
+   * its statements as steps (see `./handwritten.ts`).
+   */
+  source?: string;
   /** True when a step is an Op or a manual step: the migration is more than its SQL. */
   refused: boolean;
   /** What the diff pointed out besides the changes, e.g. a likely rename written as a drop and an add. */
@@ -119,6 +125,7 @@ const DOCUMENT_ORDER: readonly (keyof MigrationDocument)[] = [
   "major",
   "topology",
   "checkpoint",
+  "source",
   "refused",
   "hints",
   "checks",

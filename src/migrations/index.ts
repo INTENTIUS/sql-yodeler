@@ -11,6 +11,7 @@
  *   createMigration(options)          the next migration from a build, offline (pure)
  *   writeMigration(dir, migration)    puts it on disk
  *   createCheckpoint(options)         a checkpoint: the parent's recorded schema from nothing (#63)
+ *   createHandWritten(options)        an empty hand-written migration, migration.sql its source (#248)
  *
  * The file layout is in `./document.ts`, the checksum's exact definition in
  * `./checksum.ts`, the ordering rules in `./directory.ts`.
@@ -22,3 +23,4 @@ export * from "./checksum.js";
 export * from "./create.js";
 export * from "./directory.js";
 export * from "./document.js";
+export * from "./handwritten.js";

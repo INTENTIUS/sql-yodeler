@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
-import { scanMigrations } from "../migrations/index.js";
+import { isHandWritten, MIGRATION_JSON, recordHandWritten, scanMigrations, serializeDocument } from "../migrations/index.js";
+import { buildSchema } from "../chant/build.js";
 import { inspect, migrationsDir, openVersioned } from "../versioned/index.js";
 import { chantLevel, CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
@@ -251,6 +252,28 @@ export const lint: Command = {
           if (!m) throw new YodelError(`--update-checksum ${id}: no such migration in ${dir}`);
           const applied = options.history?.status.applied.some((x) => x.id === id);
           if (applied) throw new YodelError(`--update-checksum ${id}: it is applied in ${String(options.history?.environment)}; record an intended edit there with yodel repair ${id} --reason ... ${String(options.history?.environment)}`);
+          if (isHandWritten(m.document)) {
+            // A hand-written migration (#248): its statements come from migration.sql.
+            const parent = m.document.parent === null ? undefined : byId.get(m.document.parent);
+            const recorded = await recordHandWritten(m, parent?.document.schema, async () => {
+              const build = await buildSchema(project);
+              try {
+                return build.output;
+              } finally {
+                build.dispose();
+              }
+            });
+            const doc = { ...(JSON.parse(m.files.json) as Record<string, unknown>), ...recorded.document };
+            writeFileSync(join(m.dir, MIGRATION_JSON), serializeDocument(doc));
+            m.files = { ...m.files, json: serializeDocument(doc) };
+            m.document = recorded.document;
+            if (!a.json) {
+              io.err(
+                `${id}: ${String(recorded.statements)} hand-written statement${recorded.statements === 1 ? "" : "s"} recorded; ` +
+                  (recorded.changesSchema ? "the schema after it is the current build of src/ (yodel lint --replay shows the statements give it)\n" : "data only, so the schema after it is its parent's\n"),
+              );
+            }
+          }
           const changed = updateChecksum(m);
           if (!a.json) io.err(changed ? `${id}: checksum ${changed.from} is now ${changed.to}\n` : `${id}: its checksum already matches its files\n`);
         }

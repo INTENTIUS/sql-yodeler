@@ -11,12 +11,12 @@
 import { diffStatements, type MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { BuildOutput } from "../chant/build.js";
 import type { Project } from "../project.js";
-import { checkpointProblems, computeChecksum, emptyBuild, scanMigrations, type Migration, type MigrationProblem, type MigrationScan } from "../migrations/index.js";
+import { checkpointProblems, computeChecksum, emptyBuild, HAND_TEMPLATE_MARK, isHandWritten, scanMigrations, type Migration, type MigrationProblem, type MigrationScan } from "../migrations/index.js";
 import type { VersionedStatus } from "../versioned/state.js";
 import { levelOf, type LintSettings } from "./config.js";
 import { LINT_RULES, type LintLevel, type LintRule } from "./rules.js";
 import { mapMigrationSql, type Silence } from "./silences.js";
-import { createdObjects, refusedStep, stepFindings, unreadableStep, type Dialect } from "./statements.js";
+import { createdObjects, refusedStep, stepFindings, unreadableStep, type Dialect, type StepFinding } from "./statements.js";
 import { routineFindings } from "./routines.js";
 import { accessFindings } from "./access.js";
 import { namingFindings } from "./naming.js";
@@ -255,6 +255,7 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
   const used = new Set<Silence>();
   const statementRaw: Array<RawFinding & { silence?: Silence }> = [];
 
+  const byId = new Map(scan.migrations.map((m) => [m.id, m]));
   for (const m of scan.migrations) {
     const d = m.document.dialect as unknown;
     if (d !== "clickhouse" && d !== "postgres") continue; // reported above
@@ -262,6 +263,56 @@ export async function lintMigrations(dir: string, options: LintOptions = {}): Pr
     const map = mapMigrationSql(m.files.sql, steps, silenceable);
     silences[m.id] = map.silences;
     for (const p of map.problems) raw.push({ rule: p.rule, migration: m.id, message: p.message, ...(p.step !== undefined ? { step: p.step } : {}), ...(p.line !== undefined ? { line: p.line } : {}) });
+
+    if (isHandWritten(m.document)) {
+      // A hand-written migration (#248): its steps are the person's statements, so the
+      // statement rules run on the schema change it records, its parent's recorded schema
+      // against its own, and a silence anywhere in its migration.sql covers its rule there.
+      if (steps.length === 0) {
+        raw.push({ rule: "migration-sql", migration: m.id, message: `${m.id}: a hand-written migration with no statements recorded; write them in migration.sql${m.files.sql.includes(HAND_TEMPLATE_MARK) ? "" : " (each ending with ;)"} and run yodel lint --update-checksum ${m.id}` });
+        continue;
+      }
+      const silenceFor = (rule: string, step?: number): Silence | undefined => map.silences.find((x) => x.rule === rule && (step === undefined || x.step === step)) ?? map.silences.find((x) => x.rule === rule);
+      const push = (f: RawFinding) => {
+        const silence = silenceFor(f.rule, f.step);
+        if (silence) used.add(silence);
+        statementRaw.push({ ...f, ...(silence ? { silence } : {}) });
+      };
+      steps.forEach((step, i) => {
+        if (step.kind === "statement" && step.destructive) push({ rule: "destructive", migration: m.id, step: i, object: step.name, message: `step ${String(i)}: ${step.name}: removes rows that cannot be recovered` });
+      });
+      const parent = m.document.parent === null ? undefined : byId.get(m.document.parent)?.document.schema;
+      const schema = m.document.schema;
+      const before = parent && Array.isArray(parent.objects) && parent.dialect === schema.dialect ? parent : emptyBuild(schema);
+      let classified: MigrationStep[] = [];
+      try {
+        classified = diffStatements(before, schema, {
+          ...(m.document.defaultDatabase !== undefined ? { defaultDatabase: m.document.defaultDatabase } : {}),
+          ...(m.document.defaultSchema !== undefined ? { defaultSchema: m.document.defaultSchema } : {}),
+        }).steps;
+      } catch {
+        // An unreadable recorded schema is reported above (recordedSchemaFindings).
+      }
+      const createdHere = d === "postgres" ? createdObjects(classified) : undefined;
+      for (const cs of classified) {
+        const found: StepFinding[] = stepFindings(d, cs, createdHere ? { created: createdHere } : {});
+        for (const f of found) {
+          const rule: LintRule | undefined = rules[f.rule];
+          if (rule?.dialect !== undefined && rule.dialect !== d) continue;
+          push({ rule: f.rule, migration: m.id, object: cs.name, message: `${cs.name}: ${f.message}` });
+        }
+      }
+      if (d === "postgres") {
+        const doc = { ...m.document, steps: classified };
+        for (const f of [...routineFindings(doc), ...accessFindings(doc)]) push({ rule: f.rule, migration: m.id, message: f.message });
+      }
+      for (const f of bySchema.get(m.id) ?? []) push(f);
+      for (const x of map.silences) {
+        if (used.has(x)) continue;
+        raw.push({ rule: "silence", level: "warning", migration: m.id, step: x.step, line: x.line, message: `migration.sql line ${String(x.line)}: yodel:allow ${x.rule} silences nothing: this migration breaks no ${x.rule} rule` });
+      }
+      continue;
+    }
 
     const created = d === "postgres" ? createdObjects(steps) : undefined;
     steps.forEach((step, i) => {

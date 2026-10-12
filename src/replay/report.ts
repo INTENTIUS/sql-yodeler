@@ -36,7 +36,9 @@ export function replayFailure(result: ReplayResult): { migration: string; messag
           `${m.id}: replaying the history through it does not give the schema it records (${MIGRATIONS_DIR}/${m.id}/${MIGRATION_JSON}); ${String(n)} difference${n === 1 ? "" : "s"}:\n` +
           result.changes.map((c) => `  ${describeChange(c)}`).join("\n") +
           `\n${before.trim() ? `${before.trim()}\n` : ""}` +
-          `Its statements (the steps in ${MIGRATION_JSON}, which ${MIGRATION_SQL} shows) and its recorded schema disagree: make the statements produce the schema, or record the schema they produce, then yodel repair the migration where it is already applied.${skipped}`,
+          (m.handWritten
+            ? `It is hand-written, and it records the build of src/ as the schema after it: declare in src/ what its statements change (or change the statements), then run yodel lint --update-checksum ${m.id} again.${skipped}`
+            : `Its statements (the steps in ${MIGRATION_JSON}, which ${MIGRATION_SQL} shows) and its recorded schema disagree: make the statements produce the schema, or record the schema they produce, then yodel repair the migration where it is already applied.${skipped}`),
       };
     }
     case "failed":
