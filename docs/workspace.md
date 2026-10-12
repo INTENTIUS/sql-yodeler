@@ -71,6 +71,6 @@ and each link to the old name says where it went: `it was renamed to app.events.
 
 ## Ops and backfills
 
-chant reads a member's outputs by folding its TypeScript without running it, the whole directory, `ops/` and `migrations/` included. A name exported twice stops that fold, so every Op in a yodel project has an export of its own. The templates name each one after the Op (`migrateDev`, `watchDev`), and `yodel new --backfill` writes `backfillFillCountry` for a backfill of `fill-country`. chant finds an Op by its value, not its export name, so the name is yours to choose.
+chant reads a member's outputs by folding its TypeScript without running it, and collects only the sql lexicon's declarations from it, so the Ops in `ops/` and the backfills in `migrations/` do not take part. When `chant.config.ts` sets `sourceDir`, only that directory is read.
 
-A project made before this release exports `op` from each of `ops/*.op.ts` (and from each backfill). Rename each `ops/` file's export, as in `export const { op: watchDev } = WatchOp(...)`. Leave a backfill already in a migration as it is: its file counts in the migration's checksum, and yodel still reads a backfill's Op as `op`.
+The templates and `yodel new --backfill` export each Op under a name of its own all the same (`migrateDev`, `watchDev`, `backfillFillCountry` for a backfill of `fill-country`), so a project's files never export one name twice. chant finds an Op by its value, not its export name. A project made earlier, whose files each export `op`, works as it is, and a backfill already in a migration stays as it is: its file counts in the migration's checksum.

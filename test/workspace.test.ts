@@ -52,7 +52,13 @@ function addNote(dialect: Dialect, dir: string, column = "note", trailer = ""): 
   writeFileSync(path, next);
 }
 
-function workspace(dialect: Dialect, note: { column?: string; trailer?: string } | false): string {
+/** Puts each Op back under the export `op`, as a project made before #2 has them. */
+function asBefore(db: string): void {
+  const files = [...readdirSync(join(db, "ops")).map((f) => join(db, "ops", f)), ...readdirSync(join(db, "migrations")).filter((d) => d.startsWith("2026")).map((d) => join(db, "migrations", d, "backfill.ts"))];
+  for (const f of files) writeFileSync(f, readFileSync(f, "utf8").replace(/export const \{ op: \w+ \} =/, "export const { op } =").replace(/export const \w+ = Op\(/, "export const op = Op("));
+}
+
+function workspace(dialect: Dialect, note: { column?: string; trailer?: string } | false, before = false): string {
   const root = mkdtempSync(join(tmpdir(), `yodel-workspace-${dialect}-`));
   temps.push(root);
   const db = join(root, "db");
@@ -63,6 +69,7 @@ function workspace(dialect: Dialect, note: { column?: string; trailer?: string }
     mkdirSync(join(db, "migrations", `20261012T0000-${name}`), { recursive: true });
     writeFileSync(join(db, "migrations", `20261012T0000-${name}`, "backfill.ts"), backfillTemplate(name, dialect));
   }
+  if (before) asBefore(db);
   const schema = SCHEMA[dialect];
   writeFileSync(
     join(root, "chant.workspace.json"),
@@ -122,6 +129,17 @@ describe.each(["clickhouse", "postgres"] as const)("a %s project as a workspace 
     expect(ran.text).toMatch(new RegExp(`app's link to db output ${schema}\\.events\\.note does not resolve.*WSP093`));
     expect(ran.text).toContain("analytics/models/staging/sources.yml");
     expect(ran.text).toMatch(new RegExp(`analytics's link to db output ${schema}\\.events\\.note .*does not resolve`));
+  }, 180_000);
+
+  it("reads a project made before #2 too, whose Ops and backfills all export op (chant#3941)", () => {
+    const root = workspace(dialect, {}, true);
+    expect(readFileSync(join(root, "db", "ops", "watch-dev.op.ts"), "utf8")).toContain("export const { op } =");
+    const ran = check(root);
+    expect(ran.code, ran.text).toBe(0);
+    expect(ran.text).not.toContain("WSP094");
+    const dropped = check(workspace(dialect, false, true));
+    expect(dropped.code, dropped.text).toBe(1);
+    expect(dropped.text).toContain("WSP093");
   }, 180_000);
 
   it("says where a column went when src/ renames it with a -- previously: hint", () => {
