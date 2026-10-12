@@ -25,10 +25,14 @@
  * `SHOW GRANTS`) cannot be declared, since a declaration holds no `REVOKE`:
  * it is left out with a warning, and its grants with it.
  *
- * A table the import declared, or a user or role adopted here, is
- * interpolated where a statement names it (`ON ${events}`, `TO ${reader}`),
+ * A table the import declared, or a user, role or settings profile adopted
+ * here, is interpolated where a statement names it (`ON ${events}`,
+ * `TO ${reader}`, `SETTINGS PROFILE ${analysts}`, `SETTINGS INHERIT ${base}`),
  * so the declarations carry their dependencies and a baseline creates them
- * in order.
+ * in order. `access.ts` lists each declaration after the ones it
+ * interpolates. A settings profile or quota assigned `TO` a user who names
+ * that profile in `SETTINGS PROFILE` would make each wait on the other: its
+ * `TO` keeps that name as text, with a warning.
  */
 
 import type { GeneratedFile } from "@intentius/chant/import/generator";
@@ -98,17 +102,35 @@ const literal = (text: string) => text.replace(/\\/g, "\\\\").replace(/`/g, "\\`
  * `TO` in a row policy, after `DEFAULT ROLE` in a user). Strings and the
  * object's own name stay as they are.
  */
-export function templateOf(s: Pick<Statement, "kind" | "own" | "sql">, tables: ReadonlyMap<string, string>, principals: ReadonlyMap<string, string>): { body: string; refs: Set<string> } {
+export function templateOf(
+  s: Pick<Statement, "kind" | "own" | "sql">,
+  tables: ReadonlyMap<string, string>,
+  principals: ReadonlyMap<string, string>,
+  profiles: ReadonlyMap<string, string> = new Map(),
+): { body: string; refs: Set<string> } {
   const t = tokens(s.sql);
   const refs = new Set<string>();
   let body = "";
   let ownSeen = false;
   let zone = s.kind === "grant";
+  // The next name is a settings profile: after a user's, role's or profile's `SETTINGS PROFILE`, or `SETTINGS INHERIT`.
+  let profileNext = false;
   for (let i = 0; i < t.length; i++) {
     const tok = t[i];
     if (tok === undefined) break;
     if (tok.kind === "ident") {
       const word = tok.text.toUpperCase();
+      if (profileNext) {
+        profileNext = false;
+        const exp = tok.name !== undefined ? profiles.get(tok.name) : undefined;
+        if (exp) {
+          body += `\${${exp}}`;
+          refs.add(exp);
+          continue;
+        }
+      }
+      // `CREATE SETTINGS PROFILE <own>` names the profile itself, not one it uses.
+      if (word === "INHERIT" || (word === "PROFILE" && t[i - 2]?.text.toUpperCase() === "SETTINGS" && !/^(CREATE|ALTER)$/i.test(t[i - 4]?.text ?? ""))) profileNext = true;
       if ((s.kind === "policy" || s.kind === "quota" || s.kind === "settingsProfile") && word === "TO") zone = true;
       if (s.kind === "user" && word === "DEFAULT" && t[i + 2]?.text.toUpperCase() === "ROLE") zone = true;
       if (s.kind === "user" && zone && ["SETTINGS", "GRANTEES", "HOST", "VALID", "IN"].includes(word)) zone = false;
@@ -138,6 +160,46 @@ export function templateOf(s: Pick<Statement, "kind" | "own" | "sql">, tables: R
     body += literal(tok.text);
   }
   return { body, refs };
+}
+
+type Body = { s: Statement; body: string; refs: Set<string> };
+
+/**
+ * `bodies` with each after the ones it interpolates, in their order
+ * otherwise. A cycle runs through a settings profile's or quota's `TO` (a
+ * user naming a profile assigned to it): `retemplate` renders that
+ * statement again without the principal it points back to, and a warning
+ * says so.
+ */
+export function ordered(bodies: readonly Body[], retemplate: (b: Body, cut: string) => Body, warnings: string[]): Body[] {
+  const byExport = new Map(bodies.map((b) => [b.s.exportName, b]));
+  // A profile assigned TO a user or role that names it: the profile's TO keeps that name as text.
+  for (const [name, b] of byExport) {
+    const kind = b.s.kind;
+    if (kind !== "settingsProfile" && kind !== "quota") continue;
+    let cur = b;
+    for (const dep of [...cur.refs]) {
+      if (!byExport.get(dep)?.refs.has(name)) continue;
+      cur = retemplate(cur, dep);
+      warnings.push(`${KIND_LABEL[kind]} ${cur.s.own ?? name} is assigned TO ${dep}, which names it in SETTINGS PROFILE; its TO keeps ${dep} as text, so a baseline replayed into a fresh server needs ${dep} created first`);
+    }
+    byExport.set(name, cur);
+  }
+  const out: Body[] = [];
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = (name: string): void => {
+    const b = byExport.get(name);
+    if (done.has(name) || b === undefined) return;
+    if (visiting.has(name)) throw new Error(`access.ts: ${name} names a declaration that names it back`);
+    visiting.add(name);
+    for (const dep of b.refs) visit(dep);
+    visiting.delete(name);
+    done.add(name);
+    out.push(b);
+  };
+  for (const b of bodies) visit(b.s.exportName);
+  return out;
 }
 
 /** The users, roles, row policies, quotas, settings profiles and grants to adopt from `env`, as `access.ts`; see the module comment. */
@@ -224,14 +286,18 @@ export async function clickhouseAccessDeclarations(project: Project, env: Enviro
   }
   if (statements.length === 0) return { objects: [], warnings };
 
-  const bodies = statements.map((s) => ({ s, ...templateOf(s, tables, principals) }));
+  const profiles = new Map(statements.flatMap((s) => (s.kind === "settingsProfile" && s.own !== undefined ? [[s.own, s.exportName] as const] : [])));
+  const bodies = ordered(
+    statements.map((s) => ({ s, ...templateOf(s, tables, principals, profiles) })),
+    (b, cut) => ({ s: b.s, ...templateOf(b.s, tables, new Map([...principals].filter(([, exp]) => exp !== cut)), profiles) }),
+    warnings,
+  );
   const declared = new Set(statements.map((s) => s.exportName));
   const fromSchema = [...new Set(bodies.flatMap((b) => [...b.refs].filter((r) => !declared.has(r))))].sort();
   const tags = [...new Set(statements.map((s) => s.kind))].sort();
   const lines = [`import { ${tags.join(", ")} } from "@intentius/chant-lexicon-sql/clickhouse";`];
   if (fromSchema.length > 0) lines.push(`import { ${fromSchema.join(", ")} } from "./schema.js";`);
   lines.push("");
-  // Roles, then users (whose default role names a role), then policies, quotas, settings profiles and grants, so each comes after what it interpolates.
   for (const b of bodies) lines.push(`export const ${b.s.exportName} = ${b.s.kind}\`${b.body}\`;`, "");
   return {
     file: { path: "access.ts", content: `${lines.join("\n").trimEnd()}\n` },
