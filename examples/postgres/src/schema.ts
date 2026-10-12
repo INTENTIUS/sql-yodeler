@@ -4,7 +4,7 @@ export const shopSchema = schema`
   CREATE SCHEMA shop;
   COMMENT ON SCHEMA shop IS 'The SQL Yodeler Postgres example'`;
 
-export const orders = table`
+export const orders = table<"shop.orders">`
   CREATE TABLE ${shopSchema}.orders (
       id bigint GENERATED ALWAYS AS IDENTITY,
       email text NOT NULL, -- previously: customer_email

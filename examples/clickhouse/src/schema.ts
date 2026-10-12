@@ -5,7 +5,7 @@ export const shopDb = database`
   ENGINE = Atomic
   COMMENT 'The SQL Yodeler ClickHouse example'`;
 
-export const events = table`
+export const events = table<"shop.events">`
   CREATE TABLE ${shopDb}.events
   (
       id UInt64,

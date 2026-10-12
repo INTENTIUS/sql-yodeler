@@ -172,6 +172,8 @@ export interface Environments {
   replay: boolean;
   /** The project has tests/*.test.ts: with the replay profile, the lint job runs yodel test on its server too (#54). */
   tests?: boolean;
+  /** The project commits sql-types.d.ts (typed columns, #228): the lint job fails when it no longer matches the schema. */
+  typedColumns?: boolean;
   /**
    * The environments whose profile is made with credentials() (#50): the
    * variables each role reads, and the cloud token source that mints its
@@ -387,6 +389,9 @@ export const TEST = `yodel test --env ${REPLAY_PROFILE} --reset --junit yodel-te
 /** Fails a pull request whose pipelines differ from what yodel ci renders. */
 export const CI_CHECK = "yodel ci --check";
 
+/** Fails a pull request whose sql-types.d.ts no longer matches the schema (#228). */
+export const TYPES_CHECK = "chant sql types --check";
+
 /**
  * Webhook events (yodel.config.ts `notify`): the variables the apply, plan
  * and watch jobs pass from the forge's secrets. yodel sends nothing while
@@ -489,7 +494,7 @@ function commentToken(forge: Actions): Record<string, string> {
   return forge === "github" ? { GITHUB_TOKEN: "${{ github.token }}" } : { FORGEJO_TOKEN: "${{ github.token }}" };
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false): AJob {
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false): AJob {
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
@@ -499,6 +504,7 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
   const steps = [
     ...setupSteps(container, tc),
     new Step({ name: "The pipelines are up to date", run: CI_CHECK }),
+    ...(typedColumns ? [new Step({ name: "sql-types.d.ts is up to date", run: TYPES_CHECK })] : []),
     new Step({ name: "yodel lint", run: lintCommand(forge) }),
   ];
   if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
@@ -525,7 +531,7 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
 export function actionsReview(forge: Actions, envs_: Environments): RenderedFile {
   const { dialect, names: envs, replay, waves, jobs: own } = envs_;
   const tc = toolchainOf(envs_);
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true) };
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true) };
   for (const env of envs) {
     const read = [env, ...requiredOf(waves, env)];
     jobs[`plan-${env}`] = new ActionsJob({
@@ -606,6 +612,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     }),
   );
   const svc = REPLAY_SERVICE[dialect];
+  const types = envs_.typedColumns === true ? [TYPES_CHECK] : [];
   jobs.set(
     "lint",
     new GitLabJob({
@@ -614,11 +621,11 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: [CI_CHECK, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : [])],
+            script: [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : [])],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
-        : { script: [CI_CHECK, lintCommand("gitlab")] }),
+        : { script: [CI_CHECK, ...types, lintCommand("gitlab")] }),
       // The code quality report, kept when lint fails too: that is when it has something to show.
       artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
     }),
@@ -1163,6 +1170,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(Object.keys(credentials).length > 0 ? { credentials } : {}),
     replay,
     ...(hasTests(dir) ? { tests: true } : {}),
+    ...(existsSync(join(dir, (config as { sourceDir?: string }).sourceDir ?? ".", "sql-types.d.ts")) ? { typedColumns: true } : {}),
     waves: await withTenants(dir, await readWaves(dir, envs)),
     forges: ci?.forges ?? FORGES,
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
