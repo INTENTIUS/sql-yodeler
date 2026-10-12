@@ -54,7 +54,8 @@
     "workflows": "tsx .github/src/render.ts",
     "templates:check": "tsx scripts/templates-check.ts",
     "claims:page": "tsx scenarios/status-page.ts",
-    "bench": "npm run build && tsx bench/run.ts"
+    "bench": "npm run build && tsx bench/run.ts",
+    "grant": "tsx scripts/grant.ts"
   },
   "dependencies": {
     "@intentius/chant": "^0.124.15",
