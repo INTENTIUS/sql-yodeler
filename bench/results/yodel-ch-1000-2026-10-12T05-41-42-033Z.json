@@ -1,0 +1,510 @@
+{
+  "schema": 1,
+  "bench": "sql-yodeler",
+  "scenario": "yodel-clickhouse-1000",
+  "arm": "yodel",
+  "run": {
+    "id": "yodel-ch-1000-2026-10-12T05-41-42-033Z",
+    "finished_at": "2026-10-12T07:26:06.341Z",
+    "harness_commit": "3b2b2b0",
+    "harness_dirty": false,
+    "substrate": "emulator",
+    "measurements": [
+      "new",
+      "plan",
+      "apply",
+      "pr",
+      "resume",
+      "backfill",
+      "replay",
+      "fanout"
+    ],
+    "sizes": [
+      10,
+      100,
+      1000,
+      10000
+    ],
+    "machine": {
+      "platform": "darwin",
+      "release": "25.6.0",
+      "arch": "arm64",
+      "cpu": "Apple M5 Pro",
+      "cpus": 18,
+      "memory_gb": 64,
+      "node": "v24.13.1"
+    },
+    "emulator": {
+      "started_with": "chant emulator up --lexicon sql",
+      "clickhouse": "26.8.15.10",
+      "postgres": "PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit"
+    },
+    "oracle_clients": {
+      "clickhouse": "the HTTP interface (clickhouse-client is not installed here)",
+      "postgres": "psql (PostgreSQL) 16.14 (Homebrew)"
+    },
+    "versions": {
+      "@intentius/sql-yodeler": "3b2b2b0",
+      "@intentius/chant": "0.124.15",
+      "@intentius/chant-lexicon-sql": "0.124.15"
+    }
+  },
+  "agent": {
+    "name": "none",
+    "model": null,
+    "k": 1
+  },
+  "score": {
+    "trials": 8,
+    "expected_trials": 8,
+    "passed": 8,
+    "pass_rate": 1,
+    "by_task": {
+      "new": [
+        1
+      ],
+      "plan": [
+        1
+      ],
+      "apply": [
+        1
+      ],
+      "pr": [
+        1
+      ],
+      "resume": [
+        1
+      ],
+      "backfill": [
+        1
+      ],
+      "replay": [
+        1
+      ],
+      "fanout": [
+        1
+      ]
+    }
+  },
+  "gates": {
+    "audit": true,
+    "tool_missing": false,
+    "exceptions": {},
+    "errored_trials": 0,
+    "complete": true
+  },
+  "independence": {
+    "account_reads": null,
+    "account_reads_status": "not_applicable",
+    "account_reads_reason": "a schema-migration bench: no cloud account is read; the oracle figures in measurement are this bench's comparison"
+  },
+  "effort": {
+    "wall_seconds": 6264.288,
+    "stage_seconds": {
+      "new": 2.891,
+      "plan": 2.06,
+      "apply": 16.026,
+      "pr": 1.229,
+      "resume": 41.098,
+      "backfill": 41.312,
+      "replay": 2605.053,
+      "fanout": 3549.339
+    }
+  },
+  "measurement": {
+    "objects": 1001,
+    "new": {
+      "what": "yodel new, wall seconds: `create` declares every object from nothing; `incremental` adds a column to every table",
+      "objects": 1001,
+      "create_seconds": 1.402,
+      "create_statements": 1001,
+      "oracle": null,
+      "oracle_reason": "yodel new reads the declarations and the migrations directory and sends nothing to the server; there is no statement to send straight",
+      "incremental_seconds": 1.443,
+      "incremental_statements": 1000
+    },
+    "plan": {
+      "what": "yodel plan <env> --json, wall seconds, versioned project: `create_pending` is every object pending on an empty history; `incremental_pending` is a column added to every table pending after the create applied",
+      "create_pending_seconds": 0.881,
+      "oracle": null,
+      "oracle_reason": "yodel plan reads the history and changes nothing; there is no statement it would send to time straight",
+      "incremental_pending_seconds": 1.179
+    },
+    "apply": {
+      "what": "the create migration (every object) through yodel apply: the Op to its gate, chant approve, the Op's yodel apply --execute; lock and statement figures from the history's recorded_at",
+      "statements": 1001,
+      "wall": {
+        "code": 0,
+        "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+        "gate_seconds": 3.188,
+        "approve_seconds": 0.622,
+        "execute_seconds": 10.127,
+        "seconds": 13.937
+      },
+      "runs": 1,
+      "history_rows": 2004,
+      "lock_held_lower_bound_seconds": 5.928835,
+      "per_migration": {
+        "n": 1,
+        "total": 5.928835,
+        "mean": 5.928835,
+        "p50": 5.928835,
+        "p95": 5.928835,
+        "max": 5.928835
+      },
+      "per_statement": {
+        "n": 1001,
+        "total": 4.026081,
+        "mean": 0.004022,
+        "p50": 0.003754,
+        "p95": 0.005369,
+        "max": 0.060172
+      },
+      "per_step": null,
+      "oracle": {
+        "client": "ClickHouse HTTP interface (fetch, one POST per statement)",
+        "statements": 1001,
+        "wall_seconds": 2.072,
+        "per_statement": {
+          "n": 1001,
+          "total": 2.071016,
+          "mean": 0.002069,
+          "p50": 0.001811,
+          "p95": 0.002637,
+          "max": 0.063208
+        }
+      },
+      "overhead_seconds": {
+        "lock_held_minus_oracle": 3.857,
+        "apply_wall_minus_oracle": 11.865,
+        "execute_wall_minus_oracle": 8.055
+      }
+    },
+    "pr": {
+      "what": "the pull request job's local equivalent, not a forge run: yodel plan <env> --format markdown, which plans and renders the comment `yodel plan --comment` posts; no push, no runner, no forge API",
+      "pending_statements": 1000,
+      "plan_and_render_seconds": 1.227,
+      "comment_bytes": 71909,
+      "oracle": null,
+      "oracle_reason": "the job sends nothing to the database; there is no statement to send straight"
+    },
+    "resume": {
+      "what": "a migration adding a column to every table, failing at the middle table's statement (its column made by hand first), resumed once the column is gone; against another migration of the same shape run clean",
+      "statements": 1000,
+      "failed_at_statement": 500,
+      "interrupted": {
+        "wall": {
+          "code": 1,
+          "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+          "gate_seconds": 3.532,
+          "approve_seconds": 0.682,
+          "execute_seconds": 6.89,
+          "seconds": 11.104
+        },
+        "runs": 1,
+        "history_rows": 1004,
+        "lock_held_lower_bound_seconds": 2.818519,
+        "per_migration": {
+          "n": 1,
+          "total": 2.818519,
+          "mean": 2.818519,
+          "p50": 2.818519,
+          "p95": 2.818519,
+          "max": 2.818519
+        },
+        "per_statement": {
+          "n": 501,
+          "total": 1.78795,
+          "mean": 0.003569,
+          "p50": 0.003328,
+          "p95": 0.005133,
+          "max": 0.016241
+        },
+        "per_step": null
+      },
+      "resumed": {
+        "wall": {
+          "code": 0,
+          "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+          "gate_seconds": 3.537,
+          "approve_seconds": 0.695,
+          "execute_seconds": 6.967,
+          "seconds": 11.199
+        },
+        "runs": 1,
+        "history_rows": 1002,
+        "lock_held_lower_bound_seconds": 2.699588,
+        "per_migration": {
+          "n": 1,
+          "total": 2.699588,
+          "mean": 2.699588,
+          "p50": 2.699588,
+          "p95": 2.699588,
+          "max": 2.699588
+        },
+        "per_statement": {
+          "n": 500,
+          "total": 1.707526,
+          "mean": 0.003415,
+          "p50": 0.003262,
+          "p95": 0.004556,
+          "max": 0.007509
+        },
+        "per_step": null,
+        "statements_resent": 0
+      },
+      "clean": {
+        "wall": {
+          "code": 0,
+          "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+          "gate_seconds": 3.692,
+          "approve_seconds": 0.64,
+          "execute_seconds": 10.009,
+          "seconds": 14.341
+        },
+        "runs": 1,
+        "history_rows": 2002,
+        "lock_held_lower_bound_seconds": 5.605829,
+        "per_migration": {
+          "n": 1,
+          "total": 5.605829,
+          "mean": 5.605829,
+          "p50": 5.605829,
+          "p95": 5.605829,
+          "max": 5.605829
+        },
+        "per_statement": {
+          "n": 1000,
+          "total": 3.579754,
+          "mean": 0.00358,
+          "p50": 0.003376,
+          "p95": 0.004765,
+          "max": 0.019936
+        },
+        "per_step": null
+      },
+      "interrupted_plus_resumed_minus_clean_seconds": 7.962,
+      "oracle": {
+        "client": "ClickHouse HTTP interface (fetch, one POST per statement)",
+        "statements": 1000,
+        "wall_seconds": 1.227,
+        "per_statement": {
+          "n": 1000,
+          "total": 1.226312,
+          "mean": 0.001226,
+          "p50": 0.001172,
+          "p95": 0.001467,
+          "max": 0.007553
+        }
+      },
+      "oracle_of": "the clean migration's statements sent straight"
+    },
+    "backfill": {
+      "what": "a hand-written backfill step over every row of bf, in batches by id; clean, then another column's backfill interrupted at its middle batch and resumed from its receipts",
+      "rows": 1000000,
+      "batches": 10,
+      "clean": {
+        "wall": {
+          "code": 0,
+          "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+          "gate_seconds": 3.722,
+          "approve_seconds": 0.659,
+          "execute_seconds": 4.855,
+          "seconds": 9.236
+        },
+        "runs": 1,
+        "history_rows": 6,
+        "lock_held_lower_bound_seconds": 0.470409,
+        "per_migration": {
+          "n": 1,
+          "total": 0.470409,
+          "mean": 0.470409,
+          "p50": 0.470409,
+          "p95": 0.470409,
+          "max": 0.470409
+        },
+        "per_statement": {
+          "n": 1,
+          "total": 0.006472,
+          "mean": 0.006472,
+          "p50": 0.006472,
+          "p95": 0.006472,
+          "max": 0.006472
+        },
+        "per_step": {
+          "n": 1,
+          "total": 0.453647,
+          "mean": 0.453647,
+          "p50": 0.453647,
+          "p95": 0.453647,
+          "max": 0.453647
+        },
+        "rows_per_second": 2204357
+      },
+      "interrupted": {
+        "wall": {
+          "code": 1,
+          "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+          "gate_seconds": 3.869,
+          "approve_seconds": 0.654,
+          "execute_seconds": 4.558,
+          "seconds": 9.081
+        },
+        "failed_at_batch": 5,
+        "runs": 1,
+        "history_rows": 6,
+        "lock_held_lower_bound_seconds": 0.254943,
+        "per_migration": {
+          "n": 1,
+          "total": 0.254943,
+          "mean": 0.254943,
+          "p50": 0.254943,
+          "p95": 0.254943,
+          "max": 0.254943
+        },
+        "per_statement": {
+          "n": 1,
+          "total": 0.006097,
+          "mean": 0.006097,
+          "p50": 0.006097,
+          "p95": 0.006097,
+          "max": 0.006097
+        },
+        "per_step": {
+          "n": 1,
+          "total": 0.239234,
+          "mean": 0.239234,
+          "p50": 0.239234,
+          "p95": 0.239234,
+          "max": 0.239234
+        }
+      },
+      "resumed": {
+        "wall": {
+          "code": 0,
+          "lock": "local file: the server has no KeeperMap (keeper_map_path_prefix unset)",
+          "gate_seconds": 3.684,
+          "approve_seconds": 0.646,
+          "execute_seconds": 4.78,
+          "seconds": 9.11
+        },
+        "runs": 1,
+        "history_rows": 4,
+        "lock_held_lower_bound_seconds": 0.282311,
+        "per_migration": {
+          "n": 1,
+          "total": 0.282311,
+          "mean": 0.282311,
+          "p50": 0.282311,
+          "p95": 0.282311,
+          "max": 0.282311
+        },
+        "per_statement": null,
+        "per_step": {
+          "n": 1,
+          "total": 0.275731,
+          "mean": 0.275731,
+          "p50": 0.275731,
+          "p95": 0.275731,
+          "max": 0.275731
+        }
+      },
+      "oracle": {
+        "client": "ClickHouse HTTP interface (fetch, one POST per statement)",
+        "statements": 10,
+        "wall_seconds": 0.386,
+        "per_statement": {
+          "n": 10,
+          "total": 0.38619,
+          "mean": 0.038619,
+          "p50": 0.040769,
+          "p95": 0.043144,
+          "max": 0.043144
+        },
+        "rows_per_second": 2590674
+      },
+      "oracle_of": "the clean backfill's batch statements sent straight to a copy of bf with the same rows"
+    },
+    "replay": {
+      "what": "yodel lint --replay <env>: every migration applied in order to a fresh database on the env's server, each compared with the schema it recorded",
+      "migrations": 1000,
+      "capped": null,
+      "generate_seconds": 2227.864,
+      "replay_seconds": 374.077,
+      "oracle": {
+        "client": "ClickHouse HTTP interface (fetch, one POST per statement)",
+        "statements": 1001,
+        "wall_seconds": 2.493,
+        "per_statement": {
+          "n": 1001,
+          "total": 2.492964,
+          "mean": 0.00249,
+          "p50": 0.002033,
+          "p95": 0.004877,
+          "max": 0.010924
+        }
+      },
+      "overhead_seconds": 371.584
+    },
+    "fanout": {
+      "what": "a tenant set of `tenants` empty tenants (#56), one table each, applied by its wave through chant run wave: decide (plans every tenant and waits), one chant approve of the set digest, apply (plans again and applies each tenant under its own lock). `list` renders a run per tenant; `query` reads the set from a registry table when the wave runs, one run for every tenant. `plan_comment` is yodel plan <set> --format markdown, the one comment for the set",
+      "tenants": 1000,
+      "statements_per_tenant": 2,
+      "list": {
+        "runs": 1000,
+        "plan_comment": {
+          "seconds": 129.752,
+          "bytes": 2249
+        },
+        "decide_seconds": 834.364,
+        "approve_seconds": 0.624,
+        "apply_seconds": 1915.838,
+        "wall_seconds": 2750.826,
+        "per_tenant_wall_seconds": 2.75,
+        "lock_held_per_tenant": {
+          "n": 1000,
+          "total": 20.790022,
+          "mean": 0.02079,
+          "p50": 0.020966,
+          "p95": 0.023616,
+          "max": 0.056342
+        }
+      },
+      "query": {
+        "runs": 1,
+        "plan_comment": {
+          "seconds": 125.29,
+          "bytes": 2249
+        },
+        "decide_seconds": 50.528,
+        "approve_seconds": 0.675,
+        "apply_seconds": 481.023,
+        "wall_seconds": 532.226,
+        "per_tenant_wall_seconds": 0.532,
+        "lock_held_per_tenant": {
+          "n": 1000,
+          "total": 18.87598,
+          "mean": 0.018876,
+          "p50": 0.018335,
+          "p95": 0.022963,
+          "max": 0.070882
+        }
+      },
+      "oracle": {
+        "client": "ClickHouse HTTP interface (fetch, one POST per statement)",
+        "statements": 2000,
+        "wall_seconds": 3.436,
+        "per_statement": {
+          "n": 2000,
+          "total": 3.435848,
+          "mean": 0.001718,
+          "p50": 0.001667,
+          "p95": 0.002722,
+          "max": 0.010029
+        }
+      },
+      "oracle_of": "every tenant's statements sent straight to a copy of it, one after another"
+    }
+  },
+  "reproduce": "bench/README.md: npm run bench -- new plan apply pr resume backfill replay fanout --sizes 1000 --dialects ch"
+}

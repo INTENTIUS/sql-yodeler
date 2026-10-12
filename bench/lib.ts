@@ -145,8 +145,19 @@ export async function exec(dialect: Dialect, sql: string): Promise<void> {
 /** Drops a ClickHouse database or a Postgres schema. */
 export async function drop(dialect: Dialect, name: string): Promise<void> {
   if (!name.startsWith("yodel_35_")) throw new Error(`refusing to drop ${name}: the bench owns yodel_35_* only`);
-  if (dialect === "ch") await clickhouse(`DROP DATABASE IF EXISTS ${name} SYNC`);
-  else await postgres(`DROP SCHEMA IF EXISTS ${name} CASCADE`);
+  if (dialect === "ch") {
+    await clickhouse(`DROP DATABASE IF EXISTS ${name} SYNC`);
+    return;
+  }
+  // A schema of thousands of tables, dropped in one statement, needs a lock per table in one
+  // transaction and runs past max_locks_per_transaction ("out of shared memory"). Its tables go
+  // first, a few hundred at a time.
+  for (;;) {
+    const tables = await postgres<{ t: string }>(`SELECT quote_ident(tablename) AS t FROM pg_tables WHERE schemaname = '${name}' LIMIT 200`);
+    if (!tables.length) break;
+    await postgres(`DROP TABLE IF EXISTS ${tables.map((r) => `${name}.${r.t}`).join(", ")} CASCADE`);
+  }
+  await postgres(`DROP SCHEMA IF EXISTS ${name} CASCADE`);
 }
 
 /** The emulator's versions, as the servers report them. */
