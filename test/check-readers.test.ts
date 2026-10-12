@@ -7,10 +7,10 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { splitStatements } from "@intentius/chant-lexicon-sql/postgres/apply/statements";
-import { detectTool, readForeign } from "../src/check/readers.js";
+import { detectTool, readForeign, readForeignDir } from "../src/check/readers.js";
 import { changedSince } from "../src/commands/check.js";
 import { migrationName, onForeignFiles } from "../src/check/run.js";
 import type { LintReport } from "../src/lint/index.js";
@@ -24,7 +24,10 @@ afterEach(() => {
 function dir(files: Record<string, string>): string {
   const d = mkdtempSync(join(tmpdir(), "yodel-check-"));
   dirs.push(d);
-  for (const [name, text] of Object.entries(files)) writeFileSync(join(d, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(d, name)), { recursive: true });
+    writeFileSync(join(d, name), text);
+  }
   return d;
 }
 
@@ -101,6 +104,98 @@ describe("flyway", () => {
     const read = readForeign(d, "flyway", split);
     expect(read.map((m) => m.file)).toEqual(["V1__create.sql", "V1.9__add_name.sql", "V1.10__add_email.sql", "R__a_first.sql", "R__views.sql"]);
     expect(read.filter((m) => m.repeatable).map((m) => m.name)).toEqual(["a_first", "views"]);
+  });
+});
+
+describe("flyway projects", () => {
+  it("reads nested folders, and leaves callbacks out of the migrations and the detection", () => {
+    const d = dir({
+      "V1__create.sql": "CREATE TABLE users (id bigint);\n",
+      "release_2/V2__add_name.sql": "ALTER TABLE users ADD COLUMN name text;\n",
+      "release_2/deep/V2.1__add_email.sql": "ALTER TABLE users ADD COLUMN email text;\n",
+      "beforeMigrate.sql": "SELECT 1;\n",
+      "afterEachMigrate__notify.sql": "SELECT 2;\n",
+    });
+    expect(detectTool(d)).toBe("flyway");
+    expect(sqls(d, "flyway").map((m) => m.file)).toEqual(["V1__create.sql", "release_2/V2__add_name.sql", "release_2/deep/V2.1__add_email.sql"]);
+  });
+
+  it("reads flyway.conf: its locations, relative to it, and its placeholders, Flyway's own included", () => {
+    const d = dir({
+      "flyway.conf": "flyway.locations=filesystem:db/core,filesystem:db/extra\nflyway.placeholders.owner=app_owner\nflyway.defaultSchema=app\n# a comment\n",
+      "db/core/V1__create.sql": "CREATE TABLE ${flyway:defaultSchema}.users (id bigint);\nALTER TABLE ${flyway:defaultSchema}.users OWNER TO ${owner};\n",
+      "db/extra/V2__note.sql": "-- ${flyway:filename}\nALTER TABLE app.users ADD COLUMN note text;\n",
+      "db/elsewhere/V3__not_a_location.sql": "DROP TABLE app.users;\n",
+    });
+    const read = readForeignDir(join(d, "db", "core"), "flyway", split, { stopAt: d });
+    expect(read.root).toBe(d);
+    expect(read.config).toBe(join(d, "flyway.conf"));
+    expect(read.migrations.map((m) => ({ file: m.file, statements: m.statements.map((s) => s.sql) }))).toEqual([
+      { file: "db/core/V1__create.sql", statements: ["CREATE TABLE app.users (id bigint)", "ALTER TABLE app.users OWNER TO app_owner"] },
+      { file: "db/extra/V2__note.sql", statements: ["-- V2__note.sql\nALTER TABLE app.users ADD COLUMN note text"] },
+    ]);
+    expect(detectTool(join(d, "db", "core"), d)).toBe("flyway");
+  });
+
+  it("reads flyway.toml: its locations, its placeholders and the environment's schemas and database", () => {
+    const d = dir({
+      "flyway.toml": [
+        "[environments.default]",
+        'url = "jdbc:postgresql://localhost:5432/shop"',
+        'schemas = ["sales", "audit"]',
+        "",
+        "[flyway]",
+        "locations = [",
+        '  "filesystem:migrations",  # the SQL',
+        "]",
+        "",
+        "[flyway.placeholders]",
+        'tablespace = "pg_default"',
+      ].join("\n"),
+      "migrations/V1__create.sql": "CREATE TABLE ${flyway:defaultSchema}.orders (id bigint) TABLESPACE ${tablespace};\nCOMMENT ON TABLE sales.orders IS '${flyway:database}';\n",
+    });
+    const read = readForeignDir(join(d, "migrations"), "flyway", split, { stopAt: d });
+    expect(read.migrations.map((m) => m.statements.map((s) => s.sql))).toEqual([["CREATE TABLE sales.orders (id bigint) TABLESPACE pg_default", "COMMENT ON TABLE sales.orders IS 'shop'"]]);
+  });
+
+  it("falls back to the replay scope for flyway:defaultSchema, and names the file and line of a placeholder with no value", () => {
+    const d = dir({ "V1__create.sql": "CREATE TABLE ${flyway:defaultSchema}.users (id bigint);\n\nCREATE INDEX ON users (${missing});\n" });
+    expect(() => readForeign(d, "flyway", split, { defaults: { defaultSchema: "replay" } })).toThrow(/V1__create\.sql:3: no value for the placeholder \$\{missing\}/);
+    const ok = dir({ "V1__create.sql": "CREATE TABLE ${flyway:defaultSchema}.users (id bigint);\n" });
+    expect(readForeign(ok, "flyway", split, { defaults: { defaultSchema: "replay" } })[0]?.statements[0]?.sql).toBe("CREATE TABLE replay.users (id bigint)");
+  });
+
+  it("leaves placeholders alone when flyway.placeholderReplacement is false", () => {
+    const d = dir({ "flyway.conf": "flyway.placeholderReplacement=false\n", "V1__create.sql": "SELECT '${not_a_placeholder}';\n" });
+    expect(sqls(d, "flyway")[0]?.statements).toEqual(["SELECT '${not_a_placeholder}'"]);
+  });
+
+  it("starts from the newest B__ baseline, in place of the versioned files up to its version", () => {
+    const d = dir({
+      "V1__create.sql": "CREATE TABLE users (id bigint);\n",
+      "V2__add_name.sql": "ALTER TABLE users ADD COLUMN name text;\n",
+      "B1__old_baseline.sql": "CREATE TABLE users (id bigint);\n",
+      "B2__baseline.sql": "CREATE TABLE users (id bigint, name text);\n",
+      "V3__add_email.sql": "ALTER TABLE users ADD COLUMN email text;\n",
+      "R__view.sql": "CREATE OR REPLACE VIEW ids AS SELECT id FROM users;\n",
+    });
+    const read = readForeign(d, "flyway", split);
+    expect(read.map((m) => m.file)).toEqual(["B2__baseline.sql", "V3__add_email.sql", "R__view.sql"]);
+    expect(read[0]?.baseline).toBe(true);
+  });
+
+  it("refuses a Java migration in a classpath location, naming it", () => {
+    const d = dir({
+      "flyway.conf": "flyway.locations=classpath:db/migration\n",
+      "src/main/resources/db/migration/V1__create.sql": "CREATE TABLE users (id bigint);\n",
+      "src/main/java/db/migration/V2__Seed.java": "public class V2__Seed {}\n",
+    });
+    expect(() => readForeign(join(d, "src", "main", "resources", "db", "migration"), "flyway", split, { stopAt: d })).toThrow(/src\/main\/java\/db\/migration\/V2__Seed\.java: a Java or Kotlin migration is code/);
+  });
+
+  it("refuses two migrations of one version", () => {
+    const d = dir({ "a/V1__create.sql": "CREATE TABLE a (id bigint);\n", "b/V1.0__create.sql": "CREATE TABLE b (id bigint);\n" });
+    expect(() => readForeign(d, "flyway", split)).toThrow(/two versioned migrations of version/);
   });
 });
 

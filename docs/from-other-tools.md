@@ -23,10 +23,19 @@ What it reads from each tool, the up direction only:
 
 | Tool | Files | What is read |
 |---|---|---|
-| golang-migrate | `<version>_<title>.up.sql` | the whole file; `.down.sql` files are not read |
-| goose | `<version>_<name>.sql` | the `-- +goose Up` section. A `-- +goose StatementBegin` ... `StatementEnd` block is one statement. Go migrations are refused, since their code is not SQL |
-| Flyway | `V<version>__<description>.sql`, `R__<description>.sql` | the versioned files by version (1.10 after 1.9), then the repeatable ones by description; undo files are not read |
-| dbmate | `<version>_<name>.sql` | the `-- migrate:up` section |
+| golang-migrate | `<version>_<title>.up.sql` in the directory | the whole file, by version; `.down.sql` files are not read |
+| goose | `<version>_<name>.sql` in the directory | the `-- +goose Up` section, by version. A `-- +goose StatementBegin` ... `StatementEnd` block is one statement. Go migrations are refused, since their code is not SQL |
+| Flyway | `V<version>__<description>.sql`, `B<version>__<description>.sql` and `R__<description>.sql` in every location, subfolders included | the newest `B__` baseline first, when there is one, then the versioned files after its version by version (1.10 after 1.9), then the repeatable ones by description, with placeholders substituted. Undo files and callbacks (`beforeMigrate.sql`, `afterEachMigrate__notify.sql`, ...) are not read. Java and Kotlin migrations are refused, naming each one |
+| dbmate | `<version>_<name>.sql` in the directory | the `-- migrate:up` section, by version |
+
+For Flyway, `yodel check` reads the first `flyway.toml`, else `flyway.conf`, in the directory it checks or a directory above it, up to the project's:
+
+- `locations`, relative to the configuration file. `filesystem:<path>` is that directory; `classpath:<path>` is `src/main/resources/<path>`, and its code migrations would be in `src/main/java/<path>` or `src/main/kotlin/<path>`. With no locations, the directory checked is the one location.
+- Placeholders: `flyway.placeholders.<name>` in `flyway.conf`, `[flyway.placeholders]` in `flyway.toml`, with `placeholderPrefix`, `placeholderSuffix` and `placeholderReplacement`. Flyway's own work too: `${flyway:defaultSchema}` is `defaultSchema`, else the first of `schemas`, else the replay profile's schema; `${flyway:database}` comes from `url`; `${flyway:user}`, `${flyway:table}`, `${flyway:filename}`, `${flyway:timestamp}`, `${flyway:workingDirectory}` and `${flyway:environment}` as Flyway sets them. A placeholder with no value fails the check, naming the file and line.
+- In `flyway.toml`, the `[environments.<name>]` that `[flyway] environment` names (`default` when it names none) gives `url`, `user` and `schemas`.
+- `sqlMigrationPrefix`, `repeatableSqlMigrationPrefix`, `baselineMigrationPrefix`, `sqlMigrationSeparator` and `sqlMigrationSuffixes` when they are set.
+
+Two migrations of one version (1 and 1.0 included) fail the check, as they fail Flyway.
 
 ### Set it up
 
