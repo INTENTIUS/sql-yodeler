@@ -1,7 +1,15 @@
 import { parseArgs } from "node:util";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
+import type { Io } from "../command.js";
+import type { PolicyConfig } from "../config/define.js";
+import { declarativeRefusal } from "../config/settings.js";
+import { buildSchema } from "../chant/build.js";
+import { declaredChanges, planEnvironment, planExitCode } from "../chant/plan.js";
+import { findApplyOp } from "../chant/apply.js";
+import { declarativeDigest } from "../declarative/review.js";
+import { judgeDeclarative } from "../declarative/plan.js";
 import { EXIT_REFUSED } from "../exit.js";
 import { policyAtBase } from "../config/base.js";
 import { runChant } from "../chant/process.js";
@@ -42,6 +50,12 @@ under (--by, else chant's: the CI actor or your user), under approval
 sealed only signed (--sign is passed for you), and once: yodel apply spends
 it before it applies and records it in the history.
 
+In a project with no migrations (the declarative path), the plan is the
+changes the declared schema plans against <env>'s live database, under the
+ApplyOp's name, for the digest yodel plan <env> prints: once the live
+database or src/ changes, it denies again. yodel apply spends it once the
+ApplyOp applies, not when it stops at the gate.
+
 With --revert <id>, the plan is the revert yodel revert <env> <id> would run
 (with --step, the hand-written revert step it is given), and the override
 counts for that revert's digest only.
@@ -59,7 +73,8 @@ Options:
                         for yodel apply's plan
   --step <file>         with --revert: the hand-written revert step yodel
                         revert is given
-  --op <name>           the migrations Op, when more than one applies <env>
+  --op <name>           the migrations Op (declarative: the ApplyOp), when
+                        more than one applies <env>
   --allow-out-of-order  the plan yodel apply --allow-out-of-order runs
   -C, --dir <dir>       the project directory (default: the working directory)
 
@@ -117,7 +132,6 @@ export const override: Command = {
       const project = await loadProject(typeof values.dir === "string" ? values.dir : process.cwd());
       const env = resolveEnvironment(project, name);
       if (rules.length === 0 || reason === "") throw new YodelError(`--rule and --reason are required: an override names the rule and says why\n${usage}`);
-      if (!hasMigrations(project)) throw new YodelError(`${project.dir} has no migrations/ directory with a migration; policy is for versioned migrations`);
       // The policy apply judges: the base commit's (#73).
       const { policy, note } = await policyAtBase(project);
       if (!policy) throw new YodelError(note ? `${note} There is nothing to override.` : "yodel.config.ts declares no policy, so there is nothing to override", EXIT_REFUSED);
@@ -127,6 +141,10 @@ export const override: Command = {
         throw new YodelError(`${by} is not in policy.overriders (${(policy.overriders ?? []).join(", ") || "none"}), so an override by them would not count; nothing recorded`, EXIT_REFUSED);
       }
 
+      if (!hasMigrations(project)) {
+        if (revertId !== undefined || values["allow-out-of-order"] === true) throw new YodelError(`${revertId !== undefined ? "--revert" : "--allow-out-of-order"} is for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+        return await declarativeOverride({ project, env, io, policy, rules, reason, by, opName: typeof values.op === "string" ? values.op : undefined });
+      }
       const ordered = readChain(project);
       const venv = await openVersioned(project, env);
       try {
@@ -148,40 +166,83 @@ export const override: Command = {
           next = `yodel apply ${env.name}`;
         }
         const what = revertId !== undefined ? `the revert of ${revertId} in ${env.name}` : `the plan for ${env.name}`;
-        const notDenying = rules.filter((r) => results.find((x) => x.id === r)?.outcome !== "denied");
-        if (notDenying.length > 0) {
-          throw new YodelError(`${notDenying.join(", ")} ${notDenying.length === 1 ? "does" : "do"} not deny ${what} (${digest}); an override answers a denial. Nothing recorded.`, EXIT_REFUSED);
-        }
-        // One override answers the whole denial: chant binds it to every rule that denies the plan.
-        const denied = results.filter((x) => x.outcome === "denied").map((x) => x.id);
-        const missing = denied.filter((r) => !rules.includes(r));
-        if (missing.length > 0) {
-          throw new YodelError(`${missing.join(", ")} also ${missing.length === 1 ? "denies" : "deny"} ${what} (${digest}); an override names every rule that denies the plan: add ${missing.map((r) => `--rule ${r}`).join(" ")}. Nothing recorded.`, EXIT_REFUSED);
-        }
-        for (const rule of denied) io.out(`${rule} denies ${digest}:\n${(results.find((x) => x.id === rule)?.reasons ?? []).map((x) => `  ${x}`).join("\n")}\n`);
-
         const op = await findMigrateOp(project, env, typeof values.op === "string" ? values.op : undefined);
-        const subject = overrideSubject(op.name, revertId);
-        const approval = await migrationsApprovalAtBase(project, env.name);
-        if (approval.note) io.err(`${approval.note}\n`);
-        const decision = await decidePolicyOverride(await overrideSourceAt(project.dir, subject, approval), digest, denied, policy.overriders);
-        // chant approve policy-override answers a recorded denial, so the denial goes on the ledger first, unless it stands there already.
-        if (decision.status !== "overridden" && !decision.standing) {
-          const { recordOverrideDenial } = await import("@intentius/chant/lifecycle/override-ledger");
-          const now = new Date();
-          await recordOverrideDenial(
-            { subject, planDigest: digest, rules: denied, timestamp: now.toISOString(), expiresAt: new Date(now.getTime() + DENIAL_TTL_MS).toISOString(), description: `policy denies ${what}` },
-            { cwd: project.dir },
-          );
-        }
-        const args = ["approve", "policy-override", subject, ...denied.flatMap((r) => ["--rule", r]), "--reason", reason, ...(by ? ["--approver", by] : []), ...(approval.mode === "sealed" ? ["--sign"] : [])];
-        const ran = await runChant(args, { cwd: project.dir, onStdout: io.err, onStderr: io.err });
-        if (ran.code !== 0) throw new YodelError(`chant approve policy-override ${subject} failed (exit ${String(ran.code)}); the override was not recorded`);
-        io.out(`Recorded an override of ${denied.join(", ")} for ${digest}${by ? ` by ${by}` : ""}: ${reason}\n`);
-        io.out(`It counts for this plan only. ${revertId !== undefined ? "Revert" : "Apply"} with:\n  ${runnableAsWriter(next, project.dir, env.profile)}\n`);
-        return 0;
+        return await recordOverride({ project, env: env.name, io, subject: overrideSubject(op.name, revertId), digest, results, rules, reason, by, what, next, verb: revertId !== undefined ? "Revert" : "Apply", overriders: policy.overriders });
       } finally {
         await closeVersioned(venv);
       }
     }),
 };
+
+/**
+ * The override of a declarative plan (#249): the changes the declared
+ * schema plans against the live database now, under the ApplyOp's name,
+ * for the digest yodel plan prints and yodel apply judges.
+ */
+async function declarativeOverride(c: { project: Project; env: Environment; io: Io; policy: PolicyConfig; rules: string[]; reason: string; by: string | undefined; opName: string | undefined }): Promise<number> {
+  const { project, env } = c;
+  const refusal = declarativeRefusal(project, env.name);
+  if (refusal) throw refusal;
+  const op = await findApplyOp(project, env, c.opName);
+  const build = await buildSchema(project);
+  try {
+    const plan = await planEnvironment(project, env, build);
+    if (planExitCode(plan) !== 0) throw new YodelError(`yodel apply would refuse this plan before any policy: a change needs its own Op, or a live object could not be read (yodel plan ${env.name} shows which).\nNothing recorded.`, EXIT_REFUSED);
+    const changes = declaredChanges(plan, build);
+    if (changes.length === 0) throw new YodelError(`${env.name} already matches the declared schema: there is no plan to override; nothing recorded`, EXIT_REFUSED);
+    const digest = await declarativeDigest(env.name, project.dialect, changes);
+    const results = await judgeDeclarative({ policy: c.policy, environment: env.name, dialect: project.dialect, changes, digest, ledger: () => Promise.resolve(undefined) });
+    return await recordOverride({ project, env: env.name, io: c.io, subject: overrideSubject(op.name), digest, results, rules: c.rules, reason: c.reason, by: c.by, what: `the plan for ${env.name}`, next: `yodel apply ${env.name}`, verb: "Apply", overriders: c.policy.overriders });
+  } finally {
+    build.dispose();
+  }
+}
+
+/** Checks the rules given answer exactly the denial, records the denial when it is not on the ledger, then the override through chant. */
+async function recordOverride(c: {
+  project: Project;
+  env: string;
+  io: Io;
+  subject: string;
+  digest: string;
+  results: readonly RuleResult[];
+  rules: readonly string[];
+  reason: string;
+  by: string | undefined;
+  what: string;
+  next: string;
+  verb: string;
+  overriders: readonly string[] | undefined;
+}): Promise<number> {
+  const { project, io, subject, digest, results, rules, reason, by, what, next } = c;
+  const notDenying = rules.filter((r) => results.find((x) => x.id === r)?.outcome !== "denied");
+  if (notDenying.length > 0) {
+    throw new YodelError(`${notDenying.join(", ")} ${notDenying.length === 1 ? "does" : "do"} not deny ${what} (${digest}); an override answers a denial. Nothing recorded.`, EXIT_REFUSED);
+  }
+  // One override answers the whole denial: chant binds it to every rule that denies the plan.
+  const denied = results.filter((x) => x.outcome === "denied").map((x) => x.id);
+  const missing = denied.filter((r) => !rules.includes(r));
+  if (missing.length > 0) {
+    throw new YodelError(`${missing.join(", ")} also ${missing.length === 1 ? "denies" : "deny"} ${what} (${digest}); an override names every rule that denies the plan: add ${missing.map((r) => `--rule ${r}`).join(" ")}. Nothing recorded.`, EXIT_REFUSED);
+  }
+  for (const rule of denied) io.out(`${rule} denies ${digest}:\n${(results.find((x) => x.id === rule)?.reasons ?? []).map((x) => `  ${x}`).join("\n")}\n`);
+
+  const approval = await migrationsApprovalAtBase(project, c.env);
+  if (approval.note) io.err(`${approval.note}\n`);
+  const decision = await decidePolicyOverride(await overrideSourceAt(project.dir, subject, approval), digest, denied, c.overriders);
+  // chant approve policy-override answers a recorded denial, so the denial goes on the ledger first, unless it stands there already.
+  if (decision.status !== "overridden" && !decision.standing) {
+    const { recordOverrideDenial } = await import("@intentius/chant/lifecycle/override-ledger");
+    const now = new Date();
+    await recordOverrideDenial(
+      { subject, planDigest: digest, rules: denied, timestamp: now.toISOString(), expiresAt: new Date(now.getTime() + DENIAL_TTL_MS).toISOString(), description: `policy denies ${what}` },
+      { cwd: project.dir },
+    );
+  }
+  const args = ["approve", "policy-override", subject, ...denied.flatMap((r) => ["--rule", r]), "--reason", reason, ...(by ? ["--approver", by] : []), ...(approval.mode === "sealed" ? ["--sign"] : [])];
+  const ran = await runChant(args, { cwd: project.dir, onStdout: io.err, onStderr: io.err });
+  if (ran.code !== 0) throw new YodelError(`chant approve policy-override ${subject} failed (exit ${String(ran.code)}); the override was not recorded`);
+  io.out(`Recorded an override of ${denied.join(", ")} for ${digest}${by ? ` by ${by}` : ""}: ${reason}\n`);
+  io.out(`It counts for this plan only. ${c.verb} with:\n  ${runnableAsWriter(next, project.dir, resolveEnvironment(project, c.env).profile)}\n`);
+  return 0;
+}

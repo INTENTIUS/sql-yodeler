@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import { fixture, yodel } from "./helpers/run.js";
 
 describe("yodel plan's versioned flags", () => {
-  it("refuses them on a declarative project, which keeps #6's plan", async () => {
-    const ran = await yodel(["plan", "e2e", "--comment", "--dir", fixture("clickhouse")]);
+  it("takes --comment on a declarative project (#249), and refuses --allow-out-of-order there", async () => {
+    // --comment resolves the forge first, before it reads the server.
+    const ran = await yodel(["plan", "e2e", "--comment", "--forge", "github", "--repo", "o/r", "--pr", "1", "--api-url", "http://127.0.0.1:9", "--token-env", "YODEL_TEST_NO_SUCH_TOKEN", "--dir", fixture("clickhouse")]);
     expect(ran.code).toBe(1);
-    expect(ran.err).toContain("--comment is for versioned migrations");
-    const md = await yodel(["plan", "e2e", "--format", "markdown", "--dir", fixture("clickhouse")]);
-    expect(md.err).toContain("--format markdown is for versioned migrations");
+    expect(ran.err).toContain("--comment on github needs a token");
+    const late = await yodel(["plan", "e2e", "--allow-out-of-order", "--dir", fixture("clickhouse")]);
+    expect(late.code).toBe(1);
+    expect(late.err).toContain("--allow-out-of-order is for versioned migrations");
+    expect(late.err).toContain("docs/workflows.md");
   });
 
   it("takes the forge flags only with --comment, and one format", async () => {

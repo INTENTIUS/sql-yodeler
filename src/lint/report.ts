@@ -29,6 +29,11 @@ export function renderLint(report: LintReport): string {
     for (const f of list) out.push(...line(f));
     out.push("");
   }
+  if (report.declarative) {
+    // No migration.sql holds a yodel:allow line on this path: lint.rules lowers a rule, a policy override answers a denial.
+    out.push(`${report.environment ? `The declared schema and the plan for ${report.environment}` : "The declared schema"}: ${[plural(report.errors, "error"), plural(report.warnings, "warning")].join(", ")}.`);
+    return `${out.join("\n")}\n`;
+  }
   const silenceHint = report.findings.some((f) => f.silenced === undefined && f.level === "error" && ["destructive", "pg-rewrite", "pg-lock", "pg-signature", "ch-mutation", "ch-rebuild"].includes(f.rule));
   if (silenceHint) {
     out.push("A statement rule can be silenced for one statement, with a reason the history records when it applies:", "  a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql", "");
@@ -41,6 +46,7 @@ export function renderLint(report: LintReport): string {
 export function lintJson(report: LintReport): Record<string, unknown> {
   return {
     status: report.errors > 0 ? "failed" : "passed",
+    ...(report.declarative ? { declarative: true } : {}),
     ...(report.environment ? { environment: report.environment } : {}),
     dialect: report.dialect ?? null,
     migrations: report.migrations,

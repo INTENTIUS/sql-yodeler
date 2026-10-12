@@ -92,6 +92,8 @@ export interface LintReport {
   errors: number;
   warnings: number;
   silenced: number;
+  /** A project with no migrations (#249): the findings are over the declared schema, and with an environment over the plan against it. */
+  declarative?: boolean;
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).split("\n")[0] ?? "";

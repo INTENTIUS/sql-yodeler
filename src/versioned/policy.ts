@@ -255,8 +255,8 @@ export async function judgePlan(input: {
   return judgePolicyPlan(input.policy, policyPlan(input.environment, input.dialect, input.toApply, input.now), input.digest, input.ledger, input.spend);
 }
 
-/** The rules over `plan`, with the override that counts for `digest` (chant's decision) marking the denials it answers. */
-async function judgePolicyPlan(
+/** The rules over `plan` (a migration plan's, a revert's, a declarative plan's), with the override that counts for `digest` (chant's decision) marking the denials it answers. */
+export async function judgePolicyPlan(
   policy: PolicyConfig,
   plan: PolicyPlan,
   digest: string | undefined,

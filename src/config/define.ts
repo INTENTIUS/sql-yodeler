@@ -446,6 +446,13 @@ export interface PolicyPlan {
   pending: PolicyMigration[];
   /** Present when the plan is a revert (`yodel revert`): the migration undone and the one it goes back to (null: an empty schema). */
   revert?: { id: string; to: string | null };
+  /**
+   * Present when the project has no migrations (#249): the plan is the
+   * declared schema against the live database, and `pending` holds one
+   * entry, `declared`, its steps the planned changes (each a `statement`
+   * with its rule and class, and no SQL).
+   */
+  declarative?: true;
 }
 
 export interface PolicyMigration {

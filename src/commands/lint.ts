@@ -6,7 +6,11 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { isHandWritten, MIGRATION_JSON, recordHandWritten, scanMigrations, serializeDocument } from "../migrations/index.js";
 import { buildSchema } from "../chant/build.js";
-import { inspect, migrationsDir, openVersioned } from "../versioned/index.js";
+import { hasMigrations, inspect, migrationsDir, openVersioned } from "../versioned/index.js";
+import { declarativeRefusal } from "../config/settings.js";
+import { declaredChanges, planEnvironment } from "../chant/plan.js";
+import { changeFindings, declarativeLint, declaredSchemaFindings } from "../declarative/review.js";
+import type { LintReport, LintSettings } from "../lint/index.js";
 import { chantLevel, CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
 import { loadPolicies, policyRules } from "../lint/policies.js";
@@ -19,6 +23,17 @@ const help = `${usage}
 
 Checks the migrations directory against every lint rule, offline: no server
 and no dev database. Every rule is free and runs in CI on every pull request.
+
+A project with no migrations/ directory (the declarative path) has no
+migrations to check: yodel lint runs the lexicon's schema checks, the
+project's own checks and lint.naming over the build of src/, offline. With
+--env <env> it also plans src/ against <env>'s live database and checks the
+planned changes against the statement rules that read a change's rule and
+class (destructive, pg-rewrite, pg-access, ch-mutation, ch-rebuild,
+ch-access, and refused-step for a change that needs its own Op). The plan
+carries no statement, so pg-lock, data-dependent and pg-signature are for
+versioned migrations, and with no migration.sql nothing is silenced:
+lint.rules sets a rule's level. yodel plan <env> shows the same findings.
 
 Rules (yodel lint --rules lists them with their levels):
   fork               two migrations follow the same parent (yodel rebase)
@@ -84,7 +99,8 @@ Options:
   --env <env>             also compare with <env>'s history: a
                           checksum error is then an applied migration whose
                           files changed since it ran; a pending migration's
-                          edit is a warning
+                          edit is a warning. Declarative: also lint the
+                          plan against <env>
   --update-checksum <id>  first write <id>'s migration.json checksum to match
                           its files (repeatable); refused with --env when <id>
                           is applied there
@@ -230,6 +246,7 @@ export const lint: Command = {
       const policies = await loadPolicies(project);
       if (a.rules) return listRules(io, a.json, project, policies);
       const settings = lintSettings(project.yodel?.config.lint as Record<string, unknown> | undefined, allRules(policies), project.yodel?.path);
+      if (!hasMigrations(project)) return declarativeLintRun(project, a, settings, policies, io);
       const dir = migrationsDir(project);
 
       const options: LintOptions = { dialect: project.dialect, project, settings, rules: projectRules, policies };
@@ -292,14 +309,51 @@ export const lint: Command = {
       }
 
       const report = await lintMigrations(dir, options);
-      if (a.json) io.out(`${JSON.stringify({ ...lintJson(report), ...(replay ? { replay: replayJson(replay) } : {}) }, null, 2)}\n`);
-      else {
-        io.out(`${replay ? `${renderReplay(replay)}\n` : ""}${renderLint(report)}`);
-        // The forge's checkout, which a forge's file paths are relative to; the project's directory elsewhere.
-        const root = process.env.GITHUB_WORKSPACE || process.env.CI_PROJECT_DIR || project.dir;
-        if (a.format === "github") io.out(workflowCommands(report, root));
-        if (a.format === "gitlab") writeFileSync(resolve(a.output), `${JSON.stringify(codeQuality(report, root), null, 2)}\n`);
-      }
-      return lintExitCode(report);
+      return emit(report, a, project, io, replay);
     }),
 };
+
+/** Prints the report as `a` asks, writes the code quality report for --format gitlab, and returns the exit code. */
+function emit(report: LintReport, a: LintArgs, project: Project, io: Io, replay?: ReplayResult): number {
+  if (a.json) io.out(`${JSON.stringify({ ...lintJson(report), ...(replay ? { replay: replayJson(replay) } : {}) }, null, 2)}\n`);
+  else {
+    io.out(`${replay ? `${renderReplay(replay)}\n` : ""}${renderLint(report)}`);
+    // The forge's checkout, which a forge's file paths are relative to; the project's directory elsewhere.
+    const root = process.env.GITHUB_WORKSPACE || process.env.CI_PROJECT_DIR || project.dir;
+    if (a.format === "github") io.out(workflowCommands(report, root));
+    if (a.format === "gitlab") writeFileSync(resolve(a.output), `${JSON.stringify(codeQuality(report, root), null, 2)}\n`);
+  }
+  return lintExitCode(report);
+}
+
+/**
+ * `yodel lint` in a project with no migrations (#249): the lexicon's schema
+ * checks, the project's own checks and lint.naming over the build of src/,
+ * offline; with --env, also the statement rules over the changes the
+ * declared schema plans against that environment's live database.
+ */
+async function declarativeLintRun(project: Project, a: LintArgs, settings: LintSettings, policies: readonly PostSynthCheck[], io: Io): Promise<number> {
+  const versionedOnly = [...(a.replay !== undefined ? ["--replay"] : []), ...(a.update.length > 0 ? ["--update-checksum"] : [])];
+  if (versionedOnly.length > 0) throw new YodelError(`${versionedOnly.join(" and ")} ${versionedOnly.length === 1 ? "reads" : "read"} a migrations directory, and ${project.dir} has no migrations/ directory with a migration; on the declarative path, yodel lint --env <env> lints the plan against <env>`);
+  const build = await buildSchema(project, { empty: true });
+  try {
+    // A project that declares nothing yet has no schema to check and nothing to plan.
+    if (build.output.objects.length === 0) {
+      if (a.env !== undefined) throw new YodelError(`${project.sourceDir} declares nothing: there is no declared schema to plan against ${a.env}`);
+      return emit(declarativeLint({ project, settings, policies, schema: [] }), a, project, io);
+    }
+    const chantRules = (project.config as { lint?: { rules?: Record<string, unknown> } }).lint?.rules;
+    const schema = declaredSchemaFindings(build.output, { settings, chantRules, policies, env: a.env });
+    let plan: { environment: string; findings: ReturnType<typeof changeFindings> } | undefined;
+    if (a.env !== undefined) {
+      const env = resolveEnvironment(project, a.env);
+      const refusal = declarativeRefusal(project, env.name);
+      if (refusal) throw refusal;
+      const planned = await planEnvironment(project, env, build);
+      plan = { environment: env.name, findings: changeFindings(project.dialect, declaredChanges(planned, build), planned.refused) };
+    }
+    return emit(declarativeLint({ project, settings, policies, schema, plan }), a, project, io);
+  } finally {
+    build.dispose();
+  }
+}

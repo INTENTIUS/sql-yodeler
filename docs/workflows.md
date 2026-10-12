@@ -103,6 +103,41 @@ What the declarative path does and does not do:
 - The topology comes from `sql.profiles.<env>.topology` only ([Topology](topology.md)).
 - chant marks the objects it creates with an ownership marker in their comment (`[chant managed-by=chant]`) and never touches an object the project does not declare.
 
+### Review on a pull request
+
+A pull request on this path gets the same review as one on the versioned path, read from the plan rather than from a migration:
+
+```sh
+npx yodel lint                # offline: the declared schema's checks
+npx yodel lint --env dev      # and the planned changes against dev
+npx yodel plan dev --comment  # the plan comment, with the findings and the policy
+```
+
+- `yodel lint`, with no server, runs the sql lexicon's schema checks (`SQLCH1xx`, `SQLPG1xx`), the project's own checks (`chant.config.ts` `lint.policies`) and `lint.naming` over the build of `src/`. With `--env <env>` it also plans `src/` against that environment and checks each planned change against the rules that read a change's rule and class: `destructive`, `pg-rewrite`, `pg-access`, `ch-mutation`, `ch-rebuild`, `ch-access`, and `refused-step` for a change that needs its own Op. The plan carries no statement, so `pg-lock`, `data-dependent` and `pg-signature`, which read one, are for migrations.
+- Nothing is silenced here, since there is no `migration.sql` to hold a `-- yodel:allow` line. `yodel.config.ts` `lint.rules` sets a rule's level, as on the versioned path.
+- `yodel plan <env>` prints chant's plan with those findings, each policy rule's outcome (`yodel.config.ts` `policy`, read at the base commit) and how the ApplyOp's gate is approved. `--comment` posts it on the pull request, updating the one posted before, with the same marker the versioned comment uses. The comment names no server address. `yodel ci` already renders the `plan-<env>` job that runs it.
+- A policy rule sees one entry in `pending`, `declared`, whose steps are the planned changes (each a `statement` with its object, class, rule and `destructive`, and no `sql`), and `plan.declarative` is `true`. A rule that denies the plan makes `yodel apply` refuse (exit 4) before the ApplyOp runs. `yodel override <env> --rule <id> --reason <text>` records an override for exactly these changes, under the ApplyOp's name; it stops counting once the live database or `src/` moves, and `yodel apply` spends it once the ApplyOp applies, not when it stops at the gate. The gate still asks for its own approval.
+
+## What each path has
+
+| | Declarative | Versioned |
+|---|---|---|
+| `yodel plan`, the plan-bound gate, `yodel approve` | yes | yes |
+| The plan comment (`yodel plan --comment`) | yes | yes |
+| `yodel lint` | the declared schema offline, the planned changes with `--env` | every migration, offline |
+| Silences (`-- yodel:allow`) | no: no `migration.sql` | yes |
+| Plan policy and overrides | yes, over the planned changes | yes, over the pending migrations |
+| `yodel drift` | against the declared schema | against the newest applied migration's recorded schema |
+| History, resume, `yodel report`, `yodel revert` | no history | yes |
+| `--allow-out-of-order`, `yodel rebase`, `yodel repair` | no: there are no migrations to order | yes |
+| The replay check (`yodel lint --replay`) | no | yes |
+| Data migrations: rebuild, backfill and expand-and-contract steps | no: a change that needs one exits 2 | yes |
+| Waves and their gate policies (`always`, `on-destructive`, `never`) | no: a wave plans and applies migrations | yes |
+| Tenant sets | no | yes |
+| The apply lock and `--lock-wait` | no: chant's ApplyOp applies | yes |
+
+A project that needs something from the versioned column moves to the versioned path ([Moving from one to the other](#moving-from-one-to-the-other)).
+
 ## Versioned: migrations written from the declared schema
 
 The declared schema stays the source. `yodel new <name>` writes the next migration by diffing it against the schema the newest migration recorded, with no database involved. Each change goes through review as a pull request holding the edit to `src/` and the migration it produced:

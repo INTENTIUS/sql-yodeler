@@ -90,6 +90,8 @@ src/replay/                            migrations forge
 
 # yodel plan and the pull request comment it posts.
 src/commands/plan.ts                   declarative approval forge waves
+# The declarative path's review (#249): its plan comment, lint and policy.
+src/declarative/                       declarative forge
 src/pr/tenants.ts                      waves
 src/pr/                                approval declarative forge
 

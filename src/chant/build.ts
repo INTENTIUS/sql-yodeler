@@ -38,7 +38,7 @@ export interface Build {
  * a temporary directory that {@link Build.dispose} removes. A build that
  * fails, or that holds another dialect than the project's, is an error.
  */
-export async function buildSchema(project: Project, options: { out?: string; env?: NodeJS.ProcessEnv } = {}): Promise<Build> {
+export async function buildSchema(project: Project, options: { out?: string; env?: NodeJS.ProcessEnv; empty?: boolean } = {}): Promise<Build> {
   const tmp = options.out ? undefined : mkdtempSync(join(tmpdir(), "yodel-build-"));
   const path = options.out ?? join(tmp ?? ".", "schema.json");
   const dispose = () => {
@@ -63,6 +63,10 @@ export async function buildSchema(project: Project, options: { out?: string; env
     } catch (e) {
       throw new YodelError(`chant build wrote no readable output at ${path}: ${e instanceof Error ? e.message : String(e)}`);
     }
+    // A source directory that declares nothing builds no dialect; `empty` takes it as an empty schema of the project's.
+    // chant's output type always has both; a build of nothing has neither.
+    const raw = output as { dialect?: unknown; objects?: unknown[] };
+    if (options.empty === true && raw.dialect === undefined && (raw.objects ?? []).length === 0) output = { ...output, dialect: project.dialect, objects: [] };
     if (output.dialect !== project.dialect) {
       throw new YodelError(`the build holds ${output.dialect} objects, but the project's dialect is ${project.dialect}`);
     }

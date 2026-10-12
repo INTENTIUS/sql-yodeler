@@ -62,6 +62,8 @@ import {
 import type { ExecuteOptions, ExecuteResult } from "../versioned/engine.js";
 import type { StatusReport } from "../versioned/report.js";
 import type { RuleResult } from "../versioned/policy.js";
+import { declarativeDigest } from "../declarative/review.js";
+import { declarativeOverrideSource, judgeDeclarative } from "../declarative/plan.js";
 import type { StandingOverride } from "@intentius/chant/override-gate";
 import { BASELINE_ENV } from "../versioned/op.js";
 import { baselineFromEnv, executeBaseline, planBaseline, projectBaseline } from "../init/second.js";
@@ -99,8 +101,8 @@ export type VersionedOutcome =
   | { status: "applied"; op: string; appliedNow: string[] };
 
 /** What a declarative run (the ApplyOp) did; `plan` is the plan before the run. */
-export type DeclarativeOutcome = { plan: Record<string, unknown> } & (
-  | { status: "refused" | "unchanged" | "applied" }
+export type DeclarativeOutcome = { plan: Record<string, unknown>; policy?: RuleResult[] } & (
+  | { status: "refused" | "denied" | "unchanged" | "applied" }
   | { status: "gated"; gate: string; approve?: string; chantApprove?: string; planDigest?: string }
   | { status: "failed"; exitCode: number }
   | { status: "incomplete"; remaining: Record<string, unknown> }
@@ -177,7 +179,13 @@ Two paths, chosen by the project:
 
 - Declarative: no migrations. Plans the declared schema against the live
   database, then runs the project's ApplyOp for the environment behind its
-  plan-bound gate.
+  plan-bound gate. The policy (yodel.config.ts policy, at the base commit)
+  judges the plan first: a rule that denies it refuses (exit 4) before the
+  ApplyOp runs, unless an override counts for exactly these changes (yodel
+  override <env>), which is spent once the ApplyOp applies. Waves, tenant
+  sets, --allow-out-of-order and the lock read a history of migrations, so
+  they are for the versioned path (docs/workflows.md lists what each path
+  has).
 
 Both paths write. For a profile made with credentials(), yodel apply runs
 as the writer only under YODEL_CREDENTIALS=writer or writer:<env>; as the
@@ -240,7 +248,8 @@ Exit codes:
      policy rule that denies the plan with no override, or a pending
      migration the environment this one requires (yodel.config.ts
      waves[].requires, default the wave before) does not record as applied
-     with the same checksum. Either path: the run holds <env>'s reader
+     with the same checksum. Declarative: a policy rule that denies the
+     plan with no override. Either path: the run holds <env>'s reader
      (YODEL_CREDENTIALS is not writer or writer:<env>), which refuses before
      the gate, or the server refused the user a privilege
   5  versioned: another apply holds the lock (after --lock-wait, if given)
@@ -363,7 +372,7 @@ async function applyIn(project: Project, a: ApplyArgs, args: readonly string[], 
   }
   if (hasMigrations(project)) return versionedApply(project, env, a, io);
   if (a.plan || a.digest || a.execute || a.allowOutOfOrder || a.lockWaitMs !== undefined || args.includes("--stand-down") || a.wavePlan !== undefined || a.waveApply !== undefined) {
-    throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+    throw new YodelError(`--plan, --digest, --execute, --wave-plan, --wave-apply, --allow-out-of-order, --lock-wait and --stand-down are for versioned migrations, and ${project.dir} has no migrations/ directory with a migration (see docs/workflows.md for what each path has)`);
   }
   const refusal = declarativeRefusal(project, env.name);
   if (refusal) throw refusal;
@@ -877,9 +886,36 @@ async function declarativeRun(
       if (!json) io.err(`yodel apply: refused: ${unreadable.length > 0 ? `${unreadable.map((u) => u.object).join(", ")} could not be read` : `${String(before.refused.length)} change(s) need their own Op`}; nothing was applied\n`);
       return report({ status: "refused", plan: planJson(before) }, PLAN_NEEDS_OP);
     }
-    if (declaredChanges(before, build).length === 0) {
+    const changes = declaredChanges(before, build);
+    if (changes.length === 0) {
       if (!json) io.out(`${env.name} already matches the declared schema; nothing to apply.\n`);
       return report({ status: "unchanged", plan: planJson(before) }, 0);
+    }
+
+    // The policy as the base commit has it (#73, #249), before the gate: a plan a rule denies, with no override, never reaches it.
+    const basePolicy = await policyAtBase(project);
+    if (basePolicy.note) io.err(`${basePolicy.note}\n`);
+    const digest = await declarativeDigest(env.name, project.dialect, changes);
+    let standing: StandingOverride | undefined;
+    const policy = await judgeDeclarative({
+      policy: basePolicy.policy,
+      environment: env.name,
+      dialect: project.dialect,
+      changes,
+      digest,
+      ledger: () => declarativeOverrideSource(project, env.name, op.name),
+      // Spent once the ApplyOp applies, not here: a run that stops at the gate has applied nothing under it.
+      spend: (o) => {
+        standing = o;
+        return Promise.resolve();
+      },
+    });
+    const withPolicy = policy.length > 0 ? { policy } : {};
+    if (!json) for (const l of describeResults(policy)) io.out(`${l}\n`);
+    const denied = policyRefusal(policy, env.name, digest, "before the gate");
+    if (denied) {
+      if (!json) io.err(`yodel apply: ${denied.message}\n`);
+      return report({ status: "denied", plan: planJson(before), ...withPolicy }, EXIT_REFUSED);
     }
 
     if (!json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
@@ -890,11 +926,11 @@ async function declarativeRun(
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
         if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nwhich shows the plan and asks you first; then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`);
       }
-      return report({ status: "gated", gate: op.gate, ...commands, ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before) }, GATED);
+      return report({ status: "gated", gate: op.gate, ...commands, ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before), ...withPolicy }, GATED);
     }
     if (run.status === "failed") {
       if (!json) io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})\n`);
-      return report({ status: "failed", exitCode: run.code, plan: planJson(before) }, 1);
+      return report({ status: "failed", exitCode: run.code, plan: planJson(before), ...withPolicy }, 1);
     }
 
     // The Op completed: check the server now matches, so a change the applier did not attempt is not reported as applied.
@@ -902,11 +938,12 @@ async function declarativeRun(
     const remaining = declaredChanges(after, build);
     if (remaining.length > 0) {
       if (!json) io.err(`yodel apply: ${op.name} completed but ${String(remaining.length)} change(s) to declared objects are still planned (a drop the Op's delete mode withholds, or a change it did not attempt):\n${await renderPlan(after, `Plan for ${env.name} after apply`)}\n`);
-      return report({ status: "incomplete", plan: planJson(before), remaining: planJson(after) }, 1);
+      return report({ status: "incomplete", plan: planJson(before), remaining: planJson(after), ...withPolicy }, 1);
     }
+    if (standing) await spendOverride(project.dir, standing, (l) => { io.err(`yodel apply: ${l}\n`); });
     for (const line of await recordReleaseLines(project, env, build.output)) io.err(`${line}\n`);
     if (!json) io.out(`\nApplied: ${env.name} matches the declared schema.\n`);
-    return report({ status: "applied", plan: planJson(before) }, 0);
+    return report({ status: "applied", plan: planJson(before), ...withPolicy }, 0);
   } finally {
     build.dispose();
   }

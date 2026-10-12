@@ -93,6 +93,39 @@
             }
           }
         },
+        "lint": {
+          "description": "The lint findings over the planned changes (#249): each statement rule a change's rule and class breaks, at the level yodel.config.ts lint.rules gives it. Nothing is silenced on this path.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "errors", "warnings", "findings"],
+          "properties": {
+            "status": { "enum": ["passed", "failed"] },
+            "errors": { "type": "integer", "minimum": 0 },
+            "warnings": { "type": "integer", "minimum": 0 },
+            "findings": { "$ref": "lint.schema.json#/properties/findings" }
+          }
+        },
+        "digest": {
+          "description": "The digest a policy override binds (yodel override <env>): chant's plan digest over the environment, dialect and declared changes. Not the ApplyOp gate's digest, which is known once yodel apply stops at the gate. Absent when nothing would change.",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "common.schema.json#/$defs/policy"
+        },
+        "approval": {
+          "description": "The ApplyOp and its gate, with the command that approves the plan it stops with; or, with no ApplyOp, why.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "op": { "type": "string" },
+            "gate": { "type": "string" },
+            "command": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        },
+        "notes": {
+          "$ref": "common.schema.json#/$defs/stringList"
+        },
         "mode": false
       }
     },
