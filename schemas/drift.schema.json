@@ -25,6 +25,7 @@
       "type": "array",
       "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } }
     },
+    "unmanaged": { "description": "Objects on the server of a kind yodel cannot declare, as <kind> <name>. They are unmanaged and never drift.", "$ref": "common.schema.json#/$defs/stringList" },
     "lockWait": { "description": "Postgres: a read gave up at the lock timeout, and what it waited on.", "type": "string" },
     "columns": {
       "description": "Each changed table's declared column names, by position.",

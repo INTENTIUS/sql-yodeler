@@ -31,6 +31,7 @@ import { closeVersioned, hasMigrations, inspect, openVersioned, readChain } from
 import { isApplied } from "../history/index.js";
 import { describeForge, resolveForge, type ForgeFlags, type ForgeTarget } from "../pr/forge.js";
 import { driftIssueMarker, trackDrift, type DriftOutcome, type IssueAction } from "../pr/issue.js";
+import { describeUnsupported, findUnsupported } from "../init/unsupported.js";
 import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/live/client";
 
 interface PgLockSettings {
@@ -302,6 +303,9 @@ export const drift: Command = {
         result.against = against;
         if (project.dialect === "clickhouse" && (recorded || source === "src")) result = await clickhouseAccess(project, env, result, recorded);
         if (pg && result.unobserved.some((u) => isLockTimeout(u.detail) || isLockTimeout(u.reason))) result.lockWait = await lockWait(pg);
+        // Unmanaged objects are reported, never drift; a reader that cannot list them leaves the list out.
+        const unmanaged = (await findUnsupported(project, env).catch(() => [])).map(describeUnsupported);
+        if (unmanaged.length > 0) result.unmanaged = unmanaged;
         const ofRecorded = recorded;
         const build = ofRecorded ? () => Promise.resolve({ output: ofRecorded, dispose: () => undefined }) : () => buildSchema(project);
         const columns = await declaredColumns(project, result, build).catch(() => ({}));

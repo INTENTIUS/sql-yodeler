@@ -12,7 +12,7 @@ import { EXIT_REFUSED } from "../exit.js";
 import { isApplied } from "../history/index.js";
 import { closeVersioned, findMigrateOp, inspect, openVersioned, readChain, runMigrateOp } from "../versioned/index.js";
 
-const usage = "usage: yodel init --from <env> [--json] [--dir <project>] [--force] [--name <name>]\n       yodel init --baseline <env> [--json] [--dir <project>] [--op <name>]";
+const usage = "usage: yodel init --from <env> [--json] [--dir <project>] [--force] [--skip-unsupported] [--name <name>]\n       yodel init --baseline <env> [--json] [--dir <project>] [--op <name>]";
 
 const help = `${usage}
 
@@ -73,6 +73,9 @@ Options:
   --op <name>      (--baseline) the Op to run, when more than one applies <env>
   --name <name>    the baseline migration's name (default ${BASELINE_NAME})
   --force          overwrite declaration files the source directory already has
+  --skip-unsupported
+                   adopt the rest when the database holds objects of a kind
+                   yodel cannot declare, and record those in the baseline's note
   --json           print what was done as JSON
   -C, --dir <dir>  the project directory (default: the working directory)
 
@@ -82,7 +85,8 @@ Exit codes:
   3  (--baseline) stopped at the gate, waiting for approval of the record
   4  refused, nothing written: the source directory already declares a
      schema (without --force), the project already has migrations, the
-     history already records migrations, the environment holds nothing, or
+     history already records migrations, the environment holds nothing or
+     an object of a kind yodel cannot declare (without --skip-unsupported), or
      a ClickHouse profile with no databases or with the history's database;
      --baseline: the project has no migrations, <env>'s history records
      any, or <env>'s live schema is not the baseline's; or the run holds
@@ -100,6 +104,7 @@ interface InitArgs {
   json: boolean;
   dir: string;
   force: boolean;
+  skipUnsupported: boolean;
   name: string;
 }
 
@@ -117,6 +122,7 @@ function parseInitArgs(args: string[]): InitArgs {
         json: { type: "boolean" },
         dir: { type: "string", short: "C" },
         force: { type: "boolean" },
+        "skip-unsupported": { type: "boolean" },
         name: { type: "string" },
       },
     });
@@ -128,7 +134,7 @@ function parseInitArgs(args: string[]): InitArgs {
   const from = str("from");
   const baseline = str("baseline");
   if ((from === undefined) === (baseline === undefined)) throw new YodelError(`one of --from <env> and --baseline <env> is required\n${usage}`);
-  if (baseline !== undefined && (values.force === true || values.name !== undefined)) throw new YodelError(`--force and --name go with --from; --baseline records the baseline the project has\n${usage}`);
+  if (baseline !== undefined && (values.force === true || values.name !== undefined || values["skip-unsupported"] === true)) throw new YodelError(`--force, --skip-unsupported and --name go with --from; --baseline records the baseline the project has\n${usage}`);
   if (from !== undefined && values.op !== undefined) throw new YodelError(`--op goes with --baseline\n${usage}`);
   const name = typeof values.name === "string" ? values.name : BASELINE_NAME;
   migrationId(name, new Date()); // a bad name fails before anything is read
@@ -139,6 +145,7 @@ function parseInitArgs(args: string[]): InitArgs {
     json: values.json === true,
     dir: typeof values.dir === "string" ? values.dir : process.cwd(),
     force: values.force === true,
+    skipUnsupported: values["skip-unsupported"] === true,
     name,
   };
 }
@@ -151,6 +158,7 @@ export function initJson(a: Adopted): Record<string, unknown> {
     status: "adopted",
     objects: a.objects,
     schemaFiles: a.schemaFiles,
+    unsupported: a.unsupported,
     migration: { path: a.migrationPath, ...a.baseline },
     recorded: { history: a.recorded.database, seq: a.recorded.row.seq, note: a.recorded.row.note, appliedBy: a.recorded.row.applied_by },
     warnings: a.warnings,
@@ -172,6 +180,7 @@ function report(io: Io, json: boolean, a: Adopted): void {
     "",
     `yodel plan ${a.environment} shows no change, and yodel status ${a.environment} lists the baseline applied.`,
   ];
+  if (a.unsupported.length > 0) lines.push("", `Not adopted, of kinds yodel cannot declare (--skip-unsupported): ${String(a.unsupported.length)}`, ...a.unsupported.map((u) => `  ${u}`));
   for (const w of a.warnings) lines.push(`warning: ${w}`);
   io.out(`${lines.join("\n")}\n`);
 }
@@ -237,7 +246,7 @@ export const init: Command = {
       if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
       try {
         if (a.baseline !== undefined) return await recordIn(project, a.baseline, a, io);
-        const adopted = await adopt(project, env, { force: a.force, name: a.name, log: (l) => { io.err(`${l}\n`); } });
+        const adopted = await adopt(project, env, { force: a.force, skipUnsupported: a.skipUnsupported, name: a.name, log: (l) => { io.err(`${l}\n`); } });
         report(io, a.json, adopted);
         return 0;
       } catch (e) {

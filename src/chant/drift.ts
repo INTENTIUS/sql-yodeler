@@ -46,6 +46,8 @@ export interface Drift {
   columns?: Record<string, string[]>;
   /** What the server was compared with (#49): `src/`, or the schema the newest applied migration records. */
   against?: DriftAgainst;
+  /** Objects on the server of a kind yodel cannot declare (#251), as `<kind> <name>`: unmanaged, never drift. */
+  unmanaged?: string[];
 }
 
 /**
@@ -287,6 +289,10 @@ export function renderDrift(drift: Drift, server?: ServerInfo): string {
     lines.push("", "Could not be read, so their state is unknown:");
     for (const u of drift.unobserved) lines.push(`  ${u.name}: ${u.reason}${u.detail ? ` (${u.detail})` : ""}`);
     if (drift.lockWait) lines.push("", `The read ${drift.lockWait}.`);
+  }
+  if (drift.unmanaged?.length) {
+    lines.push("", "Unmanaged (a kind yodel cannot declare, so never drift):");
+    for (const u of drift.unmanaged) lines.push(`  ${u}`);
   }
   return `${lines.join("\n")}\n`;
 }
