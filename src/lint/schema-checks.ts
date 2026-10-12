@@ -54,8 +54,12 @@ export interface SchemaDiagnostic {
 /** Objects as `chant build` writes them carry their name besides the DDL; one with the DDL alone is left out. */
 const serialized = (o: unknown): boolean => typeof (o as { name?: unknown }).name === "string";
 
-/** Runs every schema check over one recorded schema. A check that throws is reported as a finding of its own. */
-export function schemaDiagnostics(schema: BuildOutput): SchemaDiagnostic[] {
+/**
+ * Runs every schema check over one recorded schema, then the project's own
+ * `policies` (#227), with `env` as the context's environment. A check that
+ * throws is reported as a finding of its own.
+ */
+export function schemaDiagnostics(schema: BuildOutput, options: { policies?: readonly PostSynthCheck[]; env?: string | undefined } = {}): SchemaDiagnostic[] {
   if (!Array.isArray(schema.objects)) return [];
   const value = { ...schema, objects: schema.objects.filter(serialized) };
   if (value.objects.length === 0) return [];
@@ -65,9 +69,10 @@ export function schemaDiagnostics(schema: BuildOutput): SchemaDiagnostic[] {
     entities: new Map(),
     docs: [{ lexicon: "sql", index: 0, format: "json", value }],
     buildResult: { outputs, entities: new Map(), warnings: [], errors: [], sourceFileCount: 0 },
+    ...(options.env !== undefined ? { env: options.env } : {}),
   };
   const out: SchemaDiagnostic[] = [];
-  for (const check of postSynthChecks) {
+  for (const check of [...postSynthChecks, ...(options.policies ?? [])]) {
     const dialect = dialectOf(check.id);
     if (dialect !== undefined && dialect !== schema.dialect) continue;
     let found: PostSynthDiagnostic[];
@@ -110,16 +115,20 @@ const keyOf = (d: SchemaDiagnostic) => `${d.rule}\u0000${d.entity ?? ""}\u0000${
  * The schema findings of every migration: each check's findings on its
  * recorded schema that its parent's recorded schema does not have.
  * `configured` are the rule ids `yodel.config.ts` sets; `chantRules` is
- * `chant.config.ts`'s `lint.rules`.
+ * `chant.config.ts`'s `lint.rules`; `policies` are the project's own checks
+ * (./policies.ts), run with the schema checks.
  */
-export function schemaFindings(migrations: readonly Migration[], options: { dialect?: Dialect | undefined; configured: ReadonlySet<string>; chantRules?: Record<string, unknown> | undefined }): SchemaFinding[] {
+export function schemaFindings(
+  migrations: readonly Migration[],
+  options: { dialect?: Dialect | undefined; configured: ReadonlySet<string>; chantRules?: Record<string, unknown> | undefined; policies?: readonly PostSynthCheck[]; env?: string | undefined },
+): SchemaFinding[] {
   const byId = new Map(migrations.map((m) => [m.id, m]));
   const cache = new Map<string, SchemaDiagnostic[]>();
   const diagnostics = (m: Migration): SchemaDiagnostic[] => {
     let d = cache.get(m.id);
     if (!d) {
       const schema = m.document.schema;
-      d = (schema.dialect as unknown) === "clickhouse" || (schema.dialect as unknown) === "postgres" ? schemaDiagnostics(schema) : [];
+      d = (schema.dialect as unknown) === "clickhouse" || (schema.dialect as unknown) === "postgres" ? schemaDiagnostics(schema, { ...(options.policies ? { policies: options.policies } : {}), env: options.env }) : [];
       cache.set(m.id, d);
     }
     return d;
