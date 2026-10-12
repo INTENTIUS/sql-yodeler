@@ -486,7 +486,7 @@ export const op = Op({
   async approvedApply(env: Record<string, string> = {}): Promise<{ code: number; lock: string | null; gate_seconds: number; approve_seconds: number; execute_seconds: number; seconds: number }> {
     const first = await this.yodel(["apply", this.env, "--json"], env);
     if (first.code !== 3) return { code: first.code, lock: null, gate_seconds: first.seconds, approve_seconds: 0, execute_seconds: 0, seconds: first.seconds };
-    const approve = parseJson<{ approve?: string }>(first).approve;
+    const approve = parseJson<{ chantApprove?: string }>(first).chantApprove;
     if (!approve?.startsWith("chant approve ")) throw new Error(`no chant approve command: ${String(approve)}`);
     const approved = await this.chant(approve.split(" ").slice(1));
     if (approved.code !== 0) throw new Error(`${approve} exited ${String(approved.code)}`);
