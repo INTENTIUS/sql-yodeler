@@ -11,6 +11,7 @@ import type { Migration } from "../migrations/index.js";
 import { buildSchema } from "../chant/build.js";
 import {
   checksProblem,
+  createHandWritten,
   createMigration,
   describeExpect,
   migrationChecks,
@@ -27,7 +28,7 @@ import {
 } from "../migrations/index.js";
 import { asBackfill, asForm, BACKFILL_FILE, backfillTemplate, describeForm, describeFormSql, formPath, formProblems, formTemplate, loadBackfill, PG_MIGRATION_OP, REBUILD_OP, TEMPLATE_MARK, type BackfillForm } from "../steps/index.js";
 
-const usage = "usage: yodel new <name> [--backfill [<file>]] [--retain <duration>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
+const usage = "usage: yodel new <name> [--sql | --backfill [<file>]] [--retain <duration>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
 
 const help = `${usage}
 
@@ -43,6 +44,17 @@ recorded schema, the steps). A change no statement makes in place, such as a
 ClickHouse sort-key change or a Postgres column rename, is an Op step:
 written to migration.json with its declaration, and to migration.sql as a
 comment only.
+
+--sql writes a migration you write yourself: migration.sql holds a header
+and no statements. Write them, each ending with ;, then run
+yodel lint --update-checksum <id>, which records them in migration.json.
+From then on it goes through the chain, plan, approval, apply, history and
+resume like any other. It is for data a migration carries (reference rows,
+a data fix) and statements yodel would not write. A statement that changes
+the schema needs the change declared in src/ as well: the migration
+records the current build as the schema after it, and yodel lint --replay
+shows the statements give that schema. A migration of data statements only
+records its parent's schema. No build and no server are read.
 
 A data backfill is a step too. --backfill ends the migration with a
 backfill step written from ${formPath("<name>")}, a form of four fields:
@@ -93,6 +105,8 @@ have not applied: refused when the migration is applied in an environment
 --env names (each one is read), and it says so when git already tracks it.
 
 Options:
+  --sql                a hand-written migration: an empty migration.sql to
+                       write, recorded with yodel lint --update-checksum <id>
   --backfill [<file>]  end the migration with a backfill step written from
                        ${formPath("<name>")} (or <file>)
   --retain <duration>  how long a column rename or a rebuild keeps the old
@@ -125,6 +139,7 @@ interface NewArgs {
   replace: boolean;
   envs: string[];
   checks: MigrationCheck[];
+  sql: boolean;
 }
 
 /** A bare --backfill (last, or followed by another option) as --backfill="", the default form. */
@@ -140,7 +155,7 @@ function parseNewArgs(args: string[]): NewArgs {
       args: bareBackfill(args),
       allowPositionals: true,
       strict: true,
-      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, backfill: { type: "string" }, retain: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
+      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, sql: { type: "boolean" }, backfill: { type: "string" }, retain: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
     });
   } catch (e) {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
@@ -150,6 +165,10 @@ function parseNewArgs(args: string[]): NewArgs {
   if (parsed.values.env !== undefined && parsed.values.replace !== true) throw new YodelError(`--env goes with --replace\n${usage}`);
   migrationId(name, new Date()); // a bad name fails before anything is built
   const retain = typeof parsed.values.retain === "string" ? parsed.values.retain : undefined;
+  const sql = parsed.values.sql === true;
+  if (sql && (parsed.values.backfill !== undefined || parsed.values.retain !== undefined || parsed.values.check !== undefined || parsed.values.replace === true)) {
+    throw new YodelError(`--sql writes a migration you write yourself, so it takes no --backfill, --retain, --check or --replace\n${usage}`);
+  }
   if (retain !== undefined && !DURATION.test(retain)) throw new YodelError(`--retain takes a duration such as 7d, 12h or 0s, got ${JSON.stringify(retain)}\n${usage}`);
   return {
     name,
@@ -160,6 +179,7 @@ function parseNewArgs(args: string[]): NewArgs {
     replace: parsed.values.replace === true,
     envs: Array.isArray(parsed.values.env) ? parsed.values.env.filter((e): e is string => typeof e === "string") : [],
     checks: parseChecks(parsed.values.check),
+    sql,
   };
 }
 
@@ -274,8 +294,9 @@ export const newCommand: Command = {
   implemented: true,
   run: (args, io) =>
     guarded("new", io, args, help, async () => {
-      const { name, json, dir, backfill: backfillArg, retain, replace, envs, checks } = parseNewArgs(args);
+      const { name, json, dir, backfill: backfillArg, retain, replace, envs, checks, sql } = parseNewArgs(args);
       const project = await loadProject(dir);
+      if (sql) return writeHandWritten(io, project, name, json);
       let backfill: { text: string } | { form: BackfillForm } | undefined;
       if (backfillArg !== undefined) {
         const file = backfillArg === "" ? formPath(name) : backfillArg;
@@ -353,6 +374,30 @@ export const newCommand: Command = {
       return 0;
     }),
 };
+
+/** `yodel new <name> --sql`: the empty hand-written migration after the newest. */
+function writeHandWritten(io: Io, project: Project, name: string, json: boolean): number {
+  const migrationsDir = join(project.dir, MIGRATIONS_DIR);
+  const previous = newestMigration(readMigrations(migrationsDir));
+  const made = createHandWritten({
+    name,
+    dialect: project.dialect,
+    previous,
+    ...(project.dialect === "clickhouse" ? { defaultDatabase: previous?.document.defaultDatabase ?? "default" } : { defaultSchema: previous?.document.defaultSchema ?? "public" }),
+  });
+  const path = writeMigration(migrationsDir, made);
+  if (json) {
+    io.out(`${JSON.stringify({ written: true, id: made.id, path, parent: made.document.parent, checksum: made.document.checksum, dialect: made.document.dialect, source: "sql", statements: 0, ops: [], manual: [], hints: [], checks: [] }, null, 2)}\n`);
+    return 0;
+  }
+  const where = relative(project.dir, path) || path;
+  io.out(
+    `Wrote ${where}/ (hand-written; ${made.document.parent ? `follows ${made.document.parent}` : "the first migration"}).\n` +
+      `  Write its statements in ${where}/migration.sql, each ending with ;, then run yodel lint --update-checksum ${made.id}.\n` +
+      `  A statement that changes the schema needs the change declared in src/ too.\n`,
+  );
+  return 0;
+}
 
 /** Exit code: --replace refused; nothing written. */
 export const REPLACE_REFUSED = 4;

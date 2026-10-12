@@ -46,7 +46,34 @@ No changes: the declared schema matches the newest migration's recorded schema (
 
 (From the Postgres example's run, just after it writes `rename-email`; `run.ts postgres --write` rewrites this quote with the README. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
 
-It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Data migrations](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Data migrations](steps.md#postgres-postgresmigrationop)).
+It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --sql` writes a migration you write yourself ([below](#writing-one-yourself-yodel-new---sql)). `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Data migrations](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Data migrations](steps.md#postgres-postgresmigrationop)).
+
+## Writing one yourself: yodel new --sql
+
+Some changes are yours to write: reference rows a migration ships, a data fix, a statement yodel would not write. `yodel new <name> --sql` writes a hand-written migration: `migration.json` marks it `"source": "sql"`, and `migration.sql` holds a header and no statements. Write them under the header, each ending with `;`, then record them:
+
+```sql
+-- yodel migration 20261012T1400-seed-kinds
+-- parent: 20261012T1350-create
+-- hand-written: migration.sql is this migration's source.
+
+INSERT INTO app.kinds (id, name) VALUES (1, 'retail'), (2, 'wholesale');
+ALTER TABLE app.orders ADD COLUMN kind_id bigint REFERENCES app.kinds (id);
+UPDATE app.orders SET kind_id = 1;
+```
+
+```sh
+npx yodel lint --update-checksum 20261012T1400-seed-kinds
+```
+
+`--update-checksum` splits `migration.sql` with the dialect's own rules (a `$$` body, a quoted `;`) and records each statement as a step in `migration.json`. From then on the migration is like any other: its checksum covers both files, `yodel plan` shows its statements, the gate binds them, `yodel apply` runs them under the lock and records each in the history, and a run that fails part way resumes at the statement that failed. A Postgres statement that cannot run in a transaction (`CREATE INDEX CONCURRENTLY`, `ALTER TYPE ... ADD VALUE`) runs outside one, and a ClickHouse `ALTER TABLE ... UPDATE` or `DELETE` waits for its mutation.
+
+The schema a hand-written migration records is what the next `yodel new` diffs from:
+
+- Statements that only change rows (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `COPY`, `TRUNCATE`, and ClickHouse `ALTER TABLE ... UPDATE | DELETE`) record the parent's schema.
+- Any other statement records the current build of `src/`. Declare in `src/` what the statements change. `yodel lint --replay <env>` runs the chain and the statements into a fresh database and fails when they do not give that schema, naming the difference, so a change the declarations miss fails the pull request's lint job.
+
+Recording reads no server. Lint classifies what a hand-written migration does from the schema change it records: a column it drops is `destructive`, an index it builds on an existing table without `CONCURRENTLY` is `pg-lock`, as in a migration yodel wrote. A `TRUNCATE`, or a `DELETE` with no `WHERE`, is `destructive` too. A `-- yodel:allow <rule> <reason>` line anywhere in its `migration.sql` silences that rule for the migration. To change the statements before the migration is applied anywhere, edit `migration.sql` and run `--update-checksum` again. `yodel rebase` moves a hand-written migration with its statements as written.
 
 ## The history table
 

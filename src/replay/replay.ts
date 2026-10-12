@@ -38,7 +38,7 @@
 import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classifier";
 import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { YodelError, type SqlDialect } from "../project.js";
-import { isCheckpoint, type Migration } from "../migrations/index.js";
+import { isCheckpoint, isHandWritten, type Migration } from "../migrations/index.js";
 import { asBackfill, describeStep, planStep, type BackfillStep } from "../steps/kinds.js";
 import type { RebuildReceiptStore } from "../steps/rebuild.js";
 
@@ -83,6 +83,8 @@ export interface ReplayedMigration {
   skipped: string[];
   /** A checkpoint (#63), replayed on its own into an empty database after the chain. */
   checkpoint?: true;
+  /** A hand-written migration (#248): its statements are the person's, its recorded schema the build's. */
+  handWritten?: true;
 }
 
 export type ReplayResult = {
@@ -140,7 +142,7 @@ export async function replayMigrations(ordered: readonly Migration[], driver: Re
   type Failure = Exclude<ReplayResult, { outcome: "matches" }>;
   /** Replays one migration's steps on what the database holds now, then compares; a failure, or the migration replayed. */
   const replayOne = async (m: Migration): Promise<ReplayedMigration | Failure> => {
-    const done: ReplayedMigration = { id: m.id, statements: 0, ran: [], skipped: [], ...(isCheckpoint(m) ? { checkpoint: true } : {}) };
+    const done: ReplayedMigration = { id: m.id, statements: 0, ran: [], skipped: [], ...(isCheckpoint(m) ? { checkpoint: true } : {}), ...(isHandWritten(m.document) ? { handWritten: true } : {}) };
     log(`${m.id}: replaying${isCheckpoint(m) ? " (a checkpoint, into an empty database)" : ""}`);
     for (const [i, step] of m.document.steps.entries()) {
       const s = step as typeof step | BackfillStep;
