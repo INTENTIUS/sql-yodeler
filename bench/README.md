@@ -21,10 +21,6 @@ The default size is the smallest, so a plain `npm run bench` is a check that
 the harness works. The large sizes run only when asked for, with `--full` or
 `--sizes`.
 
-yodel is measured to 1,000 tables, past the size of most real schemas.
-`--sizes 10000` still runs, but it mostly measures the emulator, and each
-dialect takes about two hours.
-
 ## What it needs
 
 The emulator (`chant emulator up --lexicon sql`), reached at its LAN
