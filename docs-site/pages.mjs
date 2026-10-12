@@ -6,9 +6,9 @@
 // heading becomes the title, links between docs pages become site links, and
 // links into the rest of the repository (examples, source files) become their
 // plain text. Each page's editUrl points "Edit page" at its docs/ file (none
-// for claims.md, which npm run claims:page writes). The landing page is the
-// README's intro, then the starting-point picker (src/components/Picker.astro),
-// then docs/README.md. The sidebar opens with "Start here", the
+// for claims.md, which npm run claims:page writes). The landing page is
+// src/components/Landing.astro, then the starting-point picker
+// (src/components/Picker.astro), then docs/README.md. The sidebar opens with "Start here", the
 // rooms, then groups the pages by the `type:` in their front matter
 // (Tutorial, How-to, Concepts, Reference, Proof), each group in the order of
 // docs/README.md's table, and the build fails on a page with no type or an
@@ -297,17 +297,6 @@ hero:
 
 const frontmatter = (fields) => `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}\n---\n\n`;
 
-/** The README's first paragraph, without the sentences that point into the repository's design and research notes. */
-function tagline() {
-	const { body } = splitTitle(read(new URL('README.md', repo)), 'README.md');
-	const para = body.split(/\n\s*\n/)[0].replace(/\n/g, ' ');
-	return para
-		.split(/(?<=\.)\s+/)
-		.filter((s) => !/\b(design|research)\//.test(s))
-		.join(' ')
-		.replace(/`([^`]+)`/g, '<code>$1</code>');
-}
-
 /** Each page's one-line description, from the second column of docs/README.md's table, by slug. */
 export function descriptions() {
 	const out = {};
@@ -582,8 +571,8 @@ export function writePages() {
 title: ${JSON.stringify(index.title)}
 head:
   - tag: title
-    content: ${JSON.stringify(`${index.title}: schema management and migrations for ClickHouse and Postgres`)}
-description: "What SQL Yodeler is, and the docs pages"
+    content: ${JSON.stringify(`${index.title}: schema changes for ClickHouse and Postgres, and the ops they imply`)}
+description: "Schema changes for ClickHouse and Postgres, and the ops they imply"
 editUrl: ${JSON.stringify(`${editBase}README.md`)}
 template: splash
 ---

@@ -4,7 +4,15 @@ claims: []
 
 # SQL Yodeler
 
-SQL Yodeler manages the schemas of ClickHouse and Postgres databases declaratively. You declare what the schema should be in TypeScript with chant's `sql` lexicon ([Declaring the schema](schema.md)), and the `yodel` CLI works out the change: it either applies it directly (the declarative path) or writes versioned migrations from it and applies those (the versioned path). Both paths apply behind an approval bound to a digest of the plan. Data migrations (rebuilds, backfills, expand-and-contract column changes) are steps inside a migration, recorded in the same history as the DDL, and resume where they stopped.
+SQL Yodeler manages the schemas of ClickHouse and Postgres databases declaratively. You declare what the schema should be in TypeScript with chant's `sql` lexicon ([Declaring the schema](schema.md)), and the `yodel` CLI works out the change: it either applies it directly (the declarative path) or writes versioned migrations from it and applies those (the versioned path). Both paths apply behind an approval bound to a digest of the plan.
+
+Some schema changes imply work beyond one statement, and yodel does that work as a step of the migration, in the same history as the DDL:
+
+- **ClickHouse rebuild.** Some changes, such as a new sort key, engine or partitioning, can't be made with `ALTER`. yodel creates a new table, copies the rows into it, checks that they match, and swaps it in.
+- **Postgres safe rename.** Renaming a column or table in one step breaks the app that is still using the old name. yodel adds the new name, keeps both in sync, moves readers over, and drops the old name later. This is called expand and contract.
+- **Backfill.** A new column often needs values for the rows already there. You write the fill once, and yodel runs it in batches, resuming where it stopped if it is interrupted.
+
+Rebuilds, renames and backfills run once, inside the migration. No recurring jobs. Not an ORM; it works next to one ([Schema from an ORM](orm.md)).
 
 | Page | What it covers |
 |---|---|

@@ -16,7 +16,7 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'SQL Yodeler',
-			description: 'Declarative schema migrations for ClickHouse and Postgres: declare the schema in TypeScript, and yodel works out the change.',
+			description: 'Schema changes for ClickHouse and Postgres, and the ops they imply: declare the schema in TypeScript, and yodel works out the change.',
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/INTENTIUS/sql-yodeler' },
 				{ icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/@intentius/sql-yodeler' },

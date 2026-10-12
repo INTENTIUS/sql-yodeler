@@ -133,7 +133,7 @@ An approval recorded with `--no-resume`, by a script with `chantApprove`, or one
 ci: { forges: ["github", "gitlab", "forgejo"], resume: { schedule: "*/10 * * * *" } },
 ```
 
-`npm run ci` then renders `yodel-apply-resume`, which runs `chant run resume --op yodel-apply`: every apply wave that waits at its gate and whose approval has arrived since is started again, the way `yodel approve` starts it. It approves nothing, and it skips a run that is still going, passed, or was already started again, so it can run every few minutes.
+`npm run ci` then renders `yodel-apply-resume`, which runs `chant run resume --op yodel-apply`: every apply wave that waits at its gate and whose approval has arrived since is started again, the way `yodel approve` starts it. It approves nothing, and it skips a run that is still going, passed, or was already started again, so it can run every few minutes. It starts applies that are approved and waiting, and moves no data itself.
 
 - GitHub: `.github/workflows/yodel-apply-resume.yml`, with the job's own token and `actions: write`.
 - Forgejo: `.forgejo/workflows/yodel-apply-resume.yml`, with the `CHANT_FORGE_TOKEN` secret, a token with `write:repository` (the job's own token cannot dispatch a workflow).

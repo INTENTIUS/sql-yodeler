@@ -2,7 +2,7 @@
 
 # SQL Yodeler
 
-Declarative schema migrations for ClickHouse and Postgres. Declare your schema in TypeScript, and SQL Yodeler works out the change: it plans and applies it against the live database, or writes it as a versioned migration, behind an approval bound to the plan. Built on chant's `sql` lexicon.
+Schema changes for ClickHouse and Postgres, and the ops they imply. Declare your schema in TypeScript, and SQL Yodeler works out the change: it plans and applies it against the live database, or writes it as a versioned migration, behind an approval bound to the plan. Built on chant's `sql` lexicon.
 
 ```ts
 // src/schema.ts
@@ -21,6 +21,14 @@ export const events = table`
 ```
 
 Each export is one object in the database's own DDL; `${db}` is a reference, so the build orders the objects and checks them against a pinned server's catalog. [Declaring the schema](docs/schema.md) has the whole form, both dialects.
+
+Some schema changes imply work beyond one statement, and yodel does that work as part of the migration:
+
+- **ClickHouse rebuild.** Some changes, such as a new sort key, engine or partitioning, can't be made with `ALTER`. yodel creates a new table, copies the rows into it, checks that they match, and swaps it in.
+- **Postgres safe rename.** Renaming a column or table in one step breaks the app that is still using the old name. yodel adds the new name, keeps both in sync, moves readers over, and drops the old name later. This is called expand and contract.
+- **Backfill.** A new column often needs values for the rows already there. You write the fill once, and yodel runs it in batches, resuming where it stopped if it is interrupted.
+
+Rebuilds, renames and backfills run once, inside the migration. No recurring jobs. Not an ORM; it works next to one ([Schema from an ORM](docs/orm.md)). [Data migrations](docs/steps.md) has the details.
 
 SQL Yodeler is built on [chant](https://intentius.io/chant/), a declarative infrastructure-as-code toolkit in TypeScript. The `yodel` CLI covers every step, and runs chant's CLI underneath: `yodel create` makes a project from a template, `yodel emulator up` starts a local database, and `yodel approve` records an approval. Before a project exists, run it as `npx @intentius/sql-yodeler`; inside one, as `npx yodel`.
 
