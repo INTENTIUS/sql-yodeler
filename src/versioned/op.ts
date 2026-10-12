@@ -24,6 +24,7 @@
  */
 
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { opExportName } from "../chant/export-name.js";
 import { tmpdir } from "node:os";
 import { delimiter, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,7 +83,7 @@ export function migrateOpExample(env: string): string {
     `const plan = shell("yodel apply ${env} --digest", { id: "plan" });`,
     `const digest = stepOutput(plan, "stdout");`,
     ``,
-    `export const op = Op({`,
+    `export const ${opExportName(`migrate-${env}`)} = Op({`,
     `  name: "migrate-${env}",`,
     `  overview: "Apply the pending migrations to ${env}, behind an approval bound to their plan digest",`,
     `  phases: [`,

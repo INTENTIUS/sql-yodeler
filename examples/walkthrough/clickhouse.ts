@@ -31,7 +31,7 @@ const APPLY_OP = `import { ApplyOp } from "@intentius/chant/op";
 
 // The declarative path: yodel apply dev plans src/ against dev and runs this
 // Op, behind a gate bound to the plan.
-export const { op } = ApplyOp({ name: "apply-dev", env: "dev", target: "clickhouse", gate: {} });
+export const { op: applyDev } = ApplyOp({ name: "apply-dev", env: "dev", target: "clickhouse", gate: {} });
 `;
 
 export const walkthrough: Walkthrough = {

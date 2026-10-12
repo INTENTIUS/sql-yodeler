@@ -6,6 +6,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { opExportName } from "../src/chant/export-name.js";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
@@ -119,11 +120,18 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       typedColumns: true,
     });
     for (const env of envs.names) {
-      const migrate = (await import(pathToFileURL(join(dir, "ops", `migrate-${env}.op.ts`)).href)) as { op: { props: OpConfig } };
-      expect(migrateOpParts(migrate.op.props, env)).toEqual({ gate: `approve-migrate-${env}`, quorum: false });
-      const watch = (await import(pathToFileURL(join(dir, "ops", `watch-${env}.op.ts`)).href)) as { op: { props: OpConfig } };
-      expect(watch.op.props.name).toBe(`watch-${env}`);
-      const cron = watch.op.props.schedule?.cron;
+      // Each Op is exported under a name of its own (#2): migrateDev, watchDev.
+      const migrateMod = (await import(pathToFileURL(join(dir, "ops", `migrate-${env}.op.ts`)).href)) as Record<string, { props: OpConfig }>;
+      const migrate = migrateMod[opExportName(`migrate-${env}`)];
+      if (!migrate) throw new Error(`ops/migrate-${env}.op.ts does not export ${opExportName(`migrate-${env}`)}`);
+      expect(Object.keys(migrateMod)).toEqual([opExportName(`migrate-${env}`)]);
+      expect(migrateOpParts(migrate.props, env)).toEqual({ gate: `approve-migrate-${env}`, quorum: false });
+      const watchMod = (await import(pathToFileURL(join(dir, "ops", `watch-${env}.op.ts`)).href)) as Record<string, { props: OpConfig }>;
+      const watch = watchMod[opExportName(`watch-${env}`)];
+      if (!watch) throw new Error(`ops/watch-${env}.op.ts does not export ${opExportName(`watch-${env}`)}`);
+      expect(Object.keys(watchMod)).toEqual([opExportName(`watch-${env}`)]);
+      expect(watch.props.name).toBe(`watch-${env}`);
+      const cron = watch.props.schedule?.cron;
       expect(cron).toMatch(/^\S+ \S+ \S+ \S+ \S+$/);
       for (const forge of [".github", ".forgejo"]) {
         const doc = load(readFileSync(join(dir, forge, "workflows", `watch-${env}.yml`), "utf8")) as { on: { schedule: Array<{ cron: string }> } };
