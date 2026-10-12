@@ -86,7 +86,7 @@ const ENV_KEYS = ["staging", "prod"] as const;
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; commandsWhenPlanning?: boolean } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; dropBeforeCommand?: boolean } = {}): Promise<void> {
   const { p } = st;
   p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps, options.tenantQuery));
   // A tenant set's wave has a run per tenant, as yodel ci renders it.
@@ -95,17 +95,17 @@ async function render(st: State, waves: readonly Wave[], options: { allNever?: b
   const files = await applyPipelines(p.dir, { dialect: p.ctx.dialect === "ch" ? "clickhouse" : "postgres", names: ws.map((w) => w.env), replay: false, waves: ws });
   for (const f of files) {
     let content = f.content;
-    if (options.commandsWhenPlanning && f.path === "yodel-waves.json") {
-      const spec = JSON.parse(content) as { waves: Array<{ hooks?: { before?: { plan?: Array<{ command: string[] }>; apply?: Array<{ command: string[] }> } } }> };
-      let moved = 0;
+    if (options.dropBeforeCommand && f.path === "yodel-waves.json") {
+      const spec = JSON.parse(content) as { waves: Array<{ hooks?: { before?: { apply?: Array<{ command: string[] }> } } }> };
+      let dropped = 0;
       for (const w of spec.waves) {
-        const commands = (w.hooks?.before?.apply ?? []).filter((h) => h.command[0] === "sh");
-        if (w.hooks?.before && commands.length > 0) {
-          w.hooks.before.plan = [...(w.hooks.before.plan ?? []), ...commands];
-          moved += commands.length;
-        }
+        const before = w.hooks?.before;
+        if (!before?.apply) continue;
+        const kept = before.apply.filter((h) => h.command[0] !== "sh");
+        dropped += before.apply.length - kept.length;
+        before.apply = kept;
       }
-      if (moved === 0) throw new Error("the rendered waves spec has no before command to run when the wave is planned");
+      if (dropped === 0) throw new Error("the rendered waves spec has no before command to drop");
       content = `${JSON.stringify(spec, null, 2)}\n`;
     }
     p.write(f.path, content);
@@ -561,9 +561,9 @@ async function steps(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const notify = `echo "$YODEL_ENV" >> ${notified}`;
   const runs = () => (existsSync(notified) ? readFileSync(notified, "utf8").split("\n").filter(Boolean).length : 0);
   const steps = `{ before: [{ name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
-  // Broken: the rendered spec runs the before command when the wave is planned too, as it runs under the lock.
-  if (broken) ctx.log("BREAK: the waves spec runs the before command as a before-plan hook too");
-  await render(st, waves(st, "never", "never"), { steps, commandsWhenPlanning: broken });
+  // Broken: the rendered spec loses the before command, so the apply runs without it.
+  if (broken) ctx.log("BREAK: the rendered waves spec drops the before command");
+  await render(st, waves(st, "never", "never"), { steps, dropBeforeCommand: broken });
   await st.p.commit("the waves: both never, staging with steps around apply");
   addColumn(st.p, "checked");
   await migrate(st, "add-checked", "feat: a checked column");

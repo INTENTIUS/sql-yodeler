@@ -26,7 +26,7 @@ async function retryPart(ctx: Ctx, { p }: LockRetry): Promise<void> {
   await p.commit("add note");
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
 
   const holder = await postgresSession();
   try {
@@ -233,7 +233,7 @@ async function serialPart(ctx: Ctx, { p, s }: LockRetry): Promise<void> {
   await p.commit("add serial");
   const gated = await p.apply();
   if (gated.ran.code !== 3) throw new Error(`yodel apply did not stop at the gate (exit ${String(gated.ran.code)})`);
-  await p.approve(gated.doc.approve);
+  await p.approve(gated.doc.chantApprove);
 
   // main on origin a commit ahead of this checkout: a newer commit whose own apply would apply the environment.
   const origin = join(ctx.work, "origin.git");

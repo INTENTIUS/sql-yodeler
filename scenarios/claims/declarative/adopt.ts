@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
 import { parse, Project } from "../../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../../lib/access.js";
@@ -135,6 +136,13 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
   hold((await ctx.db.scalar(`SELECT auth_type[1] FROM system.users WHERE name = '${svc}'`)) === "sha256_password", "the user's password changed during the adoption");
 }
 
+/** Every declaration file yodel init --from wrote, as one text. A tag may carry a type argument (`table<"db.t">`). */
+const declared = (p: Project): string =>
+  readdirSync(p.path("src"))
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => p.read(join("src", f)))
+    .join("\n");
+
 /**
  * `yodel init --from <env>` adopts a database made by hand (on Postgres,
  * with a trigger function and a trigger; on ClickHouse, with a dictionary
@@ -149,12 +157,12 @@ async function initPart(ctx: Ctx, s: Adoption): Promise<void> {
   hold(doc.migration !== undefined && p.migrationIds().length === 1, "init wrote no baseline migration");
   if (ctx.dialect === "pg") {
     // Functions and triggers are adopted with the tables (#44), so the declared schema holds what the server does.
-    const src = p.read("src/schema.ts");
-    hold(/= func`/.test(src) && /= trigger`/.test(src) && src.includes("orders_lower_status"), "yodel init --from did not declare the function and the trigger it found");
+    const src = declared(p);
+    hold(/= func(<[^>]*>)?`/.test(src) && /= trigger(<[^>]*>)?`/.test(src) && src.includes("orders_lower_status"), "yodel init --from did not declare the function and the trigger it found");
   } else {
     // Dictionaries and functions are adopted with the tables (#46).
-    const src = p.read("src/schema.ts");
-    hold(/= dictionary`/.test(src) && /= func`/.test(src) && src.includes(chNames(ctx).fn), "yodel init --from did not declare the dictionary and the function it found");
+    const src = declared(p);
+    hold(/= dictionary(<[^>]*>)?`/.test(src) && /= func(<[^>]*>)?`/.test(src) && src.includes(chNames(ctx).fn), "yodel init --from did not declare the dictionary and the function it found");
   }
 
   if (ctx.broken) {
@@ -220,11 +228,11 @@ async function secondEnvPart(ctx: Ctx, s: Adoption): Promise<void> {
 
     const first = await p.yodel(["init", "--baseline", env, "--json"], { timeoutMs: 600_000 });
     hold(first.code === 3, `yodel init --baseline ${env} exited ${String(first.code)}, not 3 at the gate: ${first.err.trim().split("\n").slice(-6).join("\n")}`);
-    const gated = parse<{ status: string; approve?: string; planDigest: string }>(first);
+    const gated = parse<{ status: string; approve?: string; chantApprove?: string; planDigest: string }>(first);
     hold(gated.status === "gated" && gated.approve !== undefined, `yodel init --baseline ${env} did not stop at the gate (${gated.status})`);
     const unrecorded = await server.scalar(`SELECT count(*) FROM ${ctx.db.history}.history`).catch(() => "0");
     hold(unrecorded === "0" || unrecorded === "", `the history recorded ${unrecorded} rows before the approval`);
-    await p.approve(gated.approve);
+    await p.approve(gated.chantApprove);
     const second = await p.yodel(["init", "--baseline", env, "--json"], { timeoutMs: 600_000 });
     hold(second.code === 0 && parse<{ status: string }>(second).status === "recorded", `yodel init --baseline ${env} after the approval exited ${String(second.code)}`);
 
