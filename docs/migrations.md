@@ -46,9 +46,9 @@ No changes: the declared schema matches the newest migration's recorded schema (
 
 (From the Postgres example's run, just after it writes `rename-email`; `run.ts postgres --write` rewrites this quote with the README. The committed-example check in `examples/walkthrough/run.ts` runs `yodel new check` in each example, so a declared schema that drifts from its migrations fails the e2e test.)
 
-It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --sql` writes a migration you write yourself ([below](#writing-one-yourself-yodel-new---sql)). `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Data migrations](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Data migrations](steps.md#postgres-postgresmigrationop)).
+It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --sql` writes a migration you write yourself ([below](#hand-written-migrations)). `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Data migrations](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Data migrations](steps.md#postgres-postgresmigrationop)).
 
-## Writing one yourself: yodel new --sql
+## Hand-written migrations
 
 Some changes are yours to write: reference rows a migration ships, a data fix, a statement yodel would not write. `yodel new <name> --sql` writes a hand-written migration: `migration.json` marks it `"source": "sql"`, and `migration.sql` holds a header and no statements. Write them under the header, each ending with `;`, then record them:
 
