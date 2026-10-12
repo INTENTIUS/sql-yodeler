@@ -8,7 +8,7 @@ compared with another tool.
 npm run bench                                  every measurement, 10 objects, both dialects
 npm run bench -- apply resume                  only those measurements
 npm run bench -- --sizes 10,100                other sizes
-npm run bench -- --full                        10, 100, 1,000 and 10,000 objects
+npm run bench -- --full                        10, 100 and 1,000 objects
 npm run bench -- --dialects ch                 ClickHouse only (ch, pg)
 ```
 
