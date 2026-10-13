@@ -15,8 +15,9 @@
  * }
  * ```
  *
- * `YODEL_CREDENTIALS` picks the role a process connects as: the reader
- * unless it is `writer` (every environment) or `writer:<env>` (that one).
+ * `YODEL_ROLE` picks the role a process connects as: the reader unless it
+ * is `writer` (every environment) or `writer:<env>` (that one). Its older
+ * name, `YODEL_CREDENTIALS`, is still read (#268).
  * Only an environment's apply job sets it. Each role reads its user and its
  * password from a variable, by default `<ENV>_<DIALECT>_READER_USER`,
  * `..._READER_PASSWORD`, `..._WRITER_USER` and `..._WRITER_PASSWORD`
@@ -85,13 +86,30 @@ export interface ProfileCredentials {
 /** DEV_POSTGRES for dev on Postgres: what an environment's variables start with. */
 export const credentialsPrefix = (env: string, dialect: CredentialsDialect): string => `${env.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_${dialect.toUpperCase()}`;
 
-/** The role `YODEL_CREDENTIALS` picks for `env`: the writer under `writer` or `writer:<env>`, else the reader. */
-export function roleOf(env: string, value: string | undefined = process.env.YODEL_CREDENTIALS): Role {
+/** The variable that picks the role a process connects as (#268), and its older name, still read. */
+export const ROLE_VAR = "YODEL_ROLE";
+export const OLD_ROLE_VAR = "YODEL_CREDENTIALS";
+
+/**
+ * The variable that picks the role in `processEnv` and its value:
+ * `YODEL_ROLE`, else `YODEL_CREDENTIALS`. Undefined when neither is set;
+ * throws when both are and they differ, so neither is silently ignored.
+ */
+export function roleSetting(processEnv: NodeJS.ProcessEnv = process.env): { name: string; value: string } | undefined {
+  const value = processEnv[ROLE_VAR];
+  const old = processEnv[OLD_ROLE_VAR];
+  if (value && old && value !== old) throw new Error(`${ROLE_VAR} is ${value} and ${OLD_ROLE_VAR}, its older name, is ${old}: set one of them`);
+  if (value) return { name: ROLE_VAR, value };
+  return old ? { name: OLD_ROLE_VAR, value: old } : undefined;
+}
+
+/** The role `YODEL_ROLE` picks for `env`: the writer under `writer` or `writer:<env>`, else the reader. */
+export function roleOf(env: string, value: string | undefined = roleSetting()?.value): Role {
   return value === "writer" || value === `writer:${env}` ? "writer" : "reader";
 }
 
 /**
- * The profile's `user` and `password` for the role `YODEL_CREDENTIALS`
+ * The profile's `user` and `password` for the role `YODEL_ROLE`
  * picks, with both roles recorded for yodel. `roles` replaces a role's
  * user or password; what it leaves out is read from the default variable.
  */
@@ -171,13 +189,13 @@ export function sharedCredentialsIn(profiles: Record<string, unknown>, processEn
 
 /**
  * What a printed command that writes starts with for `profile` (#159):
- * `YODEL_CREDENTIALS=writer:<env> ` when the profile has a reader and a
+ * `YODEL_ROLE=writer:<env> ` when the profile has a reader and a
  * writer of its own, so the command a hint prints runs as the writer
  * whatever the shell it is pasted into holds; nothing for any other profile.
  */
 export function writerPrefix(profile: unknown): string {
   const c = credentialsOf(profile);
-  return c ? `YODEL_CREDENTIALS=writer:${c.env} ` : "";
+  return c ? `${ROLE_VAR}=writer:${c.env} ` : "";
 }
 
 /** The user a profile's chosen role connects as, for a message: `DEV_CLICKHOUSE_READER_USER (reader)`, or the variable alone when it is not set here. */
@@ -196,11 +214,11 @@ function connectsAs(user: unknown, processEnv: NodeJS.ProcessEnv): string | unde
 export function readerRefusal(profile: unknown, command: string, processEnv: NodeJS.ProcessEnv = process.env): string | undefined {
   const c = credentialsOf(profile);
   if (!c || c.role !== "reader") return undefined;
-  const ys = processEnv.YODEL_CREDENTIALS;
+  const set = roleSetting(processEnv);
   return (
     `refused: ${command} writes, and this process holds ${c.env}'s reader, ${connectsAs(c.reader.user, processEnv) ?? c.reader.user.env}, ` +
-    `because YODEL_CREDENTIALS is ${ys ? `${ys}, not writer or writer:${c.env}` : "not set"}. ` +
-    `Run it as the writer: YODEL_CREDENTIALS=writer:${c.env} ${command}. Nothing was done.`
+    `because ${set ? `${set.name} is ${set.value}, not writer or writer:${c.env}` : `${ROLE_VAR} is not set`}. ` +
+    `Run it as the writer: ${ROLE_VAR}=writer:${c.env} ${command}. Nothing was done.`
   );
 }
 
@@ -237,7 +255,7 @@ export function permissionRefusal(e: unknown, profile: unknown, command: string,
   const role = c ? `${c.env}'s ${c.role}, ` : "";
   const user = connectsAs((profile as { user?: unknown } | null)?.user, processEnv);
   const fix = c?.role === "reader"
-    ? `Run it as the writer: YODEL_CREDENTIALS=writer:${c.env} ${command}.`
+    ? `Run it as the writer: ${ROLE_VAR}=writer:${c.env} ${command}.`
     : `Grant that user what the server names, or connect as a user that has it.`;
   return `refused: the server refused ${command}, which connected as ${role}${user ?? "the profile's user"}: ${serverLine(e)}. ${fix}`;
 }

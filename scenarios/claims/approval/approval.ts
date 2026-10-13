@@ -346,11 +346,11 @@ function withoutSharedRefusal(ctx: Ctx, p: Project): string[] {
  * reader and a writer, the reader's password minted by a command token
  * source (the test double for a cloud's). With the reader, yodel config
  * check --write-probe connects (the token minted) and the server refuses
- * the write; with the writer (YODEL_CREDENTIALS=writer:<env>) the probe's
+ * the write; with the writer (YODEL_ROLE=writer:<env>) the probe's
  * write goes through and it exits 4. With the writer's user variable
  * holding the reader's user, yodel refuses the project, exit 4 naming both
  * variables and the user, and nothing runs. yodel apply with the reader
- * (#159) refuses before the gate, exit 4 naming YODEL_CREDENTIALS=writer:<env>,
+ * (#159) refuses before the gate, exit 4 naming YODEL_ROLE=writer:<env>,
  * and the history is as it was. The profile is put back after.
  * BREAK: yodel is built without those refusals, so the shared config runs
  * and the apply as the reader goes on to the gate or the server's refusal.
@@ -374,7 +374,7 @@ export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
     const must: (cond: boolean, what: string) => asserts cond = ctx.broken ? (cond, what) => { if (!cond) throw new Error(what); } : hold;
     const read = await p.yodel(["config", "check", p.env, "--write-probe"], { env: apart, ...bin });
     must(read.code === 0 && read.out.includes("write probe   cannot write") && read.out.includes("password a command token (node)"), `yodel config check --write-probe with the reader exited ${String(read.code)}: ${read.out}${read.err}`);
-    const wrote = await p.yodel(["config", "check", p.env, "--write-probe"], { env: { ...apart, YODEL_CREDENTIALS: `writer:${p.env}` }, ...bin });
+    const wrote = await p.yodel(["config", "check", p.env, "--write-probe"], { env: { ...apart, YODEL_ROLE: `writer:${p.env}` }, ...bin });
     must(wrote.code === 4 && wrote.err.includes("the credentials this process holds can write"), `yodel config check --write-probe with the writer exited ${String(wrote.code)}, not 4: ${wrote.out}${wrote.err}`);
 
     const shared = await p.yodel(["status", p.env], { env: { ...apart, CLAIM_WRITER_USER: reader }, ...bin });
@@ -389,8 +389,8 @@ export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
     const asReader = await p.yodel(["apply", p.env], { env: apart, ...bin });
     const after = await history();
     hold(
-      asReader.code === 4 && asReader.err.includes(`YODEL_CREDENTIALS=writer:${p.env}`) && !asReader.err.includes("\n    at ") && after === before,
-      `yodel apply as the reader exited ${String(asReader.code)}, not 4 naming YODEL_CREDENTIALS=writer:${p.env}${after === before ? "" : ", and the history moved"}: ${asReader.err.slice(-400)}`,
+      asReader.code === 4 && asReader.err.includes(`YODEL_ROLE=writer:${p.env}`) && !asReader.err.includes("\n    at ") && after === before,
+      `yodel apply as the reader exited ${String(asReader.code)}, not 4 naming YODEL_ROLE=writer:${p.env}${after === before ? "" : ", and the history moved"}: ${asReader.err.slice(-400)}`,
     );
   } finally {
     p.write("chant.config.ts", config);

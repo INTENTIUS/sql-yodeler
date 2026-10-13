@@ -86,7 +86,7 @@ Exit codes:
   4  refused, nothing reverted: <id> is not applied in <env>, a migration
      after it is, the history does not match the migrations directory, or
      a policy rule denies the revert and no override is recorded for its
-     digest, the run holds <env>'s reader (YODEL_CREDENTIALS is not writer
+     digest, the run holds <env>'s reader (YODEL_ROLE is not writer
      or writer:<env>), or the server refused the user a privilege
   5  another apply holds the lock
   1  anything else failed: a statement (the history records where; rerun to

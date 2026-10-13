@@ -1,6 +1,6 @@
 /**
  * Credentials (#50): credentials() gives a profile a reader and a writer,
- * YODEL_CREDENTIALS picks the one a process connects as, yodel refuses an
+ * YODEL_ROLE picks the one a process connects as, yodel refuses an
  * environment whose two roles are one identity, and yodel ci gives each job
  * the variables of the role it holds, the cloud identity a token source
  * needs, and the write probe before every plan.
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { credentials, credentialsOf, isPermissionDenied, permissionRefusal, readerRefusal, roleOf, roleVariables, sharedCredentials, writerPrefix, type Credentials } from "../src/credentials.js";
+import { credentials, credentialsOf, isPermissionDenied, permissionRefusal, readerRefusal, roleOf, roleSetting, roleVariables, sharedCredentials, writerPrefix, type Credentials } from "../src/credentials.js";
 import { runnableAsWriter } from "../src/chant/runnable.js";
 import { repoRoot, yodel } from "./helpers/run.js";
 
@@ -38,7 +38,7 @@ const withEnv = async <T>(vars: Record<string, string | undefined>, body: () => 
 };
 
 describe("credentials()", () => {
-  it("picks the reader unless YODEL_CREDENTIALS is writer or writer:<env>", () => {
+  it("picks the reader unless YODEL_ROLE is writer or writer:<env>", () => {
     expect(roleOf("dev", undefined)).toBe("reader");
     expect(roleOf("dev", "reader")).toBe("reader");
     expect(roleOf("dev", "writer")).toBe("writer");
@@ -46,11 +46,20 @@ describe("credentials()", () => {
     expect(roleOf("dev", "writer:prod")).toBe("reader");
   });
 
+  it("reads YODEL_CREDENTIALS, the older name, when YODEL_ROLE is not set, and refuses the two set apart (#268)", () => {
+    expect(roleSetting({})).toBeUndefined();
+    expect(roleSetting({ YODEL_ROLE: "writer:dev" })).toEqual({ name: "YODEL_ROLE", value: "writer:dev" });
+    expect(roleSetting({ YODEL_CREDENTIALS: "writer:dev" })).toEqual({ name: "YODEL_CREDENTIALS", value: "writer:dev" });
+    expect(roleSetting({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "writer:dev" })).toEqual({ name: "YODEL_ROLE", value: "writer:dev" });
+    expect(roleOf("dev", roleSetting({ YODEL_CREDENTIALS: "writer:dev" })?.value)).toBe("writer");
+    expect(() => roleSetting({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "writer:prod" })).toThrow("YODEL_ROLE is writer:dev and YODEL_CREDENTIALS, its older name, is writer:prod: set one of them");
+  });
+
   it("names the default variables, takes a token source for a role's password, and records both roles", async () => {
-    const reader = await withEnv({ YODEL_CREDENTIALS: undefined }, () => Promise.resolve(credentials("dev", "postgres", { writer: { password: { token: "rds-iam" } } })));
+    const reader = await withEnv({ YODEL_ROLE: undefined }, () => Promise.resolve(credentials("dev", "postgres", { writer: { password: { token: "rds-iam" } } })));
     expect(reader.user).toEqual({ env: "DEV_POSTGRES_READER_USER" });
     expect(reader.password).toEqual({ env: "DEV_POSTGRES_READER_PASSWORD" });
-    const writer = await withEnv({ YODEL_CREDENTIALS: "writer:dev" }, () => Promise.resolve(credentials("dev", "postgres", { writer: { password: { token: "rds-iam" } } })));
+    const writer = await withEnv({ YODEL_ROLE: "writer:dev" }, () => Promise.resolve(credentials("dev", "postgres", { writer: { password: { token: "rds-iam" } } })));
     expect(writer.user).toEqual({ env: "DEV_POSTGRES_WRITER_USER" });
     expect(writer.password).toEqual({ token: "rds-iam" });
     // Spread into a profile, the roles go with it; JSON (and chant's strict schema) does not see them.
@@ -106,7 +115,7 @@ describe("a project's reader and writer", () => {
     expect(ran.err).toContain("sql.profiles.prod: the reader (PROD_POSTGRES_READER_USER) and the writer (PROD_POSTGRES_WRITER_USER) are the same user, app");
     const apart = await withEnv({ PROD_POSTGRES_READER_USER: "app_r", PROD_POSTGRES_WRITER_USER: "app_w" }, () => yodel(["config", "check", "prod", "--dir", dir]));
     expect(apart.code, apart.err).toBe(0);
-    expect(apart.out).toContain("connects as   reader (YODEL_CREDENTIALS unset)");
+    expect(apart.out).toContain("connects as   reader (YODEL_ROLE unset)");
     expect(apart.out).toContain("reader        user PROD_POSTGRES_READER_USER (set: app_r), password PROD_POSTGRES_READER_PASSWORD (not set here)");
     expect(apart.out).toContain("writer        user PROD_POSTGRES_WRITER_USER (set: app_w), password PROD_POSTGRES_WRITER_PASSWORD (not set here)");
   });
@@ -165,26 +174,27 @@ describe("a project's reader and writer", () => {
 });
 
 describe("a command that writes, run as the reader (#159)", () => {
-  const reader = () => withEnv({ YODEL_CREDENTIALS: undefined }, () => Promise.resolve({ url: "clickhouse://127.0.0.1:8123", ...credentials("dev", "clickhouse") }));
-  const writer = () => withEnv({ YODEL_CREDENTIALS: "writer:dev" }, () => Promise.resolve({ url: "clickhouse://127.0.0.1:8123", ...credentials("dev", "clickhouse") }));
+  const reader = () => withEnv({ YODEL_ROLE: undefined }, () => Promise.resolve({ url: "clickhouse://127.0.0.1:8123", ...credentials("dev", "clickhouse") }));
+  const writer = () => withEnv({ YODEL_ROLE: "writer:dev" }, () => Promise.resolve({ url: "clickhouse://127.0.0.1:8123", ...credentials("dev", "clickhouse") }));
   const plain = { url: "clickhouse://127.0.0.1:8123", user: { env: "CH_USER" } };
 
-  it("prints the command to run again with YODEL_CREDENTIALS=writer:<env> when the profile has a writer", async () => {
+  it("prints the command to run again with YODEL_ROLE=writer:<env> when the profile has a writer", async () => {
     const dir = mkdtempSync(join(tmpdir(), "yodel-hint-"));
     temps.push(dir);
     // Printed as the reader or the writer alike: a shell the line is pasted into may hold neither.
-    expect(runnableAsWriter("yodel apply dev", dir, await reader())).toBe("YODEL_CREDENTIALS=writer:dev yodel apply dev");
-    expect(runnableAsWriter("yodel apply dev", dir, await writer())).toBe("YODEL_CREDENTIALS=writer:dev yodel apply dev");
+    expect(runnableAsWriter("yodel apply dev", dir, await reader())).toBe("YODEL_ROLE=writer:dev yodel apply dev");
+    expect(runnableAsWriter("yodel apply dev", dir, await writer())).toBe("YODEL_ROLE=writer:dev yodel apply dev");
     expect(writerPrefix(plain)).toBe("");
     expect(runnableAsWriter("yodel apply dev", dir, plain)).toBe("yodel apply dev");
   });
 
-  it("is refused in one line naming the reader's user and YODEL_CREDENTIALS=writer:<env>; the writer is not", async () => {
+  it("is refused in one line naming the reader's user and YODEL_ROLE=writer:<env>; the writer is not", async () => {
     const line = readerRefusal(await reader(), "npx yodel apply dev", { DEV_CLICKHOUSE_READER_USER: "reader" });
     expect(line).toBe(
-      "refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_CREDENTIALS is not set. Run it as the writer: YODEL_CREDENTIALS=writer:dev npx yodel apply dev. Nothing was done.",
+      "refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_ROLE is not set. Run it as the writer: YODEL_ROLE=writer:dev npx yodel apply dev. Nothing was done.",
     );
-    expect(readerRefusal(await reader(), "yodel apply dev", { YODEL_CREDENTIALS: "writer:prod" })).toContain("because YODEL_CREDENTIALS is writer:prod, not writer or writer:dev");
+    expect(readerRefusal(await reader(), "yodel apply dev", { YODEL_ROLE: "writer:prod" })).toContain("because YODEL_ROLE is writer:prod, not writer or writer:dev");
+    expect(readerRefusal(await reader(), "yodel apply dev", { YODEL_CREDENTIALS: "writer:prod" })).toContain("because YODEL_CREDENTIALS is writer:prod, not writer or writer:dev. Run it as the writer: YODEL_ROLE=writer:dev yodel apply dev.");
     expect(readerRefusal(await writer(), "yodel apply dev", {})).toBeUndefined();
     expect(readerRefusal(plain, "yodel apply dev", {})).toBeUndefined();
   });
@@ -201,7 +211,7 @@ describe("a command that writes, run as the reader (#159)", () => {
 
     const asReader = permissionRefusal(ch, await reader(), "npx yodel apply dev", { DEV_CLICKHOUSE_READER_USER: "reader" });
     expect(asReader).toBe(
-      "refused: the server refused npx yodel apply dev, which connected as dev's reader, DEV_CLICKHOUSE_READER_USER (reader): Code: 497. DB::Exception: reader: Not enough privileges. To execute this query, it's necessary to have the grant CREATE DATABASE ON yodeler.*. (ACCESS_DENIED). Run it as the writer: YODEL_CREDENTIALS=writer:dev npx yodel apply dev.",
+      "refused: the server refused npx yodel apply dev, which connected as dev's reader, DEV_CLICKHOUSE_READER_USER (reader): Code: 497. DB::Exception: reader: Not enough privileges. To execute this query, it's necessary to have the grant CREATE DATABASE ON yodeler.*. (ACCESS_DENIED). Run it as the writer: YODEL_ROLE=writer:dev npx yodel apply dev.",
     );
     expect(asReader).not.toContain("\n");
     const asPlain = permissionRefusal(pg, plain, "yodel apply dev", { CH_USER: "app" });
@@ -211,11 +221,11 @@ describe("a command that writes, run as the reader (#159)", () => {
 
   it("refuses yodel apply, revert and init as the reader, exit 4, before reading the server, with no stack trace", async () => {
     const dir = template();
-    const vars = { YODEL_CREDENTIALS: undefined, DEV_POSTGRES_READER_USER: "app_r", DEV_POSTGRES_WRITER_USER: "app_w" };
+    const vars = { YODEL_ROLE: undefined, DEV_POSTGRES_READER_USER: "app_r", DEV_POSTGRES_WRITER_USER: "app_w" };
     for (const args of [["apply", "dev"], ["apply", "dev", "--execute"], ["revert", "dev", "20261010T0000-x"], ["init", "--from", "dev", "--force"], ["init", "--baseline", "dev"]]) {
       const ran = await withEnv(vars, () => yodel([...args, "--dir", dir]));
       expect(ran.code, `${args.join(" ")}: ${ran.err}`).toBe(4);
-      expect(ran.err).toMatch(/^yodel \w+: refused: (npx )?yodel .* writes, and this process holds dev's reader, DEV_POSTGRES_READER_USER \(app_r\), because YODEL_CREDENTIALS is not set\. Run it as the writer: YODEL_CREDENTIALS=writer:dev .*\. Nothing was done\.\n$/);
+      expect(ran.err).toMatch(/^yodel \w+: refused: (npx )?yodel .* writes, and this process holds dev's reader, DEV_POSTGRES_READER_USER \(app_r\), because YODEL_ROLE is not set\. Run it as the writer: YODEL_ROLE=writer:dev .*\. Nothing was done\.\n$/);
       expect(ran.out).toBe("");
     }
     // Reading is the reader's: --plan is not refused for the credentials (it fails here for the project having no migrations).

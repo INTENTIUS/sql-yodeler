@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { environmentSettings } from "../config/settings.js";
 import { CONFIG_FILE } from "../config/load.js";
-import { credentialsOf, describePassword, roleOf, ROLES, type Credentials, type Role } from "../credentials.js";
+import { credentialsOf, describePassword, roleOf, roleSetting, ROLE_VAR, ROLES, type Credentials, type Role } from "../credentials.js";
 import { guarded } from "../env-args.js";
 import { EXIT_REFUSED } from "../exit.js";
 import { writeProbe, type ProbeResult } from "../probe.js";
@@ -14,7 +14,7 @@ const USAGE = "usage: yodel config check [<env>...] [--write-probe] [--dir <proj
 const help = `${USAGE}
 
 Prints each environment's settings and where each came from: the server,
-the role this process connects as (YODEL_CREDENTIALS), the reader's and the
+the role this process connects as (YODEL_ROLE), the reader's and the
 writer's user and password (the variable each is read from and whether it
 is set here, or the token source that mints it), the history's database,
 the topology, and the lock's TTL and wait. Every environment, or the ones
@@ -79,14 +79,14 @@ function view(project: Project, name: string, env: NodeJS.ProcessEnv): EnvView {
   const settings = environmentSettings(project, name, env);
   const own = project.yodel?.config.environments?.[name];
   const historySource = own?.history?.database !== undefined ? CONFIG_FILE : env.YODEL_HISTORY_DATABASE ? "YODEL_HISTORY_DATABASE" : "default";
-  const ys = env.YODEL_CREDENTIALS;
+  const set = roleSetting(env);
   const user = profile.user;
   const password = profile.password as Parameters<typeof describePassword>[0] | undefined;
   return {
     environment: name,
     server: serverAddress(project.dialect, String(profile.url)),
-    role: roleOf(name, ys),
-    roleSource: ys ? `YODEL_CREDENTIALS=${ys}` : "YODEL_CREDENTIALS unset",
+    role: roleOf(name, set?.value),
+    roleSource: set ? `${set.name}=${set.value}` : `${ROLE_VAR} unset`,
     credentials: c
       ? { split: true, reader: roleView(c, "reader", env), writer: roleView(c, "writer", env) }
       : { split: false, ...(isEnvRef(user) ? { user: user.env } : {}), ...(password ? { password: describePassword(password) } : {}) },

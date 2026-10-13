@@ -49,7 +49,7 @@ export function runnable(command: string, projectDir: string, env: NodeJS.Proces
 
 /**
  * A command that writes, as a person can run it in `projectDir` (#159):
- * {@link runnable}, after `YODEL_CREDENTIALS=writer:<env> ` when `profile`
+ * {@link runnable}, after `YODEL_ROLE=writer:<env> ` when `profile`
  * has a reader and a writer of its own, so the printed command does not run
  * as the reader.
  */

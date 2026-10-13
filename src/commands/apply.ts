@@ -188,9 +188,9 @@ Two paths, chosen by the project:
   has).
 
 Both paths write. For a profile made with credentials(), yodel apply runs
-as the writer only under YODEL_CREDENTIALS=writer or writer:<env>; as the
+as the writer only under YODEL_ROLE=writer or writer:<env>; as the
 reader it refuses before the gate (exit 4), and the command it prints to
-run again after a gate stop carries YODEL_CREDENTIALS=writer:<env>. A server
+run again after a gate stop carries YODEL_ROLE=writer:<env>. A server
 that refuses a write for want of a privilege is told in one line naming the
 user (exit 4).
 
@@ -250,7 +250,7 @@ Exit codes:
      waves[].requires, default the wave before) does not record as applied
      with the same checksum. Declarative: a policy rule that denies the
      plan with no override. Either path: the run holds <env>'s reader
-     (YODEL_CREDENTIALS is not writer or writer:<env>), which refuses before
+     (YODEL_ROLE is not writer or writer:<env>), which refuses before
      the gate, or the server refused the user a privilege
   5  versioned: another apply holds the lock (after --lock-wait, if given)
   1  anything else failed: a statement (the history records where; rerun to
