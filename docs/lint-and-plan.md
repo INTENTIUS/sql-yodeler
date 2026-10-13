@@ -38,7 +38,7 @@ On each pull request, every job with readers or with no database credentials at 
 
 On its schedule, `watch-<env>` compares the server with the declared schema and keeps a tracking issue open while it finds drift ([Drift](drift.md)). It holds the environment's reader.
 
-Applying is left to you. `YODEL_CREDENTIALS=writer yodel apply <env>` from a machine that holds the writer applies behind the same approval as the pipeline would ([Approving](approval.md#approving)), and records each migration in the history the plan comment and the watch read.
+Applying is left to you. `YODEL_CREDENTIALS=writer:<env> yodel apply <env>` from a machine that holds the writer applies behind the same approval as the pipeline would ([Approving](approval.md#approving)), and records each migration in the history the plan comment and the watch read.
 
 ## Turning apply on later
 

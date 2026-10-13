@@ -89,7 +89,7 @@ The live database is only read. The one write is the history row (and the histor
 What it needs first:
 
 - A project: a `chant.config.ts` with `lexicons: ["sql"]`, `sql.dialect` and `sql.profiles.<env>`, with the project's databases (ClickHouse, `databases`) or schemas (Postgres, `schemas`) listed and the history's database or schema not among them, and a `package.json` from which chant and the `sql` lexicon resolve. `init` does not write `chant.config.ts`. The usual way to get one is a [starter template](#a-new-project-from-a-template) made with the existing database's name (`yodel create <dir> --clickhouse --database <name>`, or `--postgres --schema <name>`); its `src/schema.ts` is a placeholder, so run `init` with `--force` to write over it.
-- The writer's credentials. `init` writes the history row, and creates the history's database or schema and table when they are not there. The templates read the reader's credentials, which their READMEs create read-only, unless `YODEL_CREDENTIALS=writer`, so with a template it is `YODEL_CREDENTIALS=writer npx yodel init --from <env> --force`.
+- The writer's credentials. `init` writes the history row, and creates the history's database or schema and table when they are not there. The templates read the reader's credentials, which their READMEs create read-only, unless `YODEL_CREDENTIALS=writer:<env>`, so with a template it is `YODEL_CREDENTIALS=writer:<env> npx yodel init --from <env> --force`.
 - No subdirectory in `migrations/`. Move another tool's migration files out of it first.
 
 It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, the environment holds nothing, or the environment holds an object of a kind yodel cannot declare.
@@ -175,7 +175,7 @@ The [Postgres example](../examples/postgres/README.md#2-adopting-the-schema-into
 `init --from` adopts one environment. Another environment that holds the same schema with its data (staging, prod) cannot run the baseline, whose first `CREATE` would fail there. `yodel init --baseline <env>` records the baseline applied in it instead, without running it:
 
 ```sh
-YODEL_CREDENTIALS=writer npx yodel init --baseline prod
+YODEL_CREDENTIALS=writer:prod npx yodel init --baseline prod
 ```
 
 1. It plans the schema the baseline (the project's first migration) records against `<env>`'s live database, from `migration.json` alone. The plan must be empty: every object the baseline declares is there as it declares it, and the profile's databases or schemas hold nothing else. Each difference is named, with what the environment has and what the baseline declares, and the command refuses (exit 4), recording nothing:

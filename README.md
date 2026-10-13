@@ -45,12 +45,12 @@ curl -s http://127.0.0.1:8123 --data-binary "GRANT SELECT, SHOW ON *.* TO reader
 export DEV_CLICKHOUSE_READER_USER=reader DEV_CLICKHOUSE_READER_PASSWORD= DEV_CLICKHOUSE_WRITER_USER=default DEV_CLICKHOUSE_WRITER_PASSWORD=
 npx yodel new init && npx yodel lint
 git add -A && git commit -m "feat: the first migration"
-YODEL_CREDENTIALS=writer npx yodel apply dev   # stops at the approval
+YODEL_CREDENTIALS=writer:dev npx yodel apply dev   # stops at the approval
 npx yodel approve dev   # shows the plan; type dev to approve
-YODEL_CREDENTIALS=writer npx yodel apply dev
+YODEL_CREDENTIALS=writer:dev npx yodel apply dev
 ```
 
-yodel refuses an environment whose reader and writer are one user, so dev reads with a read-only user, `reader`, and applies with the emulator's `default` user, picked by `YODEL_CREDENTIALS=writer`. The template's `just up` makes the reader and prints these variables for a `.env` file, and `just apply` sets the writer.
+yodel refuses an environment whose reader and writer are one user, so dev reads with a read-only user, `reader`, and applies with the emulator's `default` user, picked by `YODEL_CREDENTIALS=writer:dev`. The template's `just up` makes the reader and prints these variables for a `.env` file, and `just apply` sets the writer.
 
 For Postgres, use `--postgres --schema app`.
 
