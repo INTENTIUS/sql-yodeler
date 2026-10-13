@@ -8,6 +8,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "types": "chant sql types",
     "ci": "yodel ci",
     "ci:check": "yodel ci --check",
     "replay": "yodel ci --replay"

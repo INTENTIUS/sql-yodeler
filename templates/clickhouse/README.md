@@ -33,7 +33,7 @@ Then create the users and the forge's secrets (below), and push. Every change af
 
 `npx yodel new <name> --backfill` adds a backfill, which runs once when that migration applies.
 
-`src/sql-types.d.ts` types each table's columns, so a misspelled column name fails `npm run typecheck`. Run `npx chant sql types` after you change a table; the pull request job fails while the file is out of date.
+`src/sql-types.d.ts` types each table's columns, so a misspelled column name fails `npm run typecheck`. Run `npm run types` (`chant sql types`) after you change a table; the pull request job fails while the file is out of date.
 
 ### When database `{{chant:database}}` already exists
 

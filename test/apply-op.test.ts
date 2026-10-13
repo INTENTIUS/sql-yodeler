@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApplyOp } from "@intentius/chant/op";
 import type { OpConfig } from "@intentius/chant/op/types";
 import { gatedCommands, readApplyRun, selectApplyOp } from "../src/chant/apply.js";
+import { approveCommandsFor } from "../src/commands/apply.js";
 import { projectFromConfig, resolveEnvironment } from "../src/project.js";
 
 const project = projectFromConfig("/p", "/p/chant.config.ts", {
@@ -91,5 +92,15 @@ describe("readApplyRun", () => {
   it("maps chant run's exit codes", () => {
     expect(readApplyRun(0, "").status).toBe("applied");
     expect(readApplyRun(1, "").status).toBe("failed");
+  });
+});
+
+describe("approveCommandsFor (#273)", () => {
+  const op = { name: "migrate-prod", gate: "approve-migrate-prod" } as Parameters<typeof approveCommandsFor>[2];
+  it("takes chant's approve command when it printed one, and makes one from the digest when it did not", () => {
+    expect(approveCommandsFor({ chantApprove: "chant approve migrate-prod approve-migrate-prod --plan d1", planDigest: "d1" }, "prod", op, "d2", "ledger")).toEqual({ approve: "yodel approve prod --plan d1", chantApprove: "chant approve migrate-prod approve-migrate-prod --plan d1" });
+    expect(approveCommandsFor({}, "prod", op, "d2", "ledger")).toEqual({ approve: "yodel approve prod --plan d2", chantApprove: "chant approve migrate-prod approve-migrate-prod --plan d2" });
+    expect(approveCommandsFor({}, "prod", op, "d2", "sealed")).toEqual({ approve: "yodel approve prod --plan d2 --sign", chantApprove: "chant approve migrate-prod approve-migrate-prod --plan d2 --sign" });
+    expect(approveCommandsFor({}, "prod", op, undefined, "ledger")).toEqual({});
   });
 });

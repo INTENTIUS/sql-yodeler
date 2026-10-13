@@ -20,6 +20,7 @@ import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
 import { describeStep, heldSteps, runSqlStep, runStepHooks, sqlStepOfArgv, STEP_SQL_FLAG, stepsAtBase, stepsHooksFile, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
 import type { OpWaveHooksFile } from "@intentius/chant/op";
 import { approveCommand, migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
+import type { ApprovalMode } from "../config/define.js";
 import { baseEnvironment, tenantTarget } from "../tenants/target.js";
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
 import { enforcePromotion, forecastWave, planWave, RECORD_PLANS_ENV, readWavePlan, verifyWaveDecision, WavePlanMoved, WAVES_SPEC_FILE, writeWavePlan, type WavePlanFile, type WaveRecord } from "../waves/index.js";
@@ -76,18 +77,29 @@ async function movedSinceApproval(project: Project, venv: VersionedEnv, ordered:
     if (!latest?.digest || latest.holds) return undefined;
     if (latest.sameDigest) {
       return {
-        moved: { approved: latest.digest, by: latest.by, at: latest.at, confirmed: true, changes: [], ...(latest.askedAgain ? { askedAgain: latest.askedAgain } : {}) },
+        moved: { approved: latest.digest, ...(digest ? { now: digest } : {}), by: latest.by, at: latest.at, confirmed: true, changes: [], ...(latest.askedAgain ? { askedAgain: latest.askedAgain } : {}) },
         line: `Nothing was applied. The approval of ${latest.digest} (by ${latest.by} at ${latest.at}) ${askedAgainLine(latest)}.`,
       };
     }
     const moved = await explainAgainst(venv, ordered, { approvedDigest: latest.digest, approvedAt: latest.at });
     return {
-      moved: { approved: latest.digest, by: latest.by, at: latest.at, confirmed: moved.confirmed, changes: moved.changes },
+      moved: { approved: latest.digest, ...(digest ? { now: digest } : {}), by: latest.by, at: latest.at, confirmed: moved.confirmed, changes: moved.changes },
       line: `Nothing was applied. The approval of ${latest.digest} (by ${latest.by} at ${latest.at}) does not hold: the plan moved since. ${moved.confirmed ? "What moved" : "What moved, as far as yodel can tell"}: ${describeMove(moved)}.`,
     };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The commands that approve `digest` at the migrations Op's gate: from chant's
+ * output when it printed one, else made here (#273), so `--json` always says
+ * what to run next when there is a plan to approve.
+ */
+export function approveCommandsFor(run: { chantApprove?: string; planDigest?: string }, env: string, op: MigrateOpRef, digest: string | undefined, mode: ApprovalMode) {
+  const d = run.planDigest ?? digest;
+  if (run.chantApprove) return gatedCommands(run, env, mode);
+  return d ? gatedCommands({ chantApprove: `chant approve ${op.name} ${op.gate} --plan ${d}`, planDigest: d }, env, mode) : {};
 }
 
 /** What a versioned run did, beyond the status it reports. */
@@ -97,7 +109,7 @@ export type VersionedOutcome =
   | { status: "denied"; policy: RuleResult[] }
   | { status: "stood-down"; stoodDown: string; op?: string }
   | { status: "gated"; op: string; gate: string; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; chantApprove?: string; gatePlanDigest?: string }
-  | { status: "failed"; op: string; exitCode: number; chantExitCode: number }
+  | { status: "failed"; op: string; exitCode: number; chantExitCode: number; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; chantApprove?: string }
   | { status: "applied"; op: string; appliedNow: string[] };
 
 /** What a declarative run (the ApplyOp) did; `plan` is the plan before the run. */
@@ -810,7 +822,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
     }
     // A sealed gate (#48) counts only a sealed approval, which --execute checks.
-    const commands = gatedCommands(run, env.name, (await migrationsApprovalAtBase(project, env.name)).mode);
+    const commands = approveCommandsFor(run, env.name, op, report.digest, (await migrationsApprovalAtBase(project, env.name)).mode);
     if (!a.json && commands.approve) {
       io.out(
         `Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\n` +
@@ -828,7 +840,11 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})${run.stepExit ? `: its Apply step, yodel apply ${env.name} --execute, exited ${String(run.stepExit)}` : ""}\n`);
       io.out(`\n${renderStatus(after)}`);
     }
-    outcome.doc = applyJson({ mode: "versioned", report: after, outcome: { status: "failed", op: op.name, exitCode: code, chantExitCode: run.code } });
+    // The plan moved under the lock since it was approved (#273): what moved, and the commands that approve the plan as it is now.
+    const stale = after.digest ? await movedSinceApproval(project, venv, ordered, op, after.digest) : undefined;
+    const again = stale ? approveCommandsFor({}, env.name, op, after.digest, (await migrationsApprovalAtBase(project, env.name)).mode) : {};
+    if (stale && !a.json && again.approve) io.out(`\n${stale.line}\nApprove the plan as it is now with:\n  ${runnable(again.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`);
+    outcome.doc = applyJson({ mode: "versioned", report: after, outcome: { status: "failed", op: op.name, exitCode: code, chantExitCode: run.code, ...(stale ? { moved: stale.moved } : {}), ...again } });
     if (a.json) io.out(`${JSON.stringify(outcome.doc, null, 2)}\n`);
     return code;
   }

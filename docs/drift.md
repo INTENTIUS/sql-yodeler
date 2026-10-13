@@ -5,7 +5,7 @@ type: concepts
 
 # Drift
 
-Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the declared objects with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported.
+Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the declared objects with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported. A column added by hand to a declared table is: it reads `column <name>: declared (none), live <type>`.
 
 What the server is compared with (`--against`):
 
