@@ -122,7 +122,7 @@
           "type": "string"
         },
         "approve": {
-          "description": "gated: the command a person runs to approve. An agent prints it and never runs it.",
+          "description": "gated: the command a person runs to approve. failed, when the plan moved since its approval: the command that approves the plan as it is now. An agent prints it and never runs it.",
           "type": "string"
         },
         "chantApprove": { "description": "chant's own command for the same approval (chant approve <op> <gate> --plan <digest>), for scripts; a person runs approve.", "type": "string" },
@@ -130,7 +130,7 @@
           "type": "string"
         },
         "moved": {
-          "description": "gated: the gate's newest approval does not hold, and what moved since it.",
+          "description": "gated, or failed when the plan moved under the lock: the gate's newest approval does not hold, and what moved since it.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -142,6 +142,10 @@
           ],
           "properties": {
             "approved": {
+              "type": "string"
+            },
+            "now": {
+              "description": "The plan's digest now, which approve approves.",
               "type": "string"
             },
             "by": {

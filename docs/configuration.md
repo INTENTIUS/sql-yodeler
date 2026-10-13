@@ -60,12 +60,19 @@ export default {
 
 | Field | Meaning |
 |---|---|
-| `url` | ClickHouse: the HTTP interface (`http://clickhouse:8123`). Postgres: a connection URL with no password in it. |
+| `url` | ClickHouse: the HTTP interface (`http://clickhouse:8123`). Postgres: a connection URL with no password in it; [TLS](#postgres-tls) has its `sslmode`. |
 | `user`, `password` | `{ env: "<VAR>" }`: the variable each is read from. Credentials are never written in the file. A `password` can also be a token source; see [Credentials](#credentials-a-reader-and-a-writer). |
 | `databases` (ClickHouse) | the databases the project's schema lives in. `yodel init --from` needs it, and the history's database must not be one of them. |
 | `schemas` (Postgres) | the same, for schemas. |
 | `topology` (ClickHouse) | the topology chant renders for; see [Topology](topology.md). |
 | `lockTimeoutMs`, `statementTimeoutMs`, `scanTimeoutMs` (Postgres) | the `lock_timeout` of every statement `yodel apply` sends, and of the live-schema reads before it and in `yodel drift`, which name the lock they waited on (default 5000), the `statement_timeout` of a catalog change (default 60000), and of a statement that reads or rewrites rows (default none). |
+
+### Postgres TLS
+
+The connection URL goes to node-postgres as it is, and node-postgres reads `sslmode` its own way: `sslmode=require` verifies the server's certificate in full, where libpq's `require` only encrypts. A server whose certificate the machine does not trust, such as Amazon RDS without its CA bundle or any server reached through a tunnel, where the host name does not match, then refuses the connection. Add `uselibpqcompat=true` for libpq's meaning:
+
+- `?uselibpqcompat=true&sslmode=require` encrypts and does not verify the certificate.
+- `?uselibpqcompat=true&sslmode=verify-full&sslrootcert=/path/to/global-bundle.pem` verifies it against the CA bundle, RDS's included. This is the one for production.
 
 ## Credentials: a reader and a writer
 
@@ -110,7 +117,7 @@ A role's password can be minted when a connection needs it, so CI holds no long-
 
 ```ts
 prod: {
-  url: "postgres://db.abc.us-east-1.rds.amazonaws.com:5432/app",
+  url: "postgres://db.abc.us-east-1.rds.amazonaws.com:5432/app?uselibpqcompat=true&sslmode=require",
   ...credentials("prod", "postgres", { writer: { password: { token: "rds-iam" } } }),
   schemas: ["shop"],
 },

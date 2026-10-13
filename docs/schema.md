@@ -202,7 +202,7 @@ import type { orders } from "./schema.js";
 type Order = RowOf<typeof orders>; // { id: string; email: string }
 ```
 
-Run `chant sql types` again after each schema change. When a project commits `sql-types.d.ts`, the pull request job `yodel ci` renders runs `chant sql types --check`, which fails when the file no longer matches the schema. Tables and views a composite builds are typed the same way. The examples (`examples/clickhouse`, `examples/postgres`) use typed columns, and chant's [typed columns page](https://intentius.io/chant/lexicons/sql/typed-columns/) has the type mapping for each dialect.
+Run `chant sql types` again after each schema change; `yodel new` does it when it writes a migration from `src/` and the project keeps the file. When a project commits `sql-types.d.ts`, the pull request job `yodel ci` renders runs `chant sql types --check`, which fails when the file no longer matches the schema. Tables and views a composite builds are typed the same way. The examples (`examples/clickhouse`, `examples/postgres`) use typed columns, and chant's [typed columns page](https://intentius.io/chant/lexicons/sql/typed-columns/) has the type mapping for each dialect.
 
 ## In the editor
 

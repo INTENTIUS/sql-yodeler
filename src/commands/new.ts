@@ -9,6 +9,7 @@ import { loadProject, resolveEnvironment, YodelError, type Project } from "../pr
 import { closeVersioned, inspect, openVersioned } from "../versioned/index.js";
 import type { Migration } from "../migrations/index.js";
 import { buildSchema } from "../chant/build.js";
+import { refreshSqlTypes } from "../chant/sql-types.js";
 import {
   checksProblem,
   createHandWritten,
@@ -367,13 +368,22 @@ export const newCommand: Command = {
         rmSync(aside, { recursive: true, force: true });
         if (!json) io.out(`Replaced ${replaced.id}.\n`);
         report(io, json, made, path, project.dir);
+        await sqlTypes(io, project, json);
         return 0;
       }
       const path = writeMigration(migrationsDir, made);
       report(io, json, made, path, project.dir);
+      await sqlTypes(io, project, json);
       return 0;
     }),
 };
+
+/** Refreshes src/sql-types.d.ts after a migration from src/ (#273), and says so; under --json only a warning, on stderr. */
+async function sqlTypes(io: Io, project: Project, json: boolean): Promise<void> {
+  const r = await refreshSqlTypes(project);
+  if (r.warning) io.err(`yodel new: warning: ${r.warning}\n`);
+  else if (r.updated && !json) io.out(`Updated ${r.updated} from the declarations.\n`);
+}
 
 /** `yodel new <name> --sql`: the empty hand-written migration after the newest. */
 function writeHandWritten(io: Io, project: Project, name: string, json: boolean): number {

@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LiveDiffResult, UnobservedResource } from "@intentius/chant/lifecycle/live-diff";
-import type { DeepDiffResult, DeepEntityDrift } from "@intentius/chant/lifecycle/deep-diff";
+import type { DeepDiffResult, DeepEntityDrift, DeepEntityUnclaimed } from "@intentius/chant/lifecycle/deep-diff";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { lastJsonLine, runChant } from "./process.js";
 import { describeServer, type ServerInfo } from "../server.js";
@@ -185,12 +185,45 @@ export function driftFromLifecycle(environment: string, doc: unknown): Drift {
   for (const u of [...(sql.resources?.unobserved ?? []), ...(sql.deep?.unobserved ?? [])]) {
     if (!unobserved.has(u.name)) unobserved.set(u.name, u);
   }
+  const changed = new Map<string, DeepEntityDrift>();
+  for (const d of [...(sql.deep?.drifted ?? []), ...extraColumns(sql.deep?.unclaimed ?? [])]) {
+    if (d.changes.length === 0) continue;
+    const had = changed.get(d.name);
+    changed.set(d.name, had ? { ...had, changes: [...had.changes, ...d.changes] } : d);
+  }
   return {
     environment,
-    changed: (sql.deep?.drifted ?? []).filter((d) => d.changes.length > 0),
+    changed: [...changed.values()],
     missing: [...(sql.resources?.missing ?? [])].sort(),
     unobserved: [...unobserved.values()].sort((a, b) => a.name.localeCompare(b.name)),
   };
+}
+
+/**
+ * Columns on the server that a declared table does not declare (#273), as
+ * drift: `column <name>`, declared none, live its type. chant reports a live
+ * column past the declared ones as unclaimed fields `columns[N].*`, which it
+ * does not count as drift, since nothing in src/ set them. A group with its
+ * own `name` is a whole column; a field of a declared column that src/ does
+ * not set (`columns[2].default`) has no name of its own and stays unclaimed.
+ */
+export function extraColumns(unclaimed: readonly DeepEntityUnclaimed[]): DeepEntityDrift[] {
+  const out: DeepEntityDrift[] = [];
+  for (const u of unclaimed) {
+    const byIndex = new Map<string, Record<string, unknown>>();
+    for (const f of u.fields) {
+      const m = /^columns\[(\d+)\]\.(.+)$/.exec(f.path);
+      if (!m?.[1] || !m[2]) continue;
+      const column = byIndex.get(m[1]) ?? {};
+      column[m[2]] = f.live;
+      byIndex.set(m[1], column);
+    }
+    const changes = [...byIndex.values()]
+      .filter((c) => typeof c.name === "string")
+      .map((c) => ({ path: `column ${String(c.name)}`, kind: "changed" as const, live: c.type ?? null }));
+    if (changes.length > 0) out.push({ name: u.name, type: u.type, changes });
+  }
+  return out;
 }
 
 /** Runs `chant lifecycle diff <env> --live --json` in the project and reads the drift from it. */

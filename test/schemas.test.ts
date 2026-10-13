@@ -227,6 +227,8 @@ describe("each command's --json output validates against its schema", () => {
       { status: "stood-down", stoodDown: "standing down", op: "migrate-dev" },
       { status: "gated", op: "migrate-dev", gate: "approve", moved: { approved: "sha256:old", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: true, changes: [], askedAgain: { at: "2026-10-10T09:30:00Z", digest: "sha256:old" } }, approve: "yodel approve dev --plan sha256:d", chantApprove: "chant approve migrate-dev approve --plan sha256:d", gatePlanDigest: "sha256:d" },
       { status: "failed", op: "migrate-dev", exitCode: 5, chantExitCode: 1 },
+      // The plan moved under the lock (#273): what moved, and how to approve the plan as it is now.
+      { status: "failed", op: "migrate-dev", exitCode: 4, chantExitCode: 1, moved: { approved: "sha256:old", now: "sha256:d", by: "alice", at: "2026-10-10T09:00:00Z", confirmed: false, changes: [] }, approve: "yodel approve dev --plan sha256:d", chantApprove: "chant approve migrate-dev approve --plan sha256:d" },
       { status: "applied", op: "migrate-dev", appliedNow: ["20261010T0910-rebuild"] },
     ];
     for (const outcome of outcomes) expectValid("apply", applyJson({ mode: "versioned", report, outcome }));

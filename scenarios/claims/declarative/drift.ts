@@ -11,14 +11,16 @@ interface DriftDoc {
   against?: { source: string; migration?: string | null };
 }
 
-/** Changes the main table's TTL (ClickHouse) or a column default (Postgres) by hand, and drops a declared object (unless `drop` is false). */
+/** Changes the main table's TTL (ClickHouse) or a column default (Postgres) by hand, adds it a column (#273), and drops a declared object (unless `drop` is false). */
 async function changeByHand(ctx: Ctx, drop = true): Promise<void> {
   const n = ctx.db.name;
   if (ctx.dialect === "ch") {
     await ctx.db.exec(`ALTER TABLE ${n}.events MODIFY TTL ts + INTERVAL 30 DAY`);
+    await ctx.db.exec(`ALTER TABLE ${n}.events ADD COLUMN by_hand String`);
     if (drop) await ctx.db.exec(`DROP TABLE ${n}.daily SYNC`);
   } else {
     await ctx.db.exec(`ALTER TABLE ${n}.orders ALTER COLUMN status SET DEFAULT 'new'`);
+    await ctx.db.exec(`ALTER TABLE ${n}.orders ADD COLUMN by_hand text`);
     if (drop) await ctx.db.exec(`DROP INDEX ${n}.orders_status_idx`);
   }
 }
@@ -28,8 +30,8 @@ const changedProperty = (ctx: Ctx): [string, RegExp] => (ctx.dialect === "ch" ? 
 /**
  * yodel drift reports a declared object changed on the server outside the
  * code (ClickHouse: the events TTL; Postgres: a column default), naming the
- * property, and a declared object dropped (daily; the orders_status_idx
- * index), and exits 2. Before that, with nothing changed, it exits 0.
+ * property, a column added by hand to it (#273), and a declared object
+ * dropped (daily; the orders_status_idx index), and exits 2. Before that, with nothing changed, it exits 0.
  * BREAK: the server is not changed, so there is no drift to report.
  */
 async function declarativePart(ctx: Ctx): Promise<void> {
@@ -47,6 +49,7 @@ async function declarativePart(ctx: Ctx): Promise<void> {
   const doc = parse<DriftDoc>(ran);
   hold(ran.code === 2 && doc.drifted, `yodel drift exited ${String(ran.code)} after the server changed`);
   hold(doc.changed.some((c) => c.name === changed && c.changes.some((x) => path.test(x.path))), `yodel drift does not name ${changed}'s ${String(path)}: ${JSON.stringify(doc.changed)}`);
+  hold(doc.changed.some((c) => c.name === changed && c.changes.some((x) => x.path === "column by_hand")), `yodel drift does not report the column by_hand added to ${changed} by hand: ${JSON.stringify(doc.changed)}`);
   hold(doc.missing.includes(gone), `yodel drift does not report ${gone} gone: ${JSON.stringify(doc.missing)}`);
 }
 
@@ -96,7 +99,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const drift: Claim = {
   name: "drift",
-  says: "yodel drift reports a declared object changed out of band, naming the property, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
+  says: "yodel drift reports a declared object changed out of band, naming the property, a column added to it by hand, and one dropped; on the versioned path it compares with the newest applied migration's recorded schema, so a pending migration is not drift",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
 };

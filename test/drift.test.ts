@@ -55,6 +55,35 @@ describe("drift", () => {
     expect(text).not.toContain("handmade");
   });
 
+  it("reports a column added by hand to a declared table (#273), and not a field src/ leaves unset on a declared column", () => {
+    const unclaimed = (path: string, live: unknown) => ({ path, live, source: "claimed-fields" });
+    const drift = driftFromLifecycle(
+      "e2e",
+      doc({
+        resources: resources(),
+        deep: deep({
+          drifted: [{ name: "events", type: "Postgres::Table", changes: [{ path: "columns[1].nullable", kind: "changed", declared: false, live: true }] }],
+          unclaimed: [
+            { name: "events", type: "Postgres::Table", fields: [unclaimed("columns[2].name", "note"), unclaimed("columns[2].type", "text"), unclaimed("columns[1].default", "'x'::text")] },
+            { name: "orders", type: "Postgres::Table", fields: [unclaimed("columns[0].default", "0")] },
+          ],
+        }),
+      }),
+    );
+    expect(drift.changed).toEqual([
+      {
+        name: "events",
+        type: "Postgres::Table",
+        changes: [
+          { path: "columns[1].nullable", kind: "changed", declared: false, live: true },
+          { path: "column note", kind: "changed", live: "text" },
+        ],
+      },
+    ]);
+    expect(driftExitCode(drift)).toBe(2);
+    expect(renderDrift(drift)).toContain("column note: declared (none), live text");
+  });
+
   it("exits 1 when nothing drifted but a declared object could not be read", () => {
     const drift = driftFromLifecycle(
       "e2e",
