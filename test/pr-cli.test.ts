@@ -13,6 +13,12 @@ describe("yodel plan's versioned flags", () => {
     expect(late.err).toContain("docs/workflows.md");
   });
 
+  it("refuses --part on a declarative project (#237): it writes a versioned plan", async () => {
+    const ran = await yodel(["plan", "e2e", "--part", "part.json", "--dir", fixture("clickhouse")]);
+    expect(ran.code).toBe(1);
+    expect(ran.err).toContain("--part is for versioned migrations");
+  });
+
   it("takes the forge flags only with --comment, and one format", async () => {
     expect((await yodel(["plan", "e2e", "--forge", "github"])).err).toContain("--forge goes with --comment");
     expect((await yodel(["plan", "e2e", "--json", "--format", "markdown"])).err).toContain("--json and --format markdown cannot be combined");

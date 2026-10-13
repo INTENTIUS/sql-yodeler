@@ -540,3 +540,39 @@ npx yodel apply prod     # past the policy, then the ApplyOp's gate
 ```
 
 `yodel apply` judges the plan before it runs the ApplyOp and refuses a denial with exit 4. The override is recorded under the ApplyOp's name, for a digest yodel takes over the environment, the dialect and the declared changes, so it stops counting when the live database or `src/` moves. It is spent once the ApplyOp applies: a run that stops at the gate, or one whose Op leaves the change unapplied, has not used it. There is no history, so the override is on `chant/lifecycle` only. [The two workflows](workflows.md#review-on-a-pull-request) has the rest of the declarative review.
+
+## Gating SQL with another project's change: `yodel plan --part`
+
+When a database change has to be reviewed together with another member's (infrastructure planned by Terraform, another chant project), a chant Op can join their plans into one change set and put one gate in front of all of them. `yodel plan <env> --part <file>` writes the versioned plan as that Op's input: a chant change-set part, planner `sql`, with one entry per object the pending migrations touch, at its server name (`app.events`). Its action (`create`, `update`, `replace`, `delete`) and disruption come from the steps' classes: a `drop` is a delete, a `rebuild` or an Op step a replace, a destructive step (a column drop) disruption `destroy`. Steps already applied by a partial run are left out, and statements are redacted as in `--json`. The member's plan digest is the one `yodel apply` asks approval for, and a plan `yodel apply` would refuse is a `failed` member. `--part` writes one environment's plan: it is refused on a declarative project and on a tenant set.
+
+```sh
+npx yodel plan prod --part db.part.json
+```
+
+The Op reads the file with `readChangeSetPart`, under any member name it chooses, joins it to the other parts with `composeChangeSet`, and binds its gate to the document's digest. A gate with a Cedar policy gets the change set's summary as `context.plan` (chant's change set and gate docs have every field):
+
+```ts
+import { Op, phase, gate, shell, stepOutput, readChangeSetPart, composeChangeSet, terraformPlan } from "@intentius/chant/op";
+
+const estate = terraformPlan({ root: "estate", id: "estate" });
+const db = readChangeSetPart({ member: "db", planner: "sql", file: "db/db.part.json", id: "db" });
+const changes = composeChangeSet({ parts: [stepOutput(estate, "changeSet"), stepOutput(db, "part")], id: "change-set" });
+
+export const release = Op({
+  name: "release-prod",
+  overview: "Plan the estate and the database together, behind one gate",
+  phases: [
+    phase("Plan", [shell("yodel plan prod --part db.part.json", { cwd: "db" }), estate, db, changes]),
+    phase("Approve", [gate("approve-release", { plan: stepOutput(changes, "digest"), approval: { policy: releasePolicy, mode: "enforce" } })]),
+    // ... apply the estate, then yodel apply prod
+  ],
+});
+```
+
+```cedar
+// Nothing deleted in the estate while the database changes in the same release.
+forbid (principal, action, resource)
+when { context.plan.deletes > 0 && context.plan.membersChanged.contains("db") && context.plan.membersChanged.contains("estate") };
+```
+
+The release gate approves the change set. `yodel apply prod` still stops at the migrations Op's own gate for its plan digest, the same digest the part carries, so an approval of the release never applies migrations it did not see.
