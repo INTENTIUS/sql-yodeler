@@ -10,8 +10,8 @@
     "build": "chant build src --lexicon sql -o dist/schema.json"
   },
   "dependencies": {
-    "@intentius/chant": "0.124.23",
-    "@intentius/chant-lexicon-sql": "0.124.23",
+    "@intentius/chant": "0.124.25",
+    "@intentius/chant-lexicon-sql": "0.124.25",
     "@intentius/sql-yodeler": "file:../.."
   },
   "devDependencies": {
