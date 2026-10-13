@@ -159,7 +159,8 @@ async function unsupportedPart(ctx: Ctx): Promise<void> {
     hold(ran.code === 4 && ran.err.includes(`operator ${n}.===(integer,integer)`), `yodel init --from exited ${String(ran.code)} without naming the operator ${n}.=== it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
     hold(p.migrationIds().length === 0, "yodel init --from wrote a migration although it refused");
   } finally {
-    await ctx.db.exec(`DROP SCHEMA IF EXISTS ${n} CASCADE`);
+    // The history too: under BREAK=1 init goes on and records a baseline, which the adoption after this would refuse.
+    await ctx.db.exec(`DROP SCHEMA IF EXISTS ${n} CASCADE; DROP SCHEMA IF EXISTS ${ctx.db.history} CASCADE`);
   }
 }
 
