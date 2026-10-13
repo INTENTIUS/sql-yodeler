@@ -1,5 +1,6 @@
 import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readChangeSetPartFile } from "@intentius/chant/change-set";
 import { hold, partDialects, partNames, runParts, Violation, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
 import { parse, parseOr, Project } from "../../lib/project.js";
 import { addColumn, addTable, mainTable, needsVersioned } from "../../lib/schema.js";
@@ -8,7 +9,8 @@ import { addColumn, addTable, mainTable, needsVersioned } from "../../lib/schema
  * A pending migration applies only behind the migrations Op's gate: yodel
  * apply stops at the gate with the server untouched, `chant approve` with
  * the command it printed lets the next yodel apply run, and every history
- * row carries the digest that was approved.
+ * row carries the digest that was approved. yodel plan --part writes the
+ * plan as a chant change-set part under that same digest (#237).
  * BREAK: the approval is skipped, so the second apply stops at the gate too.
  */
 export async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
@@ -21,6 +23,14 @@ export async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
   const gated = await p.apply();
   hold(gated.ran.code === 3 && gated.doc.status === "gated", `yodel apply did not stop at the gate (exit ${String(gated.ran.code)}, status ${String(gated.doc.status)})`);
   hold(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists before the approval`);
+
+  // The plan as a chant change-set part (#237): chant reads it back as the sql planner's, under the digest the gate binds.
+  const planned = await p.yodel(["plan", p.env, "--part", "part.json"]);
+  hold(planned.code === 0, `yodel plan --part exited ${String(planned.code)}: ${planned.err.trim().split("\n").slice(-2).join(" ")}`);
+  const part = readChangeSetPartFile(JSON.parse(p.read("part.json")) as unknown, "sql", "db");
+  rmSync(p.path("part.json"));
+  hold(part.member.status === "planned" && part.member.planDigest === gated.doc.planDigest, `the change-set part is ${part.member.status} under ${String(part.member.planDigest)}, not planned under the gate's ${String(gated.doc.planDigest)}`);
+  hold(part.entries.some((e) => e.address.endsWith(`.${table}`) && e.action === "create"), `the change-set part does not create ${table}: ${part.entries.map((e) => `${e.action} ${e.address}`).join(", ")}`);
 
   if (!ctx.broken) await p.approve(gated.doc.chantApprove);
   const applied = await p.apply();
@@ -415,7 +425,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const approval: Claim = {
   name: "approval",
-  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write",
+  says: "a pending migration applies only after chant approve of its plan digest, and the history records that digest; yodel plan --part writes the plan as a chant change-set part under that digest; a failing pre-migration check refuses it, and so does a policy rule, read at the base commit, unless an override is recorded for that digest, for a yodel revert as for an apply; the audit log derived from the history and the ledger accounts for every approval and apply, and names one removed; a reader and a writer that are one user are refused, and the reader, its password a minted token, cannot write",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

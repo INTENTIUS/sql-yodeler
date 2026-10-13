@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import type { Command, Io } from "../command.js";
@@ -12,13 +14,14 @@ import { runnable } from "../chant/runnable.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
+import { planPart } from "../pr/part.js";
 import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
 import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
 
 const usage =
   "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json]\n" +
-  "                        [--allow-out-of-order] [--op <name>]\n" +
+  "                        [--allow-out-of-order] [--op <name>] [--part <file>]\n" +
   "                        [--comment [--forge github|gitlab|forgejo]\n" +
   "                         [--repo <repo>] [--pr <n>] [--api-url <url>] [--token-env <VAR>]]";
 
@@ -38,7 +41,9 @@ manual step with what it needs), integrity problems (directory problems,
 checksum mismatches, out-of-order migrations), and the plan digest yodel
 apply asks approval for, with the yodel approve command that approves it.
 When chant's gate ledger holds an approval of the migrations Op's gate for
-another digest, it says what moved since. Reads only.
+another digest, it says what moved since. --part writes the plan as a
+chant change-set part, for a chant Op that gates it together with another
+member's plan. Reads only.
 
 An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
 is planned tenant by tenant, each against its own history, and shown as one
@@ -56,6 +61,10 @@ Options:
                         applies <env>
   --op <name>           declarative: the ApplyOp, when more than one applies
                         <env>
+  --part <file>         versioned: also write the plan to <file> as a chant
+                        change-set part (planner sql), one entry per object,
+                        with the plan digest yodel apply binds; a chant Op
+                        reads it with readChangeSetPart and composeChangeSet
   --comment             post the markdown as one comment on the
                         pull (merge) request, updating the one posted before;
                         prints the text plan. The forge, repository, request
@@ -96,6 +105,7 @@ interface PlanArgs {
   comment: boolean;
   allowOutOfOrder: boolean;
   op: string | undefined;
+  part: string | undefined;
   forge: ForgeFlags;
   /** The flags only a versioned project takes. */
   versionedOnly: string[];
@@ -115,6 +125,7 @@ function parsePlanArgs(args: string[]): PlanArgs {
         comment: { type: "boolean" },
         "allow-out-of-order": { type: "boolean" },
         op: { type: "string" },
+        part: { type: "string" },
         forge: { type: "string" },
         repo: { type: "string" },
         pr: { type: "string" },
@@ -142,8 +153,9 @@ function parsePlanArgs(args: string[]): PlanArgs {
     comment: v.comment === true,
     allowOutOfOrder: v["allow-out-of-order"] === true,
     op: str("op"),
+    part: str("part"),
     forge,
-    versionedOnly: v["allow-out-of-order"] === true ? ["--allow-out-of-order"] : [],
+    versionedOnly: [...(v["allow-out-of-order"] === true ? ["--allow-out-of-order"] : []), ...(str("part") !== undefined ? ["--part"] : [])],
   };
 }
 
@@ -184,7 +196,10 @@ async function declarativePlan(project: Project, env: Environment, a: PlanArgs, 
 }
 
 async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
-  if (!env.tenant && tenantSetOf(project, env.name)) return tenantSetPlan(project, env, a, io);
+  if (!env.tenant && tenantSetOf(project, env.name)) {
+    if (a.part !== undefined) throw new YodelError(`--part writes one environment's plan, and ${env.name} is a tenant set: plan one tenant, yodel plan ${env.name}/<tenant> --part <file>`);
+    return tenantSetPlan(project, env, a, io);
+  }
   const marker = commentMarker(env.name);
   // Resolve the forge first: a job missing its token fails before it reads the server.
   const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
@@ -196,6 +211,11 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   const code = result.refusal?.exitCode ?? 0;
 
   if (forge) await postComment(forge, marker, renderPlanMarkdown(result), io);
+  if (a.part !== undefined) {
+    const file = resolve(a.part);
+    writeFileSync(file, `${JSON.stringify(planPart(result, basename(project.dir)), null, 2)}\n`);
+    io.err(`yodel plan: wrote the change-set part to ${file}\n`);
+  }
   const doc = planJsonVersioned(result);
   if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
   else if (a.format === "markdown") io.out(renderPlanMarkdown(result));
