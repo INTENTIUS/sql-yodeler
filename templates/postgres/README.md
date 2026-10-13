@@ -40,7 +40,7 @@ Then create the users and the forge's secrets (below), and push. Every change af
 To adopt a database that already holds the schema (one another migration tool managed, or one made by hand), run `yodel init` in place of `just new init`, as the environment's writer, since it writes the baseline's row to the history:
 
 ```sh
-YODEL_CREDENTIALS=writer npx yodel init --from <env> --force
+YODEL_CREDENTIALS=writer:<env> npx yodel init --from <env> --force
 ```
 
 `--force` lets it write over the placeholder `src/schema.ts` with the declarations it reads from the database. It writes the baseline migration and records it applied in that environment without running it. Coming from another tool, move its migration files out of `migrations/` first. [Coming from another migration tool](https://intentius.io/sql-yodeler/from-other-tools/) in the SQL Yodeler docs covers the rest: the other tool's history table, the other environments, and rollback.
@@ -59,7 +59,7 @@ YODEL_CREDENTIALS=writer npx yodel init --from <env> --force
 | `just replay` | `npm run replay`, which is `yodel ci --replay` (see [The replay check](#the-replay-check)) |
 | `just plan [env]` | `npx yodel plan <env>` |
 | `just approve [env]` | prints the approve command from `npx yodel plan <env> --json`, `npx yodel approve <env> --plan <digest>`, for you to run at a terminal; it never runs it |
-| `just apply [env]` | `YODEL_CREDENTIALS=writer npx yodel apply <env>` |
+| `just apply [env]` | `YODEL_CREDENTIALS=writer:<env> npx yodel apply <env>` |
 | `just drift [env]` | `npx yodel drift <env>` |
 | `just status [env]` | `npx yodel status <env>` |
 | `just ci` | `npm run ci`, which is `yodel ci` |

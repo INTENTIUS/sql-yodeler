@@ -44,7 +44,7 @@ approve env="dev":
 
 # Apply env's approved plan, with env's writer credentials.
 apply env="dev":
-    YODEL_CREDENTIALS=writer npx yodel apply {{env}}
+    YODEL_CREDENTIALS=writer:{{env}} npx yodel apply {{env}}
 
 # Compare env's live schema with src/.
 drift env="dev":
