@@ -10,7 +10,7 @@ type: reference
 `@intentius/sql-yodeler` is on npm. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import:
 
 ```sh
-npm install @intentius/sql-yodeler @intentius/chant@0.124.23 @intentius/chant-lexicon-sql@0.124.23
+npm install @intentius/sql-yodeler @intentius/chant@0.124.25 @intentius/chant-lexicon-sql@0.124.25
 npx yodel --version
 ```
 
@@ -69,10 +69,12 @@ export default {
 
 ### Postgres TLS
 
-The connection URL goes to node-postgres as it is, and node-postgres reads `sslmode` its own way: `sslmode=require` verifies the server's certificate in full, where libpq's `require` only encrypts. A server whose certificate the machine does not trust, such as Amazon RDS without its CA bundle or any server reached through a tunnel, where the host name does not match, then refuses the connection. Add `uselibpqcompat=true` for libpq's meaning:
+`sslmode` in the connection URL means what it means in libpq:
 
-- `?uselibpqcompat=true&sslmode=require` encrypts and does not verify the certificate.
-- `?uselibpqcompat=true&sslmode=verify-full&sslrootcert=/path/to/global-bundle.pem` verifies it against the CA bundle, RDS's included. This is the one for production.
+- `?sslmode=require` encrypts and does not verify the server's certificate.
+- `?sslmode=verify-full&sslrootcert=/path/to/global-bundle.pem` verifies it against the CA bundle, RDS's included. This is the one for production.
+
+This needs chant 0.124.25 or later. Before that, node-postgres read `sslmode=require` as full verification, and a server whose certificate the machine did not trust refused the connection unless the URL also had `uselibpqcompat=true`.
 
 ## Credentials: a reader and a writer
 
@@ -117,7 +119,7 @@ A role's password can be minted when a connection needs it, so CI holds no long-
 
 ```ts
 prod: {
-  url: "postgres://db.abc.us-east-1.rds.amazonaws.com:5432/app?uselibpqcompat=true&sslmode=require",
+  url: "postgres://db.abc.us-east-1.rds.amazonaws.com:5432/app?sslmode=require",
   ...credentials("prod", "postgres", { writer: { password: { token: "rds-iam" } } }),
   schemas: ["shop"],
 },
