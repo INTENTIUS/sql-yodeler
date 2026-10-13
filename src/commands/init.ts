@@ -90,7 +90,7 @@ Exit codes:
      a ClickHouse profile with no databases or with the history's database;
      --baseline: the project has no migrations, <env>'s history records
      any, or <env>'s live schema is not the baseline's; or the run holds
-     <env>'s reader (YODEL_CREDENTIALS is not writer or writer:<env>), or
+     <env>'s reader (YODEL_ROLE is not writer or writer:<env>), or
      the server refused the user a privilege
   5  another apply holds the lock; nothing recorded, nothing kept
   1  anything else failed, and nothing was kept: a bad config, a server it
