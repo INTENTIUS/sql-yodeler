@@ -12,7 +12,7 @@
  * batch size so a rerun sees the same ranges.
  *
  * The advanced case: the step names a module in the migration's directory (`backfill.ts` by
- * default) that exports a chant Op as `op` (or as its default export). Each
+ * default) that exports one chant Op, under a name of its own. Each
  * step of its phases is an `effect()` step: one batch of the backfill, with
  * its own receipt. The nested steps run SQL on the environment's server with
  * the `yodelSql` activity yodel provides, or any activity chant has:
@@ -26,7 +26,7 @@
  *         activity("yodelSql", { sql: `ALTER TABLE shop.orders UPDATE country = ... WHERE toYYYYMM(ts) = ${m}` }, "atMostOnce"),
  *       ]);
  *
- *     export const op = Op({ name: "backfill-country", overview: "...", phases: [phase("Backfill", months.map(batch))] });
+ *     export const backfillCountry = Op({ name: "backfill-country", overview: "...", phases: [phase("Backfill", months.map(batch))] });
  *
  * How a run goes is chant's `effect()` cycle, run by chant's local executor:
  * for each batch, read its receipt; skip the batch when the receipt is there
@@ -64,6 +64,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { opExportName } from "../chant/export-name.js";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -168,7 +169,7 @@ const batch = (b: string) =>
     activity("${SQL_ACTIVITY}", { sql: \`${todo}\` }, "atMostOnce"),
   ]);
 
-export const op = Op({
+export const ${opExportName(`backfill-${name}`)} = Op({
   name: "backfill-${name}",
   overview: "Backfill for migration ${name}",
   phases: [phase("Backfill", batches.map(batch))],
@@ -198,13 +199,24 @@ export function formTemplate(name: string, dialect: SqlDialect = "clickhouse"): 
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
-/** The Op config a module exports as `op` or as its default export. */
+const opConfigOf = (value: unknown): OpConfig | undefined => {
+  const props = isRecord(value) ? value.props : undefined;
+  return isRecord(props) && typeof props.name === "string" && Array.isArray(props.phases) ? (props as unknown as OpConfig) : undefined;
+};
+
+/**
+ * The Op config a module exports: as `op` or its default export, else the
+ * one Op it exports under any other name (`backfillCountry`, as yodel new
+ * writes it since #2). A module that exports more than one Op under other
+ * names gives none: which one runs would be a guess.
+ */
 export function exportedOp(mod: Record<string, unknown>): OpConfig | undefined {
   for (const value of [mod.op, mod.default]) {
-    const props = isRecord(value) ? value.props : undefined;
-    if (isRecord(props) && typeof props.name === "string" && Array.isArray(props.phases)) return props as unknown as OpConfig;
+    const config = opConfigOf(value);
+    if (config) return config;
   }
-  return undefined;
+  const others = Object.values(mod).map(opConfigOf).filter((c): c is OpConfig => c !== undefined);
+  return others.length === 1 ? others[0] : undefined;
 }
 
 /** What is wrong with a backfill's Op, if anything: every phase step is an effect() step, and there are no gates. */
@@ -232,7 +244,7 @@ export async function loadBackfill(path: string, text?: string): Promise<OpConfi
     throw new YodelError(`${path}: could not load it: ${e instanceof Error ? e.message : String(e)}`);
   }
   const config = exportedOp(mod);
-  if (!config) throw new YodelError(`${path} exports no Op (export const op = Op({ ... }), or a default export)`);
+  if (!config) throw new YodelError(`${path} exports no Op, or more than one (export one Op, as export const backfillCountry = Op({ ... }))`);
   const problems = backfillProblems(config);
   if (problems.length > 0) throw new YodelError(`${path}: ${problems.join("; ")}`);
   return config;

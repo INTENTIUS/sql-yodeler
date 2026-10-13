@@ -51,7 +51,7 @@ import { ApplyOp } from "@intentius/chant/op";
 
 // The declarative path: yodel apply dev plans src/ against dev and runs this
 // Op, behind a gate bound to the plan.
-export const { op } = ApplyOp({ name: "apply-dev", env: "dev", target: "clickhouse", gate: {} });
+export const { op: applyDev } = ApplyOp({ name: "apply-dev", env: "dev", target: "clickhouse", gate: {} });
 ```
 
 ```console
@@ -297,7 +297,7 @@ import { Op, phase, gate, shell, stepOutput } from "@intentius/chant/op";
 const plan = shell("yodel apply dev --digest", { id: "plan" });
 const digest = stepOutput(plan, "stdout");
 
-export const op = Op({
+export const migrateDev = Op({
   name: "migrate-dev",
   overview: "Apply the pending migrations to dev, behind an approval bound to their plan digest",
   phases: [
@@ -1301,7 +1301,7 @@ import { WatchOp } from "@intentius/chant/op";
 // Every hour at :17, read dev and report drift: a declared object changed out
 // of band, or gone. Objects src/ does not declare are never reported.
 // `chant run watch-dev` runs it once, by hand.
-export const { op } = WatchOp({ name: "watch-dev", env: "dev", schedule: "17 * * * *" });
+export const { op: watchDev } = WatchOp({ name: "watch-dev", env: "dev", schedule: "17 * * * *" });
 ```
 
 <!-- quote: clickhouse#watch-run -->

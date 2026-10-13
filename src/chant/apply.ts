@@ -10,6 +10,7 @@
  */
 
 import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
+import { opExportName } from "./export-name.js";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { approveCommand, type ApprovalMode } from "../approval-mode/index.js";
 import { runChant } from "./process.js";
@@ -47,7 +48,7 @@ export function applyOpExample(env: string, dialect: SqlDialect): string {
     `// ops/apply-${env}.op.ts`,
     `import { ApplyOp } from "@intentius/chant/op";`,
     ``,
-    `export const { op } = ApplyOp({ name: "apply-${env}", env: "${env}", target: "${dialect}", gate: {} });`,
+    `export const { op: ${opExportName(`apply-${env}`)} } = ApplyOp({ name: "apply-${env}", env: "${env}", target: "${dialect}", gate: {} });`,
   ].join("\n");
 }
 

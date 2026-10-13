@@ -7,7 +7,7 @@ import { Op, phase, gate, shell, stepOutput } from "@intentius/chant/op";
 const plan = shell("yodel apply dev --digest", { id: "plan" });
 const digest = stepOutput(plan, "stdout");
 
-export const op = Op({
+export const migrateDev = Op({
   name: "migrate-dev",
   overview: "Apply the pending migrations to dev, behind an approval bound to their plan digest",
   phases: [

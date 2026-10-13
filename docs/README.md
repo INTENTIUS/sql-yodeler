@@ -33,6 +33,7 @@ Rebuilds, renames and backfills run once, inside the migration. No recurring job
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |
 | [Reports and the audit log](audit.md) | `yodel report`: every environment's migrations side by side, the audit log derived from the history and the gate ledger, its gaps, `audit.jsonl` and the HTML run view |
 | [Schema from an ORM](orm.md) | `sources` in `yodel.config.ts`: tables an ORM defines, read from the DDL it prints, planned and applied with the rest |
+| [In a chant workspace](workspace.md) | a yodel project as a member of a chant workspace: its tables and columns as outputs, dbt sources that link to them, and `chant workspace check` failing on a dropped or renamed column |
 | [Drift](drift.md) | `yodel drift` and the scheduled `WatchOp` |
 | [Webhook events](notify.md) | `notify` in `yodel.config.ts`: signed events for an apply waiting for approval, a refusal, a failure and drift, and checking them in a receiver |
 | [Generated schema reference](schema-docs.md) | `yodel docs`: an HTML reference and a Mermaid ERD generated from the declared schema |
