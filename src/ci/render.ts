@@ -636,7 +636,8 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
     comment: asComment(header),
     name: "yodel-pr",
     on: { pull_request: { branches: [MAIN] } },
-    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
+    // actions: read lets yodel plan --comment ask when the watch workflows last ran (chant#4289).
+    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(forge === "github" ? { actions: "read" as const } : {}), ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
     concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
     jobs,
   });

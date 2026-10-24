@@ -110,7 +110,7 @@ export type VersionedOutcome =
   | { status: "stood-down"; stoodDown: string; op?: string }
   | { status: "gated"; op: string; gate: string; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; chantApprove?: string; gatePlanDigest?: string }
   | { status: "failed"; op: string; exitCode: number; chantExitCode: number; moved?: NonNullable<Awaited<ReturnType<typeof movedSinceApproval>>>["moved"]; approve?: string; chantApprove?: string }
-  | { status: "applied"; op: string; appliedNow: string[] };
+  | { status: "applied"; op: string; appliedNow: string[]; resumed?: { gate: string; run: string; checkpoint: string } };
 
 /** What a declarative run (the ApplyOp) did; `plan` is the plan before the run. */
 export type DeclarativeOutcome = { plan: Record<string, unknown>; policy?: RuleResult[] } & (
@@ -855,7 +855,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     return emit({ status: "stood-down", stoodDown: stoodLate, op: op.name }, 0);
   }
   if (a.json) {
-    io.out(`${JSON.stringify(applyJson({ mode: "versioned", report: after, outcome: { status: "applied", op: op.name, appliedNow: report.status.pending.map((p) => p.id) } }), null, 2)}\n`);
+    io.out(`${JSON.stringify(applyJson({ mode: "versioned", report: after, outcome: { status: "applied", op: op.name, appliedNow: report.status.pending.map((p) => p.id), ...(run.resumed ? { resumed: run.resumed } : {}) } }), null, 2)}\n`);
   } else {
     io.out(`\nApplied: ${report.status.pending.map((p) => p.id).join(", ")}.\n`);
   }

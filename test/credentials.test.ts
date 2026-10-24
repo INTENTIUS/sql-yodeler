@@ -135,7 +135,7 @@ describe("a project's reader and writer", () => {
     const pr = yaml(".github/workflows/yodel-pr.yml");
     const jobs = pr.jobs as Record<string, Job>;
     expect(Object.keys(jobs["plan-dev"]?.env ?? {})).toEqual(["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "YODEL_WEBHOOK_URL", "YODEL_WEBHOOK_KEY"]);
-    expect(pr.permissions).toEqual({ contents: "read", "pull-requests": "write", "id-token": "write" });
+    expect(pr.permissions).toEqual({ contents: "read", "pull-requests": "write", actions: "read", "id-token": "write" });
     // Every plan job tries a write first, with each reader it holds.
     expect(jobs["plan-dev"]?.steps.map((s) => s.run)).toContain("yodel config check dev --write-probe");
     const prodSteps = (jobs["plan-prod"]?.steps ?? []).map((s) => s.run);

@@ -16,7 +16,10 @@
  * - it is newer than the newest pending fact for the gate, so an approval
  *   from before the gate last asked does not answer it;
  * - the workspace's approval rule for the gate (`identity.gates`), when one
- *   applies, accepts it.
+ *   applies, accepts it;
+ * - one the gate step carried from an alias (`carriedFrom`, chant#3949)
+ *   counts only while the gate still lists that alias, as chant's gate reads
+ *   it (`op/gate.ts:815` in chant 0.124.46).
  *
  * A gate with a quorum or policy (`approval`) is refused here: counting a
  * quorum is the gate step's, and `--execute` fails closed rather than
@@ -40,13 +43,15 @@ export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, dig
   const { latestPendingGate, latestResolutionForPlan } = await import("@intentius/chant/lifecycle/gate-ledger");
   const ledger = await port.read(op.name);
   const rule = (await port.approvalRule?.(op.gate)) ?? null;
-  const resolutions = ledger.resolutions.filter((r) => r.gate !== op.gate || rule === null || rule.refuses(r) === null);
+  const declared = (from: { op: string; gate: string }) => (op.aliases ?? []).some((a) => a.op === from.op && a.gate === from.gate);
+  const listed = ledger.resolutions.filter((r) => r.gate !== op.gate || r.carriedFrom === undefined || declared(r.carriedFrom));
+  const resolutions = listed.filter((r) => r.gate !== op.gate || rule === null || rule.refuses(r) === null);
   const since = latestPendingGate(ledger.pending, op.gate)?.timestamp ?? EPOCH;
   const found = latestResolutionForPlan(resolutions, op.gate, since, digest);
   const r = found.resolution;
   if (r) return { resolvedBy: r.resolvedBy, timestamp: r.timestamp, ...(r.review ? { review: r.review } : {}), ...(r.seal ? { signer: r.seal.signer } : {}) };
   // An approval of this digest the gate's rule does not count (#48: one not sealed by a signer at base), and why.
-  const uncounted = rule === null ? undefined : latestResolutionForPlan(ledger.resolutions, op.gate, since, digest).resolution;
+  const uncounted = rule === null ? undefined : latestResolutionForPlan(listed, op.gate, since, digest).resolution;
   const why = uncounted ? rule?.refuses(uncounted) : null;
   const other = why
     ? ` (the approval by ${uncounted?.resolvedBy ?? "?"} at ${uncounted?.timestamp ?? "?"} does not count: ${why})`
