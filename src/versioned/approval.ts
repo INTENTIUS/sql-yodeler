@@ -27,6 +27,7 @@
  */
 
 import type { GateLedgerPort } from "@intentius/chant/op/gate";
+import type { ReleaseAdmission } from "@intentius/chant/lifecycle/release-ledger";
 import { YodelError } from "../project.js";
 import type { MigrateOpRef } from "./op.js";
 
@@ -35,8 +36,20 @@ const EPOCH = new Date(0).toISOString();
 /** Exit code of a refusal for want of an approval: the same as a run stopped at the gate. */
 export const NOT_APPROVED = 3;
 
+/** What {@link verifyApproval} found: the approval that counted, and what the release record says of it (#277). */
+export interface VerifiedApproval {
+  resolvedBy: string;
+  timestamp: string;
+  review?: { pr: number; head: string; approvers: string[] };
+  signer?: string;
+  /** Every approver of the plan that counted, comma joined, from chant's `admissionOf`: the release record's `approver`. */
+  approver: string;
+  /** The resolution that admitted the apply (`{ op, gate, resolvedAt }`, chant#4020): the release record's `admission`. */
+  admission: ReleaseAdmission;
+}
+
 /** Throws unless the ledger holds an approval of `op`'s gate for `digest`. Returns who approved it. */
-export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, digest: string): Promise<{ resolvedBy: string; timestamp: string; review?: { pr: number; head: string; approvers: string[] }; signer?: string }> {
+export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, digest: string): Promise<VerifiedApproval> {
   if (op.quorum) {
     throw new YodelError(`--execute cannot check gate "${op.gate}" of ${op.name}: it declares an approval quorum or policy, which only the gate step counts; run yodel apply without --execute`, NOT_APPROVED);
   }
@@ -49,7 +62,17 @@ export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, dig
   const since = latestPendingGate(ledger.pending, op.gate)?.timestamp ?? EPOCH;
   const found = latestResolutionForPlan(resolutions, op.gate, since, digest);
   const r = found.resolution;
-  if (r) return { resolvedBy: r.resolvedBy, timestamp: r.timestamp, ...(r.review ? { review: r.review } : {}), ...(r.seal ? { signer: r.seal.signer } : {}) };
+  if (r) {
+    // The release record's approver and admission come from chant's admissionOf, over the approvals that count here:
+    // this gate's, from its newest pending fact on (as latestResolutionForPlan reads it), bound to the digest of the one found.
+    const { admissionOf } = await import("@intentius/chant/lifecycle/release-ledger");
+    const counted = resolutions.filter((x) => x.gate === op.gate && Date.parse(x.timestamp) >= Date.parse(since));
+    const admitted = admissionOf(counted, { op: op.name, gate: op.gate, ...(r.planDigest !== undefined ? { planDigest: r.planDigest } : {}) }) ?? {
+      approver: r.resolvedBy,
+      admission: { op: op.name, gate: op.gate, resolvedAt: r.timestamp },
+    };
+    return { resolvedBy: r.resolvedBy, timestamp: r.timestamp, ...(r.review ? { review: r.review } : {}), ...(r.seal ? { signer: r.seal.signer } : {}), ...admitted };
+  }
   // An approval of this digest the gate's rule does not count (#48: one not sealed by a signer at base), and why.
   const uncounted = rule === null ? undefined : latestResolutionForPlan(listed, op.gate, since, digest).resolution;
   const why = uncounted ? rule?.refuses(uncounted) : null;
