@@ -95,7 +95,10 @@ export function readFlywayConfig(file: string | undefined, dir: string): FlywayC
   });
   const locations = [...c.locations.map(toAbs), ...absolute];
   if (locations.length === 0) locations.push(resolve(dir));
-  const { file: _f, root, locations: _l, codeLocations, outside: _o, url: _u, dialect: _d, ...rest } = c;
+  const { root, codeLocations } = c;
+  // chant's fields this adapter replaces with absolute paths or leaves out.
+  const replaced = ["file", "root", "locations", "codeLocations", "outside", "url", "dialect"] as const;
+  const rest = Object.fromEntries(Object.entries(c).filter(([key]) => !(replaced as readonly string[]).includes(key))) as Omit<typeof c, (typeof replaced)[number]>;
   const mine: FlywayConfig = {
     ...rest,
     ...(file !== undefined ? { file: resolve(file) } : {}),
