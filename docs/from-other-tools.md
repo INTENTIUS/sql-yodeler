@@ -149,10 +149,10 @@ yodel's migrations live in `migrations/` at the project root, and the name is fi
 Point the environment at the database (in the templates, `<ENV>_CLICKHOUSE_URL` or `<ENV>_POSTGRES_URL`, and the writer's user and password variables), then:
 
 ```sh
-YODEL_CREDENTIALS=writer:prod npx yodel init --from prod --force
+YODEL_ROLE=writer:prod npx yodel init --from prod --force
 ```
 
-- `YODEL_CREDENTIALS=writer:prod` makes the template's `chant.config.ts` read the writer's variables. Without it the template reads the reader's, which its README creates read-only.
+- `YODEL_ROLE=writer:prod` makes the template's `chant.config.ts` read the writer's variables. Without it the template reads the reader's, which its README creates read-only.
 - `--force` is needed because the template's `src/schema.ts` is a placeholder schema, and `init` refuses to write over declarations without it: `refused: src already declares a schema (schema.ts) ... Pass --force to overwrite`. The import writes `src/schema.ts`; any other file in `src/` is kept and built with it, so remove files that declare objects the database does not have.
 
 What `init` does, step by step, and what it refuses, is in [Adopting an existing database](adoption.md#adopting-an-existing-database-yodel-init-from). Afterwards `npx yodel plan prod` shows no change and `npx yodel status prod` lists the baseline applied. Commit `src/`, the baseline and the project.
@@ -185,7 +185,7 @@ There are no down migrations to write or keep in step with the up ones. Each mig
 
 ```sh
 npx yodel revert prod <id> --dry-run    # the reverse statements, each with its rule and class, and the digest
-YODEL_CREDENTIALS=writer:prod npx yodel revert prod <id>
+YODEL_ROLE=writer:prod npx yodel revert prod <id>
 ```
 
 `yodel revert` undoes the newest migration applied in the environment, and only that one, since any later migration was written against it. It goes through the migrations Op like an apply: it stops at the gate with the approve command (exit 3), and once approved, the next `yodel revert` runs it under the lock. The policy in `yodel.config.ts` judges its statements, so a rule that refuses drops refuses a revert that drops what the migration added unless an override is recorded. The history gets a row for each reverse statement and a `reverted` row; the migration is then pending again, and `yodel status` marks it reverted. Delete it, or rewrite it with `yodel new <name> --replace`, before the next `yodel apply`, which would otherwise apply it again.

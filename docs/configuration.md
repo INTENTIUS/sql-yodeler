@@ -90,17 +90,17 @@ profiles: {
 }
 ```
 
-A process connects as the reader unless `YODEL_CREDENTIALS` is `writer` (every environment) or `writer:<env>` (that one); only `<env>`'s wave job sets `writer:<env>`. Each role reads its user and password from a variable, by default `<ENV>_<DIALECT>_READER_USER`, `<ENV>_<DIALECT>_READER_PASSWORD`, `<ENV>_<DIALECT>_WRITER_USER` and `<ENV>_<DIALECT>_WRITER_PASSWORD` (`DEV_POSTGRES_READER_USER`), the names `yodel ci` maps the forge's secrets to. The third argument replaces a role's user or password: `credentials("prod", "postgres", { writer: { user: { env: "APP_MIGRATOR" } } })`. The starter templates' profiles are made this way.
+A process connects as the reader unless `YODEL_ROLE` is `writer` (every environment) or `writer:<env>` (that one); only `<env>`'s wave job sets `writer:<env>`. `YODEL_CREDENTIALS`, its older name, is still read when `YODEL_ROLE` is not set; when both are set, `YODEL_ROLE` wins. Each role reads its user and password from a variable, by default `<ENV>_<DIALECT>_READER_USER`, `<ENV>_<DIALECT>_READER_PASSWORD`, `<ENV>_<DIALECT>_WRITER_USER` and `<ENV>_<DIALECT>_WRITER_PASSWORD` (`DEV_POSTGRES_READER_USER`), the names `yodel ci` maps the forge's secrets to. The third argument replaces a role's user or password: `credentials("prod", "postgres", { writer: { user: { env: "APP_MIGRATOR" } } })`. The starter templates' profiles are made this way.
 
 Every command refuses the project, exit 4, when an environment's reader and writer are one identity: both read their user from the same variable, the two variables hold the same user name, or both read their password from the same variable. A job holding such a reader could write.
 
 A command that writes (`yodel apply`, `yodel revert`, `yodel init`) refuses, exit 4, before its gate and before it connects, when it would run as an environment's reader:
 
 ```text
-yodel apply: refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_CREDENTIALS is not set. Run it as the writer: YODEL_CREDENTIALS=writer:dev npx yodel apply dev. Nothing was done.
+yodel apply: refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_ROLE is not set. Run it as the writer: YODEL_ROLE=writer:dev npx yodel apply dev. Nothing was done.
 ```
 
-`yodel apply --plan` and `--digest`, and `yodel revert --dry-run`, only read, and run as the reader. Each command yodel prints for a person to run that writes (`then run ... again` after a gate stop, `yodel approve`'s `Apply it with`, `yodel override`'s) starts with `YODEL_CREDENTIALS=writer:<env>` for a profile made with `credentials()`. A server that refuses a write for want of a privilege (a profile without `credentials()`, or a writer missing a grant) is reported the same way, in one line naming the user and the server's message, exit 4.
+`yodel apply --plan` and `--digest`, and `yodel revert --dry-run`, only read, and run as the reader. Each command yodel prints for a person to run that writes (`then run ... again` after a gate stop, `yodel approve`'s `Apply it with`, `yodel override`'s) starts with `YODEL_ROLE=writer:<env>` for a profile made with `credentials()`. A server that refuses a write for want of a privilege (a profile without `credentials()`, or a writer missing a grant) is reported the same way, in one line naming the user and the server's message, exit 4.
 
 ```text
 yodel status: refused: sql.profiles.prod: the reader (PROD_POSTGRES_READER_USER) and the writer (PROD_POSTGRES_WRITER_USER) are the same user, app, so a job that holds the reader can write. Give each role its own database user.
@@ -170,7 +170,7 @@ On GitHub the step requests the job's OIDC token for the cloud's audience and wr
 | lint (pull request) | no database credentials: the replay runs on a throwaway server the job starts |
 | plan-`<env>` (pull request) | `<env>`'s reader, and the reader of the environment its wave requires |
 | watch-`<env>` (schedule) | `<env>`'s reader |
-| wave `<env>` (push to main) | `<env>`'s writer (`YODEL_CREDENTIALS=writer:<env>`), and the reader of the environment it requires |
+| wave `<env>` (push to main) | `<env>`'s writer (`YODEL_ROLE=writer:<env>`), and the reader of the environment it requires |
 
 The pipelines map only those, but a pull request can change a workflow, so where a secret is readable decides what a pull request could take. [Setting up each forge](forges.md) says where the readers' and the writer's secrets go on GitHub, GitLab and Forgejo so that only the wave job can read the writer's, and which tokens the jobs use.
 
@@ -197,7 +197,7 @@ export default defineConfig({
 | Setting | 1. yodel.config.ts | 2. chant.config.ts | 3. variable | Default |
 |---|---|---|---|---|
 | topology (ClickHouse) | `environments.<env>.topology` | `sql.profiles.<env>.topology` | `YODEL_TOPOLOGY` | `single` |
-| which role a process connects as | | `credentials()` in chant.config.ts | `YODEL_CREDENTIALS`: `writer` or `writer:<env>` connects as the writer. Only an environment's wave job sets it | the reader |
+| which role a process connects as | | `credentials()` in chant.config.ts | `YODEL_ROLE`: `writer` or `writer:<env>` connects as the writer. Only an environment's wave job sets it | the reader |
 | the history's database (ClickHouse) or schema (Postgres) | `environments.<env>.history.database` | | `YODEL_HISTORY_DATABASE` | `yodeler` |
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
 | how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |

@@ -13,7 +13,7 @@ The pipelines `yodel ci` renders do the same from CI ([The pipelines](workflows.
 
 - The CI image, pinned by its digest: `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`. It carries Node, yodel, chant and the lexicons, so the Job runs no `npm ci`. Use the version the project's `package.json` installs.
 - The project at the commit being deployed, as a git checkout with the `chant/lifecycle` branch fetched: the approvals are commits on that branch ([Approval](approval.md)). An init container that clones the repository at the deployed commit does this.
-- The environment's writer, from a Secret, in the variables the profile reads (`PROD_POSTGRES_WRITER_USER`, `PROD_POSTGRES_WRITER_PASSWORD`, and the reader's pair), and `YODEL_CREDENTIALS=writer:<env>` ([Credentials](configuration.md#credentials-a-reader-and-a-writer)).
+- The environment's writer, from a Secret, in the variables the profile reads (`PROD_POSTGRES_WRITER_USER`, `PROD_POSTGRES_WRITER_PASSWORD`, and the reader's pair), and `YODEL_ROLE=writer:<env>` ([Credentials](configuration.md#credentials-a-reader-and-a-writer)).
 - A token that can read the repository, for the clone and the fetch.
 
 ## The Job
@@ -53,7 +53,7 @@ spec:
           workingDir: /work
           command: ["yodel", "apply", "prod", "--lock-wait", "10m"]
           env:
-            - name: YODEL_CREDENTIALS
+            - name: YODEL_ROLE
               value: writer:prod
           envFrom:
             - secretRef: { name: yodel-prod-db }

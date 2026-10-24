@@ -146,7 +146,7 @@ export const ROOMS = [
 		],
 		differs: {},
 		first: {
-			command: { any: 'YODEL_CREDENTIALS=writer npx yodel init --from <env> --force' },
+			command: { any: 'YODEL_ROLE=writer npx yodel init --from <env> --force' },
 			link: { label: 'Adopting an existing database', href: 'adoption#adopting-an-existing-database-yodel-init-from' },
 		},
 		claims: ['declarative'],
@@ -206,7 +206,7 @@ export const ROOMS = [
 		],
 		differs: {},
 		first: {
-			command: { any: 'YODEL_CREDENTIALS=writer npx yodel init --from <env> --force' },
+			command: { any: 'YODEL_ROLE=writer npx yodel init --from <env> --force' },
 			link: { label: 'Coming from another migration tool', href: 'from-other-tools' },
 		},
 		claims: ['declarative', 'resume', 'migrations'],
