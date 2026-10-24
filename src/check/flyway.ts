@@ -1,5 +1,5 @@
 /**
- * A Flyway project as `yodel check` reads it (#250): its `flyway.toml` or
+ * A Flyway project as `yodel check` reads it (#250, #4400): its `flyway.toml` or
  * `flyway.conf`, the locations it names, read recursively, and the
  * placeholders it substitutes.
  *
@@ -24,9 +24,18 @@
  * Flyway's own run would be.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import * as layout from "@intentius/chant/workspace/flyway-layout";
+import { workingTree, type WorkspaceTree } from "@intentius/chant/workspace/tree";
 import { YodelError } from "../project.js";
+
+/*
+ * The reading itself is chant's `workspace/flyway-layout`, the one the
+ * workspace's Flyway kind uses (#4400). This file keeps yodel's view of it:
+ * absolute file system paths in, absolute paths out, and a YodelError where
+ * chant throws a FlywayPlaceholderError. The tree is rooted at `/`, so a
+ * location outside the project (`filesystem:../shared`) still reads.
+ */
 
 export interface FlywayConfig {
   /** The configuration file, absolute; undefined with none. */
@@ -54,233 +63,79 @@ export interface FlywayConfig {
   environment?: string;
 }
 
+const fsRoot = (): WorkspaceTree => workingTree(sep);
+const toTree = (abs: string): string => resolve(abs).split(sep).filter(Boolean).join("/");
+const toAbs = (p: string): string => resolve(sep, ...p.split("/"));
+
+/** chant's configuration for each of ours, to hand back to chant's `substitute`. */
+const layouts = new WeakMap<FlywayConfig, layout.FlywayConfig>();
+
 /** The first `flyway.toml`, else `flyway.conf`, in `dir` or a directory above it up to `stopAt`. */
 export function findFlywayConfig(dir: string, stopAt?: string): string | undefined {
+  const at = resolve(dir);
   const top = stopAt === undefined ? undefined : resolve(stopAt);
-  let at = resolve(dir);
-  for (;;) {
-    for (const name of ["flyway.toml", "flyway.conf"]) {
-      const f = join(at, name);
-      if (existsSync(f) && statSync(f).isFile()) return f;
-    }
-    const up = dirname(at);
-    if (at === top || up === at || (top !== undefined && !`${at}${sep}`.startsWith(`${top}${sep}`))) return undefined;
-    at = up;
-  }
+  // A tree reads up to its root, so the project's directory is the root when `dir` is inside it.
+  const inside = top !== undefined && `${at}${sep}`.startsWith(`${top}${sep}`);
+  const base = inside ? top : resolve(sep);
+  const found = layout.findFlywayConfig(workingTree(base), toTreeUnder(base, at));
+  return found === undefined ? undefined : resolve(base, ...found.split("/"));
 }
 
-type Values = Record<string, string | string[] | boolean>;
-
-/** Java-properties `flyway.*` keys, without the `flyway.` prefix. */
-export function parseFlywayConf(text: string): Values {
-  const out: Values = {};
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i] ?? "";
-    while (/\\$/.test(line) && i + 1 < lines.length) line = line.slice(0, -1) + (lines[++i] ?? "").trimStart();
-    const t = line.trim();
-    if (t === "" || t.startsWith("#") || t.startsWith("!")) continue;
-    const m = /^([^=:\s]+)\s*[=:]\s*(.*)$/.exec(t);
-    if (!m) continue;
-    const key = m[1] ?? "";
-    if (!key.startsWith("flyway.")) continue;
-    out[key.slice("flyway.".length)] = (m[2] ?? "").trim();
-  }
-  return out;
-}
-
-/** A TOML document, as far as Flyway's configuration uses it: tables, strings, arrays of strings, booleans and numbers. */
-export function parseToml(text: string): Record<string, Values> {
-  const tables: Record<string, Values> = { "": {} };
-  let current = "";
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const t = stripComment(lines[i] ?? "").trim();
-    if (t === "") continue;
-    const table = /^\[\s*([^\]]+?)\s*\]$/.exec(t);
-    if (table) {
-      current = (table[1] ?? "").split(".").map((k) => unquote(k.trim())).join(".");
-      tables[current] ??= {};
-      continue;
-    }
-    const kv = /^("[^"]*"|'[^']*'|[A-Za-z0-9_.:-]+)\s*=\s*(.*)$/.exec(t);
-    if (!kv) continue;
-    let raw = kv[2] ?? "";
-    // A multi-line array runs to its closing bracket.
-    while (raw.trimStart().startsWith("[") && !balanced(raw) && i + 1 < lines.length) raw += ` ${stripComment(lines[++i] ?? "").trim()}`;
-    const path = unquote(kv[1] ?? "").split(".");
-    const key = path.pop() ?? "";
-    const where = [current, ...path].filter(Boolean).join(".");
-    tables[where] ??= {};
-    tables[where][key] = tomlValue(raw.trim());
-  }
-  return tables;
-}
-
-function stripComment(line: string): string {
-  let quote: string | undefined;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quote) {
-      if (c === "\\" && quote === '"') i++;
-      else if (c === quote) quote = undefined;
-    } else if (c === '"' || c === "'") quote = c;
-    else if (c === "#") return line.slice(0, i);
-  }
-  return line;
-}
-
-const balanced = (s: string) => (s.match(/\[/g) ?? []).length <= (s.match(/\]/g) ?? []).length;
-
-function unquote(s: string): string {
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) return s.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-  return s;
-}
-
-function tomlValue(raw: string): string | string[] | boolean {
-  if (raw === "true" || raw === "false") return raw === "true";
-  if (raw.startsWith("[")) {
-    const inner = raw.replace(/^\[/, "").replace(/\]\s*$/, "");
-    return (inner.match(/"(?:[^"\\]|\\.)*"|'[^']*'|[^,\s]+/g) ?? []).map((v) => unquote(v.trim())).filter((v) => v !== "");
-  }
-  return unquote(raw);
-}
-
-const list = (v: string | string[] | boolean | undefined): string[] | undefined =>
-  v === undefined || typeof v === "boolean" ? undefined : Array.isArray(v) ? v : v.split(",").map((s) => s.trim()).filter(Boolean);
-const str = (v: string | string[] | boolean | undefined): string | undefined => (typeof v === "string" ? v : Array.isArray(v) ? v.join(",") : undefined);
-
-/** The database name a JDBC URL names: the path after the host. */
-function databaseOf(url: string | undefined): string | undefined {
-  const m = url === undefined ? null : /^jdbc:[a-z0-9]+:\/\/[^/]+\/([^?;]+)/i.exec(url);
-  return m?.[1] ?? undefined;
+function toTreeUnder(base: string, abs: string): string {
+  return relative(base, abs).split(sep).filter(Boolean).join("/");
 }
 
 /** The configuration `file` holds, or the defaults with `dir` as the one location when there is none. */
 export function readFlywayConfig(file: string | undefined, dir: string): FlywayConfig {
-  let values: Values = {};
-  let placeholders: Record<string, string> = {};
-  if (file !== undefined) {
-    const text = readFileSync(file, "utf8");
-    if (file.endsWith(".toml")) {
-      const t = parseToml(text);
-      const flyway = t.flyway ?? {};
-      const name = str(flyway.environment) ?? "default";
-      const env = t[`environments.${name}`] ?? {};
-      values = { ...flyway, ...(t[`environments.${name}.flyway`] ?? {}), ...(env.url !== undefined ? { url: env.url } : {}), ...(env.user !== undefined ? { user: env.user } : {}), ...(env.schemas !== undefined ? { schemas: env.schemas } : {}) };
-      if (str(flyway.environment) !== undefined) values.environment = name;
-      placeholders = Object.fromEntries(Object.entries({ ...(t["flyway.placeholders"] ?? {}), ...(t[`environments.${name}.flyway.placeholders`] ?? {}) }).map(([k, v]) => [k, str(v) ?? String(v)]));
-    } else {
-      values = parseFlywayConf(text);
-      placeholders = Object.fromEntries(Object.entries(values).flatMap(([k, v]) => (k.startsWith("placeholders.") ? [[k.slice("placeholders.".length), str(v) ?? ""]] : [])));
-    }
-  }
-  const root = file === undefined ? resolve(dir) : dirname(file);
-  const named = list(values.locations) ?? [];
-  const locations: string[] = [];
-  const codeLocations: string[] = [];
-  for (const l of named) {
-    const m = /^(filesystem|classpath):(.*)$/.exec(l);
-    const kind = m?.[1] ?? "classpath";
-    const path = (m?.[2] ?? l).replace(/^\/+/, kind === "classpath" ? "" : "/");
-    if (kind === "filesystem") locations.push(resolve(root, path));
-    else {
-      locations.push(join(root, "src", "main", "resources", path));
-      codeLocations.push(join(root, "src", "main", "java", path), join(root, "src", "main", "kotlin", path));
-    }
-  }
+  const c = layout.readFlywayConfig(fsRoot(), file === undefined ? undefined : toTree(file), toTree(dir));
+  // Locations chant leaves out as outside the tree: only an absolute `filesystem:` path is one here, as the tree is the whole disk.
+  const absolute = c.outside.flatMap((l) => {
+    const m = /^filesystem:(.*)$/.exec(l);
+    return m?.[1] !== undefined && isAbsolute(m[1]) ? [resolve(m[1])] : [];
+  });
+  const locations = [...c.locations.map(toAbs), ...absolute];
   if (locations.length === 0) locations.push(resolve(dir));
-  const schemas = list(values.schemas);
-  const replacement = values.placeholderReplacement;
-  const defaultSchema = str(values.defaultSchema) ?? schemas?.[0];
-  const user = str(values.user);
-  const database = databaseOf(str(values.url));
-  const environment = str(values.environment);
-  return {
-    ...(file !== undefined ? { file } : {}),
-    root,
+  const { file: _f, root, locations: _l, codeLocations, outside: _o, url: _u, dialect: _d, ...rest } = c;
+  const mine: FlywayConfig = {
+    ...rest,
+    ...(file !== undefined ? { file: resolve(file) } : {}),
+    root: toAbs(root),
     locations,
-    codeLocations,
-    placeholders,
-    placeholderPrefix: str(values.placeholderPrefix) ?? "${",
-    placeholderSuffix: str(values.placeholderSuffix) ?? "}",
-    placeholderReplacement: !(replacement === false || replacement === "false"),
-    sqlMigrationPrefix: str(values.sqlMigrationPrefix) ?? "V",
-    repeatableSqlMigrationPrefix: str(values.repeatableSqlMigrationPrefix) ?? "R",
-    baselineMigrationPrefix: str(values.baselineMigrationPrefix) ?? "B",
-    undoSqlMigrationPrefix: str(values.undoSqlMigrationPrefix) ?? "U",
-    sqlMigrationSeparator: str(values.sqlMigrationSeparator) ?? "__",
-    sqlMigrationSuffixes: list(values.sqlMigrationSuffixes) ?? [".sql"],
-    ...(defaultSchema !== undefined ? { defaultSchema } : {}),
-    ...(user !== undefined ? { user } : {}),
-    ...(database !== undefined ? { database } : {}),
-    table: str(values.table) ?? "flyway_schema_history",
-    ...(environment !== undefined ? { environment } : {}),
+    codeLocations: codeLocations.map(toAbs),
   };
+  layouts.set(mine, c);
+  return mine;
 }
 
 /** Every file under `dir`, recursively, absolute, sorted; none when it does not exist. */
 export function walk(dir: string): string[] {
-  if (!existsSync(dir) || !statSync(dir).isDirectory()) return [];
-  const out: string[] = [];
-  for (const name of readdirSync(dir).sort()) {
-    const p = join(dir, name);
-    if (statSync(p).isDirectory()) out.push(...walk(p));
-    else out.push(p);
-  }
-  return out;
+  return layout.walk(fsRoot(), toTree(dir)).map(toAbs);
 }
 
 /** A Flyway SQL callback (`beforeMigrate.sql`, `afterEachMigrate__notify.sql`, ...): run around a migrate, not a migration. */
-export const isCallback = (file: string): boolean => /^(before|after)[A-Z][A-Za-z]*(__.*)?\.[A-Za-z]+$/.test(basename(file));
+export const isCallback = (file: string): boolean => layout.isCallback(basename(file));
 
 /** The code migrations (Java, Kotlin) in `config`'s locations, relative to its root. */
 export function codeMigrations(config: FlywayConfig): string[] {
-  const code = /\.(java|kt|class)$/;
-  const prefixes = [config.sqlMigrationPrefix, config.repeatableSqlMigrationPrefix, config.baselineMigrationPrefix].filter(Boolean);
-  const migration = (f: string) => code.test(f) && prefixes.some((p) => basename(f).startsWith(p)) && basename(f).includes(config.sqlMigrationSeparator);
-  return [...new Set([...config.locations, ...config.codeLocations])]
-    .flatMap((d) => walk(d))
-    .filter(migration)
-    .map((f) => relative(config.root, f).split(sep).join("/"));
+  const c = layouts.get(config);
+  if (c === undefined) return [];
+  // Ours holds the absolute locations (with any absolute `filesystem:` ones), so the tree-relative copy takes them.
+  const shared: layout.FlywayConfig = { ...c, locations: config.locations.map(toTree), codeLocations: config.codeLocations.map(toTree) };
+  return layout.codeMigrations(fsRoot(), shared).map((f) => relative(config.root, toAbs(f)).split(sep).join("/"));
 }
-
-/** The values Flyway gives its own placeholders, for `file`. */
-function builtins(config: FlywayConfig, file: string, fallback: { defaultSchema?: string | undefined }): Record<string, string | undefined> {
-  return {
-    "flyway:defaultSchema": config.defaultSchema ?? fallback.defaultSchema,
-    "flyway:user": config.user,
-    "flyway:database": config.database,
-    "flyway:timestamp": new Date().toISOString().replace("T", " ").replace(/\..*$/, ""),
-    "flyway:filename": basename(file),
-    "flyway:workingDirectory": process.cwd(),
-    "flyway:table": config.table,
-    "flyway:environment": config.environment,
-  };
-}
-
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * `text` with its placeholders replaced, line by line so line numbers hold.
- * A placeholder with no value is an error naming `file` and the line.
+ * A placeholder with no value is a YodelError naming `file` and the line.
  */
 export function substitute(text: string, file: string, config: FlywayConfig, fallback: { defaultSchema?: string | undefined } = {}): string {
-  if (!config.placeholderReplacement) return text;
-  const values: Record<string, string | undefined> = { ...builtins(config, file, fallback), ...config.placeholders };
-  const lower = new Map(Object.entries(values).map(([k, v]) => [k.toLowerCase(), v]));
-  const pattern = new RegExp(`${escape(config.placeholderPrefix)}([A-Za-z0-9_.:-]+)${escape(config.placeholderSuffix)}`, "g");
-  return text
-    .split("\n")
-    .map((line, i) =>
-      line.replace(pattern, (whole, name: string) => {
-        const v = values[name] ?? lower.get(name.toLowerCase());
-        if (v === undefined) {
-          const where = config.file === undefined ? "a flyway.toml or flyway.conf beside the migrations" : relative(process.cwd(), config.file) || config.file;
-          throw new YodelError(`${file}:${String(i + 1)}: no value for the placeholder ${whole}; set it in ${where} (flyway.placeholders.${name} in flyway.conf, [flyway.placeholders] in flyway.toml)`);
-        }
-        return v;
-      }),
-    )
-    .join("\n");
+  const c = layouts.get(config);
+  if (c === undefined) return text;
+  try {
+    return layout.substitute(text, file, c, fallback);
+  } catch (e) {
+    if (!(e instanceof layout.FlywayPlaceholderError)) throw e;
+    const where = config.file === undefined ? "a flyway.toml or flyway.conf beside the migrations" : relative(process.cwd(), config.file) || config.file;
+    throw new YodelError(`${e.file}:${String(e.line)}: no value for the placeholder ${e.placeholder}; set it in ${where} (flyway.placeholders.${e.name} in flyway.conf, [flyway.placeholders] in flyway.toml)`);
+  }
 }
