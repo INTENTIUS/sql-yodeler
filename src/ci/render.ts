@@ -1010,7 +1010,9 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
  */
 export function withPinComments(original: string, emitted: string): string {
   const comments = new Map<string, string>();
-  for (const m of original.matchAll(/uses: (\S+@[0-9a-f]{40}) (# [^\n]*)$/gm)) comments.set(m[1]!, m[2]!);
+  for (const [, ref, comment] of original.matchAll(/uses: (\S+@[0-9a-f]{40}) (# [^\n]*)$/gm)) {
+    if (ref !== undefined && comment !== undefined) comments.set(ref, comment);
+  }
   if (comments.size === 0) return emitted;
   return emitted.replace(/uses: (\S+@[0-9a-f]{40})$/gm, (line: string, ref: string) => {
     const comment = comments.get(ref);
