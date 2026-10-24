@@ -88,6 +88,37 @@ yodel plan: each object has one owner, and app.customers is declared twice: by s
 
 The same holds when `src/` exports the object under another name: yodel reads each built object's name and refuses the build when a source creates it too.
 
+## Drizzle for queries, chant for the schema
+
+The sections above read the ORM's schema into declarations. For Drizzle on Postgres the other direction works too: the declarations in `src/` own the schema, and chant writes the Drizzle module the application queries with. A select over it has the row type the declaration gives, and the plan, the approval and the apply stay yodel's.
+
+```bash
+npx chant sql drizzle --output app/db/schema.ts
+```
+
+The command builds the project as `chant build` does and writes `pgTable`, `pgEnum`, `pgSequence` and view declarations, with the foreign keys, indexes and constraints named as Postgres names them. The file starts with chant's generated-file marker. Commit it, and import it where the application imports its Drizzle schema today. Your app keeps Drizzle and never imports yodel.
+
+Then stop running Drizzle's migrations:
+
+- Remove `drizzle-kit push` and `drizzle-kit migrate` from scripts, CI and the deploy. Tables change through `yodel new`, `yodel plan` and `yodel apply`, or through a `PostgresMigrationOp` for a hard change.
+- Run `npx chant sql drizzle --check --output app/db/schema.ts` in CI. It exits 1, naming the file, when `src/` declares something the file does not.
+- In a chant workspace, list the file as a `generated` entry of the member, so `chant workspace check --generated` fails on a stale file ([In a chant workspace](workspace.md)):
+
+```json
+{
+  "name": "db",
+  "dir": "db",
+  "kind": "chant",
+  "generated": [
+    { "path": "app/db/schema.ts", "generator": "chant sql drizzle --output app/db/schema.ts", "sources": ["db/src"] }
+  ]
+}
+```
+
+Use one direction per table. If a Drizzle `drizzle-kit export` source (above) declares `app.orders`, the export of the same table would write what that source already owns, and a table declared in `src/` and by a source is a build error ([One owner per object](#one-owner-per-object)). Pick the source for tables Drizzle owns, and the export for tables `src/` owns.
+
+The module is checked against drizzle-orm 0.45.4. `bigint` columns are `number` by default, as `drizzle-kit pull` writes them, and `--bigint bigint` reads them as `bigint`. Routines, triggers, extensions, grants and the other objects Drizzle has no declaration for are listed in the file's header and left out; chant's [Drizzle Schema Export](https://intentius.io/chant/lexicons/sql/drizzle/) page has the full list and the mapping.
+
 ## Handing a hard change to the ORM
 
 An ORM is weakest at the hard change: a column rename that must not break readers, a type change across kinds, a large backfill. For those, run the change as a `PostgresMigrationOp` ([Data migrations](steps.md#postgres-postgresmigrationop)), change the ORM's schema file to the final state, and write the ORM's own migration for the same change. An `orm-handoff` step at the end of the yodel migration then marks that ORM migration as applied, so the ORM does not run it a second time.
