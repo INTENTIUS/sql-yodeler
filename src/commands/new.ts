@@ -93,8 +93,8 @@ to a migration you just wrote, run yodel new <name> --replace --retain 7d.
 --orm-handoff <orm>:<migration> ends the migration with an orm-handoff step:
 after the Op, apply marks the ORM's own migration applied, so the ORM does
 not run it (docs/orm.md). <orm> is prisma, with the migration's directory
-name (prisma:20261009120000_rename_login), or rails, with its version
-(rails:20261009120000). It cannot be combined with --backfill.
+name (prisma:20261009120000_rename_login), or drizzle, with its tag in
+drizzle-kit's meta/_journal.json (drizzle:0003_rename_login). It cannot be combined with --backfill.
 
 --check <sql> adds a pre-migration check to migration.json: a read-only
 query that must return no rows. yodel apply runs it against the environment
@@ -120,7 +120,7 @@ Options:
                        column or table
   --orm-handoff <orm>:<migration>
                        end the migration with a step that marks the ORM's
-                       migration applied (prisma or rails)
+                       migration applied (prisma or drizzle)
   --check <sql>        a pre-migration check that must return no rows
                        (repeatable; "<name>: <sql>" names it)
   --replace            redo the newest migration, named <name>
@@ -187,7 +187,7 @@ function parseNewArgs(args: string[]): NewArgs {
     if (sql || parsed.values.backfill !== undefined) throw new YodelError(`--orm-handoff ends a migration the way --backfill does, and --sql writes a migration you write yourself: give one of them\n${usage}`);
     const at = handoffArg.indexOf(":");
     const got = ormHandoffOptions({ orm: at < 0 ? handoffArg : handoffArg.slice(0, at), migration: at < 0 ? "" : handoffArg.slice(at + 1) });
-    if ("problem" in got) throw new YodelError(`--orm-handoff takes <orm>:<migration>, such as prisma:20261009120000_rename_login or rails:20261009120000: ${got.problem}\n${usage}`);
+    if ("problem" in got) throw new YodelError(`--orm-handoff takes <orm>:<migration>, such as prisma:20261009120000_rename_login or drizzle:0003_rename_login: ${got.problem}\n${usage}`);
     ormHandoff = got.options;
   }
   return {

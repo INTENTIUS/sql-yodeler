@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,19 +28,22 @@ afterAll(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/** A project directory holding a Prisma migration and a Rails one. */
+/** A project directory holding a Prisma migration and a Drizzle one. */
 function repo(): string {
   const d = mkdtempSync(join(tmpdir(), "yodel-handoff-"));
   dirs.push(d);
   mkdirSync(join(d, "prisma/migrations/20261009120000_rename_login"), { recursive: true });
   writeFileSync(join(d, "prisma/migrations/20261009120000_rename_login/migration.sql"), 'ALTER TABLE "users" RENAME COLUMN "login" TO "handle";\n');
-  mkdirSync(join(d, "db/migrate"), { recursive: true });
-  writeFileSync(join(d, "db/migrate/20261009120000_rename_login.rb"), "class RenameLogin < ActiveRecord::Migration[7.1]; end\n");
+  mkdirSync(join(d, "drizzle/meta"), { recursive: true });
+  writeFileSync(join(d, "drizzle/0003_rename_login.sql"), 'ALTER TABLE "users" RENAME COLUMN "login" TO "handle";\n');
+  writeFileSync(join(d, "drizzle/meta/_journal.json"), JSON.stringify({ version: "7", dialect: "postgresql", entries: [{ idx: 3, version: "7", when: DRIZZLE_WHEN, tag: "0003_rename_login", breakpoints: true }] }));
   return d;
 }
 
 const PRISMA: OrmHandoffOptions = { orm: "prisma", migration: "20261009120000_rename_login", dbSchema: "app" };
-const RAILS: OrmHandoffOptions = { orm: "rails", migration: "20261009120000", dbSchema: "app" };
+const DRIZZLE: OrmHandoffOptions = { orm: "drizzle", migration: "0003_rename_login", dbSchema: "app" };
+const DRIZZLE_WHEN = 1760011200000;
+const DRIZZLE_HASH = createHash("sha256").update('ALTER TABLE "users" RENAME COLUMN "login" TO "handle";\n').digest("hex");
 
 /** A stand-in for the server: the ORM's table holds `recorded` and every query is kept. */
 function fakeServer(recorded: Array<Record<string, unknown>> = [], missingTable = false) {
@@ -59,23 +63,23 @@ function fakeServer(recorded: Array<Record<string, unknown>> = [], missingTable 
 
 describe("the orm-handoff step's options", () => {
   const step = (options: unknown): MigrationStep => ({ ...ormHandoffStep("m", PRISMA), options: options as Record<string, unknown> });
-  it("plans a Prisma or Rails handoff", () => {
+  it("plans a Prisma or Drizzle handoff", () => {
     expect(planStep(ormHandoffStep("m", PRISMA))).toEqual({ run: "ormHandoff", options: PRISMA });
-    expect(planStep(ormHandoffStep("m", RAILS))).toEqual({ run: "ormHandoff", options: RAILS });
-    expect(describeStep(ormHandoffStep("m", RAILS))).toBe("orm-handoff: mark rails migration 20261009120000 applied");
-    expect(asOrmHandoff(ormHandoffStep("m", RAILS))).toBeDefined();
+    expect(planStep(ormHandoffStep("m", DRIZZLE))).toEqual({ run: "ormHandoff", options: DRIZZLE });
+    expect(describeStep(ormHandoffStep("m", DRIZZLE))).toBe("orm-handoff: mark drizzle migration 0003_rename_login applied");
+    expect(asOrmHandoff(ormHandoffStep("m", DRIZZLE))).toBeDefined();
   });
   it("refuses an ORM it does not know, a bad name, a path outside the project and a stray option", () => {
     const why = (o: unknown) => {
       const p = planStep(step(o));
       return p.run === "refused" ? p.reason : p.run;
     };
-    expect(why({ orm: "django", migration: "0001" })).toMatch(/options.orm is "django"; yodel hands off to prisma and rails/);
+    expect(why({ orm: "django", migration: "0001" })).toMatch(/options.orm is "django"; yodel hands off to prisma and drizzle/);
     expect(why({ orm: "prisma", migration: "../x" })).toMatch(/names a Prisma migration directory/);
-    expect(why({ orm: "rails", migration: "rename_login" })).toMatch(/Rails migration version/);
+    expect(why({ orm: "drizzle", migration: "../0003" })).toMatch(/Drizzle journal tag/);
     expect(why({ orm: "prisma", migration: "a", dir: "../outside" })).toMatch(/options.dir is a path inside the project/);
-    expect(why({ orm: "rails", migration: "1", table: 'x"; DROP' })).toMatch(/options.table is an unquoted SQL name/);
-    expect(why({ orm: "rails", migration: "1", schema: "x" })).toMatch(/"schema" is not an option of a rails handoff/);
+    expect(why({ orm: "drizzle", migration: "0001_a", table: 'x"; DROP' })).toMatch(/options.table is an unquoted SQL name/);
+    expect(why({ orm: "drizzle", migration: "0001_a", schema: "x" })).toMatch(/"schema" is not an option of a drizzle handoff/);
     expect(ormHandoffOptions(null)).toEqual({ problem: "its options are an object" });
   });
 });
@@ -86,8 +90,15 @@ describe("refusing a handoff that cannot work", () => {
     const read = () => Promise.resolve([]);
     const prisma = await ormHandoffRefusal({ ...PRISMA, migration: "20270101000000_gone" }, { projectDir, read });
     expect(prisma).toMatch(/Prisma migration 20270101000000_gone is not in the repository \(looked for prisma\/migrations\/20270101000000_gone\/migration.sql\)/);
-    const rails = await ormHandoffRefusal({ ...RAILS, migration: "20270101000000" }, { projectDir, read });
-    expect(rails).toMatch(/Rails migration 20270101000000 is not in the repository \(looked for db\/migrate\/20270101000000_\*.rb\)/);
+    const drizzle = await ormHandoffRefusal({ ...DRIZZLE, migration: "0009_gone" }, { projectDir, read });
+    expect(drizzle).toMatch(/Drizzle migration 0009_gone is not in the repository \(looked for drizzle\/meta\/_journal.json for an entry with tag 0009_gone, and drizzle\/0009_gone.sql\)/);
+    // A journal entry without its .sql file, and a .sql file without a journal entry, are not migrations.
+    writeFileSync(join(projectDir, "drizzle/meta/_journal.json"), JSON.stringify({ entries: [{ idx: 3, when: DRIZZLE_WHEN, tag: "0003_rename_login" }, { idx: 4, when: DRIZZLE_WHEN + 1, tag: "0004_nofile" }] }));
+    writeFileSync(join(projectDir, "drizzle/0005_nojournal.sql"), "SELECT 1;\n");
+    expect(await ormHandoffRefusal({ ...DRIZZLE, migration: "0004_nofile" }, { projectDir, read })).toMatch(/not in the repository/);
+    expect(await ormHandoffRefusal({ ...DRIZZLE, migration: "0005_nojournal" }, { projectDir, read })).toMatch(/not in the repository/);
+    rmSync(join(projectDir, "drizzle/meta"), { recursive: true });
+    expect(await ormHandoffRefusal(DRIZZLE, { projectDir, read })).toMatch(/not in the repository/);
     // A directory without migration.sql is not a migration.
     mkdirSync(join(projectDir, "prisma/migrations/20270202000000_empty"));
     expect(await ormHandoffRefusal({ ...PRISMA, migration: "20270202000000_empty" }, { projectDir, read })).toMatch(/not in the repository/);
@@ -95,12 +106,12 @@ describe("refusing a handoff that cannot work", () => {
 
   it("refuses when the ORM already records the migration as applied", async () => {
     const projectDir = repo();
-    const read = (sql: string) => Promise.resolve(sql.includes("_prisma_migrations") || sql.includes("schema_migrations") ? [{ applied: 1 }] : []);
+    const read = (sql: string) => Promise.resolve(sql.includes("_prisma_migrations") || sql.includes("__drizzle_migrations") ? [{ applied: 1 }] : []);
     expect(await ormHandoffRefusal(PRISMA, { projectDir, read })).toMatch(/Prisma already records 20261009120000_rename_login as applied \("app"._prisma_migrations\)/);
-    expect(await ormHandoffRefusal(RAILS, { projectDir, read })).toMatch(/Rails already records 20261009120000 as applied \("app"."schema_migrations"\)/);
+    expect(await ormHandoffRefusal(DRIZZLE, { projectDir, read })).toMatch(/Drizzle already records 0003_rename_login as applied \("app"."__drizzle_migrations" has a created_at at or after the journal's when for it\)/);
   });
 
-  it("counts a Prisma row as applied only when it is finished, and an ORM table that is not there as empty", async () => {
+  it("counts a Prisma row as applied only when it is finished, a Drizzle row only when it is not older than the journal entry, and an ORM table that is not there as empty", async () => {
     const projectDir = repo();
     const seen: string[] = [];
     const read = (sql: string) => {
@@ -109,33 +120,51 @@ describe("refusing a handoff that cannot work", () => {
     };
     expect(await ormHandoffRefusal(PRISMA, { projectDir, read })).toBeUndefined();
     expect(seen[0]).toBe(`SELECT 1 AS applied FROM "app"._prisma_migrations WHERE migration_name = '20261009120000_rename_login' AND finished_at IS NOT NULL`);
-    const none = () => Promise.reject(new Error('relation "app.schema_migrations" does not exist'));
-    expect(await ormHandoffRefusal(RAILS, { projectDir, read: none })).toBeUndefined();
+    seen.length = 0;
+    expect(await ormHandoffRefusal(DRIZZLE, { projectDir, read })).toBeUndefined();
+    expect(seen[0]).toBe(`SELECT 1 AS applied FROM "app"."__drizzle_migrations" WHERE created_at >= ${String(DRIZZLE_WHEN)} LIMIT 1`);
+    const none = () => Promise.reject(new Error('relation "app.__drizzle_migrations" does not exist'));
+    expect(await ormHandoffRefusal(DRIZZLE, { projectDir, read: none })).toBeUndefined();
     const broken = () => Promise.reject(new Error("permission denied for table x"));
-    await expect(ormHandoffRefusal(RAILS, { projectDir, read: broken })).rejects.toThrow(/permission denied/);
+    await expect(ormHandoffRefusal(DRIZZLE, { projectDir, read: broken })).rejects.toThrow(/permission denied/);
   });
 });
 
 describe("running the handoff", () => {
-  it("Rails: creates the table when it is not there and inserts the version", async () => {
+  it("Drizzle: creates the schema and table when they are not there and inserts the file's hash and the journal's when", async () => {
     const projectDir = repo();
     const { client, queries } = fakeServer();
-    const { summary } = await runOrmHandoff(RAILS, { projectDir, client });
-    expect(summary).toEqual({ op: "orm-handoff", orm: "rails", migration: "20261009120000", via: "insert", table: '"app"."schema_migrations"' });
+    const { summary } = await runOrmHandoff(DRIZZLE, { projectDir, client });
+    expect(summary).toEqual({ op: "orm-handoff", orm: "drizzle", migration: "0003_rename_login", via: "insert", table: '"app"."__drizzle_migrations"' });
     expect(queries.slice(1).map((q) => q.sql)).toEqual([
-      `CREATE TABLE IF NOT EXISTS "app"."schema_migrations" ("version" character varying NOT NULL PRIMARY KEY)`,
-      `INSERT INTO "app"."schema_migrations" ("version") VALUES ($1)`,
+      `CREATE SCHEMA IF NOT EXISTS "app"`,
+      `CREATE TABLE IF NOT EXISTS "app"."__drizzle_migrations" (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)`,
+      `INSERT INTO "app"."__drizzle_migrations" ("hash", "created_at") VALUES ($1, $2)`,
     ]);
-    expect(queries[2]?.params).toEqual(["20261009120000"]);
+    expect(queries[3]?.params).toEqual([DRIZZLE_HASH, DRIZZLE_WHEN]);
+    expect(DRIZZLE_HASH).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("Rails: writes nothing when the migration is missing or recorded", async () => {
+  it("Drizzle: defaults to drizzle.__drizzle_migrations and takes dir and table", async () => {
+    const projectDir = repo();
+    const { client, queries } = fakeServer();
+    await runOrmHandoff({ orm: "drizzle", migration: "0003_rename_login" }, { projectDir, client });
+    expect(queries[0]?.sql).toContain('FROM "drizzle"."__drizzle_migrations"');
+    mkdirSync(join(projectDir, "db/out/meta"), { recursive: true });
+    writeFileSync(join(projectDir, "db/out/0001_x.sql"), "SELECT 1;\n");
+    writeFileSync(join(projectDir, "db/out/meta/_journal.json"), JSON.stringify({ entries: [{ idx: 0, when: 5, tag: "0001_x" }] }));
+    const other = fakeServer();
+    await runOrmHandoff({ orm: "drizzle", migration: "0001_x", dir: "db/out", table: "migs", dbSchema: "s" }, { projectDir, client: other.client });
+    expect(other.queries.at(-1)).toMatchObject({ sql: `INSERT INTO "s"."migs" ("hash", "created_at") VALUES ($1, $2)`, params: [createHash("sha256").update("SELECT 1;\n").digest("hex"), 5] });
+  });
+
+  it("Drizzle: writes nothing when the migration is missing or recorded", async () => {
     const projectDir = repo();
     const recorded = fakeServer([{ applied: 1 }]);
-    await expect(runOrmHandoff(RAILS, { projectDir, client: recorded.client })).rejects.toThrow(/already records/);
+    await expect(runOrmHandoff(DRIZZLE, { projectDir, client: recorded.client })).rejects.toThrow(/already records/);
     expect(recorded.queries.filter((q) => !q.sql.startsWith("SELECT"))).toEqual([]);
     const missing = fakeServer();
-    await expect(runOrmHandoff({ ...RAILS, migration: "99" }, { projectDir, client: missing.client })).rejects.toThrow(/not in the repository/);
+    await expect(runOrmHandoff({ ...DRIZZLE, migration: "0099_gone" }, { projectDir, client: missing.client })).rejects.toThrow(/not in the repository/);
     expect(missing.queries).toEqual([]);
   });
 

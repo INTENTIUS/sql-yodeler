@@ -115,18 +115,18 @@ export type OrmHandoffOptions =
       dbSchema?: string;
     }
   | {
-      orm: "rails";
-      /** The migration's version, the digits that start its file name. */
+      orm: "drizzle";
+      /** The migration's `tag` in drizzle-kit's `meta/_journal.json`, for example `0003_rename_login`; the file is `<tag>.sql`. */
       migration: string;
-      /** Rails' migration directory; default `db/migrate`. */
+      /** drizzle-kit's `out` directory, the one holding `meta/_journal.json`; default `drizzle`. */
       dir?: string;
-      /** The schema migrations table; default `schema_migrations`. */
+      /** drizzle's `migrationsTable`; default `__drizzle_migrations`. */
       table?: string;
-      /** The Postgres schema the table is in; default `public`. */
+      /** drizzle's `migrationsSchema`, the Postgres schema the table is in; default `drizzle`. */
       dbSchema?: string;
     };
 
-export const ORM_HANDOFF_ORMS = ["prisma", "rails"] as const;
+export const ORM_HANDOFF_ORMS = ["prisma", "drizzle"] as const;
 
 export type StepPlan =
   | { run: "ormHandoff"; options: OrmHandoffOptions }
@@ -285,17 +285,18 @@ const isRelativePath = (v: unknown): v is string => {
   return v.split("/").every((p) => p !== "" && p !== "." && p !== ".." && !p.startsWith("."));
 };
 const isIdentifier = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(v);
+const DRIZZLE_TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 const PRISMA_NAME = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;
 
 /** The step's options as an ORM handoff, or what is wrong with them. */
 export function ormHandoffOptions(o: unknown): { options: OrmHandoffOptions } | { problem: string } {
   if (!isRecord(o)) return { problem: "its options are an object" };
   const orm = o.orm;
-  if (orm !== "prisma" && orm !== "rails") return { problem: `options.orm is ${JSON.stringify(orm)}; yodel hands off to ${ORM_HANDOFF_ORMS.join(" and ")}` };
+  if (orm !== "prisma" && orm !== "drizzle") return { problem: `options.orm is ${JSON.stringify(orm)}; yodel hands off to ${ORM_HANDOFF_ORMS.join(" and ")}` };
   const allowed = orm === "prisma" ? ["orm", "migration", "dir", "schema", "config", "dbSchema"] : ["orm", "migration", "dir", "table", "dbSchema"];
   for (const k of Object.keys(o)) if (!allowed.includes(k)) return { problem: `"${k}" is not an option of a ${orm} handoff (${allowed.join(", ")})` };
   if (orm === "prisma" && !(typeof o.migration === "string" && PRISMA_NAME.test(o.migration))) return { problem: `options.migration names a Prisma migration directory, for example "20261009120000_rename_login" (got ${JSON.stringify(o.migration)})` };
-  if (orm === "rails" && !(typeof o.migration === "string" && /^[0-9]+$/.test(o.migration))) return { problem: `options.migration is a Rails migration version, the digits that start its file name, as a string (got ${JSON.stringify(o.migration)})` };
+  if (orm === "drizzle" && !(typeof o.migration === "string" && DRIZZLE_TAG.test(o.migration))) return { problem: `options.migration is a Drizzle journal tag, the name of its .sql file without the extension, for example "0003_rename_login" (got ${JSON.stringify(o.migration)})` };
   for (const k of ["dir", "schema", "config"] as const) if (o[k] !== undefined && !isRelativePath(o[k])) return { problem: `options.${k} is a path inside the project (got ${JSON.stringify(o[k])})` };
   for (const k of ["table", "dbSchema"] as const) if (o[k] !== undefined && !isIdentifier(o[k])) return { problem: `options.${k} is an unquoted SQL name (got ${JSON.stringify(o[k])})` };
   return { options: o as unknown as OrmHandoffOptions };

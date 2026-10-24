@@ -7,9 +7,11 @@
  *   `prisma migrate deploy` runs nothing. Needs the prisma CLI in the project
  *   (the suite installs it with npm into the temporary project) and
  *   DATABASE_URL pointing at the emulator with ?schema=<suite schema>.
- * - Rails: the version is a row in schema_migrations. When `rails` is on the
- *   PATH, `rails db:migrate:status` is also checked; the row is checked either
- *   way, because it is the whole of what Rails reads.
+ * - Drizzle: the migration is a row in drizzle.__drizzle_migrations (hash of
+ *   the .sql file, the journal's `when`; drizzle-orm 0.45.4, see
+ *   src/steps/orm-handoff.ts). The row is checked either way; when drizzle-orm
+ *   and pg resolve from the project, drizzle's own migrate() is also run, and
+ *   must not run the migration (its SQL would fail: the rename is done).
  *
  * Written, not run: the epic's brief is unit tests only. Run it with the
  * emulator up:
@@ -21,6 +23,7 @@
  * Objects in schema <prefix>_orm_handoff, the history in <prefix>_orm_handoff_history.
  */
 
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -93,21 +96,34 @@ describe.skipIf(!postgresReachable)("the ORM handoff on postgres", () => {
     await postgres(`DROP SCHEMA IF EXISTS ${S} CASCADE; DROP SCHEMA IF EXISTS ${HISTORY} CASCADE`);
   });
 
-  it("Rails: the rename runs, then schema_migrations holds the version", async () => {
-    const version = "20261023130000";
-    mkdirSync(join(dir, "db/migrate"), { recursive: true });
-    writeFileSync(join(dir, "db/migrate", `${version}_rename_login.rb`), "class RenameLogin < ActiveRecord::Migration[7.1]\n  def change\n    rename_column :people, :login, :handle\n  end\nend\n");
-    const m = rename({ orm: "rails", migration: version, dbSchema: S }, 30, "handle");
+  it("Drizzle: the rename runs, then __drizzle_migrations holds the hash and when, and migrate() runs nothing", async () => {
+    const tag = "0001_rename_login";
+    const when = 1792000000000;
+    const sql = `ALTER TABLE "${S}"."people" RENAME COLUMN "login" TO "handle";\n`;
+    mkdirSync(join(dir, "drizzle/meta"), { recursive: true });
+    writeFileSync(join(dir, "drizzle", `${tag}.sql`), sql);
+    writeFileSync(join(dir, "drizzle/meta/_journal.json"), JSON.stringify({ version: "7", dialect: "postgresql", entries: [{ idx: 1, version: "7", when, tag, breakpoints: true }] }));
+    const m = rename({ orm: "drizzle", migration: tag, dbSchema: S }, 30, "handle");
     expect(m.document.steps.map((s) => (s.kind === "op" ? s.op : s.kind))).toEqual(["PostgresMigrationOp", "orm-handoff"]);
 
     const applied = await approvedApply();
     expect(applied.code, applied.err).toBe(0);
-    expect(applied.err).toMatch(/step 1: orm-handoff: mark rails migration 20261023130000 applied/);
+    expect(applied.err).toMatch(/step 1: orm-handoff: mark drizzle migration 0001_rename_login applied/);
     const cols = await postgres<{ c: string }>(`SELECT column_name AS c FROM information_schema.columns WHERE table_schema = '${S}' AND table_name = 'people' ORDER BY ordinal_position`);
     expect(cols.map((c) => c.c)).toEqual(["id", "handle"]);
-    expect(await postgres(`SELECT version FROM ${S}.schema_migrations`)).toEqual([{ version }]);
+    expect(await postgres(`SELECT hash, created_at::text AS created_at FROM ${S}.__drizzle_migrations`)).toEqual([{ hash: createHash("sha256").update(sql).digest("hex"), created_at: String(when) }]);
     const step = (await postgres<{ note: string }>(`SELECT note FROM ${HISTORY}.history WHERE migration_id = '${m.id}' AND kind = 'step' AND statement_index = 1 AND status = 'succeeded'`))[0];
-    expect(JSON.parse(step?.note ?? "{}")).toMatchObject({ op: "orm-handoff", orm: "rails", via: "insert" });
+    expect(JSON.parse(step?.note ?? "{}")).toMatchObject({ op: "orm-handoff", orm: "drizzle", via: "insert" });
+
+    if (available("node", ["-e", "require.resolve('drizzle-orm/node-postgres/migrator');require.resolve('pg')"])) {
+      const url = new URL(postgresUrl);
+      url.username = process.env.YODEL_E2E_POSTGRES_USER ?? "postgres";
+      url.password = process.env.YODEL_E2E_POSTGRES_PASSWORD ?? "";
+      const script = `const { Pool } = require("pg"); const { drizzle } = require("drizzle-orm/node-postgres"); const { migrate } = require("drizzle-orm/node-postgres/migrator");
+        (async () => { const pool = new Pool({ connectionString: process.env.URL }); await migrate(drizzle(pool), { migrationsFolder: "drizzle", migrationsSchema: process.env.SCHEMA }); await pool.end(); })().catch((e) => { console.error(e); process.exit(1); });`;
+      execFileSync("node", ["-e", script], { cwd: dir, env: { ...process.env, URL: url.toString(), SCHEMA: S } });
+      expect(await postgres(`SELECT count(*)::int AS n FROM ${S}.__drizzle_migrations`)).toEqual([{ n: 1 }]);
+    }
   }, 600_000);
 
   it.skipIf(!available("npx", ["--no-install", "prisma", "--version"]))("Prisma: migrate status reports the migration applied and migrate deploy runs nothing", async () => {
