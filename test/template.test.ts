@@ -236,7 +236,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
         expect(job.steps.find((s) => s.run === reportCommand(env))?.if, `${f} ${name}`).toBe("always()");
         // On Forgejo, Forgejo's fork: actions/upload-artifact@v4 refuses any server but github.com's.
         const upload = f.startsWith(".forgejo") ? FORGEJO_UPLOAD_ARTIFACT : "actions/upload-artifact@v4";
-        expect(job.steps.find((s) => s.uses === upload)?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
+        // A wave job also uploads its outcome file (#4322), so pick the report's upload by name.
+        expect(job.steps.find((s) => s.uses === upload && s.with?.name === reportArtifact(name))?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
         for (const v of WEBHOOK_VARIABLES) expect(job.env?.[v], `${f} ${name}`).toBe(`\${{ secrets.${v} }}`);
       }
     }
