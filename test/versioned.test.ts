@@ -272,7 +272,7 @@ describe("the approval --execute checks in chant's gate ledger", () => {
     // An approval recorded before plan-bound gates (no digest) never counts.
     const legacy = memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z" }] });
     await expect(verifyApproval(legacy, OP, digest)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
-    // A quorum gate is the gate step's to count: refused, never approximated.
+    // A quorum only the Op declares is the change's to edit: refused (the quorum at base is test/quorum-at-base.test.ts).
     await expect(verifyApproval(approvedLedger(digest), { ...OP, quorum: true }, digest)).rejects.toThrow(/quorum/);
   });
 });

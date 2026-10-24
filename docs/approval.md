@@ -53,6 +53,12 @@ phase("Approve", [gate("approve-dev", { plan: digest, resume: true, aliases: [{ 
 
 Leave `op` out of the alias when the gate stays in its Op, or name the old one: `{ op: "migrate-dev-legacy", gate: "approve" }`. An approval of the old name counts at the renamed gate when it answers the old gate's newest pending fact, that fact has not expired, and the approval is for this run's plan digest. The run then writes it again under the new name, with `carriedFrom` naming the line it came from, and prints a `[carried]` line. `yodel apply --execute` counts the carried line only while the gate still lists that alias, which is how chant's gate reads it (`op/gate.ts:815` in chant 0.124.46, `src/versioned/approval.ts`). A carried approval does not resume the run at the gate, since its approver saw the old gate's checkpoint: the run starts at the first phase and the carried approval passes the gate when it gets there. `yodel approve` always records an approval under the gate's current name. chant's OPS017 refuses an alias that is still a gate in some Op of the build.
 
+### A quorum at the base commit
+
+A gate that needs more than one approver declares `identity.gates.<gate>.quorum` in `chant.workspace.json` (chant#4324). chant reads that entry at the base commit, and its quorum replaces the Op's own `approval.quorum`, so a pull request cannot lower the quorum its own apply needs. `yodel apply --execute` counts the gate the same way, with chant's `tallyGateApprovals` over the rules at base and the roles `.chant/trust.json` at base gives a sealed approver (`src/versioned/approval.ts`). It passes when every rule is met, and otherwise refuses with exit 3 and what is still missing.
+
+A quorum that only the Op declares, with none at base, is refused: the Op is part of the change being applied, so yodel counts nothing from it. Declare the quorum under `identity.gates` on the base branch, or run `yodel apply` without `--execute` and leave the count to the gate step. An approval `policy` is also refused under `--execute`, since only the gate step evaluates one. The Op runs with no environment, so a rule with `targets` does not cover it, as in chant's gate step. An approval carried from an alias still counts through the alias rule above, but a quorum split between old and new gate names is not added up here; approve under the current name.
+
 ## The plan digest
 
 On the versioned path the digest covers what the run would do and the state it would start from:
