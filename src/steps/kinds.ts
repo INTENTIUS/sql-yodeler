@@ -14,7 +14,9 @@
  *   one batch), or as an Op of `effect()` steps in a module in the
  *   migration's directory (`./backfill.ts`);
  * - `PostgresMigrationOp`, the step `yodel new` writes for a Postgres column
- *   rename or type change across kinds (`./postgres-migration.ts`, #13).
+ *   rename or type change across kinds (`./postgres-migration.ts`, #13);
+ * - `orm-handoff`, the last step of a migration whose change an ORM also owns:
+ *   it marks the ORM's own migration as applied (`./orm-handoff.ts`, #279).
  *
  * Everything else (a manual step, a rebuild in app mode) is refused before
  * anything runs, with exit 2.
@@ -30,6 +32,8 @@ export const BACKFILL_OP = "backfill";
 export const BACKFILL_FILE = "backfill.ts";
 export const REBUILD_OP = "ClickHouseRebuildOp";
 export const PG_MIGRATION_OP = "PostgresMigrationOp";
+/** The `op` of an ORM handoff step. */
+export const ORM_HANDOFF_OP = "orm-handoff";
 
 type OpStep = Extract<MigrationStep, { kind: "op" }>;
 
@@ -92,7 +96,40 @@ export interface PgMigrationOptions {
   statementTimeoutMs?: number;
 }
 
+/**
+ * An `orm-handoff` step's options: the ORM and the id of its own migration.
+ * Paths are relative to the project directory.
+ */
+export type OrmHandoffOptions =
+  | {
+      orm: "prisma";
+      /** The migration's directory name under `dir`, for example `20261009120000_rename_login`. */
+      migration: string;
+      /** Prisma's migrations directory; default `prisma/migrations`. */
+      dir?: string;
+      /** `--schema` for the CLI. */
+      schema?: string;
+      /** `--config` for the CLI. */
+      config?: string;
+      /** The Postgres schema `_prisma_migrations` is in (the datasource URL's `schema`); default `public`. */
+      dbSchema?: string;
+    }
+  | {
+      orm: "rails";
+      /** The migration's version, the digits that start its file name. */
+      migration: string;
+      /** Rails' migration directory; default `db/migrate`. */
+      dir?: string;
+      /** The schema migrations table; default `schema_migrations`. */
+      table?: string;
+      /** The Postgres schema the table is in; default `public`. */
+      dbSchema?: string;
+    };
+
+export const ORM_HANDOFF_ORMS = ["prisma", "rails"] as const;
+
 export type StepPlan =
+  | { run: "ormHandoff"; options: OrmHandoffOptions }
   | { run: "statement" }
   | { run: "rebuild"; options: RebuildOptions }
   | { run: "pgMigration"; options: PgMigrationOptions }
@@ -207,6 +244,7 @@ export function planStep(step: MigrationStep | BackfillStep): StepPlan {
     return { run: "rebuild", options: { name: o.name, table: o.table, dualWrite: dw as DualWrite, ...(retain ? { retain } : {}) } };
   }
   if (step.op === PG_MIGRATION_OP) return planPgMigration(step);
+  if ((step.op as string) === ORM_HANDOFF_OP) return planOrmHandoff(step as OpStep);
   return { run: "refused", reason: `${step.op} for ${step.object} (${step.name}), not SQL: yodel apply does not run that Op` };
 }
 
@@ -241,6 +279,36 @@ function planPgMigration(step: OpStep): StepPlan {
   };
 }
 
+/** A path inside the project: relative, `/`-separated, no `..` and no hidden part. */
+const isRelativePath = (v: unknown): v is string => {
+  if (!isString(v) || v.includes("\\") || v.startsWith("/")) return false;
+  return v.split("/").every((p) => p !== "" && p !== "." && p !== ".." && !p.startsWith("."));
+};
+const isIdentifier = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z_][A-Za-z0-9_$]*$/.test(v);
+const PRISMA_NAME = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/;
+
+/** The step's options as an ORM handoff, or what is wrong with them. */
+export function ormHandoffOptions(o: unknown): { options: OrmHandoffOptions } | { problem: string } {
+  if (!isRecord(o)) return { problem: "its options are an object" };
+  const orm = o.orm;
+  if (orm !== "prisma" && orm !== "rails") return { problem: `options.orm is ${JSON.stringify(orm)}; yodel hands off to ${ORM_HANDOFF_ORMS.join(" and ")}` };
+  const allowed = orm === "prisma" ? ["orm", "migration", "dir", "schema", "config", "dbSchema"] : ["orm", "migration", "dir", "table", "dbSchema"];
+  for (const k of Object.keys(o)) if (!allowed.includes(k)) return { problem: `"${k}" is not an option of a ${orm} handoff (${allowed.join(", ")})` };
+  if (orm === "prisma" && !(typeof o.migration === "string" && PRISMA_NAME.test(o.migration))) return { problem: `options.migration names a Prisma migration directory, for example "20261009120000_rename_login" (got ${JSON.stringify(o.migration)})` };
+  if (orm === "rails" && !(typeof o.migration === "string" && /^[0-9]+$/.test(o.migration))) return { problem: `options.migration is a Rails migration version, the digits that start its file name, as a string (got ${JSON.stringify(o.migration)})` };
+  for (const k of ["dir", "schema", "config"] as const) if (o[k] !== undefined && !isRelativePath(o[k])) return { problem: `options.${k} is a path inside the project (got ${JSON.stringify(o[k])})` };
+  for (const k of ["table", "dbSchema"] as const) if (o[k] !== undefined && !isIdentifier(o[k])) return { problem: `options.${k} is an unquoted SQL name (got ${JSON.stringify(o[k])})` };
+  return { options: o as unknown as OrmHandoffOptions };
+}
+
+function planOrmHandoff(step: OpStep): StepPlan {
+  const got = ormHandoffOptions(step.options);
+  return "problem" in got ? { run: "refused", reason: `${ORM_HANDOFF_OP} for ${step.object} (${step.name}): ${got.problem}` } : { run: "ormHandoff", options: got.options };
+}
+
+/** The step as an ORM handoff, when it is one. */
+export const asOrmHandoff = (step: MigrationStep | BackfillStep): OpStep | undefined => (step.kind === "op" && (step.op as string) === ORM_HANDOFF_OP ? (step as OpStep) : undefined);
+
 /** One line naming a step, for logs and refusals. */
 export function describeStep(step: MigrationStep | BackfillStep): string {
   if (step.kind === "statement") return `${step.rule} ${step.class}, ${step.name}`;
@@ -249,6 +317,11 @@ export function describeStep(step: MigrationStep | BackfillStep): string {
   if (backfill) {
     const form = asForm(backfill.options);
     return form ? `backfill of ${describeForm(form)}` : `backfill ${"file" in backfill.options ? backfill.options.file : "(a form yodel does not run)"}`;
+  }
+  const handoff = asOrmHandoff(step);
+  if (handoff) {
+    const got = ormHandoffOptions(handoff.options);
+    return "options" in got ? `${ORM_HANDOFF_OP}: mark ${got.options.orm} migration ${got.options.migration} applied` : `${ORM_HANDOFF_OP} (${got.problem})`;
   }
   return `${step.op} for ${step.object} (${step.name})`;
 }
