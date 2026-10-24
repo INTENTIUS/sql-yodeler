@@ -117,7 +117,14 @@ describe("the declarative plan comment (#249)", () => {
     const text = renderDeclarativeText(denied);
     expect(text).toContain("policy no-drops: denied");
     expect(text).toContain("refuses this plan before the gate");
-    expect(declarativePlanJson(denied)).toMatchObject({ environment: "prod", digest: "sha256:abc", policy: [{ id: "no-drops", outcome: "denied" }], lint: { status: "failed", errors: 2 }, approval: { op: "applyProd", command: "yodel approve prod" } });
+    // apply refuses before the gate, so there is nothing to approve until the override is recorded.
+    expect(md).toContain("Nothing to approve yet: `yodel apply prod` refuses this plan before the gate while the policy denies it.");
+    expect(md).not.toContain("npx yodel approve prod");
+    const json = declarativePlanJson(denied);
+    expect(json).toMatchObject({ environment: "prod", digest: "sha256:abc", policy: [{ id: "no-drops", outcome: "denied" }], lint: { status: "failed", errors: 2 }, approval: { op: "applyProd", gate: "approve" } });
+    expect(json.approval).not.toHaveProperty("command");
+    expect((json.approval as { message: string }).message).toContain("Record the override above first");
+    expect(declarativePlanJson(view())).toMatchObject({ approval: { op: "applyProd", command: "yodel approve prod" } });
   });
 
   it("says when nothing changes, and when no ApplyOp applies the environment", () => {
@@ -132,5 +139,22 @@ describe("the declarative plan comment (#249)", () => {
     const md = renderDeclarativeMarkdown({ ...p, plan: { ...p.plan, refused: [rebuild] } });
     expect(md).toContain("**`yodel apply` would refuse (exit 2)**");
     expect(md).toContain("1 change needs its own Op");
+    expect(md).toContain("Nothing to approve yet: `yodel apply prod` would refuse this plan. Move the change that needs its own Op into one (ClickHouseRebuildOp)");
+    expect(md).not.toContain("npx yodel approve prod");
+    const refusedApproval = declarativePlanJson({ ...p, plan: { ...p.plan, refused: [rebuild] } }).approval as Record<string, string>;
+    expect(Object.keys(refusedApproval)).toEqual(["op", "gate", "message"]);
+    expect(refusedApproval.message).toContain("would refuse this plan");
+  });
+
+  it("says apply refuses a live object it could not read, not that there is nothing to approve", () => {
+    const p = view({ changes: [], digest: undefined });
+    const unreadable = { ...p, plan: { ...p.plan, diff: { changes: [], rebuilds: [], hints: [], unreadable: [{ object: "app.legacy", type: "table", reason: "SHOW CREATE denied" }] } as never } };
+    const md = renderDeclarativeMarkdown(unreadable);
+    expect(md).toContain("**`yodel apply` would refuse (exit 2)**");
+    expect(md).toContain("Nothing to approve yet: `yodel apply prod` would refuse this plan, since `app.legacy` could not be read (SHOW CREATE denied).");
+    expect(md).not.toContain("already matches the declared schema");
+    const approval = declarativePlanJson(unreadable).approval as Record<string, string>;
+    expect(Object.keys(approval)).toEqual(["op", "gate", "message"]);
+    expect(approval.message).toContain("could not be read");
   });
 });

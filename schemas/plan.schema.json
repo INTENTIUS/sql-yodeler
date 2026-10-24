@@ -113,7 +113,7 @@
           "$ref": "common.schema.json#/$defs/policy"
         },
         "approval": {
-          "description": "The ApplyOp and its gate, with the command that approves the plan it stops with; or, with no ApplyOp, why.",
+          "description": "The ApplyOp and its gate, with the command that approves the plan it stops with; or, when yodel apply would refuse the plan (a change that needs its own Op, a live object it could not read, a policy denial), a message saying what to do instead and no command; or, with no ApplyOp, why.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
