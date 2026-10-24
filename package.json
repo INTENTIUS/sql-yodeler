@@ -1,6 +1,6 @@
 {
   "name": "@intentius/sql-yodeler",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Schema changes for ClickHouse and Postgres, and the ops they imply, on chant's sql lexicon",
   "keywords": [
     "clickhouse",
@@ -58,16 +58,16 @@
     "grant": "tsx scripts/grant.ts"
   },
   "dependencies": {
-    "@intentius/chant": "^0.124.48",
-    "@intentius/chant-lexicon-forgejo": "^0.124.48",
-    "@intentius/chant-lexicon-github": "^0.124.48",
-    "@intentius/chant-lexicon-gitlab": "^0.124.48",
-    "@intentius/chant-lexicon-sql": "^0.124.48",
+    "@intentius/chant": "^0.124.49",
+    "@intentius/chant-lexicon-forgejo": "^0.124.49",
+    "@intentius/chant-lexicon-github": "^0.124.49",
+    "@intentius/chant-lexicon-gitlab": "^0.124.49",
+    "@intentius/chant-lexicon-sql": "^0.124.49",
     "tsx": "^4.23.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@intentius/chant-lexicon-docker": "^0.124.48",
+    "@intentius/chant-lexicon-docker": "^0.124.49",
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",
     "ajv": "^8.20.0",
