@@ -39,7 +39,7 @@ import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classif
 import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { YodelError, type SqlDialect } from "../project.js";
 import { isCheckpoint, isHandWritten, type Migration } from "../migrations/index.js";
-import { asBackfill, asOrmHandoff, describeStep, planStep, type BackfillStep } from "../steps/kinds.js";
+import { asBackfill, describeStep, planStep, type BackfillStep } from "../steps/kinds.js";
 import type { RebuildReceiptStore } from "../steps/rebuild.js";
 
 /** Exit code: the target is not fresh and `reset` was not given; nothing was run. */
@@ -157,10 +157,6 @@ export async function replayMigrations(ordered: readonly Migration[], driver: Re
       }
       if (asBackfill(s)) {
         done.skipped.push(`step ${String(i)}: ${describeStep(s)} (moves data; the replayed database has none)`);
-        continue;
-      }
-      if (asOrmHandoff(s)) {
-        done.skipped.push(`step ${String(i)}: ${describeStep(s)} (records the ORM's own migration; the replayed database has no ORM)`);
         continue;
       }
       const plan = planStep(s);

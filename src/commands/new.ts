@@ -27,9 +27,9 @@ import {
   type CreatedMigration,
   type MigrationCheck,
 } from "../migrations/index.js";
-import { asBackfill, asForm, BACKFILL_FILE, ormHandoffOptions, type OrmHandoffOptions, backfillTemplate, describeForm, describeFormSql, formPath, formProblems, formTemplate, loadBackfill, PG_MIGRATION_OP, REBUILD_OP, TEMPLATE_MARK, type BackfillForm } from "../steps/index.js";
+import { asBackfill, asForm, BACKFILL_FILE, backfillTemplate, describeForm, describeFormSql, formPath, formProblems, formTemplate, loadBackfill, PG_MIGRATION_OP, REBUILD_OP, TEMPLATE_MARK, type BackfillForm } from "../steps/index.js";
 
-const usage = "usage: yodel new <name> [--sql | --backfill [<file>]] [--retain <duration>] [--orm-handoff <orm>:<migration>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
+const usage = "usage: yodel new <name> [--sql | --backfill [<file>]] [--retain <duration>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
 
 const help = `${usage}
 
@@ -90,12 +90,6 @@ Without it a Postgres step drops the old column in the same apply, right
 after the switch, and a rebuild keeps the old table for 7 days. To add it
 to a migration you just wrote, run yodel new <name> --replace --retain 7d.
 
---orm-handoff <orm>:<migration> ends the migration with an orm-handoff step:
-after the Op, apply marks the ORM's own migration applied, so the ORM does
-not run it (docs/orm.md). <orm> is prisma, with the migration's directory
-name (prisma:20261009120000_rename_login), or rails, with its version
-(rails:20261009120000). It cannot be combined with --backfill.
-
 --check <sql> adds a pre-migration check to migration.json: a read-only
 query that must return no rows. yodel apply runs it against the environment
 before the gate and again under the lock just before the migration's first
@@ -118,9 +112,6 @@ Options:
                        ${formPath("<name>")} (or <file>)
   --retain <duration>  how long a column rename or a rebuild keeps the old
                        column or table
-  --orm-handoff <orm>:<migration>
-                       end the migration with a step that marks the ORM's
-                       migration applied (prisma or rails)
   --check <sql>        a pre-migration check that must return no rows
                        (repeatable; "<name>: <sql>" names it)
   --replace            redo the newest migration, named <name>
@@ -146,7 +137,6 @@ interface NewArgs {
   /** The file --backfill names; "" for the default form. */
   backfill: string | undefined;
   retain: string | undefined;
-  ormHandoff: OrmHandoffOptions | undefined;
   replace: boolean;
   envs: string[];
   checks: MigrationCheck[];
@@ -166,7 +156,7 @@ function parseNewArgs(args: string[]): NewArgs {
       args: bareBackfill(args),
       allowPositionals: true,
       strict: true,
-      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, sql: { type: "boolean" }, backfill: { type: "string" }, retain: { type: "string" }, "orm-handoff": { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
+      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, sql: { type: "boolean" }, backfill: { type: "string" }, retain: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
     });
   } catch (e) {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
@@ -181,18 +171,8 @@ function parseNewArgs(args: string[]): NewArgs {
     throw new YodelError(`--sql writes a migration you write yourself, so it takes no --backfill, --retain, --check or --replace\n${usage}`);
   }
   if (retain !== undefined && !DURATION.test(retain)) throw new YodelError(`--retain takes a duration such as 7d, 12h or 0s, got ${JSON.stringify(retain)}\n${usage}`);
-  const handoffArg = parsed.values["orm-handoff"];
-  let ormHandoff: OrmHandoffOptions | undefined;
-  if (typeof handoffArg === "string") {
-    if (sql || parsed.values.backfill !== undefined) throw new YodelError(`--orm-handoff ends a migration the way --backfill does, and --sql writes a migration you write yourself: give one of them\n${usage}`);
-    const at = handoffArg.indexOf(":");
-    const got = ormHandoffOptions({ orm: at < 0 ? handoffArg : handoffArg.slice(0, at), migration: at < 0 ? "" : handoffArg.slice(at + 1) });
-    if ("problem" in got) throw new YodelError(`--orm-handoff takes <orm>:<migration>, such as prisma:20261009120000_rename_login or rails:20261009120000: ${got.problem}\n${usage}`);
-    ormHandoff = got.options;
-  }
   return {
     name,
-    ormHandoff,
     json: parsed.values.json === true,
     dir: typeof parsed.values.dir === "string" ? parsed.values.dir : process.cwd(),
     backfill: typeof parsed.values.backfill === "string" ? parsed.values.backfill : undefined,
@@ -315,7 +295,7 @@ export const newCommand: Command = {
   implemented: true,
   run: (args, io) =>
     guarded("new", io, args, help, async () => {
-      const { name, json, dir, backfill: backfillArg, retain, ormHandoff, replace, envs, checks, sql } = parseNewArgs(args);
+      const { name, json, dir, backfill: backfillArg, retain, replace, envs, checks, sql } = parseNewArgs(args);
       const project = await loadProject(dir);
       if (sql) return writeHandWritten(io, project, name, json);
       let backfill: { text: string } | { form: BackfillForm } | undefined;
@@ -355,7 +335,7 @@ export const newCommand: Command = {
       const build = await buildSchema(project);
       let made: ReturnType<typeof createMigration>;
       try {
-        made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}), ...(retain !== undefined ? { retain } : {}), ...(ormHandoff ? { ormHandoff } : {}), ...(checks.length > 0 ? { checks } : {}) });
+        made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}), ...(retain !== undefined ? { retain } : {}), ...(checks.length > 0 ? { checks } : {}) });
       } finally {
         build.dispose();
       }
