@@ -165,6 +165,9 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
     const applied = await approvedApply();
     expect(applied.code, applied.err).toBe(0);
     expect((json(applied) as StatusDoc).status).toBe("applied");
+    // The gate resumes (chant#3947): the second run starts at it, from the gated run's checkpoint.
+    expect((json(applied) as StatusDoc & { resumed?: { gate: string } }).resumed?.gate).toBe("approve-migrate-e2e");
+    expect(applied.err).toContain(`[resume] at gate "approve-migrate-e2e"`);
     expect(applied.err).toMatch(/lock: held in Postgres advisory lock/);
 
     const after = await status(0);

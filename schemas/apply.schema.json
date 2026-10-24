@@ -188,6 +188,30 @@
         "appliedNow": {
           "description": "applied: the migrations this run applied.",
           "$ref": "common.schema.json#/$defs/stringList"
+        },
+        "resumed": {
+          "description": "applied: the run started at the approved gate (a gate with resume: true, chant#3947) rather than at the first phase.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gate",
+            "run",
+            "checkpoint"
+          ],
+          "properties": {
+            "gate": {
+              "description": "The gate the run resumed at.",
+              "type": "string"
+            },
+            "run": {
+              "description": "The run that stopped at the gate, whose checkpoint this run read.",
+              "type": "string"
+            },
+            "checkpoint": {
+              "description": "The checkpoint's digest, the one the approval copied.",
+              "type": "string"
+            }
+          }
         }
       }
     },

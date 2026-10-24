@@ -115,6 +115,9 @@ describe.skipIf(!clickhouseReachable)("the versioned path on clickhouse", () => 
     const applied = await approvedApply();
     expect(applied.code, applied.err).toBe(0);
     expect((json(applied) as StatusDoc).status).toBe("applied");
+    // The gate resumes (chant#3947): the second run starts at it, from the gated run's checkpoint.
+    expect((json(applied) as StatusDoc & { resumed?: { gate: string } }).resumed?.gate).toBe("approve-migrate-e2e");
+    expect(applied.err).toContain(`[resume] at gate "approve-migrate-e2e"`);
     // No Keeper on the emulator: the run says the lock is local.
     expect(applied.err).toContain("cross-runner locking needs Keeper");
     expect(await count(`EXISTS TABLE ${DB}.a`)).toBe(1);

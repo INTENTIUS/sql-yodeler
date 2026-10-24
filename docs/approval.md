@@ -27,7 +27,7 @@ export const migrateDev = Op({
   overview: "Apply the pending migrations to dev, behind an approval bound to their plan digest",
   phases: [
     phase("Plan", [plan]),
-    phase("Approve", [gate("approve-migrate-dev", { plan: digest })]),
+    phase("Approve", [gate("approve-migrate-dev", { plan: digest, resume: true })]),
     phase("Apply", [shell("yodel apply dev --execute", { env: { YODEL_APPROVED_PLAN: digest }, timeout: "2h" })]),
   ],
 });
@@ -39,7 +39,19 @@ export const migrateDev = Op({
 
 The digest is checked twice: by the gate on every run, against the approval, and by the Apply step under the lock, against the digest the gate passed, so a change between the two (another runner applying first, a table altered out of band) refuses too.
 
+The gate's `resume: true` (chant 0.124.26 or later, [chant#3947](https://github.com/INTENTIUS/chant/issues/3947)) starts the run after an approval at the gate instead of the first phase. A run that stops at the gate stores a checkpoint of the step outputs the later steps read, here the Plan step's digest, and `yodel approve` copies the checkpoint's digest onto the approval. The next `yodel apply` runs the Plan step again, as chant always does for the step a gate's plan names, then carries on from the gate when the plan, the commit and the checkpoint match what was approved (`decideGateResume`, `op/gate-checkpoint.ts:266` in chant 0.124.46). chant prints `[resume] at gate "approve-migrate-dev", from run <run>'s checkpoint <digest>`, and `yodel apply --json` reports the same three under `resumed`. The Plan step is the only step before the gate, so the resumed run runs the same steps as a fresh one; what it adds is the record of which gated run it continued. When a check fails, such as a commit landing between the two runs, the run starts at the first phase, says why on a `[resume]` line, and the approval still passes the gate.
+
 `yodel apply` finds the Op by its shape, whatever its name. When there is none it prints this declaration to add; when more than one applies the environment, `--op <name>` picks one; an Op whose gate is not bound to the Plan step's output is refused. `chant run migrate-dev` run directly (as CI may) needs `yodel` on `PATH`; `yodel apply` puts itself there for the Op it runs. The declarative path's `ApplyOp` carries its own plan-bound gate ([The two workflows](workflows.md)).
+
+### Renaming the gate
+
+The approvals on `chant/lifecycle` are recorded under the Op's name and the gate's. A gate that is renamed, or moved into another Op, lists its old name in `aliases`, so an approval already given still counts ([chant#3949](https://github.com/INTENTIUS/chant/issues/3949)):
+
+```ts
+phase("Approve", [gate("approve-dev", { plan: digest, resume: true, aliases: [{ gate: "approve-migrate-dev" }] })]),
+```
+
+Leave `op` out of the alias when the gate stays in its Op, or name the old one: `{ op: "migrate-dev-legacy", gate: "approve" }`. An approval of the old name counts at the renamed gate when it answers the old gate's newest pending fact, that fact has not expired, and the approval is for this run's plan digest. The run then writes it again under the new name, with `carriedFrom` naming the line it came from, and prints a `[carried]` line. `yodel apply --execute` counts the carried line only while the gate still lists that alias, which is how chant's gate reads it (`op/gate.ts:815` in chant 0.124.46, `src/versioned/approval.ts`). A carried approval does not resume the run at the gate, since its approver saw the old gate's checkpoint: the run starts at the first phase and the carried approval passes the gate when it gets there. `yodel approve` always records an approval under the gate's current name. chant's OPS017 refuses an alias that is still a gate in some Op of the build.
 
 ## The plan digest
 

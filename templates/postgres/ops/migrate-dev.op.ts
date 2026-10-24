@@ -12,7 +12,7 @@ export const migrateDev = Op({
   overview: "Apply the pending migrations to dev, behind an approval bound to their plan digest",
   phases: [
     phase("Plan", [plan]),
-    phase("Approve", [gate("approve-migrate-dev", { plan: digest })]),
+    phase("Approve", [gate("approve-migrate-dev", { plan: digest, resume: true })]),
     phase("Apply", [shell("yodel apply dev --execute", { env: { YODEL_APPROVED_PLAN: digest }, timeout: "2h" })]),
   ],
 });
