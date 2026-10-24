@@ -23,7 +23,7 @@ jobs:
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
       GITHUB_TOKEN: '${{ github.token }}'
     steps:
-      - uses: https://code.forgejo.org/actions/checkout@v7
+      - uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'

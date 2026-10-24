@@ -255,7 +255,12 @@ describe("the approval --execute checks in chant's gate ledger", () => {
   it("counts only an approval of this gate, for this digest, newer than the gate's newest pending fact", async () => {
     const digest = `jcs1-sha256:${"a".repeat(64)}`;
     const other = `jcs1-sha256:${"b".repeat(64)}`;
-    await expect(verifyApproval(approvedLedger(digest), OP, digest)).resolves.toEqual({ resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z" });
+    await expect(verifyApproval(approvedLedger(digest), OP, digest)).resolves.toEqual({
+      resolvedBy: "alice",
+      timestamp: "2026-10-09T12:00:00.000Z",
+      approver: "alice",
+      admission: { op: OP.name, gate: OP.gate, resolvedAt: "2026-10-09T12:00:00.000Z" },
+    });
     await expect(verifyApproval(approvedLedger(other), OP, digest)).rejects.toThrow(new RegExp(`newest approval of that gate is for ${other}`));
     await expect(verifyApproval(approvedLedger(digest), { ...OP, gate: "another-gate" }, digest)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
     // The gate asked again after the approval: that approval no longer answers it.
@@ -267,7 +272,7 @@ describe("the approval --execute checks in chant's gate ledger", () => {
     // An approval recorded before plan-bound gates (no digest) never counts.
     const legacy = memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z" }] });
     await expect(verifyApproval(legacy, OP, digest)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
-    // A quorum gate is the gate step's to count: refused, never approximated.
+    // A quorum only the Op declares is the change's to edit: refused (the quorum at base is test/quorum-at-base.test.ts).
     await expect(verifyApproval(approvedLedger(digest), { ...OP, quorum: true }, digest)).rejects.toThrow(/quorum/);
   });
 });

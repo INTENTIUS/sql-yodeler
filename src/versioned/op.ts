@@ -6,8 +6,10 @@
  *
  *   Plan     shell("yodel apply <env> --digest", { id: "plan" })
  *            prints the digest of the pending migrations and the live schema
- *   Approve  gate(..., { plan: stepOutput(plan, "stdout") })
- *            a resolution counts only for that digest (`chant approve <op> <gate> --plan <digest>`)
+ *   Approve  gate(..., { plan: stepOutput(plan, "stdout"), resume: true })
+ *            a resolution counts only for that digest (`chant approve <op> <gate> --plan <digest>`);
+ *            with `resume`, the run after the approval starts at the gate
+ *            (chant#3947): it runs the Plan step again and skips nothing else
  *   Apply    shell("yodel apply <env> --execute", { env: { YODEL_APPROVED_PLAN: stepOutput(plan, "stdout") } })
  *            takes the lock, computes the digest again, refuses if it moved, applies
  *
@@ -45,8 +47,15 @@ export interface MigrateOpRef {
   name: string;
   filePath: string;
   gate: string;
-  /** The gate declares a quorum or policy (`approval`). */
+  /** The gate declares an `approval` quorum in the Op. Only a quorum at base counts for `--execute` (chant#4324); this one is the change's to edit. */
   quorum: boolean;
+  /** The gate declares an approval policy, which only the gate step evaluates. */
+  policy?: boolean;
+  /**
+   * The gate's old names (chant#3949), each with its Op (this Op when the
+   * alias names none). An approval recorded under one counts for the gate.
+   */
+  aliases?: { op: string; gate: string }[];
 }
 
 const command = (verb: string) => new RegExp(`^(?:npx\\s+)?yodel\\s+apply\\s+(\\S+)\\s+${verb}(?:\\s|$)`);
@@ -62,7 +71,7 @@ function shellCmd(step: StepDefinition): { cmd: string; id?: string } | undefine
 }
 
 /** The parts of a migrations Op for `env`, when `config` is one. */
-export function migrateOpParts(config: OpConfig, env: string): { gate: string | undefined; quorum: boolean } | undefined {
+export function migrateOpParts(config: OpConfig, env: string): { gate: string | undefined; quorum: boolean; policy?: boolean; aliases?: { op: string; gate: string }[] } | undefined {
   const all = steps(config);
   const plan = all.map(shellCmd).find((s) => s && DIGEST.exec(s.cmd)?.[1] === env);
   const execute = all.map(shellCmd).find((s) => s && EXECUTE.exec(s.cmd)?.[1] === env);
@@ -71,7 +80,9 @@ export function migrateOpParts(config: OpConfig, env: string): { gate: string | 
     if (s.kind !== "gate" || s.plan === undefined || typeof s.plan === "string") return false;
     return (s.plan as { step?: unknown }).step === plan.id;
   });
-  return gate?.kind === "gate" ? { gate: gate.gate, quorum: gate.approval !== undefined } : { gate: undefined, quorum: false };
+  if (gate?.kind !== "gate") return { gate: undefined, quorum: false };
+  const aliases = (gate.aliases ?? []).map((a) => ({ op: a.op ?? config.name, gate: a.gate }));
+  return { gate: gate.gate, quorum: gate.approval !== undefined, ...(gate.approval?.policy !== undefined ? { policy: true } : {}), ...(aliases.length > 0 ? { aliases } : {}) };
 }
 
 /** How to declare the Op `yodel apply` looks for. */
@@ -88,7 +99,7 @@ export function migrateOpExample(env: string): string {
     `  overview: "Apply the pending migrations to ${env}, behind an approval bound to their plan digest",`,
     `  phases: [`,
     `    phase("Plan", [plan]),`,
-    `    phase("Approve", [gate("approve-migrate-${env}", { plan: digest })]),`,
+    `    phase("Approve", [gate("approve-migrate-${env}", { plan: digest, resume: true })]),`,
     `    phase("Apply", [shell("yodel apply ${env} --execute", { env: { ${APPROVED_PLAN_ENV}: digest }, timeout: "2h" })]),`,
     `  ],`,
     `});`,
@@ -120,7 +131,7 @@ export function selectMigrateOp(
   if (!op.parts.gate) {
     throw new YodelError(`Op "${op.config.name}" (${op.filePath}) has no approval gate bound to its Plan step's digest, and yodel only applies behind one; give it gate(..., { plan: stepOutput(plan, "stdout") })`);
   }
-  return { name: op.config.name, filePath: op.filePath, gate: op.parts.gate, quorum: op.parts.quorum };
+  return { name: op.config.name, filePath: op.filePath, gate: op.parts.gate, quorum: op.parts.quorum, ...(op.parts.policy ? { policy: true } : {}), ...(op.parts.aliases ? { aliases: op.parts.aliases } : {}) };
 }
 
 export async function findMigrateOp(project: Project, target: Environment, name?: string): Promise<MigrateOpRef> {

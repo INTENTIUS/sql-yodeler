@@ -49,7 +49,7 @@ spec:
           volumeMounts: [{ name: project, mountPath: /work }]
       containers:
         - name: apply
-          image: ghcr.io/intentius/sql-yodeler:0.9.0@sha256:<digest>
+          image: ghcr.io/intentius/sql-yodeler:0.10.0@sha256:<digest>
           workingDir: /work
           command: ["yodel", "apply", "prod", "--lock-wait", "10m"]
           env:

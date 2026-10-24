@@ -137,6 +137,8 @@ export interface ApplyRun {
   output: string;
   /** The exit code of the Op's Apply step (`yodel apply --execute`), when it ran. */
   stepExit?: number;
+  /** The run started at an approved gate (chant#3947): the gate, the run that stopped there, and its checkpoint's digest. */
+  resumed?: { gate: string; run: string; checkpoint: string };
 }
 
 /** What a `chant run` of an ApplyOp says about its outcome. */
@@ -144,7 +146,10 @@ export function readApplyRun(code: number, output: string): ApplyRun {
   const status: ApplyRunStatus = code === 0 ? "applied" : code === GATED ? "gated" : "failed";
   const chantApprove = /^\s*approve\s*:\s*(chant approve .+?)\s*$/m.exec(output)?.[1];
   const planDigest = /^\s*plan\s*:\s*(\S+)\s*$/m.exec(output)?.[1];
-  return { status, code, ...(chantApprove ? { chantApprove } : {}), ...(planDigest ? { planDigest } : {}), output };
+  // chant's renderHuman (op/local-output.ts:33 in 0.124.46) opens a resumed run with this line.
+  const r = /^\[resume\] at gate "([^"]+)", from run (\S+)'s checkpoint (\S+)\s*$/m.exec(output);
+  const resumed = r ? { gate: r[1] ?? "", run: r[2] ?? "", checkpoint: r[3] ?? "" } : undefined;
+  return { status, code, ...(chantApprove ? { chantApprove } : {}), ...(planDigest ? { planDigest } : {}), ...(resumed ? { resumed } : {}), output };
 }
 
 /**

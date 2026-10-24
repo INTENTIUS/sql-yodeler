@@ -18,14 +18,28 @@
  * A tenant (#56) is recorded on its environment's ledger as the component
  * `<component>/<tenant>`, so a tenant compares with the same tenant of
  * another environment.
+ *
+ * What else a record carries (#277), each only when it is known:
+ *
+ * - `approver` and `admission` (`{ op, gate, resolvedAt }`, chant#4020), for
+ *   an apply a gate approved, both from chant's `admissionOf`. An apply no
+ *   approval let through writes neither.
+ * - `releaseDigest` (chant#4043), for an apply made from a chant release
+ *   (`_releases/<releaseDigest>.json`): `yodel apply <env> --release <ref>`,
+ *   which hands it to the Op's Apply step in `YODEL_RELEASE`. chant writes it
+ *   only when the caller names a release, never inferred, and so does yodel.
+ *
+ * Records already on the ledger are never rewritten; a reader takes every
+ * field above as optional (chant's `reference/workspace-read-contract`).
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { ReleaseAdmission } from "@intentius/chant/lifecycle/release-ledger";
 import type { BuildOutput } from "../chant/build.js";
 import type { Migration } from "../migrations/index.js";
 import { schemaSha } from "../migrations/checkpoint.js";
-import type { Environment, Project } from "../project.js";
+import { YodelError, type Environment, type Project } from "../project.js";
 import type { VersionedStatus } from "../versioned/state.js";
 
 /** What {@link recordRelease} did: the record it appended, or why it appended none. */
@@ -70,13 +84,48 @@ export function appliedHead(ordered: readonly Migration[], status: Pick<Versione
   return head;
 }
 
+/** What a release record says beyond the schema: who approved it, the gate resolution that admitted it, and the chant release it was made from. */
+export interface ReleaseFacts {
+  approver?: string | undefined;
+  admission?: ReleaseAdmission | undefined;
+  releaseDigest?: string | undefined;
+}
+
+/** The environment variable `yodel apply --release` hands the Op's Apply step the release digest in. */
+export const RELEASE_ENV = "YODEL_RELEASE";
+
+/**
+ * The digest of the chant release `ref` names (a digest or a cut's label),
+ * when this checkout is at the commit the release was cut at. Refuses a ref
+ * no release on the `chant/lifecycle` branch answers to, and a checkout at
+ * another commit, since the apply would then not be made from the release.
+ */
+export async function releaseToApply(cwd: string, ref: string): Promise<string> {
+  const { resolveRelease } = await import("@intentius/chant/lifecycle/release-store");
+  const { getHeadCommit } = await import("@intentius/chant/lifecycle/git");
+  const found = await resolveRelease(ref, { cwd });
+  if (!found) throw new YodelError(`--release ${ref}: no chant release on the chant/lifecycle branch has that digest or label (chant release cut makes one); nothing was applied`);
+  let head: string | undefined;
+  try {
+    head = await getHeadCommit({ cwd });
+  } catch {
+    head = undefined;
+  }
+  if (head !== found.release.commit) {
+    throw new YodelError(
+      `--release ${ref}: release ${found.release.releaseDigest} was cut at ${found.release.commit.slice(0, 12)}, and ${cwd} is at ${head ? head.slice(0, 12) : "no commit"}; check out the release's commit to apply from it. Nothing was applied.`,
+    );
+  }
+  return found.release.releaseDigest;
+}
+
 /**
  * Appends a release record of `schema` for `env` to chant's release ledger
  * and pushes it. Writes nothing when the project is not in a git
  * repository, or when the ledger branch could not be fetched or has forked
  * from the remote's (appending there would drop one side's records).
  */
-export async function recordRelease(project: Project, env: Environment, schema: BuildOutput, options: { approver?: string } = {}): Promise<ReleaseOutcome> {
+export async function recordRelease(project: Project, env: Environment, schema: BuildOutput, options: ReleaseFacts = {}): Promise<ReleaseOutcome> {
   const cwd = project.dir;
   const base = await releaseComponent(cwd);
   if (base === undefined) return { recorded: false, reason: `${cwd} is not in a git repository` };
@@ -109,6 +158,8 @@ export async function recordRelease(project: Project, env: Environment, schema: 
       timestamp: new Date().toISOString(),
       actor,
       ...(options.approver ? { approver: options.approver } : {}),
+      ...(options.admission ? { admission: options.admission } : {}),
+      ...(options.releaseDigest ? { releaseDigest: options.releaseDigest } : {}),
     },
     { cwd },
   );
@@ -117,7 +168,7 @@ export async function recordRelease(project: Project, env: Environment, schema: 
 }
 
 /** {@link recordRelease}, told in one line (two when the push did not land); a failure to record is a line too, never thrown. */
-export async function recordReleaseLines(project: Project, env: Environment, schema: BuildOutput | undefined, options: { approver?: string } = {}): Promise<string[]> {
+export async function recordReleaseLines(project: Project, env: Environment, schema: BuildOutput | undefined, options: ReleaseFacts = {}): Promise<string[]> {
   if (!schema) return [`release: not recorded; ${env.name}'s schema is none a migration recorded (nothing applied, or an out-of-order gap)`];
   try {
     const r = await recordRelease(project, env, schema, options);

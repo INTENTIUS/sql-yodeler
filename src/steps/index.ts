@@ -6,6 +6,7 @@
  *   runRebuild(...)           a ClickHouseRebuildOp step (./rebuild.ts)
  *   runBackfill(...)          a backfill step, a form or an Op of effect() batches (./backfill.ts)
  *   runPgMigration(...)       a PostgresMigrationOp step (./postgres-migration.ts)
+ *   runOrmHandoff(...)        an orm-handoff step (./orm-handoff.ts)
  *   defaultStepRunner         what the versioned apply calls for an Op step
  */
 
@@ -19,12 +20,14 @@ import { runBackfill, serverReceipts, type PgBackfillServer } from "./backfill.j
 import type { StepPlan } from "./kinds.js";
 import { rebuildChantConfig, runRebuild, type RebuildReceiptStore } from "./rebuild.js";
 import { runPgMigration } from "./postgres-migration.js";
+import { runOrmHandoff, type HandoffExec } from "./orm-handoff.js";
 
 export * from "./kinds.js";
 export * from "./run.js";
 export * from "./rebuild.js";
 export * from "./backfill.js";
 export * from "./postgres-migration.js";
+export * from "./orm-handoff.js";
 
 /** What running one Op step needs. */
 export interface StepContext {
@@ -47,6 +50,8 @@ export interface StepContext {
   receipts?: ReceiptStore | undefined;
   /** A rebuild's partition receipts; default the sql lexicon's on the server (`chant_receipts.receipts`). `yodel test` keeps each case's apart (#112). */
   rebuildReceipts?: RebuildReceiptStore | undefined;
+  /** An orm-handoff step's CLI runner; default runs the command in the project directory. A test passes its own. */
+  exec?: HandoffExec | undefined;
   /** The tenant the step runs on (#56): what the step names in the template is renamed to the tenant. */
   tenant?: TenantOf | undefined;
 }
@@ -81,6 +86,12 @@ export const defaultStepRunner: StepRunner = async (ctx) => {
     const options = tenant ? { ...ctx.plan.options, table: tenant.rename(ctx.plan.options.table) } : ctx.plan.options;
     const config = await rebuildChantConfig(ctx.projectDir, ctx.environment, process.env, tenant?.config);
     const { summary } = await runRebuild(options, { environment: ctx.environment, projectDir: ctx.projectDir, schema, log: ctx.log, config, ...(ctx.rebuildReceipts ? { receipts: ctx.rebuildReceipts } : {}) });
+    return { summary };
+  }
+  if (ctx.plan.run === "ormHandoff") {
+    if (!ctx.postgres) throw new YodelError("an orm-handoff step records the ORM's migration on the environment's Postgres server, and this environment has none");
+    const options = tenant && ctx.plan.options.dbSchema ? { ...ctx.plan.options, dbSchema: tenant.rename(ctx.plan.options.dbSchema) } : ctx.plan.options;
+    const { summary } = await runOrmHandoff(options, { projectDir: ctx.projectDir, client: ctx.postgres.client, log: ctx.log, ...(ctx.exec ? { exec: ctx.exec } : {}) });
     return { summary };
   }
   if (ctx.plan.run === "pgMigration") {

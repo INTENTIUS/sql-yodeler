@@ -636,7 +636,8 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
     comment: asComment(header),
     name: "yodel-pr",
     on: { pull_request: { branches: [MAIN] } },
-    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
+    // actions: read lets yodel plan --comment ask when the watch workflows last ran (chant#4289).
+    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(forge === "github" ? { actions: "read" as const } : {}), ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
     concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
     jobs,
   });
@@ -1000,6 +1001,25 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
  * back chant's text unchanged before anything is added, so a change in
  * chant's emitter fails here instead of rendering something else.
  */
+/**
+ * chant writes a SHA-pinned action as `uses: owner/action@<sha> # vX.Y.Z`
+ * (chant#4403, #4410); the `# vX.Y.Z` is a YAML comment, which parsing drops.
+ * Each re-emit below puts every one back on the line that names the same
+ * pinned ref, so the re-emitted text still matches chant's and the files keep
+ * the release each SHA stands for.
+ */
+export function withPinComments(original: string, emitted: string): string {
+  const comments = new Map<string, string>();
+  for (const [, ref, comment] of original.matchAll(/uses: (\S+@[0-9a-f]{40}) (# [^\n]*)$/gm)) {
+    if (ref !== undefined && comment !== undefined) comments.set(ref, comment);
+  }
+  if (comments.size === 0) return emitted;
+  return emitted.replace(/uses: (\S+@[0-9a-f]{40})$/gm, (line: string, ref: string) => {
+    const comment = comments.get(ref);
+    return comment ? `${line} ${comment}` : line;
+  });
+}
+
 function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc: Toolchain, envs: Pick<Environments, "credentials" | "login"> = {}): string {
   // A wide wave's jobs are wave-<k>-<env>-decide and -share-<i>.
   const envOf = (job: string) => waves.find((w, i) => new RegExp(`^wave-${String(i + 1)}-${w.env.replace(/[^A-Za-z0-9]/g, "\\$&")}(-decide|-share-\\d+)?$`).test(job))?.env;
@@ -1007,7 +1027,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
   const header = yaml.slice(0, body);
   const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
   if (forge === "gitlab") {
-    const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
+    const emit = (d: Record<string, unknown>) => withPinComments(yaml, `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`);
     if (emit(doc) !== yaml) throw new Error("gitlab: the apply waves do not emit back to chant's text");
     // The merge request job that records the plans a review approves (#48): the waves as after the merge.
     const record = doc[`${APPLY_PIPELINE}-record-plans`] as { variables?: Record<string, string>; id_tokens?: unknown; script?: string[] } | undefined;
@@ -1043,7 +1063,7 @@ function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc:
   if (at < 0) throw new Error(`${forge}: the apply waves have no jobs`);
   const jobs = doc.jobs as Record<string, { steps: Array<Record<string, unknown>> }>;
   const top = yaml.slice(0, at + 1);
-  const emitJobs = () => `${emitYAMLEntry("jobs", jobs)}\n`;
+  const emitJobs = () => withPinComments(yaml, `${emitYAMLEntry("jobs", jobs)}\n`);
   if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the apply waves do not emit back to chant's text`);
   for (const [name, job] of Object.entries(jobs)) {
     const env = envOf(name);
@@ -1070,7 +1090,7 @@ function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], di
   if (at < 0) throw new Error(`${forge}: the plans workflow has no jobs`);
   const doc = parseYAMLDocument(yaml) as { jobs: Record<string, Record<string, unknown>> };
   const top = yaml.slice(0, at + 1);
-  const emitJobs = () => `${emitYAMLEntry("jobs", doc.jobs)}\n`;
+  const emitJobs = () => withPinComments(yaml, `${emitYAMLEntry("jobs", doc.jobs)}\n`);
   if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the plans workflow does not emit back to chant's text`);
   const job = doc.jobs["record-plans"];
   if (!job) throw new Error(`${forge}: the plans workflow has no record-plans job`);
@@ -1170,7 +1190,7 @@ function withWatchLogin(forge: Actions, yaml: string, env: string, envs: Pick<En
   if (at < 0) throw new Error(`${forge}: the watch for ${env} has no jobs`);
   const doc = parseYAMLDocument(yaml) as { jobs: Record<string, { steps: Array<Record<string, unknown>> }> };
   const top = yaml.slice(0, at + 1);
-  const emitJobs = () => `${emitYAMLEntry("jobs", doc.jobs)}\n`;
+  const emitJobs = () => withPinComments(yaml, `${emitYAMLEntry("jobs", doc.jobs)}\n`);
   if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the watch for ${env} does not emit back to chant's text`);
   const job = doc.jobs[`watch-${env}`];
   if (!job) throw new Error(`${forge}: the watch for ${env} has no watch-${env} job`);
@@ -1185,7 +1205,7 @@ function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "cre
   const body = yaml.search(/^[^#\n]/m);
   const header = yaml.slice(0, body);
   const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
-  const emit = (d: Record<string, unknown>) => `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`;
+  const emit = (d: Record<string, unknown>) => withPinComments(yaml, `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`);
   if (emit(doc) !== yaml) throw new Error("gitlab: the watch file does not emit back to chant's text");
   for (const env of envs.names) {
     const job = doc[`watch-${env}`] as { script?: string[]; variables?: Record<string, string> } | undefined;

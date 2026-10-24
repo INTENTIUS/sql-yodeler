@@ -13,7 +13,8 @@
 # a migration that environment's history does not record as applied.
 # chant Op waves "yodel-apply": one stage per wave, each needing the one before.
 # A wave that waits at its gate exits 3 and stops the waves after it; approve the
-# digest it prints, then retry the job.
+# digest it prints, then retry the job. A job whose runs failed exits 1, an allowed
+# failure, and the waves after it run what does not depend on those runs.
 
 stages:
   - wave-1-dev
@@ -37,13 +38,16 @@ wave-1-dev:
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
     - chant run wave --spec yodel-waves.json --wave 1
-  after_script:
-    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+  allow_failure:
+    exit_codes:
+      - 1
   artifacts:
     name: yodel-report-wave-1-dev
     when: always
     paths:
       - yodel-report/
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
 
 wave-2-prod:
   stage: wave-2-prod
@@ -65,10 +69,13 @@ wave-2-prod:
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
     - chant run wave --spec yodel-waves.json --wave 2
-  after_script:
-    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+  allow_failure:
+    exit_codes:
+      - 1
   artifacts:
     name: yodel-report-wave-2-prod
     when: always
     paths:
       - yodel-report/
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true

@@ -13,6 +13,7 @@ import { collectDeclarativePlan, declarativePlanExitCode, declarativePlanJson, r
 import { runnable } from "../chant/runnable.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
+import { overdueNotes } from "../pr/overdue.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
 import { planPart } from "../pr/part.js";
 import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
@@ -183,6 +184,7 @@ async function declarativePlan(project: Project, env: Environment, a: PlanArgs, 
   const build = await buildSchema(project);
   try {
     const result = await collectDeclarativePlan(project, env, build, await planEnvironment(project, env, build), { opName: a.op });
+    if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
     if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result), io);
     const doc = declarativePlanJson(result);
     if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
@@ -210,6 +212,7 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   const result = await collectVersionedPlan(project, env, { allowOutOfOrder: a.allowOutOfOrder, opName: a.op, previous });
   const code = result.refusal?.exitCode ?? 0;
 
+  if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
   if (forge) await postComment(forge, marker, renderPlanMarkdown(result), io);
   if (a.part !== undefined) {
     const file = resolve(a.part);
@@ -229,11 +232,17 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
 async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
   const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
   const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
+  if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
   if (forge) await postComment(forge, commentMarker(env.name), renderTenantSetMarkdown(result), io);
   if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
   else if (a.format === "markdown") io.out(renderTenantSetMarkdown(result));
   else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
   return tenantSetExitCode(result);
+}
+
+/** A warning per overdue drift watch of the environment (chant#4289), for the comment; the job log gets the same lines. */
+async function watchNotes(project: Project, env: Environment, forge: Forge, io: Io): Promise<string[]> {
+  return overdueNotes(project.dir, env.tenant?.env ?? env.name, forge.client, (line) => { io.err(`${line}\n`); });
 }
 
 /** The pull request `--comment` posts on: resolveForge refuses a target without one. */

@@ -10,7 +10,7 @@ type: reference
 `@intentius/sql-yodeler` is on npm. It needs Node 22.12 or later, and the project also needs chant and the `sql` lexicon, which `chant.config.ts` and the declarations import:
 
 ```sh
-npm install @intentius/sql-yodeler @intentius/chant@0.124.25 @intentius/chant-lexicon-sql@0.124.25
+npm install @intentius/sql-yodeler @intentius/chant@0.124.48 @intentius/chant-lexicon-sql@0.124.48
 npx yodel --version
 ```
 
@@ -237,6 +237,7 @@ yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but 
 | `YODEL_LOCK_TTL` | `yodel apply`, `yodel init`, `yodel repair` on ClickHouse | the lock's TTL in seconds |
 | `YODEL_LOCK_WAIT` | `yodel apply` | how long to wait for a lock another apply holds, as `--lock-wait` (`10m`); `yodel apply` hands its `--lock-wait` to the Op's Apply step this way |
 | `YODEL_STAND_DOWN` | `yodel apply` | `1`: as `--stand-down`, apply nothing and exit 0 when the run's branch has a newer commit on `origin` |
+| `YODEL_RELEASE` | `yodel apply` | a chant release's digest or label: as `--release`, the apply is made from that release, and its release record names it (`releaseDigest`) |
 | `YODEL_LOCK_RETRIES` | `yodel apply` on Postgres | how many more times a statement that hit `lock_timeout` is tried (default 5, the pause doubling from 250 ms) |
 | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN` (each after `CHANT_<FORGE>_TOKEN`; `GH_TOKEN` on GitHub and Forgejo) | `yodel plan --comment`, `yodel drift --issue` | the forge token; see [Approval](approval.md) and [Drift](drift.md#the-tracking-issue) |
 
