@@ -50,6 +50,13 @@ jobs:
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: Plan, gate and apply wave 1 (dev)
         run: chant run wave --spec yodel-waves.json --wave 1
+      - name: Keep the job's outcome
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v3
+        with:
+          name: yodel-apply-wave-1-dev-outcome
+          path: .chant/op-waves/yodel-apply/outcomes/outcome-wave-1.json
+          if-no-files-found: ignore
       - name: yodel report dev
         if: always()
         run: mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
@@ -64,6 +71,7 @@ jobs:
     runs-on: docker
     needs:
       - wave-1-dev
+    if: '!cancelled()'
     container: node:22-bookworm
     env:
       YODEL_CREDENTIALS: writer:prod
@@ -81,11 +89,22 @@ jobs:
       - uses: https://code.forgejo.org/actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Download the earlier jobs' outcomes
+        uses: https://code.forgejo.org/actions/download-artifact@v3
+        with:
+          path: .chant/op-waves/yodel-apply/outcomes
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: Plan, gate and apply wave 2 (prod)
         run: chant run wave --spec yodel-waves.json --wave 2
+      - name: Keep the job's outcome
+        if: always()
+        uses: https://code.forgejo.org/actions/upload-artifact@v3
+        with:
+          name: yodel-apply-wave-2-prod-outcome
+          path: .chant/op-waves/yodel-apply/outcomes/outcome-wave-2.json
+          if-no-files-found: ignore
       - name: yodel report prod
         if: always()
         run: mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true

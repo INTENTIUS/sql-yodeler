@@ -115,6 +115,8 @@ SQLCH126           the check's level, silenceable, clickhouse
                    schema check: A GRANT column list names a column the table does not declare
 SQLCH127           the check's level, silenceable, clickhouse
                    schema check: An expression calls a function the pinned server does not have
+SQLCH128           the check's level, silenceable, clickhouse
+                   schema check: An integration engine or table function argument holds a literal credential
 ```
 
 `fork`, `directory`, `checksum`, `unreadable-object` and `checkpoint` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
