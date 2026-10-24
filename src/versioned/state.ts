@@ -150,7 +150,6 @@ function partWayOf(m: Migration, rec: MigrationRecord, actual: string): { partWa
 /** Why a step apply runs on one dialect is refused in a migration of the other, or `undefined`. */
 function dialectRefusal(run: string, dialect: string): string | undefined {
   if (run === "rebuild" && dialect !== "clickhouse") return `a ClickHouseRebuildOp step in a ${dialect} migration`;
-  if (run === "ormHandoff" && dialect !== "postgres") return `an orm-handoff step in a ${dialect} migration`;
   if (run === "pgMigration" && dialect !== "postgres") return `a PostgresMigrationOp step in a ${dialect} migration`;
   return undefined;
 }
@@ -164,9 +163,7 @@ export function classifySteps(m: Migration): Pick<PendingMigration, "opSteps" | 
     const plan = planStep(step);
     const wrongDialect = dialectRefusal(plan.run, m.document.dialect);
     if (plan.run === "refused") refusedSteps.push({ index, step, reason: plan.reason });
-    else if (plan.run === "ormHandoff" && index !== m.document.steps.length - 1) {
-      refusedSteps.push({ index, step, reason: `an orm-handoff step that is not ${m.id}'s last: it marks the ORM's migration applied after the Op, so nothing may follow it` });
-    } else if (wrongDialect) refusedSteps.push({ index, step, reason: wrongDialect });
+    else if (wrongDialect) refusedSteps.push({ index, step, reason: wrongDialect });
     else if (plan.run === "backfill" && plan.file !== undefined && m.files.extra?.[plan.file] === undefined) {
       refusedSteps.push({ index, step, reason: `a backfill step whose module ${plan.file} is not in ${m.id}'s directory` });
     } else opSteps.push({ index, step });

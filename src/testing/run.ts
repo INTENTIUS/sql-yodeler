@@ -39,7 +39,7 @@ import { environmentSettings } from "../config/settings.js";
 import { isCheckpoint, readMigrations, type Migration } from "../migrations/index.js";
 import { migrationsDir } from "../versioned/index.js";
 import { httpPort } from "../history/index.js";
-import { asBackfill, asOrmHandoff, defaultStepRunner, planStep, type RebuildReceiptStore, type StepRunner } from "../steps/index.js";
+import { asBackfill, defaultStepRunner, planStep, type RebuildReceiptStore, type StepRunner } from "../steps/index.js";
 import type { BackfillStep } from "../steps/kinds.js";
 import { NOT_FRESH, openReplay, refuseShared, sharedProfiles, type ReplayDriver } from "../replay/index.js";
 import type { Expectation, TestCase } from "./define.js";
@@ -299,7 +299,6 @@ export async function runTests(project: Project, env: Environment, files: readon
           await runStep({ environment: env.name, projectDir: project.dir, migration: m, index: i, plan, log: (l) => { log(`  ${l}`); }, receipts, ...s.backfillContext() });
           continue;
         }
-        if (asOrmHandoff(st)) continue; // the ORM's own record; a test database has no ORM
         const plan = planStep(st);
         if (plan.run === "refused") throw new Error(`${m.id} step ${String(i)} cannot run here: ${plan.reason}`);
         const outcome = await driver.opStep(m, i, { receipts });

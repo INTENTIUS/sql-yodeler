@@ -27,7 +27,7 @@ import {
   type StepRunner,
 } from "../src/steps/index.js";
 import { projectFromConfig } from "../src/project.js";
-import { currentDigest, executeApply, inspect, openVersioned, selectToApply, StepFailed, verifyApproval, type MigrateOpRef, type VersionedEnv } from "../src/versioned/index.js";
+import { classifySteps, currentDigest, executeApply, inspect, openVersioned, selectToApply, StepFailed, stepRefusal, verifyApproval, type MigrateOpRef, type VersionedEnv } from "../src/versioned/index.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
 import { json, projectFrom, repoRoot, yodel } from "./helpers/run.js";
 
@@ -93,6 +93,18 @@ describe("planStep", () => {
     expect(planStep({ kind: "manual", object: "v", type: "ClickHouse::View", name: "d.v", changes: [], detail: "by hand" })).toMatchObject({ run: "refused" });
     expect(planStep(backfillStep("fill") as unknown as MigrationStep)).toEqual({ run: "backfill", file: "backfill.ts" });
     expect(planStep({ ...backfillStep("fill"), options: { file: "../escape.ts" } })).toMatchObject({ run: "refused" });
+  });
+
+  it("refuses an orm-handoff step, which 0.10.0 wrote and 0.10.1 no longer runs", () => {
+    const handoff = { ...op({ orm: "drizzle", migration: "0003_rename_login" }), op: "orm-handoff", object: "orm-handoff" } as unknown as MigrationStep;
+    expect(planStep(handoff)).toMatchObject({ run: "refused", reason: expect.stringContaining("yodel apply does not run that Op") as unknown });
+    const base = migration("20261009T1000-one", null, []);
+    const m = { ...base, document: { ...base.document, dialect: "postgres" as const, steps: [handoff] } };
+    const { refusedSteps, opSteps } = classifySteps(m);
+    expect(opSteps).toHaveLength(0);
+    const refusal = stepRefusal([{ id: m.id, refusedSteps } as never]);
+    expect(refusal?.message).toMatch(/a step yodel apply does not run/);
+    expect(refusal?.message).toMatch(/orm-handoff/);
   });
 });
 

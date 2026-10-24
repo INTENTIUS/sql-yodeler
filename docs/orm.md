@@ -119,48 +119,6 @@ Use one direction per table. If a Drizzle `drizzle-kit export` source (above) de
 
 The module is checked against drizzle-orm 0.45.4. `bigint` columns are `number` by default, as `drizzle-kit pull` writes them, and `--bigint bigint` reads them as `bigint`. Routines, triggers, extensions, grants and the other objects Drizzle has no declaration for are listed in the file's header and left out; chant's [Drizzle Schema Export](https://intentius.io/chant/lexicons/sql/drizzle/) page has the full list and the mapping.
 
-## Handing a hard change to the ORM
-
-An ORM is weakest at the hard change: a column rename that must not break readers, a type change across kinds, a large backfill. For those, run the change as a `PostgresMigrationOp` ([Data migrations](steps.md#postgres-postgresmigrationop)), change the ORM's schema file to the final state, and write the ORM's own migration for the same change. An `orm-handoff` step at the end of the yodel migration then marks that ORM migration as applied, so the ORM does not run it a second time.
-
-```bash
-npx yodel new rename-login --orm-handoff prisma:20261009120000_rename_login
-npx yodel new rename-login --orm-handoff drizzle:0003_rename_login
-```
-
-The step is the migration's last, so it runs after the Op, under the migration's lock and gate. Its options are in the migration's checksum and the plan digest, and its hash is the `statement_sha` of its history row, as for any step (`stepSha` in `src/steps/kinds.ts`). It is for Postgres. `--orm-handoff` and `--backfill` both end a migration, so give one.
-
-Before the migration's first statement, apply refuses the whole migration, with exit 4 and nothing sent, when:
-
-- the ORM migration is not in the repository: for Prisma, `prisma/migrations/<name>/migration.sql`; for Drizzle, an entry with this `tag` in `<dir>/meta/_journal.json` and the file `<dir>/<tag>.sql` (`ormMigrationFile` in `src/steps/orm-handoff.ts`);
-- the ORM already records it as applied: for Prisma, a row of `_prisma_migrations` with this `migration_name` and `finished_at` set; for Drizzle, a row of `drizzle.__drizzle_migrations` whose `created_at` is at or after the journal entry's `when`, which is how `migrate()` decides to skip it.
-
-The check runs first because a refusal after the Op would leave the change made and the ORM about to make it again. A migration that stopped between the ORM's record and yodel's own history row is refused on its rerun by the second check; once you have confirmed the ORM's row, take the step out of `migration.json` and record the edit with `yodel repair <id> --reason ... <env>`.
-
-| ORM | What the step does | Options |
-|---|---|---|
-| Prisma | runs `npx --no-install prisma migrate resolve --applied <name>` in the project directory, then reads `_prisma_migrations` to confirm the row is on this environment's server | `dir` (default `prisma/migrations`), `schema`, `config` (passed as `--schema` and `--config`), `dbSchema` (the schema holding `_prisma_migrations`, default `public`) |
-| Drizzle | creates the schema and `__drizzle_migrations` if they are missing, then inserts the migration's hash and `when` | `dir` (drizzle-kit's `out`, default `drizzle`), `table` (default `__drizzle_migrations`), `dbSchema` (default `drizzle`) |
-
-### Why the Prisma CLI and not a row
-
-Both are possible, because `prisma migrate resolve --applied` writes one row to `_prisma_migrations`. yodel runs the command. The schema engine's `mark_migration_applied` (prisma-engines, `schema-engine/commands/src/commands/mark_migration_applied.rs`) refuses a migration that is not in the migrations directory or is already finished, checks the provider in `migration_lock.toml`, takes the migrations table's lock, and creates the table when the database has none. It records the SHA-256 of `migration.sql` as the row's `checksum` (`schema-connector/src/checksum.rs`), which `migrate deploy` compares on every run. A row yodel wrote itself would have to copy each of those and follow them when Prisma changes them. The cost is that the CLI must be installed in the project and must reach the same database as the environment, through the project's own datasource (`prisma.config.ts` or `DATABASE_URL`). yodel checks that after the command: if `_prisma_migrations` on the environment's server has no finished row for the migration, the step fails and says the datasource points elsewhere. Prisma's reference page for `migrate resolve` says the command is for a failed migration, but the source above also records one that has no row, which is what baselining relies on ([baselining](https://www.prisma.io/docs/orm/prisma-migrate/workflows/baselining)).
-
-### Why Drizzle gets a row, and what it holds
-
-drizzle-kit has no command that records a migration without running it: `migrate()` runs the SQL. What `migrate()` itself writes for a migration it ran is one row of `drizzle.__drizzle_migrations`, so yodel writes that row. This is read from drizzle-orm 0.45.4, the version `chant sql drizzle` is checked against:
-
-- `pg-core/dialect.ts`, `PgDialect.migrate()`, creates the schema (`CREATE SCHEMA IF NOT EXISTS "drizzle"`) and the table `(id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)`, reads the row with the newest `created_at`, and runs a migration only if there is no row or that `created_at` is below the migration's `folderMillis`. After running it, it inserts `("hash", "created_at")`.
-- `migrator.ts`, `readMigrationFiles()`, builds each migration from an entry of `meta/_journal.json`: `folderMillis` is the entry's `when`, and `hash` is the SHA-256 (hex) of the text of `<tag>.sql`.
-
-The step inserts that pair. The hash is not compared by `migrate()`; only the newest `created_at` is, so the step refuses with "already records" when a row at or after the entry's `when` exists. The flag names the migration by its journal `tag` (`drizzle:0003_rename_login`): it is unique in the journal, it is the SQL file's name, and it is what gives the step both the `when` and the file to hash. The position (`idx`) shifts if the journal is rewritten, and `when` is not something a person types.
-
-Because `migrate()` compares only the newest `created_at`, recording a migration also makes `migrate()` skip every journal entry with an earlier `when`. Hand off the newest drizzle migration, and have the earlier ones applied first.
-
-### Other ORMs
-
-The step takes `prisma` and `drizzle` only; any other `orm` value is refused with the list it does. The marks for the others are `migrate <app> <migration> --fake` for Django and `alembic stamp <revision>` for Alembic. They are not built.
-
 ## Proof
 
 The `declarative` claim runs a project whose `yodel.config.ts` has a source whose command prints a Prisma-style DDL file (the claim installs no ORM): the first apply creates the ORM's tables behind the gate, a column added to the model is the one change `yodel plan` shows, the approved apply adds it, and the plan is then empty. Under `BREAK=1` the DDL changes again after the approval, and the column is not applied.

@@ -46,8 +46,7 @@ import { PLAN_NEEDS_OP } from "../chant/plan.js";
 import type { Migration } from "../migrations/index.js";
 import { environmentSettings } from "../config/settings.js";
 import type { Topology } from "../topology/render.js";
-import { defaultStepRunner, describeStep, ormHandoffRefusal, planStep, stepSha, StepOpFailed, type StepRunner } from "../steps/index.js";
-import { renameIdentifier } from "../tenants/target.js";
+import { defaultStepRunner, describeStep, planStep, stepSha, StepOpFailed, type StepRunner } from "../steps/index.js";
 import type { ReceiptStore } from "@intentius/chant/op/receipt-store";
 import {
   HistoryRecorder,
@@ -203,7 +202,7 @@ export function stepRefusal(toApply: readonly PendingMigration[]): YodelError | 
   const lines = toApply.flatMap((p) => p.refusedSteps.map(({ index, reason }) => `  ${p.id} step ${String(index)}: ${reason}`));
   if (lines.length === 0) return undefined;
   return new YodelError(
-    `refused: a pending migration has a step yodel apply does not run: a person acts on a manual step, and yodel apply runs only ClickHouseRebuildOp (materialized-view mode) and backfill steps on ClickHouse, PostgresMigrationOp and orm-handoff on Postgres. Nothing was applied:\n${lines.join("\n")}`,
+    `refused: a pending migration has a step yodel apply does not run: a person acts on a manual step, and yodel apply runs only ClickHouseRebuildOp (materialized-view mode) and backfill steps on ClickHouse, PostgresMigrationOp on Postgres. Nothing was applied:\n${lines.join("\n")}`,
     PLAN_NEEDS_OP,
   );
 }
@@ -437,7 +436,6 @@ async function applyMigration(
   // The started row's note: the policy overrides the run relied on (#53), the checks' outcomes (#52), and what the run adds (a wave's decision, #87).
   const noted: Record<string, unknown> = { ...(overrides.length > 0 ? { policy: { overrides } } : {}), ...(options.runNote?.() ?? {}) };
   let checksNote = Object.keys(noted).length > 0 ? JSON.stringify(noted) : "";
-  await handoffPreflight(venv, p, rec, options);
   if (checksDue(p)) {
     const outcomes = await runChecks(venv.driver, m);
     checksNote = JSON.stringify({ ...noted, checks: outcomes });
@@ -489,32 +487,6 @@ async function applyMigration(
   await recorder.record({ ...base, kind: "migration", statement_index: MIGRATION_ROW, statement_sha: "", status: "succeeded", ...(after ? { note: JSON.stringify(after.note) } : {}) });
   options.log(`${m.id}: applied`);
   return after?.error;
-}
-
-/**
- * An orm-handoff step (#279) is the migration's last, so a refusal found
- * when it runs would come after the Op made its change. Before the
- * migration's first statement, apply reads the repository and the ORM's
- * table: a missing or already recorded ORM migration refuses the migration
- * with nothing of it sent.
- */
-async function handoffPreflight(venv: VersionedEnv, p: PendingMigration, rec: MigrationRecord | undefined, options: ExecuteOptions): Promise<void> {
-  const m = p.migration;
-  const where = { defaultDatabase: m.document.defaultDatabase, defaultSchema: m.document.defaultSchema };
-  for (const [i, step] of m.document.steps.entries()) {
-    if (statementDone(rec, i)) continue;
-    const plan = planStep(step);
-    if (plan.run !== "ormHandoff") continue;
-    const tenant = venv.driver.stepContext().tenant;
-    const rename = (s: string) => (tenant ? renameIdentifier(s, tenant.template, tenant.name) : s);
-    const handoff = plan.options.dbSchema ? { ...plan.options, dbSchema: rename(plan.options.dbSchema) } : plan.options;
-    const why = await ormHandoffRefusal(handoff, { projectDir: venv.projectDir ?? process.cwd(), read: (sql) => venv.driver.readCheck(sql, where) });
-    if (why) {
-      const error = `step ${String(i)} (orm-handoff): ${why}`;
-      options.log(`${m.id}: ${error}`);
-      throw new YodelError(`refused: ${m.id} ends with an orm-handoff step that cannot run. Nothing of ${m.id} was applied:\n  ${error}`, REFUSED);
-    }
-  }
 }
 
 type RowBase = { migration_id: string; parent: string; checksum: string; silences: string };

@@ -14,9 +14,8 @@ import type { BuildOutput } from "../chant/build.js";
 import { computeChecksum } from "./checksum.js";
 import { MIGRATION_FORMAT, serializeDocument, type MigrationCheck, type MigrationDocument, type MigrationFiles, type MigrationStep } from "./document.js";
 import { MIGRATION_NAME, type Migration } from "./directory.js";
-import { asBackfill, BACKFILL_FILE, describeForm, PG_MIGRATION_OP, REBUILD_OP, type BackfillForm, type OrmHandoffOptions } from "../steps/kinds.js";
+import { asBackfill, BACKFILL_FILE, describeForm, PG_MIGRATION_OP, REBUILD_OP, type BackfillForm } from "../steps/kinds.js";
 import { backfillFormStep, backfillStep, describeFormSql } from "../steps/backfill.js";
-import { ormHandoffStep } from "../steps/orm-handoff.js";
 
 export interface CreateMigrationOptions {
   /** The migration's name, the part of its id after the timestamp. */
@@ -40,11 +39,6 @@ export interface CreateMigrationOptions {
    * With one, a migration is made even when the build has no schema change.
    */
   backfill?: { text: string; file?: string } | { form: BackfillForm };
-  /**
-   * An `orm-handoff` step to end the migration with (#279): it marks the
-   * ORM's own migration applied after the Op, so the ORM does not run it.
-   */
-  ormHandoff?: OrmHandoffOptions;
   /**
    * How long a `PostgresMigrationOp` step keeps the old column, or a
    * `ClickHouseRebuildOp` step the old table, after the switch: written
@@ -165,7 +159,6 @@ export function createMigration(options: CreateMigrationOptions): CreatedMigrati
     const step = "form" in options.backfill ? backfillFormStep(options.name, options.backfill.form) : backfillStep(options.name, options.backfill.file ?? BACKFILL_FILE);
     statements = { ...statements, refused: true, steps: [...statements.steps, step as unknown as MigrationStep] };
   }
-  if (options.ormHandoff) statements = { ...statements, refused: true, steps: [...statements.steps, ormHandoffStep(options.name, options.ormHandoff)] };
   if (statements.steps.length === 0) return { id: undefined, statements };
 
   const unsigned: MigrationDocument = {
