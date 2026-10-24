@@ -15,7 +15,7 @@ This needs chant 0.124.23 or later (INTENTIUS/chant#3931, #3932 and #3941).
 {
   "name": "shop",
   "schema": 1,
-  "pins": [{ "package": "@intentius/chant-lexicon-sql", "version": "0.124.46" }],
+  "pins": [{ "package": "@intentius/chant-lexicon-sql", "version": "0.124.48" }],
   "members": [
     { "name": "db", "dir": "db", "kind": "chant" },
     {

@@ -42,7 +42,7 @@ jobs:
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
-      - uses: https://code.forgejo.org/actions/checkout@v7
+      - uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - run: npm ci
@@ -52,7 +52,7 @@ jobs:
         run: chant run wave --spec yodel-waves.json --wave 1
       - name: Keep the job's outcome
         if: always()
-        uses: https://code.forgejo.org/actions/upload-artifact@v3
+        uses: https://code.forgejo.org/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: yodel-apply-wave-1-dev-outcome
           path: .chant/op-waves/yodel-apply/outcomes/outcome-wave-1.json
@@ -86,11 +86,11 @@ jobs:
       DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
       DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
     steps:
-      - uses: https://code.forgejo.org/actions/checkout@v7
+      - uses: https://code.forgejo.org/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Download the earlier jobs' outcomes
-        uses: https://code.forgejo.org/actions/download-artifact@v3
+        uses: https://code.forgejo.org/actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         with:
           path: .chant/op-waves/yodel-apply/outcomes
       - run: npm ci
@@ -100,7 +100,7 @@ jobs:
         run: chant run wave --spec yodel-waves.json --wave 2
       - name: Keep the job's outcome
         if: always()
-        uses: https://code.forgejo.org/actions/upload-artifact@v3
+        uses: https://code.forgejo.org/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
         with:
           name: yodel-apply-wave-2-prod-outcome
           path: .chant/op-waves/yodel-apply/outcomes/outcome-wave-2.json

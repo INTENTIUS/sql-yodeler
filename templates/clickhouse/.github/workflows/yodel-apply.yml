@@ -42,7 +42,7 @@ jobs:
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - run: npm ci
@@ -52,7 +52,7 @@ jobs:
         run: chant run wave --spec yodel-waves.json --wave 1
       - name: Keep the job's outcome
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yodel-apply-wave-1-dev-outcome
           path: .chant/op-waves/yodel-apply/outcomes/outcome-wave-1.json
@@ -90,11 +90,11 @@ jobs:
       DEV_CLICKHOUSE_READER_USER: '${{ secrets.DEV_CLICKHOUSE_READER_USER }}'
       DEV_CLICKHOUSE_READER_PASSWORD: '${{ secrets.DEV_CLICKHOUSE_READER_PASSWORD }}'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Download the earlier jobs' outcomes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: .chant/op-waves/yodel-apply/outcomes
       - run: npm ci
@@ -104,7 +104,7 @@ jobs:
         run: chant run wave --spec yodel-waves.json --wave 2
       - name: Keep the job's outcome
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yodel-apply-wave-2-prod-outcome
           path: .chant/op-waves/yodel-apply/outcomes/outcome-wave-2.json
