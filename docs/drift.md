@@ -93,6 +93,18 @@ Op "watch-dev" completed in 1.8s
 
 The starter templates render a scheduled pipeline per watch for each forge (`npm run ci` writes them from `ops/`): a GitHub Actions or Forgejo Actions workflow on the watch's cron, and a GitLab CI job run by a pipeline schedule you create with the cron the file notes (GitLab keeps no cron in the file). The job reads with the reader's credentials and never pushes: its snapshot and run record stay in the job. Its token writes only issues: GitHub's job token gets `issues: write`, Forgejo's can write already, and GitLab uses `GITLAB_TOKEN`, the project access token the plan comment uses.
 
+### When the watch stops running
+
+A scheduled job can stop with no error anywhere. GitHub turns a scheduled workflow off after 60 days with no activity in the repository, and on GitLab the job runs only from a pipeline schedule someone created. `yodel plan <env> --comment` asks the forge when the environment's watch job last ran, and when the watch's cron has fired at least twice since, the comment carries a warning ([chant#4289](https://github.com/INTENTIUS/chant/issues/4289)), and the job log the same line:
+
+```
+Warning: Op `watch-dev` is overdue: its schedule `17 * * * *` has fired at least twice and its last run was on 2026-10-18. GitHub turns a scheduled workflow off after 60 days with no activity in the repository. Turn the workflow on again under Actions, or run it by hand.
+```
+
+The watch is the `WatchOp` whose `env` is the environment, and the job is the file `npm run ci` rendered for it: `.github/workflows/watch-<env>.yml`, `.forgejo/workflows/watch-<env>.yml`, or the job in `.gitlab/yodel-watch.gitlab-ci.yml` whose rules select it (`src/pr/overdue.ts`). A watch with no rendered file is not checked. With no run on record, the count starts at the commit that added the file. chant gives the verdict (`overdueVerdict`, `op/schedule-overdue.ts:107` in chant 0.124.46), so one late or dropped run is not a warning.
+
+The warning never fails the plan. A forge that does not answer is a line in the job log and no warning. On GitHub the plan job reads the workflow's runs with `actions: read`, which the rendered `yodel-pr.yml` asks for; run `npm run ci` to add it to pipelines rendered before.
+
 ## The tracking issue
 
 `yodel drift <env> --issue` keeps one issue for the project and environment on the forge, found again by a marker in its body (`<!-- yodel:drift project=<dir> env=<env> -->`, where `<dir>` is the project's directory in its repository, `.` at the root):
