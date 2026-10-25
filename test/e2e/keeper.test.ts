@@ -114,6 +114,32 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
     await taker.release();
   }, 120_000);
 
+  it("a takeover leaves a lock its holder renewed after the taker read it as expired (#283)", async () => {
+    const [r1, r2] = replicas();
+    const options = (holder: string, ttlMs = 60_000) => ({ database: HISTORY, topology: { kind: "cluster", cluster: CLUSTER } as const, holder, ttlMs, serverKey: "scratch" });
+    const p1 = await httpPort(r1);
+    const p2 = await httpPort(r2);
+    const holder = await acquireLock(p1, options("slow", 2_000));
+    await new Promise((r) => setTimeout(r, 2_200));
+    // The holder's heartbeat lands between the taker's read of the expired row and its delete.
+    let renewed = false;
+    const taking = {
+      query: async <Row>(sql: string, opts?: Parameters<typeof p2.query>[1]) => {
+        if (!renewed && / DELETE WHERE /.test(sql)) {
+          renewed = true;
+          await holder.heartbeat();
+        }
+        return p2.query<Row>(sql, opts);
+      },
+    };
+    const taker = acquireLock(taking, options("taker"));
+    await expect(taker).rejects.toBeInstanceOf(LockHeldError);
+    await expect(taker).rejects.toMatchObject({ holder: holder.owner });
+    expect(renewed).toBe(true);
+    await expect(holder.heartbeat()).resolves.toBeUndefined();
+    await holder.release();
+  }, 120_000);
+
   it("applies under the Keeper lock, and refuses (exit 5) while another runner holds it", async () => {
     const [r1, r2] = replicas();
     const project = projectFromConfig("/nowhere", "/nowhere/chant.config.ts", { lexicons: ["sql"], sql: { dialect: "clickhouse", profiles: { e2e: { url: r1.url, databases: [DB] } } } });
