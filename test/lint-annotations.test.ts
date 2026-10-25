@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
 import { actionsReview, gitlabPipeline, lintCommand, type Environments } from "../src/ci/render.js";
+import { declarativeLint } from "../src/declarative/review.js";
 import { codeQuality, CODE_QUALITY_FILE, workflowCommands, type LintReport } from "../src/lint/index.js";
 import { createMigration, newestMigration, readMigrations, writeMigration, type CreatedMigration } from "../src/migrations/index.js";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
@@ -59,6 +60,20 @@ describe("the annotation formats", () => {
     // The same finding on another pipeline is the same issue to GitLab.
     expect(codeQuality(r, "/repo")[0]?.fingerprint).toBe(issues[0]?.fingerprint);
     expect(codeQuality(report([]), "/repo")).toEqual([]);
+  });
+  it("points a declarative project's findings at no file, since src/ (the declared schema) and the plan are not files", () => {
+    const d = declarativeLint({
+      project: { dir: "/repo/db", dialect: "postgres" },
+      schema: [{ rule: "naming", object: "events", message: "table events: does not match", level: "warning" }],
+      plan: { environment: "dev", findings: [{ rule: "destructive", object: "events (app.events)", message: "drop column on events (app.events) note: removes data" }] },
+    });
+    expect(d.findings.map((f) => f.migration)).toEqual(["src/ (the declared schema)", "the plan for dev"]);
+    expect(workflowCommands(d, "/repo").split("\n")).toEqual([
+      "::warning title=yodel lint naming::table events: does not match",
+      "::error title=yodel lint destructive::drop column on events (app.events) note: removes data",
+      "",
+    ]);
+    expect(codeQuality(d, "/repo").map((i) => i.location.path)).toEqual(["db", "db"]);
   });
 });
 

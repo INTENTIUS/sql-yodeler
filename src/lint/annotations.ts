@@ -9,7 +9,9 @@
  *
  * A finding in a migration points at its migration.sql, on the statement's
  * line when the rule knows it (line 1 otherwise); a finding about the whole
- * directory points at no file. Paths are relative to `root`, the
+ * directory points at no file, and so does a declarative project's (#249),
+ * since the build of src/ does not say which file declared an object.
+ * Paths are relative to `root`, the
  * repository's checkout (GITHUB_WORKSPACE, CI_PROJECT_DIR), with `/`.
  */
 
@@ -38,10 +40,10 @@ function real(p: string): string {
 /** `to` relative to `root`, with `/`. */
 const fromRoot = (root: string, to: string): string => relative(real(root), real(to)).split(sep).join("/");
 
-/** The file a finding is about, relative to `root`; undefined for one about the directory as a whole. */
-export function findingPath(report: Pick<LintReport, "dir">, f: Pick<Finding, "migration" | "file">, root: string): string | undefined {
+/** The file a finding is about, relative to `root`; undefined for one about the directory as a whole, or in a declarative report, whose `migration` names the declared schema or a plan. */
+export function findingPath(report: Pick<LintReport, "dir" | "declarative">, f: Pick<Finding, "migration" | "file">, root: string): string | undefined {
   if (f.file !== undefined) return fromRoot(root, join(report.dir, f.file));
-  if (f.migration === undefined) return undefined;
+  if (f.migration === undefined || report.declarative === true) return undefined;
   return `${fromRoot(root, join(report.dir, f.migration))}/${MIGRATION_SQL}`;
 }
 
@@ -79,8 +81,8 @@ export interface CodeQualityIssue {
 
 /**
  * GitLab's code quality report: an error is `major`, a warning `minor` and
- * a silenced finding `info`. A finding about the directory as a whole is
- * placed on the migrations directory. The fingerprint is the rule, the
+ * a silenced finding `info`. A finding about the directory as a whole, or
+ * a declarative project's, is placed on the report's directory. The fingerprint is the rule, the
  * place and the message, so the same finding on two pipelines is one issue
  * to GitLab and a fixed one shows as resolved.
  */

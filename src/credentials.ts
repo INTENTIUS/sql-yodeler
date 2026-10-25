@@ -92,14 +92,14 @@ export const OLD_ROLE_VAR = "YODEL_CREDENTIALS";
 
 /**
  * The variable that picks the role in `processEnv` and its value:
- * `YODEL_ROLE`, else `YODEL_CREDENTIALS`. Undefined when neither is set;
- * throws when both are and they differ, so neither is silently ignored.
+ * `YODEL_ROLE`, else `YODEL_CREDENTIALS`. Undefined when neither is set.
+ * When both are set `YODEL_ROLE` wins, so a printed `YODEL_ROLE=writer:<env>`
+ * command runs as the writer in a shell that still exports the older name.
  */
 export function roleSetting(processEnv: NodeJS.ProcessEnv = process.env): { name: string; value: string } | undefined {
   const value = processEnv[ROLE_VAR];
-  const old = processEnv[OLD_ROLE_VAR];
-  if (value && old && value !== old) throw new Error(`${ROLE_VAR} is ${value} and ${OLD_ROLE_VAR}, its older name, is ${old}: set one of them`);
   if (value) return { name: ROLE_VAR, value };
+  const old = processEnv[OLD_ROLE_VAR];
   return old ? { name: OLD_ROLE_VAR, value: old } : undefined;
 }
 
@@ -191,7 +191,8 @@ export function sharedCredentialsIn(profiles: Record<string, unknown>, processEn
  * What a printed command that writes starts with for `profile` (#159):
  * `YODEL_ROLE=writer:<env> ` when the profile has a reader and a
  * writer of its own, so the command a hint prints runs as the writer
- * whatever the shell it is pasted into holds; nothing for any other profile.
+ * whatever `YODEL_ROLE` or `YODEL_CREDENTIALS` the shell it is pasted into
+ * holds (`YODEL_ROLE` wins over the older name); nothing for any other profile.
  */
 export function writerPrefix(profile: unknown): string {
   const c = credentialsOf(profile);

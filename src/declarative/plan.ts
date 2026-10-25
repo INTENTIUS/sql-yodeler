@@ -159,6 +159,29 @@ function policyMarkdown(results: readonly RuleResult[], environment: string): st
   return out;
 }
 
+/**
+ * Why there is no plan to approve yet although the environment has an
+ * ApplyOp, and what to do instead, or undefined: `yodel apply` refuses a
+ * change that needs its own Op or a live object it could not read (exit 2),
+ * and a policy denial before the gate (exit 4), so approving the gate would
+ * approve nothing it runs.
+ */
+export function approvalHeld(p: DeclarativePlan): string | undefined {
+  const unreadable = unreadableOf(p.plan);
+  const refused = p.plan.refused.length;
+  if (unreadable.length > 0) {
+    return `Nothing to approve yet: \`yodel apply ${p.environment}\` would refuse this plan, since ${unreadable.map((u) => `\`${u.object}\``).join(", ")} could not be read (${unreadable.map((u) => u.reason).join("; ")}). Plan again once ${unreadable.length === 1 ? "it can be" : "they can be"}.`;
+  }
+  if (refused > 0) {
+    const op = p.dialect === "clickhouse" ? "ClickHouseRebuildOp" : "PostgresMigrationOp";
+    return `Nothing to approve yet: \`yodel apply ${p.environment}\` would refuse this plan. Move ${refused === 1 ? "the change that needs its own Op" : "each change that needs its own Op"} into one (${op}), or into a versioned migration that runs one, then plan again.`;
+  }
+  if (declarativeRefusalOf(p)) {
+    return `Nothing to approve yet: \`yodel apply ${p.environment}\` refuses this plan before the gate while the policy denies it. Record the override above first; the gate then asks for its own approval of this plan.`;
+  }
+  return undefined;
+}
+
 /** The pull request comment body; the same marker as the versioned comment, so a project that adopts migrations updates the same comment. */
 export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?: boolean } = {}): string {
   const withReport = options.report !== false;
@@ -183,11 +206,14 @@ export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?
     out.push("", "_On the declarative path nothing is silenced: `yodel.config.ts` `lint.rules` sets a rule's level, and a policy override answers a denial._");
   }
   if (p.policy && p.policy.length > 0) out.push("", ...policyMarkdown(p.policy, p.environment));
+  const held = approvalHeld(p);
   out.push("", "#### Approval", "");
   if (p.approval.kind === "no-op") {
     out.push(`No ApplyOp: ${cell(p.approval.message.split("\n")[0] ?? "")}`);
     const example = p.approval.message.split("\n\n").slice(1).join("\n\n");
     if (example) out.push("", "<details><summary>Declare one</summary>", "", fence(example, "ts"), "", "</details>");
+  } else if (held !== undefined) {
+    out.push(cell(held));
   } else if (n === 0) {
     out.push(`Nothing to approve: \`${p.environment}\` already matches the declared schema.`);
   } else {
@@ -205,6 +231,13 @@ export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?
   return body;
 }
 
+/** The approval's `command` when there is a plan to approve, else its `message` saying why not; nothing when nothing changes. */
+function declarativeApprovalNext(p: DeclarativePlan): { command?: string; message?: string } {
+  const held = approvalHeld(p);
+  if (held !== undefined) return { message: held };
+  return p.changes.length > 0 ? { command: `yodel approve ${p.environment}` } : {};
+}
+
 /** `yodel plan <env> --json` for a declarative project: chant's diff as before, with the review. */
 export function declarativePlanJson(p: DeclarativePlan): Record<string, unknown> {
   const lint = lintJson(p.lint);
@@ -215,7 +248,7 @@ export function declarativePlanJson(p: DeclarativePlan): Record<string, unknown>
     lint: { status: lint.status, errors: lint.errors, warnings: lint.warnings, findings: lint.findings },
     ...(p.digest ? { digest: p.digest } : {}),
     ...(p.policy ? { policy: p.policy } : {}),
-    approval: p.approval.kind === "op" ? { op: p.approval.op, gate: p.approval.gate, ...(p.changes.length > 0 ? { command: `yodel approve ${p.environment}` } : {}) } : { message: p.approval.message },
+    approval: p.approval.kind === "op" ? { op: p.approval.op, gate: p.approval.gate, ...declarativeApprovalNext(p) } : { message: p.approval.message },
     ...(p.notes.length > 0 ? { notes: p.notes } : {}),
   };
 }

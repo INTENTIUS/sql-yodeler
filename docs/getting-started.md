@@ -94,7 +94,7 @@ This starts ClickHouse on `http://127.0.0.1:8123` (user `default`, no password) 
 
 `chant.config.ts` names the `dev` environment's server and credentials by environment variable, and never holds a value. `dev` defaults to the emulator's address, so only the users and passwords are needed.
 
-The template gives each environment two users: a reader (the default, used by plans, pull request comments and drift checks) and a writer, picked with `YODEL_CREDENTIALS=writer:<env>` (or `writer` for every environment; only CI's apply job sets it, and `just apply` on your machine). yodel refuses an environment whose reader and writer are the same user, so give the emulator a read-only user for the reader, and keep its admin user, which can do everything, as the writer:
+The template gives each environment two users: a reader (the default, used by plans, pull request comments and drift checks) and a writer, picked with `YODEL_ROLE=writer:<env>` (or `writer` for every environment; only CI's apply job sets it, and `just apply` on your machine). yodel refuses an environment whose reader and writer are the same user, so give the emulator a read-only user for the reader, and keep its admin user, which can do everything, as the writer:
 
 <!-- tabs: dialect -->
 #### ClickHouse
@@ -112,7 +112,7 @@ The variables for every environment:
 |---|---|
 | `<ENV>_CLICKHOUSE_URL` | the server's HTTP interface; `dev` defaults to `http://127.0.0.1:8123` |
 | `<ENV>_CLICKHOUSE_READER_USER`, `<ENV>_CLICKHOUSE_READER_PASSWORD` | the read-only user |
-| `<ENV>_CLICKHOUSE_WRITER_USER`, `<ENV>_CLICKHOUSE_WRITER_PASSWORD` | the user that applies, read when `YODEL_CREDENTIALS=writer:<env>` |
+| `<ENV>_CLICKHOUSE_WRITER_USER`, `<ENV>_CLICKHOUSE_WRITER_PASSWORD` | the user that applies, read when `YODEL_ROLE=writer:<env>` |
 
 #### Postgres
 
@@ -136,13 +136,13 @@ The variables for every environment:
 |---|---|
 | `<ENV>_POSTGRES_URL` | the server and the database, as `postgres://host:5432/database`; `dev` defaults to `postgres://127.0.0.1:5432/postgres` |
 | `<ENV>_POSTGRES_READER_USER`, `<ENV>_POSTGRES_READER_PASSWORD` | the read-only role |
-| `<ENV>_POSTGRES_WRITER_USER`, `<ENV>_POSTGRES_WRITER_PASSWORD` | the role that applies, read when `YODEL_CREDENTIALS=writer:<env>` |
+| `<ENV>_POSTGRES_WRITER_USER`, `<ENV>_POSTGRES_WRITER_PASSWORD` | the role that applies, read when `YODEL_ROLE=writer:<env>` |
 
 If a Postgres of your own already listens on `127.0.0.1:5432` (Homebrew's, for example), that address reaches it rather than the emulator. `just up` warns when it does. Stop that server, or reach the emulator through another address of this machine: `DEV_POSTGRES_URL=postgres://<address>:5432/postgres`, with the address from `ipconfig getifaddr en0` on macOS.
 
 <!-- /tabs -->
 
-`<ENV>` is `DEV` or `PROD`. Without the users, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set` (`DEV_POSTGRES_READER_USER` on Postgres). The reader cannot write, so `yodel apply` runs with `YODEL_CREDENTIALS=writer:dev`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 4) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_CREDENTIALS=writer:dev npx yodel apply dev`).
+`<ENV>` is `DEV` or `PROD`. Without the users, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set` (`DEV_POSTGRES_READER_USER` on Postgres). The reader cannot write, so `yodel apply` runs with `YODEL_ROLE=writer:dev`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 4) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_ROLE=writer:dev npx yodel apply dev`).
 
 ## 4. Write the first migration
 
@@ -206,7 +206,7 @@ The plan prints two approvals. The first, of the apply pipeline's wave, is for t
 
 <!-- quote: getting-started#apply -->
 ```console
-$ YODEL_CREDENTIALS=writer:dev npx yodel apply dev
+$ YODEL_ROLE=writer:dev npx yodel apply dev
 Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied: none
@@ -233,7 +233,7 @@ migrate-dev is waiting at gate "approve-migrate-dev" for approval of this plan (
 Approve it with:
   chant approve migrate-dev approve-migrate-dev --plan jcs1-sha256:96585362be63615a9c5a29c059b2e211f409bcb3e3d5a20a1b226773dfea9aa3
 or, at a terminal, with npx yodel approve dev, which shows the plan and asks you first;
-then run YODEL_CREDENTIALS=writer:dev npx yodel apply dev again.
+then run YODEL_ROLE=writer:dev npx yodel apply dev again.
 [exit 3]
 ```
 
@@ -247,7 +247,7 @@ $ npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply de
 Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T22:13:46.126Z (recorded locally (no remote for chant/lifecycle))
 This approves the plan jcs1-sha256:96585362be63615a9c5a29c059b2e211f409bcb3e3d5a20a1b226773dfea9aa3, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
-$ YODEL_CREDENTIALS=writer:dev npx yodel apply dev
+$ YODEL_ROLE=writer:dev npx yodel apply dev
 Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied: none
@@ -339,7 +339,7 @@ $ npx chant approve migrate-dev approve-migrate-dev --plan "$(npx yodel apply de
 Gate "approve-migrate-dev" on "migrate-dev" resolved by yodel at 2026-10-10T22:13:57.553Z (recorded locally (no remote for chant/lifecycle))
 This approves the plan jcs1-sha256:3df448990a3d23ff2213501d47ac943e9acc6267e1c0fa134e012ac6ab97af8a, and only that plan. A run whose fresh plan differs refuses rather than applying it.
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
-$ YODEL_CREDENTIALS=writer:dev npx yodel apply dev
+$ YODEL_ROLE=writer:dev npx yodel apply dev
 Migrations in dev (clickhouse 26.8.15.10 at 127.0.0.1:8123, history yodeler.history, topology single (yodel.config.ts))
 
 Applied (1):
@@ -407,7 +407,7 @@ Each template has a `justfile` for these steps. [just](https://github.com/casey/
 | `just replay` | `npm run replay`: every migration replayed into a throwaway server and compared with its recorded schema |
 | `just plan [env]` | `npx yodel plan <env>` (`dev` when left out) |
 | `just approve [env]` | prints the command that approves the environment's plan, for you to run; it never runs it |
-| `just apply [env]` | `YODEL_CREDENTIALS=writer:<env> npx yodel apply <env>` |
+| `just apply [env]` | `YODEL_ROLE=writer:<env> npx yodel apply <env>` |
 | `just status [env]` | `npx yodel status <env>` |
 | `just drift [env]` | `npx yodel drift <env>` |
 | `just ci` | `npm run ci`, which renders the CI pipelines again |

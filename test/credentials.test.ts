@@ -46,13 +46,21 @@ describe("credentials()", () => {
     expect(roleOf("dev", "writer:prod")).toBe("reader");
   });
 
-  it("reads YODEL_CREDENTIALS, the older name, when YODEL_ROLE is not set, and refuses the two set apart (#268)", () => {
+  it("reads YODEL_CREDENTIALS, the older name, when YODEL_ROLE is not set, and YODEL_ROLE wins when both are (#268)", () => {
     expect(roleSetting({})).toBeUndefined();
     expect(roleSetting({ YODEL_ROLE: "writer:dev" })).toEqual({ name: "YODEL_ROLE", value: "writer:dev" });
     expect(roleSetting({ YODEL_CREDENTIALS: "writer:dev" })).toEqual({ name: "YODEL_CREDENTIALS", value: "writer:dev" });
     expect(roleSetting({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "writer:dev" })).toEqual({ name: "YODEL_ROLE", value: "writer:dev" });
     expect(roleOf("dev", roleSetting({ YODEL_CREDENTIALS: "writer:dev" })?.value)).toBe("writer");
-    expect(() => roleSetting({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "writer:prod" })).toThrow("YODEL_ROLE is writer:dev and YODEL_CREDENTIALS, its older name, is writer:prod: set one of them");
+    expect(roleSetting({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "writer" })).toEqual({ name: "YODEL_ROLE", value: "writer:dev" });
+    expect(roleSetting({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "writer:prod" })).toEqual({ name: "YODEL_ROLE", value: "writer:dev" });
+    expect(roleSetting({ YODEL_ROLE: "", YODEL_CREDENTIALS: "writer:dev" })).toEqual({ name: "YODEL_CREDENTIALS", value: "writer:dev" });
+  });
+
+  it("loads a profile with both variables set apart, so a pasted writer command runs as the writer", async () => {
+    const profile = await withEnv({ YODEL_ROLE: "writer:dev", YODEL_CREDENTIALS: "reader" }, () => Promise.resolve(credentials("dev", "postgres")));
+    expect(credentialsOf(profile)?.role).toBe("writer");
+    expect(profile.user).toEqual({ env: "DEV_POSTGRES_WRITER_USER" });
   });
 
   it("names the default variables, takes a token source for a role's password, and records both roles", async () => {

@@ -455,7 +455,7 @@ Every migration replays to its recorded schema.
 
 `yodel lint --format gitlab` prints the same report and writes GitLab's code quality report to `gl-code-quality-report.json` (or the file `--output` names), even when there are no findings. An error is `major`, a warning `minor` and a silenced finding `info`.
 
-File paths are relative to the forge's checkout (`GITHUB_WORKSPACE`, `CI_PROJECT_DIR`), or to the project's directory outside CI. `yodel ci` renders each forge's lint job with its format, and on GitLab keeps the report as the job's `artifacts:reports:codequality`, when the job fails too. `--json` is `--format json`.
+File paths are relative to the forge's checkout (`GITHUB_WORKSPACE`, `CI_PROJECT_DIR`), or to the project's directory outside CI. In a declarative project a finding is about the declared schema or a plan, not a file, so GitHub and Forgejo show it on the run rather than on a file, and GitLab places it on the project's directory. `yodel ci` renders each forge's lint job with its format, and on GitLab keeps the report as the job's `artifacts:reports:codequality`, when the job fails too. `--json` is `--format json`.
 
 ## Tests on the replayed database: yodel test
 
