@@ -19,10 +19,16 @@
  * The row names its owner and an expiry. A runner that holds it extends the
  * expiry while it works (a heartbeat every third of the TTL) and deletes the
  * row when done. A runner that finds an expired row deletes that row (by its
- * owner, so it never deletes a newer one) and inserts its own; two runners
- * racing for an expired lock both delete, and only one insert succeeds. A
- * heartbeat that finds the row gone or someone else's stops the apply
- * before its next statement.
+ * owner, so it never deletes a newer one, and only while it is still
+ * expired) and inserts its own; two runners racing for an expired lock both
+ * delete, and only one insert succeeds. A heartbeat that finds the row gone
+ * or someone else's stops the apply before its next statement.
+ *
+ * The expiry is in the delete's WHERE, not only in the read before it: the
+ * holder can heartbeat between the two (#283). In strict mode the delete is
+ * a Keeper remove at the version its own scan read, so the predicate and the
+ * remove are one step, and a row the holder has just extended is left
+ * alone.
  *
  * KeeperMap needs Keeper and the server setting `keeper_map_path_prefix`.
  *
@@ -163,8 +169,9 @@ async function keeperLock(port: ClickHousePort, options: LockOptions, ttlMs: num
       const held = await read();
       if (held && Number(held.expired) !== 1) throw new LockHeldError(held.owner, held.until, where, clear);
       if (attempt >= 3) throw new LockHeldError(held?.owner ?? "(unknown)", held?.until ?? "(unknown)", where, clear);
-      // Expired (or released between the insert and the read): delete that owner's row, never a newer one, and try again.
-      if (held) await port.query(`ALTER TABLE ${table} DELETE WHERE name = ${literal(LOCK_NAME)} AND owner = ${literal(held.owner)}`, { settings: STRICT });
+      // Expired (or released between the insert and the read): delete that owner's row, never a newer one nor one it has
+      // renewed since the read, and try again.
+      if (held) await port.query(`ALTER TABLE ${table} DELETE WHERE name = ${literal(LOCK_NAME)} AND owner = ${literal(held.owner)} AND expires_at < now64(3)`, { settings: STRICT });
     }
   }
 

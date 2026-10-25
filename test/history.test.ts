@@ -11,6 +11,8 @@ import {
   isApplied,
   LockHeldError,
   LOCKED,
+  type ClickHousePort,
+  type Lock,
   localLockPath,
   lockTableDdl,
   parseHistoryTopology,
@@ -185,5 +187,71 @@ describe("the apply lock without Keeper", () => {
     for (const topology of [{ kind: "cluster", cluster: "c" }, { kind: "replicated" }, { kind: "cloud" }] as const) {
       await expect(acquireLock(new FakeClickHouse(), { ...options("/nonexistent", "a"), topology })).rejects.toThrow(/needs the Keeper lock/);
     }
+  });
+});
+
+/**
+ * The lock table as strict-mode KeeperMap keeps it: an insert of the key that is there fails
+ * "Node exists", and an ALTER's WHERE is read in the same step as its write.
+ */
+function keeperLockTable(beforeDelete: () => Promise<void> = () => Promise.resolve()) {
+  let now = 0;
+  let row: { owner: string; expiresAt: number } | undefined;
+  const ownerOf = (sql: string) => /owner = '([^']*)'/.exec(sql)?.[1];
+  const ttl = (sql: string) => Number(/toIntervalMillisecond\((\d+)\)/.exec(sql)?.[1]);
+  const deletes: string[] = [];
+  const port: ClickHousePort = {
+    async query<Row>(sql: string): Promise<Row[]> {
+      if (/^CREATE /.test(sql)) return [];
+      if (sql.startsWith("INSERT")) {
+        if (row) throw new Error("Code: 117. DB::Exception: Node exists");
+        row = { owner: /SELECT 'apply', '([^']*)'/.exec(sql)?.[1] ?? "", expiresAt: now + ttl(sql) };
+        return [];
+      }
+      if (sql.startsWith("SELECT")) return (row ? [{ owner: row.owner, until: String(row.expiresAt), expired: row.expiresAt < now ? 1 : 0 }] : []) as Row[];
+      if (/ UPDATE expires_at/.test(sql)) {
+        if (row && row.owner === ownerOf(sql)) row.expiresAt = now + ttl(sql);
+        return [];
+      }
+      if (/ DELETE WHERE/.test(sql)) {
+        await beforeDelete();
+        deletes.push(sql);
+        if (row && row.owner === ownerOf(sql) && (!/expires_at < now64\(3\)/.test(sql) || row.expiresAt < now)) row = undefined;
+        return [];
+      }
+      throw new Error(`unexpected: ${sql}`);
+    },
+  };
+  return { port, deletes, tick: (ms: number) => (now += ms) };
+}
+
+describe("the Keeper lock's takeover", () => {
+  const options = (holder: string, ttlMs = 60_000) => ({ database: "yodeler", topology: { kind: "cluster", cluster: "c" } as const, holder, ttlMs, serverKey: "x" });
+
+  it("deletes an expired holder's row only while it is still expired", async () => {
+    const t = keeperLockTable();
+    await acquireLock(t.port, options("dead", 100));
+    t.tick(200);
+    const taker = await acquireLock(t.port, options("taker"));
+    expect(taker.owner).toMatch(/^taker#/);
+    expect(t.deletes[0]).toMatch(/AND owner = 'dead#[^']*' AND expires_at < now64\(3\)$/);
+  });
+
+  it("leaves a lock the holder renewed after the taker read it as expired (#283)", async () => {
+    const held: { lock?: Lock } = {};
+    let renewed = false;
+    const t = keeperLockTable(async () => {
+      // The holder's heartbeat lands between the taker's read and its delete.
+      if (held.lock && !renewed) {
+        renewed = true;
+        await held.lock.heartbeat();
+      }
+    });
+    const holder = (held.lock = await acquireLock(t.port, options("holder", 100)));
+    t.tick(200);
+    const taker = acquireLock(t.port, options("taker"));
+    await expect(taker).rejects.toBeInstanceOf(LockHeldError);
+    await expect(taker).rejects.toMatchObject({ holder: holder.owner });
+    await expect(holder.heartbeat()).resolves.toBeUndefined();
   });
 });
