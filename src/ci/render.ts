@@ -71,6 +71,10 @@
  * image ghcr.io/intentius/sql-yodeler pinned by its digest, every job runs
  * in that image instead, which carries node, yodel, chant and the lexicons
  * on PATH, and no job runs `npm ci` ({@link Toolchain}).
+ *
+ * With a chant that has `@intentius/chant/ci-product` (chant#4550), yodel ci
+ * renders through chant's product pipeline with yodel's words (#289,
+ * ../ci-words.ts): {@link productWaves}.
  */
 
 import { existsSync } from "node:fs";
@@ -109,6 +113,7 @@ import {
   WorkflowRule,
 } from "@intentius/chant-lexicon-gitlab";
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
+import { chantProduct, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
 export const FORGES: readonly Forge[] = ["github", "gitlab", "forgejo"];
@@ -851,6 +856,8 @@ export const APPLY_PIPELINE = "yodel-apply";
 interface WavesSpec {
   name: string;
   op: string;
+  /** The wave gate pattern, under chant's product pipeline (#289): `yodel-apply-wave-{k}`, the names chant gives the gates without it. */
+  gateName?: string;
   plan: string[];
   apply: string[];
   branches: string[];
@@ -907,14 +914,20 @@ interface WavesPipelineResult {
   error?: string;
 }
 
-/** The waves spec file and the apply pipeline on each forge. */
-export async function applyPipelines(dir: string, envs: Environments): Promise<RenderedFile[]> {
+/**
+ * The waves spec file and the apply pipeline on each forge. With `product`
+ * (chant's product pipeline, #289), the spec comes from chant's
+ * productPipelineJobs under yodel's words, and each job runs `yodel chant`
+ * where chant's own runs `chant` ({@link productWaves}).
+ */
+export async function applyPipelines(dir: string, envs: Environments, product?: ChantProduct): Promise<RenderedFile[]> {
   const { dialect, waves } = envs;
   const tc = toolchainOf(envs);
   const { generateOpWavesPipeline } = (await import("@intentius/chant/op")) as unknown as {
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<WavesPipelineResult>;
   };
-  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(wavesSpec(waves), null, 2)}\n` }];
+  const named = (forge: Forge, spec: WavesSpec) => (product ? productWaves(product, forge, spec) : { spec, jobs: [] });
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const variables = (forge: Forge) => (env: string) => {
     const wave = waves.find((w) => w.env === env);
@@ -968,8 +981,9 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
+    const { spec, jobs } = named(forge, wavesSpec(waves, variables(forge), envs.resume));
     const result = await generateOpWavesPipeline(
-      wavesSpec(waves, variables(forge), envs.resume),
+      spec,
       forge,
       {
         specFile: WAVES_SPEC,
@@ -984,10 +998,10 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
       const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
       // The resume workflow (GitHub, Forgejo) has no wave job to report on.
-      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), yaml) });
+      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), withBin(product, yaml)) });
       // The pull request workflow that records the plans a review approves (#48).
-      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, withPlansReaders(forge, yaml, waves, dialect, envs)) });
-      else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveReports(forge, yaml, waves, tc, envs)) });
+      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, withBin(product, withPlansReaders(forge, yaml, waves, dialect, envs))) });
+      else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveLines(forge, withBin(product, withWaveReports(forge, yaml, waves, tc, envs)), jobs)) });
     }
   }
   return out;
@@ -1146,6 +1160,56 @@ export async function withTenants(dir: string, waves: readonly Wave[]): Promise<
   return out;
 }
 
+// ── chant's product pipeline (#289) ─────────────────────────────────────────
+//
+// With a chant that has @intentius/chant/ci-product (chant#4550), the apply
+// waves come from chant's productPipelineJobs with yodel's words: the spec
+// under yodel's op and gate names (`yodel-apply`, `yodel-apply-wave-<k>`,
+// the names on the ledger since the waves began, so approvals already
+// recorded keep counting), and each job running `yodel chant` where chant's
+// own runs `chant`, so the job writes yodel's statuses and approve lines.
+// The forge lexicons serialize the jobs as before, and yodel adds its
+// reports, logins and readers to them as before. A chant without the entry
+// leaves every file as yodel rendered it before, so main stays green on its
+// published chant.
+//
+// Still yodel's own until chant can run them: the plan jobs (`yodel plan
+// <env> --comment` with the write probe) wait for the sql lexicon's
+// capability (chant#4569) and the note through chant's renderer (#290); the
+// lint job for the check hook (#294); the watch for chant#4582
+// ({@link watchPipelines}).
+
+/** The spec under yodel's words, and the wave jobs chant's product pipeline names for `forge`. */
+export function productWaves(product: ChantProduct, forge: Forge, spec: WavesSpec): { spec: WavesSpec; jobs: ProductWaveJob[] } {
+  const out = product.productPipelineJobs(forge, spec.waves[0]?.name ?? MAIN, { words: YODEL_WORDS, waves: spec, wavesSpecFile: WAVES_SPEC });
+  if (!out.waves) throw new Error(`${forge}: chant's product pipeline gave no apply waves`);
+  if (out.waves.specFile !== WAVES_SPEC) throw new Error(`${forge}: chant's product pipeline reads the waves from ${out.waves.specFile}, not ${WAVES_SPEC}`);
+  const named = out.waves.spec as WavesSpec;
+  if (named.name !== APPLY_PIPELINE) throw new Error(`${forge}: chant's product pipeline names the waves ${named.name}, and the ledger has them as ${APPLY_PIPELINE}`);
+  return { spec: named, jobs: out.waves.jobs };
+}
+
+/** A `chant` command line in a rendered file: a step's `run:` or a GitLab script line, never a comment. */
+const CHANT_LINE = /^(\s*(?:- )?(?:run: )?)(chant [a-z].*)$/gm;
+
+/** `yaml` with yodel's bin in each chant command line (#289), through chant's own productCommand; unchanged without `product`. */
+export function withBin(product: ChantProduct | undefined, yaml: string): string {
+  if (!product) return yaml;
+  const words = product.assertProductWords(YODEL_WORDS);
+  return yaml.replace(CHANT_LINE, (_m, lead: string, line: string) => `${lead}${product.productCommand(words, line)}`);
+}
+
+/** Refuses an apply file whose wave jobs do not run the line chant's product pipeline gives each of them. */
+function withWaveLines(forge: Forge, yaml: string, jobs: readonly ProductWaveJob[]): string {
+  for (const job of jobs) {
+    const line = job.command.join(" ");
+    if (!new RegExp(`^\\s*(?:- )?(?:run: )?${line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m").test(yaml)) {
+      throw new Error(`${forge}: wave job ${job.jobName} does not run ${line}, the line chant's product pipeline gives it`);
+    }
+  }
+  return yaml;
+}
+
 // ── The drift watch, through chant's generateOpsPipeline ────────────────────
 
 interface OpsPipelineResult {
@@ -1219,7 +1283,19 @@ function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "cre
   return emit(doc);
 }
 
-export async function watchPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
+/**
+ * The drift watches. With `product` (#289) each job runs `yodel chant run
+ * watch-<env>` where chant's runs `chant run watch-<env>`, so the Op's
+ * statuses and notices say yodel.
+ *
+ * The job stays chant's generateOpsPipeline and its last line stays `yodel
+ * drift <env> --issue`, which plans the build for ClickHouse grant drift
+ * (../chant/drift.ts `withClickHouseGrants`), since `chant lifecycle diff
+ * --live` leaves ClickHouse::Grant out. Once chant#4582 puts grants in the
+ * sql lexicon's live diff, the watch moves onto chant's drift job with
+ * `stages.drift` and the workaround goes.
+ */
+export async function watchPipelines(dir: string, envs_: Environments, product?: ChantProduct): Promise<RenderedFile[]> {
   const { dialect, names: envs } = envs_;
   const tc = toolchainOf(envs_);
   const { generateOpsPipeline } = (await import("@intentius/chant/op")) as unknown as {
@@ -1244,7 +1320,7 @@ export async function watchPipelines(dir: string, envs_: Environments): Promise<
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
       // A GitHub or Forgejo file is one environment's watch: its name is watch-<env>.yml.
       const env = file.name.replace(/^watch-|\.yml$/g, "");
-      out.push({ path: at, content: `${HEADER.join("\n")}\n${forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : withWatchLogin(forge, yaml, env, envs_)}` });
+      out.push({ path: at, content: `${HEADER.join("\n")}\n${withBin(product, forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : withWatchLogin(forge, yaml, env, envs_))}` });
     }
   };
   // `chant run` exits 0 when a watch finds drift; the last line, yodel drift, fails the job then.
@@ -1399,12 +1475,18 @@ export function forgeOf(path: string): Forge | undefined {
   return undefined;
 }
 
-export async function render(dir: string): Promise<RenderedFile[]> {
+/**
+ * Every file `yodel ci` writes. Through chant's product pipeline when the
+ * installed chant has it (#289), unless `options.product` is false, which
+ * renders with yodel's own generator as a chant before chant#4550 does.
+ */
+export async function render(dir: string, options: { product?: boolean } = {}): Promise<RenderedFile[]> {
   const envs = await environments(dir);
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
+  const product = options.product === false ? undefined : await chantProduct();
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
-  const files = [...review(envs), ...(rendersApply(envs) ? await applyPipelines(dir, envs) : []), ...(await watchPipelines(dir, envs))];
+  const files = [...review(envs), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
   return files.filter((f) => {
     const forge = forgeOf(f.path);
     return forge === undefined || forges.includes(forge);
