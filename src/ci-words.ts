@@ -65,12 +65,28 @@ export const YODEL_WORDS: YodelWords = {
   bin: YODEL_CHANT_BIN,
 };
 
+/** One op-wave job of chant's product pipeline: its name and its argv, with yodel's bin in place of `chant`. */
+export interface ProductWaveJob {
+  jobName: string;
+  command: string[];
+}
+
+/** What `productPipelineJobs` gives back that yodel ci reads (#289). */
+export interface ProductPipeline {
+  /** The words, every slot filled. */
+  words: unknown;
+  /** The apply on merge: the spec under yodel's op and gate names, its file, and a job per wave. */
+  waves?: { spec: unknown; specFile: string; jobs: ProductWaveJob[] };
+}
+
 /** What yodel uses of `@intentius/chant/ci-product`. */
 export interface ChantProduct {
   assertProductWords: (words: YodelWords) => unknown;
   runChantInProcess: (argv: string[], words: YodelWords) => Promise<number>;
   approveLine: (words: unknown, input: { op: string; gate: string; digest: string; sign?: boolean; target?: string }) => string;
-  productPipelineJobs: (...args: never[]) => unknown;
+  productPipelineJobs: (forge: "github" | "gitlab" | "forgejo", env: string, options: { words: YodelWords; waves?: unknown; wavesSpecFile?: string }) => ProductPipeline;
+  /** A shell line with the words' bin in place of `chant`. */
+  productCommand: (words: unknown, line: string) => string;
 }
 
 let product: Promise<ChantProduct | undefined> | undefined;
@@ -80,7 +96,8 @@ let product: Promise<ChantProduct | undefined> | undefined;
  * none (a release before chant#4550). Its presence is
  * `productPipelineJobs`, `approveLine` and `assertProductWords` together,
  * as chant's ci-product.ts asks a product to check, plus
- * `runChantInProcess`, which the bin calls.
+ * `runChantInProcess`, which the bin calls, and `productCommand`, which
+ * yodel ci puts the bin into its own jobs' lines with (#289).
  */
 export function chantProduct(): Promise<ChantProduct | undefined> {
   product ??= (async () => {
@@ -92,7 +109,8 @@ export function chantProduct(): Promise<ChantProduct | undefined> {
       return undefined;
     }
     const has = (k: keyof ChantProduct) => typeof m[k] === "function";
-    return has("productPipelineJobs") && has("approveLine") && has("assertProductWords") && has("runChantInProcess") ? (m as ChantProduct) : undefined;
+    const all: Array<keyof ChantProduct> = ["productPipelineJobs", "approveLine", "assertProductWords", "runChantInProcess", "productCommand"];
+    return all.every(has) ? (m as ChantProduct) : undefined;
   })();
   return product;
 }

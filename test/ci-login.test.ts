@@ -14,6 +14,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { jobLogins, loginProblem, loginSteps, type Login } from "../src/ci/login.js";
 import { repoRoot, yodel } from "./helpers/run.js";
+import { CHANT, PRODUCT } from "./helpers/chant-bin.js";
 
 const ROLE = "arn:aws:iam::123456789012:role/yodel";
 const PROD_ROLE = "arn:aws:iam::123456789012:role/yodel-prod";
@@ -105,7 +106,7 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     // The watch: each environment's reader, before chant run.
     const watch = actionsJob(dir, ".github/workflows/watch-prod.yml", "watch-prod");
     expect(names(watch).indexOf(AZURE)).toBeGreaterThan(-1);
-    expect(names(watch).indexOf(AZURE)).toBeLessThan(names(watch).indexOf("chant run watch-prod"));
+    expect(names(watch).indexOf(AZURE)).toBeLessThan(names(watch).indexOf(`${CHANT} run watch-prod`));
     expect(names(actionsJob(dir, ".github/workflows/watch-dev.yml", "watch-dev"))).toContain(GCP);
 
     // Rendered again, nothing moves.
@@ -137,12 +138,12 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     const script = wave.script ?? [];
     const awsAt = script.indexOf(`(umask 077 && printf '%s' "$AWS_ID_TOKEN" > "/tmp/yodel-aws-token")`);
     expect(awsAt).toBeGreaterThan(-1);
-    expect(awsAt).toBeLessThan(script.findIndex((l) => l.startsWith("chant run wave")));
+    expect(awsAt).toBeLessThan(script.findIndex((l) => l.startsWith(`${CHANT} run wave`)));
     expect(apply["wave-1-dev"]?.variables).not.toHaveProperty("AWS_ROLE_ARN");
 
     const watch = yaml(dir, ".gitlab/yodel-watch.gitlab-ci.yml") as Record<string, GitLabJob>;
     const ws = watch["watch-prod"]?.script ?? [];
-    expect(ws.findIndex((l) => l.startsWith("az login"))).toBeLessThan(ws.indexOf("chant run watch-prod"));
+    expect(ws.findIndex((l) => l.startsWith("az login"))).toBeLessThan(ws.indexOf(`${CHANT} run watch-prod`));
     expect(watch["watch-prod"]?.variables).toMatchObject({ AZURE_CLIENT_ID: CLIENT });
     expect(watch["watch-dev"]?.id_tokens).toEqual({ GCP_ID_TOKEN: { aud: `https://iam.googleapis.com/${PROVIDER}` } });
 
@@ -175,9 +176,12 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     temps.push(dir);
     cpSync(join(repoRoot, "templates", "postgres"), dir, { recursive: true });
     symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    // The templates' files are what a published chant renders. Through chant's product pipeline (#289)
+    // the jobs run `yodel chant`, so render the template once without the login first.
+    if (PRODUCT) expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
     const config = join(dir, "yodel.config.ts");
     writeFileSync(config, readFileSync(config, "utf8").replace(/^( {2}ci: \{ forges: \[[^\]]*\])( \},)$/m, `$1, login: { aws: { roleArn: "${ROLE}" } }$2`));
-    execFileSync("git", ["init", "-q"], { cwd: dir });
     // The template's roles read variables: with a login configured, the files are the template's own.
     const check = await yodel(["ci", "--check", "--dir", dir]);
     expect(check.code, check.err).toBe(0);
