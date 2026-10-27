@@ -17,6 +17,8 @@ import { overdueNotes } from "../pr/overdue.js";
 import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
 import { planPart } from "../pr/part.js";
 import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
+import { renderPlanNote, renderTenantSetNote } from "../pr/note.js";
+import { baseRef } from "../config/base.js";
 import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
 
@@ -214,7 +216,8 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   const code = result.refusal?.exitCode ?? 0;
 
   if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  if (forge) await postComment(forge, marker, renderPlanMarkdown(result), io);
+  // chant's note in yodel's words when the installed chant's fits (#290), else yodel's own.
+  if (forge) await postComment(forge, marker, (await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderPlanMarkdown(result), io);
   if (a.part !== undefined) {
     const file = resolve(a.part);
     writeFileSync(file, `${JSON.stringify(planPart(result, basename(project.dir)), null, 2)}\n`);
@@ -222,7 +225,7 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   }
   const doc = planJsonVersioned(result);
   if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
-  else if (a.format === "markdown") io.out(renderPlanMarkdown(result));
+  else if (a.format === "markdown") io.out((await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderPlanMarkdown(result));
   else io.out(renderPlanText(result, { runnable: (c) => runnable(c, project.dir) }));
   // A plan that is refused, or that the policy denies, is news before anyone merges it (#61).
   await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
@@ -234,9 +237,9 @@ async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io
   const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
   const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
   if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  if (forge) await postComment(forge, commentMarker(env.name), renderTenantSetMarkdown(result), io);
+  if (forge) await postComment(forge, commentMarker(env.name), (await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result), io);
   if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
-  else if (a.format === "markdown") io.out(renderTenantSetMarkdown(result));
+  else if (a.format === "markdown") io.out((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result));
   else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
   return tenantSetExitCode(result);
 }
