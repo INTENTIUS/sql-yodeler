@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { baseRef, loadYodelConfigAtBase, type ConfigAtBase } from "../config/base.js";
-import type { WaveGate, YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, type WaveGate, type YodelConfig } from "../config/define.js";
 import { createdObjects, stepFindings } from "../lint/statements.js";
 import type { Migration } from "../migrations/index.js";
 import { YodelError, type Project, yodelRefusal } from "../project.js";
@@ -285,7 +285,7 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
   // The policy and the approval mode (#48), asked of chant's rule again rather than trusting the record,
   // at yodel's base (../config/base.ts), never at a base the spec in the change names.
   const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
-  const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
+  const policy = yodelPolicy(readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd));
   const ledger = async () => portFor(await gitLedger(cwd), policy.approval, cwd, policy.base);
   const how = policy.approval === "ledger" ? "" : `, approval ${policy.approval}`;
   if (decision.status === "approved") {
@@ -364,7 +364,7 @@ export async function forecastWave(cwd: string, specFile: string, plan: Pick<Wav
   }
   const digest = waveSetDigest(members);
   const gate = waveGateName(spec.gate ?? spec.name, k);
-  const policy = readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
+  const policy = yodelPolicy(readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd));
   let waits = opWaveNeedsApproval(policy.policy, members);
   if (waits) {
     try {
@@ -375,6 +375,19 @@ export async function forecastWave(cwd: string, specFile: string, plan: Pick<Wav
     }
   }
   return { wave: k, name, gate, digest, policy: policy.policy, base: policy.base, waits, chantApprove: `chant approve ${spec.name} ${gate} --plan ${digest}${signFlag(policy.approval)}`, approval: policy.approval };
+}
+
+/**
+ * chant's reading of a wave's policy, with its approval source as one of
+ * yodel's modes. chant#4550 added a `pull-request` source, which binds a
+ * wave to the pull request's approval; yodel's words bind each wave to its
+ * own digest (`per-wave`, ../ci-words.ts) and yodel ci never writes it, so a
+ * spec that names it is refused.
+ */
+function yodelPolicy<P extends { approval: string }>(policy: P): Omit<P, "approval"> & { approval: ApprovalMode } {
+  const approval = APPROVAL_MODES.find((m) => m === policy.approval);
+  if (!approval) throw new YodelError(`refused: the waves spec names approval ${policy.approval}, which yodel does not use (${APPROVAL_MODES.join(", ")}); render it again with yodel ci. Nothing was applied.`, EXIT_FAILED, true);
+  return { ...policy, approval };
 }
 
 /** Reads a plan file `--wave-plan` wrote. */

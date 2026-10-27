@@ -3,6 +3,7 @@ import type { Command, Io } from "./command.js";
 import { commands } from "./commands/index.js";
 import { version } from "./version.js";
 import { EXIT_CODES, PLAN_PENDING_NOTE, useChantExitTable } from "./exit.js";
+import { CHANT_VERB, runChantVerb } from "./commands/chant.js";
 
 /** Where the docs are published from docs/. */
 export const DOCS_URL = "https://intentius.io/sql-yodeler/";
@@ -99,6 +100,8 @@ export async function main(
     }
     return target.run(["--help"], io);
   }
+  // `yodel chant <args>`: a chant command line in yodel's words, for the generated jobs (#287).
+  if (name === CHANT_VERB) return runChantVerb(argv.slice(verbAt + 1), io);
   const command = list.find((c) => c.name === name);
   if (!command) {
     io.err(`yodel: unknown command "${String(name)}"\n\n${help(list)}`);
