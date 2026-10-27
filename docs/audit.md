@@ -40,6 +40,10 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 | `refused` | a failed migration row naming a pre-migration check |
 | `failed` | any other failed migration row: a statement, an Op step |
 | `repaired` | a succeeded row after the migration was applied (`yodel repair`) |
+| `wave-run` | a run record of the apply pipeline's wave job that ran the environment, on chant's run ledger (`local/runs__yodel-apply.jsonl`), with the wave, the job, its exit code and how the environment's run ended |
+| `spent` | an approval an apply spent, from `_gates/<op>/applied.jsonl` with the line that says how the apply ended: a wave's apply, a drop `yodel cleanup` asked for, or a baseline `yodel init --baseline` asked for |
+
+The `wave-run` and `spent` entries need a chant that writes run records and gated requests (the release after 0.124.51). On a ledger written before that there are none, and the rest of the log is unchanged.
 
 `--audit audit.jsonl` keeps the log as a file, one entry per line. Each run appends the entries the file does not have yet and never rewrites a line. `--audit audit.jsonl --check` appends nothing. Instead it names every entry of the file that the sources no longer give: a ledger line or a history row removed since the file was written. A CI job that keeps `audit.jsonl` as an artifact, or commits it, can run `--check` before it appends.
 
@@ -50,7 +54,7 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 - A history row missing. Each environment's history numbers its rows from 1 with no hole, because every run appends at the highest `seq` plus one, under the lock. A hole is a row someone deleted.
 - An applied migration whose plan digest has no approval of the environment's gate on the ledger: the approval was removed, or the migration was applied without one. A baseline recorded by `yodel init --from` has no digest and needs no approval; one recorded by `yodel init --baseline` carries the digest its gate approved.
 
-  A migration a wave of the apply pipeline applied ([waves](workflows.md)) was let through on the wave's gate, `yodel-apply-wave-<k>` on the `yodel-apply` ledger, for the wave's set digest, not on the migrations Op's gate. The wave's apply records that gate and digest in the migration's `started` history row (`note.wave`), and the report looks for the approval there. A wave whose gate policy at the base commit needed no approval (`never`, or `on-destructive` with nothing destructive) records that instead, checked under the lock when it applied, and is not a gap.
+  A migration a wave of the apply pipeline applied ([waves](workflows.md)) was let through on the wave's gate, `yodel-apply-wave-<k>` on the `yodel-apply` ledger, for the wave's set digest, not on the migrations Op's gate. The wave's apply records that gate and digest in the migration's `started` history row (`note.wave`). The report takes the wave from the ledger first: the wave job's run record that lists the environment applied at the time of the row. It falls back to `note.wave` for applies made before chant wrote run records, and looks for the approval on that gate and digest. A wave whose gate policy at the base commit needed no approval (`never`, or `on-destructive` with nothing destructive) records that instead, checked under the lock when it applied, and is not a gap.
 - With `--audit --check`, an entry of the file the sources no longer give.
 
 An environment that cannot be read (its server does not answer) is reported with its error, and the exit is 1 when there is no gap.

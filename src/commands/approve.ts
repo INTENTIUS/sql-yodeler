@@ -7,6 +7,9 @@ import { buildSchema } from "../chant/build.js";
 import { planEnvironment, renderPlan } from "../chant/plan.js";
 import { findApplyOp } from "../chant/apply.js";
 import { cleanupDigest, cleanupGate, describeRetained, findRetained, retainedServer } from "../cleanup/index.js";
+import { gatedRequests } from "../chant/gated-request.js";
+import { storedPlanText } from "../chant/stored-plan.js";
+import { baselineGate } from "../init/index.js";
 import { gateAtBase } from "../waves/index.js";
 import { waveApproval } from "../approval-mode/index.js";
 import { baseEnvironment } from "../tenants/target.js";
@@ -285,6 +288,12 @@ export const approve: Command = {
             io.out(renderStatus(report));
             io.out(`${describeWave(view)}\n`);
             if (!view.waits) return 0;
+            // The plan the wave's pending fact cites (#292, chant#4551), as chant stored it.
+            {
+              const { waveGateName } = await import("@intentius/chant/gated-waves");
+              const stored = await storedPlanText(project.dir, await gitLedger(project.dir), WAVES_PIPELINE, waveGateName(WAVES_PIPELINE, view.wave), view.digest);
+              if (stored) io.out(`\n${stored}`);
+            }
             if (expected !== undefined && expected !== view.digest) {
               io.err(`yodel approve: --plan ${expected} is not the plan waiting for ${env.name}, which is ${view.digest}. Nothing was approved.\n`);
               return EXIT_MOVED;
@@ -461,6 +470,8 @@ async function approveStanding(c: OtherContext, found: { standing: StandingGate;
   const { io, env } = c;
   const s = found.standing;
   io.out(`${s.op} is waiting at gate "${s.gate}" for approval of ${s.digest}, since ${s.at}${s.description ? ` (${s.description})` : ""}.\n`);
+  const stored = await storedPlanText(c.project.dir, await gitLedger(c.project.dir), s.op, s.gate, s.digest);
+  if (stored) io.out(`\n${stored}`);
   const answer = (await c.ask(`\nApprove ${s.digest} for ${env.name}? Type ${env.name} to approve: `)).trim();
   if (answer !== env.name) {
     io.err(`Not approved: the answer was not ${env.name}.\n`);
@@ -493,6 +504,8 @@ export async function approveOther(c: OtherContext, opName?: string, venv?: Vers
   }
   const mode = migrate ? (await migrationsApprovalAtBase(project, env.name)).mode : undefined;
   if (migrate) gates.push({ op: migrate.name, gate: migrate.gate, mode });
+  // chant's gated requests (#292, chant#4551): the drop yodel cleanup asks for and the record yodel init --baseline asks for wait as pending facts at their own gates.
+  if (migrate && (await gatedRequests())) gates.push({ op: migrate.name, gate: cleanupGate(migrate.gate), mode }, { op: migrate.name, gate: baselineGate(migrate.gate), mode });
   const base = baseEnvironment(env.name);
   const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === base) + 1;
   if (k > 0) {
