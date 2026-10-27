@@ -617,6 +617,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     let wave: WaveRecord | undefined;
     let before: StepOutcome[] = [];
     // The steps (#64) are the wave's stage hooks, which chant hands this run in CHANT_HOOKS (#206); run by hand, they are the steps at base.
+    // Under the sql capability (#291) chant hands none, and the spec carries only the before.plan checks, so the steps at base run here, once, under the lock.
     const { readOpWaveHooksFile } = await import("@intentius/chant/op");
     const handed = readOpWaveHooksFile(undefined, cwd);
     const steps = handed ? undefined : await stepsAtBase(project, env.name);
