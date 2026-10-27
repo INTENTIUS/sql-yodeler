@@ -2,6 +2,20 @@
 
 This page is for working on SQL Yodeler itself. To use it, start with [Your first migration](docs/getting-started.md). The rules for commits, pull requests and releases are in [AGENTS.md](AGENTS.md); they apply to people and coding agents alike.
 
+## Where a feature goes
+
+SQL Yodeler, [terragucci](https://intentius.io/terragucci/) and [plywood](https://intentius.io/plywood/) are CI products on chant's runtime, and they share chant CI features as far as they can. Extending chant CI is the default. A feature goes in the first of these homes that fits it:
+
+1. chant CI core, when the products share it.
+2. chant's sql lexicon, when the capability belongs to the SQL engines: dialect parsing, plan and classification, change-set parts, the mapping onto chant's exit codes, lock rows, CI setup lines and database token sources.
+3. SQL Yodeler, which holds its words and presets, its config defaults and init templates, and its docs.
+
+A feature stays inside SQL Yodeler only for a reason that belongs to its audience, database and data teams who write SQL, and never for convenience. Approvals, gate decisions, overrides and the records of applies and runs go in the chant workspace ledger, never in SQL Yodeler's own writes. Before adding storage for a record, check whether the ledger already holds it.
+
+The versioned migration engine stays in SQL Yodeler, and chant's sql lexicon runs it through a fixed argv list, as the pulumi lexicon runs plunge. Only the CI capability moves to chant. The engine is the migrations directory and its checksums, the history table and the apply lock, steps (rebuild and backfill Ops), promotion, tenant sets, revert, rebase and repair, cleanup and baseline, the replay check, the lint rules and `yodel test`, under `src/versioned`, `src/history`, `src/migrations`, `src/steps`, `src/tenants`, `src/rebase`, `src/replay` and `src/lint`. Its commands are `yodel new`, `status`, `plan`, `apply`, `revert`, `rebase`, `repair`, `checkpoint`, `cleanup`, `init`, `lint`, `check`, `test`, `drift` and `docs`. The CI product is the rest: the pipeline (`yodel ci`), the plan note and drift issue (`--comment`, `--issue`), the exit codes, the wave plan and apply that chant runs (`--wave-plan`, `--wave-apply`), approvals and overrides (`yodel approve`, `yodel override`), cloud logins, the audit report and the MCP tools (`yodel mcp`). Each of those runs on chant core or the sql lexicon, and SQL Yodeler keeps its words for them, such as `yodel approve <env>` and the `yodel/plan` status.
+
+The rule and the issues behind it are on chant's [CI products on chant](https://intentius.io/chant/concepts/ci-products/) page and in [chant#4530](https://github.com/INTENTIUS/chant/issues/4530) and [#285](https://github.com/INTENTIUS/sql-yodeler/issues/285); [#300](https://github.com/INTENTIUS/sql-yodeler/issues/300) places each module under `src/`.
+
 ## Building from a clone
 
 Node 22.12 or later (`.nvmrc`).

@@ -28,6 +28,7 @@ The scenario claims (`npm run claims`, `scenarios/`) and the bench (`npm run ben
 
 - `@intentius/chant` and `@intentius/chant-lexicon-sql` come from npm. Never a `file:` or workspace link in `package.json`.
 - A PR that needs a chant change waits until that change is released on npm. Develop against a packed (`npm pack`) or linked chant in the meantime, but never merge a PR that depends on one.
+- A CI feature goes in chant CI core first, then chant's sql lexicon, and in SQL Yodeler only for a reason that belongs to its audience. The versioned migration engine stays here and chant runs it. The order and the engine boundary are in [CONTRIBUTING.md, Where a feature goes](CONTRIBUTING.md#where-a-feature-goes).
 
 ## The emulator
 
