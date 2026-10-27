@@ -38,6 +38,12 @@ import { baselineRow, historyRefusal } from "./baseline.js";
 /** chant's plan-digest kind for recording a baseline: never an apply's or a revert's. */
 export const BASELINE_DIGEST_KIND = "yodel-baseline";
 
+/** The kind of gated request (chant#4551) a baseline record is asked for under. */
+export const BASELINE_REQUEST = "sql-baseline";
+
+/** The gate a baseline record waits at as a gated request: the migrations gate's name with -baseline. */
+export const baselineGate = (gate: string): string => `${gate}-baseline`;
+
 /** The note a baseline row recorded by `yodel init --baseline` carries. */
 export const recordedBaselineNote = (environment: string): string =>
   `baseline: recorded by yodel init --baseline ${environment}, whose live schema matched the schema it records; its statements were not run`;

@@ -11,12 +11,17 @@ import { deriveState, type HistoryRow } from "../history/index.js";
 import type { Migration } from "../migrations/index.js";
 import { resolveEnvironment, type Project } from "../project.js";
 import { closeVersioned, findMigrateOp, gitLedger, openVersioned, type MigrateOpRef } from "../versioned/index.js";
-import { WAVES_PIPELINE } from "../waves/record.js";
+import { WAVES_PIPELINE, waveRecordOf } from "../waves/record.js";
 import { baseEnvironment } from "../tenants/target.js";
 import { OVERRIDE_OP } from "@intentius/chant/override-gate";
-import { approvalOf, byTime, deriveAudit, isoTime, type AuditEntry, type AuditGap, type LedgerInput, type OverrideLedgerInput, type WaveLedgerInput } from "./audit.js";
+import { cleanupGate } from "../cleanup/index.js";
+import { baselineGate } from "../init/second.js";
+import { approvalOf, byTime, deriveAudit, isoTime, type AppliedLine, type AppliesInput, type AuditEntry, type AuditGap, type LedgerInput, type OverrideLedgerInput, type WaveLedgerInput, type WaveRunInput, type WaveRunRecord } from "./audit.js";
 
 export const REPORT_VERSION = 1;
+
+/** The wave gate a history row's note names, if any. */
+const waveGateOfNote = (note: string): string | undefined => waveRecordOf(note)?.gate;
 
 export type MigrationState = "applied" | "pending" | "failed" | "started" | "reverted";
 
@@ -67,7 +72,66 @@ export interface ReportSources {
   rows(project: Project, env: string): Promise<{ rows: HistoryRow[]; history: string }>;
   op(project: Project, env: string): Promise<MigrateOpRef>;
   ledger(project: Project): Promise<GateLedgerPort>;
+  /** The apply pipeline's wave job run records (chant#4551); none before chant wrote them. */
+  waveRuns?(project: Project): Promise<{ path: string; records: WaveRunRecord[] }>;
+  /** `op`'s applies under an approval, `_gates/<op>/applied.jsonl` joined with its finished lines (chant#4551's `applies` table). */
+  applies?(project: Project, op: string): Promise<{ path: string; lines: AppliedLine[] }>;
 }
+
+/** Where chant writes the waves' run records: the spec names no `labels.Env`, so under `local`, as an Op with none. */
+export const WAVE_RUNS_ENV = "local";
+
+/** A run record's `wave` field, when the record is a wave job's (chant#4551). Read structurally: a chant before it writes none. */
+export function waveRunOf(record: unknown): WaveRunRecord | undefined {
+  if (typeof record !== "object" || record === null) return undefined;
+  const r = record as Record<string, unknown>;
+  const w = r.wave as Record<string, unknown> | undefined;
+  const names = (x: unknown): x is string[] => Array.isArray(x) && x.every((t) => typeof t === "string");
+  if (typeof r.id !== "string" || typeof r.started !== "string" || typeof r.ended !== "string" || typeof r.status !== "string") return undefined;
+  if (!w || typeof w.spec !== "string" || typeof w.number !== "number" || typeof w.name !== "string" || typeof w.job !== "string" || typeof w.exitCode !== "number") return undefined;
+  if (!names(w.applied) || !names(w.failed) || !names(w.moved)) return undefined;
+  const blocked = typeof w.blocked === "object" && w.blocked !== null ? (w.blocked as Record<string, string>) : undefined;
+  return {
+    id: r.id,
+    started: r.started,
+    ended: r.ended,
+    status: r.status,
+    wave: { spec: w.spec, number: w.number, name: w.name, job: w.job, ...(typeof w.digest === "string" ? { digest: w.digest } : {}), exitCode: w.exitCode, applied: w.applied, failed: w.failed, moved: w.moved, ...(blocked ? { blocked } : {}) },
+  };
+}
+
+/** The ledger's run records and applies, read from the local chant/lifecycle branch without fetching. */
+const ledgerReads: Required<Pick<ReportSources, "waveRuns" | "applies">> = {
+  async waveRuns(project) {
+    const { readRunLedger, runLedgerFile } = await import("@intentius/chant/lifecycle/run-ledger");
+    const { records } = await readRunLedger(WAVE_RUNS_ENV, WAVES_PIPELINE, { cwd: project.dir });
+    return { path: `${WAVE_RUNS_ENV}/${runLedgerFile(WAVES_PIPELINE)}`, records: records.flatMap((r) => waveRunOf(r) ?? []) };
+  },
+  async applies(project, op) {
+    const { appliedGatePath, finishedApply, parseAppliedGateFile } = await import("@intentius/chant/lifecycle/gate-applied");
+    const { readBlobFromPath } = await import("@intentius/chant/lifecycle/git");
+    const { dir, file } = appliedGatePath(op);
+    const text = await readBlobFromPath(dir, file, { cwd: project.dir });
+    if (!text) return { path: `${dir}/${file}`, lines: [] };
+    const { applied, finished } = parseAppliedGateFile(text);
+    return {
+      path: `${dir}/${file}`,
+      lines: applied.map((a): AppliedLine => {
+        const done = finishedApply(finished, a);
+        const detail = (done as { detail?: unknown } | undefined)?.detail;
+        return {
+          gate: a.gate,
+          planDigest: a.planDigest,
+          timestamp: a.timestamp,
+          ...(a.approvedBy ? { approvedBy: a.approvedBy } : {}),
+          ...(a.approvedAt ? { approvedAt: a.approvedAt } : {}),
+          ...(a.runId ? { runId: a.runId } : {}),
+          ...(done ? { finished: { timestamp: done.timestamp, result: done.result, ...(typeof detail === "object" && detail !== null ? { detail: detail as Record<string, string | number | boolean> } : {}) } } : {}),
+        };
+      }),
+    };
+  },
+};
 
 export const liveSources: ReportSources = {
   async rows(project, name) {
@@ -80,6 +144,7 @@ export const liveSources: ReportSources = {
   },
   op: (project, name) => findMigrateOp(project, resolveEnvironment(project, name)),
   ledger: (project) => gitLedger(project.dir),
+  ...ledgerReads,
 };
 
 const firstLine = (e: unknown): string => (e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e));
@@ -95,6 +160,28 @@ export async function collectReport(project: Project, chain: readonly Migration[
   } catch (e) {
     portError = firstLine(e);
   }
+
+  // The apply pipeline's run records (#292, chant#4551): read once, matched to each environment below.
+  let runs: WaveRunInput | undefined;
+  let runsNote: string | undefined;
+  if (sources.waveRuns && (project.yodel?.config.waves ?? []).length > 0) {
+    try {
+      const { waveGateName } = await import("@intentius/chant/gated-waves");
+      const read = await sources.waveRuns(project);
+      runs = { path: read.path, gateOf: (k) => waveGateName(WAVES_PIPELINE, k), records: read.records };
+    } catch (e) {
+      runsNote = `the waves' run records could not be read (${firstLine(e)}); the history's notes name the waves`;
+    }
+  }
+  const appliesOf = new Map<string, Promise<{ path: string; lines: AppliedLine[] } | undefined>>();
+  const readApplies = (op: string) => {
+    let read = appliesOf.get(op);
+    if (!read) {
+      read = sources.applies ? sources.applies(project, op).catch(() => undefined) : Promise.resolve(undefined);
+      appliesOf.set(op, read);
+    }
+    return read;
+  };
 
   const environments: EnvironmentReport[] = [];
   const audit: AuditEntry[] = [];
@@ -150,7 +237,20 @@ export async function collectReport(project: Project, chain: readonly Migration[
       }
     }
 
-    const derived = deriveAudit({ environment: name, history: env.history ?? "history", rows, ledger, overrides, waves, sameDigest: samePlanDigest });
+    if (runsNote) env.notes.push(runsNote);
+    // The approvals spent on this environment's gates (chant's applies table): its migrations gate, the cleanup and baseline requests (#292), and its wave's gate.
+    const applies: AppliesInput[] = [];
+    if (env.op) {
+      const read = await readApplies(env.op.name);
+      if (read) applies.push({ op: env.op.name, path: read.path, gates: new Set([env.op.gate, cleanupGate(env.op.gate), baselineGate(env.op.gate)]), lines: read.lines });
+    }
+    if (waves) {
+      const read = await readApplies(WAVES_PIPELINE);
+      const gates = new Set([...(waves.gate ? [waves.gate] : []), ...rows.flatMap((r) => (r.kind === "migration" && r.status === "started" ? (waveGateOfNote(r.note) ?? []) : []))]);
+      if (read) applies.push({ op: WAVES_PIPELINE, path: read.path, gates, lines: read.lines });
+    }
+
+    const derived = deriveAudit({ environment: name, history: env.history ?? "history", rows, ledger, overrides, waves, runs, applies, sameDigest: samePlanDigest });
     audit.push(...derived.entries);
     gaps.push(...derived.gaps);
 
