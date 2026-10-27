@@ -5,7 +5,7 @@
  *
  * The baseline is the project's first migration. The environment's live
  * schema is planned against the schema the baseline records, offline from
- * `migration.json`: the plan must be empty. A difference refuses (exit 4),
+ * `migration.json`: the plan must be empty. A difference refuses (exit 1),
  * naming each object and what differs, and nothing is recorded.
  *
  * The record goes through the environment's migrations Op, as `yodel
@@ -23,8 +23,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { YodelError, type Environment, type Project } from "../project.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import type { Build, BuildOutput } from "../chant/build.js";
 import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classifier";
 import { planEnvironment, renderPlan, unreadableOf } from "../chant/plan.js";
@@ -47,9 +46,8 @@ export const recordedBaselineNote = (environment: string): string =>
 export function projectBaseline(ordered: readonly Migration[]): Migration {
   const first = ordered[0];
   if (!first) {
-    throw new YodelError(
+    throw yodelRefusal(
       "refused: the project has no migrations, so there is no baseline to record; adopt an environment with yodel init --from <env> first. Nothing was recorded.",
-      EXIT_REFUSED,
     );
   }
   return first;
@@ -105,11 +103,10 @@ export async function compareBaseline(project: Project, env: Environment, baseli
 
 /** The refusal for a difference: names each one, and records nothing. */
 export function differenceRefusal(env: string, baseline: string, cmp: BaselineComparison): YodelError {
-  return new YodelError(
+  return yodelRefusal(
     `refused: ${env}'s live schema is not the schema ${baseline} records, so the baseline cannot be recorded applied there. ` +
       `${String(cmp.differences.length)} difference${cmp.differences.length === 1 ? "" : "s"}:\n${cmp.differences.map((d) => `  ${d}`).join("\n")}\n` +
       `Make ${env} hold the baseline's schema (or empty it, and let yodel apply run the baseline), then run yodel init --baseline ${env} again. Nothing was recorded.`,
-    EXIT_REFUSED,
   );
 }
 

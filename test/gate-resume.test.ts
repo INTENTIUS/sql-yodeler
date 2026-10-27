@@ -16,12 +16,13 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
-import { GATED, readApplyRun } from "../src/chant/apply.js";
+import { readApplyRun } from "../src/chant/apply.js";
 import { runChant } from "../src/chant/process.js";
 import { chantApproveArgs } from "../src/commands/approve.js";
 import { projectFromConfig } from "../src/project.js";
-import { gitLedger, NOT_APPROVED, verifyApproval } from "../src/versioned/approval.js";
+import { gitLedger, verifyApproval } from "../src/versioned/approval.js";
 import { migrateOpParts, selectMigrateOp, type MigrateOpRef } from "../src/versioned/op.js";
+import { EXIT_WAITING } from "../src/exit.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const TEMPLATE_OP = readFileSync(join(ROOT, "templates/postgres/ops/migrate-dev.op.ts"), "utf8");
@@ -53,7 +54,7 @@ function repo(op = TEMPLATE_OP) {
   git("commit", "-qm", "init");
   const env = { ...process.env, PATH: [join(dir, "bin"), process.env.PATH ?? ""].join(delimiter) };
   const run = async () => {
-    const r = await runChant(["run", "migrate-dev", "--gated-exit", String(GATED)], { cwd: dir, env });
+    const r = await runChant(["run", "migrate-dev", "--gated-exit", String(EXIT_WAITING)], { cwd: dir, env });
     return readApplyRun(r.code, `${r.stdout}\n${r.stderr}`);
   };
   const approve = async (gate: string) => {
@@ -135,7 +136,7 @@ describe("renaming the migrations Op's gate (chant#3949)", () => {
     const ledger = await gitLedger(r.dir);
     await expect(verifyApproval(ledger, op, DIGEST)).resolves.toMatchObject({ resolvedBy: "tester" });
     // Drop the alias and the carried line stops counting, as it does for chant's gate.
-    await expect(verifyApproval(ledger, { ...op, aliases: [] }, DIGEST)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
+    await expect(verifyApproval(ledger, { ...op, aliases: [] }, DIGEST)).rejects.toMatchObject({ exitCode: EXIT_WAITING });
   });
 
   it("without the alias, the renamed gate asks for approval again", async () => {
@@ -177,6 +178,6 @@ describe("the gate's parts as yodel reads them", () => {
         resolutions: [{ version: 1, op: op.name, gate: op.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z", planDigest: DIGEST, carriedFrom: { op: "migrate-dev", gate: from, timestamp: "2026-10-09T11:00:00.000Z" } }],
       });
     await expect(verifyApproval(carried("old"), op, DIGEST)).resolves.toMatchObject({ resolvedBy: "alice" });
-    await expect(verifyApproval(carried("older"), op, DIGEST)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
+    await expect(verifyApproval(carried("older"), op, DIGEST)).rejects.toMatchObject({ exitCode: EXIT_WAITING });
   });
 });

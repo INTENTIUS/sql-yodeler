@@ -167,19 +167,19 @@ export function declarativeSuite(h: DialectHooks): void {
       expect(entry?.changes.some((c) => path.test(c.path)), JSON.stringify(doc.changed)).toBe(true);
     });
 
-    it("exits 2 on a change that needs its own Op, and apply refuses it without running the Op", async () => {
+    it("exits 3 on a change that needs its own Op, and apply refuses it without running the Op", async () => {
       edit(h.needsOp);
       const ran = await yodel(at("plan", "e2e", "--json"));
-      expect(ran.code, ran.err).toBe(2);
+      expect(ran.code, ran.err).toBe(3);
       const doc = (json(ran) as PlanDoc);
       expect((doc.rebuilds ?? doc.refused ?? []).length).toBeGreaterThan(0);
 
       const text = await yodel(at("plan", "e2e"));
-      expect(text.code).toBe(2);
+      expect(text.code).toBe(3);
       expect(text.out).toContain("Refused:");
 
       const applied = await yodel(at("apply", "e2e", "--json"));
-      expect(applied.code, applied.err).toBe(2);
+      expect(applied.code, applied.err).toBe(3);
       expect((json(applied) as ApplyDoc).status).toBe("refused");
     });
 

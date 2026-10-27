@@ -137,7 +137,7 @@ describe("the declarative plan comment (#249)", () => {
   it("says apply refuses a change that needs its own Op", () => {
     const p = view();
     const md = renderDeclarativeMarkdown({ ...p, plan: { ...p.plan, refused: [rebuild] } });
-    expect(md).toContain("**`yodel apply` would refuse (exit 2)**");
+    expect(md).toContain("**`yodel apply` would refuse (exit 3)**");
     expect(md).toContain("1 change needs its own Op");
     expect(md).toContain("Nothing to approve yet: `yodel apply prod` would refuse this plan. Move the change that needs its own Op into one (ClickHouseRebuildOp)");
     expect(md).not.toContain("npx yodel approve prod");
@@ -150,7 +150,7 @@ describe("the declarative plan comment (#249)", () => {
     const p = view({ changes: [], digest: undefined });
     const unreadable = { ...p, plan: { ...p.plan, diff: { changes: [], rebuilds: [], hints: [], unreadable: [{ object: "app.legacy", type: "table", reason: "SHOW CREATE denied" }] } as never } };
     const md = renderDeclarativeMarkdown(unreadable);
-    expect(md).toContain("**`yodel apply` would refuse (exit 2)**");
+    expect(md).toContain("**`yodel apply` would refuse (exit 1)**");
     expect(md).toContain("Nothing to approve yet: `yodel apply prod` would refuse this plan, since `app.legacy` could not be read (SHOW CREATE denied).");
     expect(md).not.toContain("already matches the declared schema");
     const approval = declarativePlanJson(unreadable).approval as Record<string, string>;

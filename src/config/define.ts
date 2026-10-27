@@ -153,7 +153,7 @@ export interface ApplyStep {
   expect?: "empty" | "true" | { min?: number; max?: number };
   command?: string;
   /**
-   * A failing `before` step: `fail` (the default) refuses the apply, exit 4;
+   * A failing `before` step: `fail` (the default) refuses the apply, exit 1;
    * `approve` holds the environment's wave for a person instead, whatever
    * its gate, until someone approves the plan with the step failing. An
    * `after` step that fails fails the run (exit 1); the migrations stay
@@ -212,7 +212,7 @@ export interface WaveConfig {
   gate?: WaveGate;
   /**
    * The environment that must have applied a migration first: `yodel
-   * apply <env>` reads its history (with its reader) and refuses, exit 4,
+   * apply <env>` reads its history (with its reader) and refuses, exit 3,
    * any pending migration it does not record as applied with the same
    * checksum. Default: the wave before this one; `false` for none. Both
    * the working tree's and the base commit's requirement are enforced, so a
@@ -395,7 +395,7 @@ export interface CheckConfig {
 
 /**
  * Rules over the versioned plan (#53). `yodel plan` shows each rule's
- * outcome, and `yodel apply` refuses (exit 4) a plan a rule denies, unless
+ * outcome, and `yodel apply` refuses (exit 7) a plan a rule denies, unless
  * someone {@link PolicyConfig.overriders} lists recorded an override of the
  * rules that deny it for exactly that plan digest (`yodel override <env>
  * --rule <id> --reason <text>`, through chant's override gate).

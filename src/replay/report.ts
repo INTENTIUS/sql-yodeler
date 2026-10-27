@@ -4,12 +4,13 @@
  */
 
 import { MIGRATIONS_DIR, MIGRATION_JSON, MIGRATION_SQL } from "../migrations/index.js";
-import { UNREPLAYABLE, type ReplayChange, type ReplayResult } from "./replay.js";
+import { type ReplayChange, type ReplayResult } from "./replay.js";
+import { EXIT_WAITING } from "../exit.js";
 
 /** 0 when every migration replays to its recorded schema; 1 for a difference or a statement the server refused; 2 for a step the replay cannot run. */
 export function replayExitCode(result: ReplayResult): number {
   if (result.outcome === "matches") return 0;
-  if (result.outcome === "unreplayable") return UNREPLAYABLE;
+  if (result.outcome === "unreplayable") return EXIT_WAITING;
   return 1;
 }
 

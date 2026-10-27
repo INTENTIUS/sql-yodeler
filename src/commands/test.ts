@@ -59,10 +59,10 @@ Options:
 
 Exit codes:
   0  every case passed (or there is no case)
-  3  a case failed, or could not run (a migration or seed statement failed)
-  4  refused, nothing run: the target has a migration history, already holds
-     what the history names (no --reset), or another profile names it
-  1  anything else: a test file that does not load, a bad config, a server
+  1  a case failed, or could not run (a migration or seed statement failed);
+     refused, nothing run: the target has a migration history, already holds
+     what the history names (no --reset), or another profile names it; or
+     anything else: a test file that does not load, a bad config, a server
      that does not answer
 `;
 
@@ -143,7 +143,7 @@ export const test: Command = {
         return 0;
       }
       const tests = await loadTests(project.dir, files);
-      // A directory that is not one chain is refused (exit 4) before anything runs.
+      // A directory that is not one chain is refused (exit 1) before anything runs.
       readChain(project);
       const env = resolveEnvironment(project, a.env ?? defaultEnv(project));
       // A rebuild step's executor prints its SQL to stdout: while the cases run, stdout goes to stderr, so --json stays one document.

@@ -7,7 +7,7 @@
  * asked to approve it; the Op's Apply step runs every migration's again
  * under the lock, just before that migration's first statement, where the
  * data is what the statements will meet. A check that fails, or whose query
- * the server refuses, refuses the run with exit 4: nothing of that
+ * the server refuses, refuses the run with exit 1: nothing of that
  * migration is sent. Under the lock the history records the outcome: the
  * migration's `started` row carries the checks that passed in its `note`,
  * and a refusal is a `failed` migration row naming the check.
@@ -22,8 +22,7 @@
  * before the first statement; it is passed, since no row of it exists yet.
  */
 
-import { YodelError } from "../project.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { YodelError, yodelRefusal } from "../project.js";
 import { describeExpect, judgeCheck, migrationChecks, type CheckOutcome, type Migration, type RunnableCheck } from "../migrations/index.js";
 import type { VersionedDriver } from "./driver.js";
 import type { PendingMigration } from "./state.js";
@@ -76,10 +75,9 @@ export function failedChecks(m: Migration, outcomes: readonly CheckOutcome[]): s
 export function checksRefusal(m: Migration, outcomes: readonly CheckOutcome[], when: string): YodelError | undefined {
   const failed = failedChecks(m, outcomes);
   if (failed.length === 0) return undefined;
-  return new YodelError(
+  return yodelRefusal(
     `refused: a pre-migration check of ${m.id} failed ${when}. Nothing of ${m.id} was applied:\n${failed.map((f) => `  ${f}`).join("\n")}\n` +
       `Fix the data, then run yodel apply again; if the check is wrong, edit it in migration.json and run yodel lint --update-checksum ${m.id} (the plan digest moves, so the plan is approved again).` +
       (failed.some((f) => f.startsWith("step ")) ? ` A statement's pre-check is chant's count of the rows the statement fails on: fix those rows, or change the declaration.` : ""),
-    EXIT_REFUSED,
   );
 }

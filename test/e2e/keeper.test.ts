@@ -9,12 +9,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { clickhouseQuery, type ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
 import { dockerAvailable } from "@intentius/chant-lexicon-sql/core/container";
 import { projectFromConfig } from "../../src/project.js";
-import { acquireLock, HistoryStore, httpPort, LockHeldError, LockLostError, LOCKED, type HistoryLocation, type HistoryRow } from "../../src/history/index.js";
+import { acquireLock, HistoryStore, httpPort, LockHeldError, LockLostError, type HistoryLocation, type HistoryRow } from "../../src/history/index.js";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
 import { currentDigest, executeApply, inspect, openVersioned, verifyApproval } from "../../src/versioned/index.js";
 import { migration } from "../helpers/fake-clickhouse.js";
 import { CLUSTER, startKeeperCluster, type KeeperCluster } from "./keeper-cluster.js";
 import { suiteName } from "./names.js";
+import { EXIT_HELD } from "../../src/exit.js";
 
 const DB = suiteName("keeper");
 const HISTORY = `${DB}_history`;
@@ -97,7 +98,7 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
     expect(first.notice).toBeUndefined();
     const second = acquireLock(p2, options("runner-2"));
     await expect(second).rejects.toBeInstanceOf(LockHeldError);
-    await expect(second).rejects.toMatchObject({ exitCode: LOCKED, holder: first.owner });
+    await expect(second).rejects.toMatchObject({ exitCode: EXIT_HELD, holder: first.owner });
     await first.heartbeat();
     await first.release();
 
@@ -156,7 +157,7 @@ describe.skipIf(!enabled)("the Keeper lock and the replicated history (scratch c
 
     const other = await acquireLock(await httpPort(r2), { database: HIST2, topology: { kind: "cluster", cluster: CLUSTER }, holder: "other-runner", serverKey: "scratch" });
     const blocked = executeApply(venv, [m], { approvedDigest: digest, allowOutOfOrder: false, approve: (d) => verifyApproval(ledger, op, d), log: () => undefined });
-    await expect(blocked).rejects.toMatchObject({ exitCode: LOCKED, holder: other.owner });
+    await expect(blocked).rejects.toMatchObject({ exitCode: EXIT_HELD, holder: other.owner });
     await other.release();
 
     const result = await executeApply(venv, [m], { approvedDigest: digest, allowOutOfOrder: false, approve: (d) => verifyApproval(ledger, op, d), log: () => undefined });

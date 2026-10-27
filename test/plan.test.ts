@@ -19,10 +19,10 @@ const plan = (changes: Plan["diff"]["changes"], refused: Plan["refused"] = []): 
 });
 
 describe("plan", () => {
-  it("exits 2 when a change needs its own Op, 0 otherwise", () => {
+  it("exits 3 when a change needs its own Op, 0 otherwise", () => {
     expect(planExitCode(plan([]))).toBe(0);
     expect(planExitCode(plan([foreignDrop] as never))).toBe(0);
-    expect(planExitCode(plan([rebuild] as never, [rebuild] as never))).toBe(2);
+    expect(planExitCode(plan([rebuild] as never, [rebuild] as never))).toBe(3);
   });
 
   it("counts only changes to declared objects as work for apply", () => {

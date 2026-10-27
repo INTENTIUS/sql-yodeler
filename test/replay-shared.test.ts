@@ -31,7 +31,7 @@ describe("a replay that would empty another profile's database (#12)", () => {
     try {
       refuseShared(replay, shared, [], "clickhouse");
     } catch (e) {
-      expect((e as { exitCode: number }).exitCode).toBe(4);
+      expect((e as { exitCode: number }).exitCode).toBe(1);
     }
     expect(() => { refuseShared(replay, shared, ["dev"], "clickhouse"); }).not.toThrow();
   });

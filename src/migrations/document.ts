@@ -87,7 +87,7 @@ export interface MigrationDocument {
   /**
    * Pre-migration checks (#52): read-only queries `yodel apply` runs against
    * the environment before the migration's first statement; one that fails
-   * refuses the run (exit 4). Absent when there are none. In the checksum,
+   * refuses the run (exit 1). Absent when there are none. In the checksum,
    * so in the plan digest. See `./checks.ts`.
    */
   checks?: MigrationCheck[];

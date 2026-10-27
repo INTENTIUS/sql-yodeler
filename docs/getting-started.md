@@ -142,7 +142,7 @@ If a Postgres of your own already listens on `127.0.0.1:5432` (Homebrew's, for e
 
 <!-- /tabs -->
 
-`<ENV>` is `DEV` or `PROD`. Without the users, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set` (`DEV_POSTGRES_READER_USER` on Postgres). The reader cannot write, so `yodel apply` runs with `YODEL_ROLE=writer:dev`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 4) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_ROLE=writer:dev npx yodel apply dev`).
+`<ENV>` is `DEV` or `PROD`. Without the users, `npx yodel plan dev` stops with `sql.profiles.dev.user names DEV_CLICKHOUSE_READER_USER, which is not set` (`DEV_POSTGRES_READER_USER` on Postgres). The reader cannot write, so `yodel apply` runs with `YODEL_ROLE=writer:dev`, as `just apply` does. Run as the reader, `yodel apply dev` refuses before the approval gate (exit 1) and names the variable to set; the commands yodel prints to run again carry it too (`YODEL_ROLE=writer:dev npx yodel apply dev`).
 
 ## 4. Write the first migration
 

@@ -214,10 +214,10 @@ describe.skipIf(!clickhouseReachable)("the versioned path on clickhouse", () => 
     const moved = { ...doc, checksum: computeChecksum({ sql: three.files.sql, json: doc }) };
     writeFileSync(join(three.dir, "migration.json"), serializeDocument(moved));
 
-    const mismatch = await status(4);
+    const mismatch = await status(1);
     expect(mismatch.mismatches).toMatchObject([{ kind: "applied", id: three.id }]);
     const refused = await yodel(at("apply", "e2e"));
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain(`${three.id} was applied with checksum`);
     expect(refused.err).toContain("yodel repair");
 
@@ -228,7 +228,7 @@ describe.skipIf(!clickhouseReachable)("the versioned path on clickhouse", () => 
         `(${String(seq)}, 'repair', 'migration', '${three.id}', '${late.id}', '${moved.checksum}', -1, 'succeeded', 'e2e', 'rebased onto ${late.id}')`,
     );
 
-    const late1 = await status(4);
+    const late1 = await status(1);
     expect(late1.mismatches).toEqual([]);
     expect(late1.outOfOrder).toEqual([late.id]);
     expect(late1.pending).toMatchObject([{ id: late.id, outOfOrder: true }]);
@@ -236,7 +236,7 @@ describe.skipIf(!clickhouseReachable)("the versioned path on clickhouse", () => 
     expect(text.out).toContain(`Out of order (1): ${late.id}; apply with --allow-out-of-order`);
 
     const notAllowed = await yodel(at("apply", "e2e"));
-    expect(notAllowed.code).toBe(4);
+    expect(notAllowed.code).toBe(1);
     expect(notAllowed.err).toMatch(new RegExp(`${late.id} is out of order.*--allow-out-of-order`));
     expect(await count(`EXISTS TABLE ${DB}.c`)).toBe(0);
 

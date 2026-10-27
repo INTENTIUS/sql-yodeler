@@ -29,7 +29,7 @@
  *
  * The profile carries both roles under a symbol chant does not read, so
  * yodel sees the reader and the writer from one evaluation of the config:
- * it refuses (exit 4) an environment whose two roles are the same user or
+ * it refuses (exit 1) an environment whose two roles are the same user or
  * read the same variable, and `yodel ci` gives each job the variables, and
  * the cloud identity, of the role it runs as.
  */

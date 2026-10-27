@@ -1,3 +1,4 @@
+import { EXIT_FAILED } from "./exit.js";
 /** Where a command writes. Tests pass their own; the bin passes process.stdout and stderr. */
 export interface Io {
   out: (text: string) => void;
@@ -29,7 +30,7 @@ export function notImplemented(name: string, summary: string): Command {
     implemented: false,
     run: (_args, io) => {
       io.err(`yodel ${name}: not implemented yet\n`);
-      return Promise.resolve(2);
+      return Promise.resolve(EXIT_FAILED);
     },
   };
 }

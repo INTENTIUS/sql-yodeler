@@ -138,7 +138,7 @@ The reason is required. `yodel apply` records each silence (step, rule, reason) 
 
 `yodel lint --env <env>` also reads the environment's history: an applied migration whose files changed since it ran is a `checksum` error, a pending migration's edit a warning. `yodel.config.ts` sets rule levels: `lint: { rules: { "ch-mutation": "warning", "pg-lock": "off" } }`; the integrity rules cannot be lowered. `yodel lint --rules` lists the rules and their levels.
 
-`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server (a throwaway emulator, `npx yodel emulator up`) and compares each with its recorded schema; the first that differs fails the run (rule `replay`, exit 3), named. The databases or schemas the history names must not exist there yet: otherwise it exits 4 and runs nothing, unless `--reset`, which drops them first (never point it at a server whose data matters). `--keep` leaves the replayed database in place to look at.
+`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server (a throwaway emulator, `npx yodel emulator up`) and compares each with its recorded schema; the first that differs fails the run (rule `replay`, exit 1), named. The databases or schemas the history names must not exist there yet: otherwise it exits 4 and runs nothing, unless `--reset`, which drops them first (never point it at a server whose data matters). `--keep` leaves the replayed database in place to look at.
 
 ## Contributing
 

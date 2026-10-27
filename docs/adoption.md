@@ -92,7 +92,7 @@ What it needs first:
 - The writer's credentials. `init` writes the history row, and creates the history's database or schema and table when they are not there. The templates read the reader's credentials, which their READMEs create read-only, unless `YODEL_ROLE=writer:<env>`, so with a template it is `YODEL_ROLE=writer:<env> npx yodel init --from <env> --force`.
 - No subdirectory in `migrations/`. Move another tool's migration files out of it first.
 
-It refuses (exit 4, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, the environment holds nothing, or the environment holds an object of a kind yodel cannot declare.
+It refuses (exit 1, nothing written) when the source directory already declares a schema (unless `--force`), the project already has migrations, the history already records migrations, the environment holds nothing, or the environment holds an object of a kind yodel cannot declare.
 
 ### What adopts, and what refuses
 
@@ -178,7 +178,7 @@ The [Postgres example](../examples/postgres/README.md#2-adopting-the-schema-into
 YODEL_ROLE=writer:prod npx yodel init --baseline prod
 ```
 
-1. It plans the schema the baseline (the project's first migration) records against `<env>`'s live database, from `migration.json` alone. The plan must be empty: every object the baseline declares is there as it declares it, and the profile's databases or schemas hold nothing else. Each difference is named, with what the environment has and what the baseline declares, and the command refuses (exit 4), recording nothing:
+1. It plans the schema the baseline (the project's first migration) records against `<env>`'s live database, from `migration.json` alone. The plan must be empty: every object the baseline declares is there as it declares it, and the profile's databases or schemas hold nothing else. Each difference is named, with what the environment has and what the baseline declares, and the command refuses (exit 1), recording nothing:
 
    ```text
    yodel init: refused: prod's live schema is not the schema 20261010T1745-baseline records, so the baseline cannot be recorded applied there. 1 difference:
@@ -189,4 +189,4 @@ YODEL_ROLE=writer:prod npx yodel init --baseline prod
 2. When they match, it runs `<env>`'s migrations Op, as `yodel apply` does. The Plan step compares again and prints the record's digest (the baseline, the empty history and the live schema), the gate binds the approval to that digest, and the run stops there (exit 3) with the command that approves it, `yodel approve <env> --plan <digest>`. Approve, and run `yodel init --baseline <env>` again.
 3. The Apply step takes the lock, checks that the history still records nothing, compares again, refuses if the digest moved since the approval, and appends the baseline's history row: a succeeded migration row whose `note` starts `baseline:`, with the approved digest. None of the baseline's statements is sent.
 
-From there `yodel status <env>` lists the baseline applied, and `yodel plan <env>` and `yodel apply <env>` take the migrations after it, as in every other environment. It refuses (exit 4) a project with no migrations and an environment whose history records anything.
+From there `yodel status <env>` lists the baseline applied, and `yodel plan <env>` and `yodel apply <env>` take the migrations after it, as in every other environment. It refuses (exit 1) a project with no migrations and an environment whose history records anything.

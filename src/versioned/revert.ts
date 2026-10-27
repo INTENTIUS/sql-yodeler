@@ -33,8 +33,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { diffStatements, type StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { YodelError } from "../project.js";
-import { EXIT_NEEDS_OP, EXIT_REFUSED } from "../exit.js";
+import { YodelError, yodelRefusal } from "../project.js";
+import { EXIT_WAITING, EXIT_MOVED } from "../exit.js";
 import { emptyBuild, isCheckpoint, type Migration, type MigrationStep } from "../migrations/index.js";
 import { asBackfill, describeStep } from "../steps/index.js";
 import { HistoryRecorder, MIGRATION_ROW, newRunContext, statementSha, withLock, appliedBy, type HistoryState } from "../history/index.js";
@@ -140,29 +140,27 @@ export function planRevert(input: { environment: string; ordered: readonly Migra
   const m = ordered[at];
   if (!m) throw new YodelError(`no migration ${id} in the migrations directory`);
   if (status.mismatches.length > 0) {
-    throw new YodelError(`refused: the history does not match the migrations directory; nothing was reverted:\n${status.mismatches.map((x) => `  ${x.message}`).join("\n")}`, EXIT_REFUSED);
+    throw yodelRefusal(`refused: the history does not match the migrations directory; nothing was reverted:\n${status.mismatches.map((x) => `  ${x.message}`).join("\n")}`);
   }
   // Checkpoints (#63): one an environment started from has no schema before it there, and the migrations before it never ran there.
   const skipped = status.skipped?.find((k) => k.id === id);
   if (skipped) {
-    throw new YodelError(
+    throw yodelRefusal(
       skipped.reason === "covered"
         ? `refused: ${id} comes before the checkpoint ${skipped.checkpoint ?? ""}, which ${environment} started from: it never ran in ${environment}, so there is nothing to revert. Nothing was reverted.`
         : `refused: ${id} is a checkpoint ${environment} skips, since it ran the migrations before it: it never ran in ${environment}, so there is nothing to revert. Nothing was reverted.`,
-      EXIT_REFUSED,
     );
   }
   if (isCheckpoint(m) && status.applied.some((a) => a.id === id)) {
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: ${id} is the checkpoint ${environment} started from: it created the whole schema, and ${environment} never ran the migrations before it, so there is no earlier schema to go back to. Nothing was reverted.`,
-      EXIT_REFUSED,
     );
   }
   const applied = status.applied.find((a) => a.id === id);
-  if (!applied) throw new YodelError(`refused: ${id} is not applied in ${environment}, so there is nothing to revert. Nothing was reverted.`, EXIT_REFUSED);
+  if (!applied) throw yodelRefusal(`refused: ${id} is not applied in ${environment}, so there is nothing to revert. Nothing was reverted.`);
   const later = status.applied.filter((a) => a.index !== undefined && a.index > at).map((a) => a.id);
   if (later.length > 0) {
-    throw new YodelError(`refused: ${later.join(", ")} ${later.length === 1 ? "is" : "are"} applied in ${environment} after ${id}, and ${later.length === 1 ? "was" : "were"} written against it; revert ${later.length === 1 ? "it" : "them"} first, newest first. Nothing was reverted.`, EXIT_REFUSED);
+    throw yodelRefusal(`refused: ${later.join(", ")} ${later.length === 1 ? "is" : "are"} applied in ${environment} after ${id}, and ${later.length === 1 ? "was" : "were"} written against it; revert ${later.length === 1 ? "it" : "them"} first, newest first. Nothing was reverted.`);
   }
 
   const parent = m.parent === null ? undefined : ordered.find((x) => x.id === m.parent);
@@ -181,14 +179,14 @@ export function planRevert(input: { environment: string; ordered: readonly Migra
   if (notStatements.length > 0) {
     throw new YodelError(
       `refused: going back from ${id} to ${parent?.id ?? "an empty schema"} takes a step yodel revert does not run (${notStatements.map((s) => describeStep(s)).join("; ")}); write the change as a new migration (yodel new). Nothing was reverted.`,
-      EXIT_NEEDS_OP,
+      EXIT_WAITING,
     );
   }
   const dataSteps = doc.steps.flatMap((s, i) => (asBackfill(s) ? [`step ${String(i)}: ${describeStep(s)}`] : []));
   if (dataSteps.length > 0 && !input.step) {
     throw new YodelError(
       `refused: ${id} has a data step the recorded schemas cannot undo (${dataSteps.join("; ")}). Write the statements that undo it in a file and pass --step <file>; they run before the reverse statements. Nothing was reverted.`,
-      EXIT_NEEDS_OP,
+      EXIT_WAITING,
     );
   }
   const statements: RevertStatement[] = [
@@ -270,7 +268,7 @@ export async function executeRevert(venv: VersionedEnv, ordered: readonly Migrat
     const plan = planRevert({ environment: venv.environment, ordered, status, state, id: options.id, step: options.step });
     const digest = await revertDigest(venv, status, plan);
     if (!(await sameDigest(digest, options.approvedDigest))) {
-      throw new YodelError(`refused: the revert's plan moved since it was approved (approved ${options.approvedDigest}, now ${digest}). Nothing was reverted; run yodel revert ${venv.environment} ${options.id} again and approve the new plan.`, 1);
+      throw new YodelError(`refused: the revert's plan moved since it was approved (approved ${options.approvedDigest}, now ${digest}). Nothing was reverted; run yodel revert ${venv.environment} ${options.id} again and approve the new plan.`, EXIT_MOVED);
     }
     await options.approve(digest);
     // The policy, judged again under the lock for the digest computed here: a denial with no override for it refuses.

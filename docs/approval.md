@@ -141,7 +141,7 @@ The token comes from `CHANT_FORGE_TOKEN`, else `GITHUB_TOKEN` or `GH_TOKEN` (Git
 - When the approval is recorded but no job was started (no token, a token the forge refused, a push that did not land), chant says why and `yodel approve` exits 3. Once that is fixed, run the job again, or leave it to the [scheduled resume job](#the-scheduled-resume-job).
 - When no CI job waits (the gate was reached by `yodel apply` on your machine), there is nothing to resume; run `yodel apply <env>`. In a repository with no remote, `yodel approve` records the approval and resumes nothing.
 
-It never approves without a person at the terminal: with no terminal to ask (a script, CI, a coding agent) it approves nothing and exits 4, and no flag skips the question. A script that records approvals itself takes chant's command from the `--json` output's `chantApprove` field.
+It never approves without a person at the terminal: with no terminal to ask (a script, CI, a coding agent) it approves nothing and exits 1, and no flag skips the question. A script that records approvals itself takes chant's command from the `--json` output's `chantApprove` field.
 
 ### The scheduled resume job
 
@@ -189,7 +189,7 @@ The policy comes from the base commit, the first parent of the commit being appl
 
 ### Promotion: what the wave before has applied
 
-A wave applies only migrations the environment before it has applied. `waves[].requires` names that environment; it defaults to the wave before, and `requires: false` turns it off. Before anything is asked or applied, `yodel apply <env>` (in a wave job, run by hand, or the migrations Op's Apply step) reads the required environment's history with that environment's own profile, which outside its own wave job is its reader, and refuses any pending migration the history does not record as applied with the checksum its files have now. It exits 4 and applies nothing, with a message like this one:
+A wave applies only migrations the environment before it has applied. `waves[].requires` names that environment; it defaults to the wave before, and `requires: false` turns it off. Before anything is asked or applied, `yodel apply <env>` (in a wave job, run by hand, or the migrations Op's Apply step) reads the required environment's history with that environment's own profile, which outside its own wave job is its reader, and refuses any pending migration the history does not record as applied with the checksum its files have now. It exits 3 and applies nothing, with a message like this one:
 
 ```text
 yodel apply: refused: prod applies only migrations staging applied first, and 1 pending one has not run there:
@@ -249,7 +249,7 @@ A `sql` step is a read-only query on the environment's server, judged like a mig
 
 The steps are chant's Op waves stage hooks: `yodel ci` writes each environment's into its wave in `yodel-waves.json`, and chant reads them there at the base commit, like the gate policy. Outside the waves, `yodel apply <env>` reads them from `yodel.config.ts` at the base commit. Either way a pull request cannot add a step that runs with the writer's credentials, or remove one that would hold it. A SQL step's hook runs `yodel apply <env> --step-sql <sql>`; a command's runs `sh -c`. They run in order, and a step that fails stops the ones after it, unless its `onFailure` is `approve`. They run only when something is pending:
 
-- `before` SQL checks run when the wave is planned (chant runs them before the plan), and in the migrations Op's path `yodel apply <env>` runs them before the gate. Every `before` step runs again under the lock, just before the first migration: the SQL checks read the data first, then each step's verdict is taken in order. A command runs once per apply, under the lock: it may have side effects (a notification, a snapshot), so planning only shows that it will run. A failing step refuses the run, exit 4, nothing applied.
+- `before` SQL checks run when the wave is planned (chant runs them before the plan), and in the migrations Op's path `yodel apply <env>` runs them before the gate. Every `before` step runs again under the lock, just before the first migration: the SQL checks read the data first, then each step's verdict is taken in order. A command runs once per apply, under the lock: it may have side effects (a notification, a snapshot), so planning only shows that it will run. A failing step refuses the run, exit 1, nothing applied.
 - With `onFailure: "approve"`, a failing `before` step holds the wave for a person instead, whatever its gate: chant waits for an approval of the wave's digest before it applies anything, and the wave job exits 3 with the command that approves it, `chant approve yodel-apply <gate> --plan <digest>` (or `yodel approve <env> --plan <digest>`). Once someone approves that digest, the job run again applies it; the step, run again under the lock, is let through. A step that first fails under the lock stops the run there the same way (exit 3), with nothing applied, and chant runs the apply again once the approval stands.
 - `after` steps run under the lock once the last migration's statements succeeded. A failing one fails the run, exit 1; the migrations stay applied.
 - A wave run that applies nothing (nothing pending, or another apply got there first) runs no step and tells chant so; the steps run once per apply that changes the schema, not once per push.
@@ -521,7 +521,7 @@ A rule applies to the environments it lists, or to every one. It denies the plan
 
 The policy is read from `yodel.config.ts` at the base commit, the commit a change merges onto (the merge base with the target branch on a pull request, `HEAD^1` on main, or `YODEL_BASE`), as a wave's gate is, never from the working tree. A pull request that weakens or deletes a rule is judged by the rule the branch had, and its own policy applies once it is merged. A rule the base does not have applies to nothing yet. When the working tree's policy differs from the base's, `yodel plan` and `yodel apply` say which one applies.
 
-`yodel plan` shows each rule's outcome, and the pull request comment shows them in a table with the command that overrides a denial. `yodel apply` judges the policy before the gate and the Apply step judges it again under the lock: a rule that denies the plan refuses the apply with exit 4, naming the rule and why, and nothing is applied.
+`yodel plan` shows each rule's outcome, and the pull request comment shows them in a table with the command that overrides a denial. `yodel apply` judges the policy before the gate and the Apply step judges it again under the lock: a rule that denies the plan refuses the apply with exit 7, naming the rule and why, and nothing is applied.
 
 An override is a person's decision, with a reason, to apply a plan a rule denies:
 
@@ -537,7 +537,7 @@ The Apply step writes the overrides it relied on into the history, in the `note`
 
 ### Reverts
 
-`yodel revert` ([Reverting](migrations.md#reverting-yodel-revert)) is judged by the same policy, read at the base commit, before the gate and again under the lock. The rules see the revert as a plan with one entry in `pending`, the migration reverted, whose steps are the revert's statements in the order they run (a hand-written revert step's first), and `plan.revert` names the migration and the one it goes back to. A revert usually drops what the migration added, so a rule that refuses drops (or `refuse.destructive`) in prod refuses the revert too: exit 4, nothing reverted. To revert anyway, override for the revert's own digest:
+`yodel revert` ([Reverting](migrations.md#reverting-yodel-revert)) is judged by the same policy, read at the base commit, before the gate and again under the lock. The rules see the revert as a plan with one entry in `pending`, the migration reverted, whose steps are the revert's statements in the order they run (a hand-written revert step's first), and `plan.revert` names the migration and the one it goes back to. A revert usually drops what the migration added, so a rule that refuses drops (or `refuse.destructive`) in prod refuses the revert too: exit 7, nothing reverted. To revert anyway, override for the revert's own digest:
 
 ```sh
 npx yodel override prod --revert 20261010T0900-add-coupons --rule no-drops-in-prod --reason "added by mistake, OPS-415" --by alice
@@ -557,7 +557,7 @@ npx yodel override prod --rule no-drops-in-prod --reason "the column has been un
 npx yodel apply prod     # past the policy, then the ApplyOp's gate
 ```
 
-`yodel apply` judges the plan before it runs the ApplyOp and refuses a denial with exit 4. The override is recorded under the ApplyOp's name, for a digest yodel takes over the environment, the dialect and the declared changes, so it stops counting when the live database or `src/` moves. It is spent once the ApplyOp applies: a run that stops at the gate, or one whose Op leaves the change unapplied, has not used it. There is no history, so the override is on `chant/lifecycle` only. [The two workflows](workflows.md#review-on-a-pull-request) has the rest of the declarative review.
+`yodel apply` judges the plan before it runs the ApplyOp and refuses a denial with exit 7. The override is recorded under the ApplyOp's name, for a digest yodel takes over the environment, the dialect and the declared changes, so it stops counting when the live database or `src/` moves. It is spent once the ApplyOp applies: a run that stops at the gate, or one whose Op leaves the change unapplied, has not used it. There is no history, so the override is on `chant/lifecycle` only. [The two workflows](workflows.md#review-on-a-pull-request) has the rest of the declarative review.
 
 ## Gating SQL with another project's change: `yodel plan --part`
 

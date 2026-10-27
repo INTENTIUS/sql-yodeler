@@ -162,7 +162,7 @@ describe("yodel rebase", () => {
     expect(conflict).toBeInstanceOf(RebaseConflict);
     expect((conflict as RebaseConflict).objects).toEqual(["a"]);
     expect((conflict as RebaseConflict).message).toMatch(/both change a, differently.*Nothing was written.*yodel new/);
-    expect((conflict as RebaseConflict).exitCode).toBe(4);
+    expect((conflict as RebaseConflict).exitCode).toBe(1);
   });
 
   it("refuses one table declared under two export names, and allows the same change on both sides", () => {
@@ -184,7 +184,7 @@ describe("yodel rebase", () => {
     writeFileSync(sql, `-- yodel:allow SQLCH250 reviewed\n${readFileSync(sql, "utf8")}`);
 
     const refused = await yodel(["rebase", "--dir", p.dir]);
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain(`${c.id} has files that differ from what yodel wrote`);
     expect(() => readMigrations(p.migrations)).toThrow(/fork/);
 
@@ -308,7 +308,7 @@ describe("yodel repair", () => {
     try {
       checkRepair(one, one.id, deriveState([]), "e2e");
     } catch (e) {
-      expect((e as { exitCode: number }).exitCode).toBe(4);
+      expect((e as { exitCode: number }).exitCode).toBe(1);
     }
   });
 

@@ -4,11 +4,8 @@ import { loadProject, resolveEnvironment, type Project } from "../project.js";
 import type { Migration } from "../migrations/index.js";
 import { listTenants, tenantTarget } from "../tenants/index.js";
 import { closeVersioned, openVersioned, readChain, renderStatus, statusJson, statusReport, type StatusReport } from "../versioned/index.js";
+import { EXIT_WAITING } from "../exit.js";
 
-/** Exit code: migrations are pending, and nothing is wrong. */
-export const STATUS_PENDING = 3;
-/** Exit code: a checksum mismatch, an applied migration gone from the directory, or an out-of-order migration. */
-export const STATUS_REFUSED = 4;
 
 const help = `${usage("status")}
 
@@ -31,12 +28,13 @@ Options:
 
 Exit codes:
   0  every migration is applied
-  3  migrations are pending (failed part way included), and nothing is wrong
-  4  a checksum mismatch, an applied migration gone from the directory, an
+  3  migrations are pending (failed part way included), and nothing is
+     wrong; or a pending migration has a manual step or an Op step yodel
+     apply does not run
+  1  a checksum mismatch, an applied migration gone from the directory, an
      out-of-order migration (apply refuses it without --allow-out-of-order),
-     or a fork or another problem in the migrations directory
-  2  a pending migration has a manual step or an Op step yodel apply does not run
-  1  the status could not be read: a bad config, a server that does not answer
+     or a fork or another problem in the migrations directory; or the status
+     could not be read: a bad config, a server that does not answer
 `;
 
 /** `yodel status <env>`; the exit codes are in `help`. */
@@ -65,7 +63,7 @@ async function readStatus(project: Project, name: string, ordered: readonly Migr
   return statusReport(venv, ordered, { sync: false }).finally(() => closeVersioned(venv));
 }
 
-const exitOf = (report: StatusReport): number => report.refusal?.exitCode ?? (report.status.pending.length > 0 ? STATUS_PENDING : 0);
+const exitOf = (report: StatusReport): number => report.refusal?.exitCode ?? (report.status.pending.length > 0 ? EXIT_WAITING : 0);
 
 /** A tenant set's status (#56): each tenant's, then how many are up to date. The exit code is the worst tenant's: a refusal, then pending. */
 async function tenantsStatus(project: Project, env: string, tenants: readonly string[], ordered: readonly Migration[], json: boolean, io: Parameters<Command["run"]>[1]): Promise<number> {
@@ -79,5 +77,5 @@ async function tenantsStatus(project: Project, env: string, tenants: readonly st
   if (json) io.out(`${JSON.stringify({ environment: env, tenants: reports.map((r) => statusJson(r)), upToDate, total: reports.length }, null, 2)}\n`);
   else io.out(`${env}: ${String(upToDate)} of ${String(reports.length)} tenants up to date${upToDate < reports.length ? `; behind: ${reports.filter((r) => r.refusal || r.status.pending.length > 0).map((r) => r.environment).join(", ")}` : ""}\n`);
   const codes = reports.map(exitOf);
-  return codes.find((c) => c !== 0 && c !== STATUS_PENDING) ?? (codes.includes(STATUS_PENDING) ? STATUS_PENDING : 0);
+  return codes.find((c) => c !== 0 && c !== EXIT_WAITING) ?? (codes.includes(EXIT_WAITING) ? EXIT_WAITING : 0);
 }

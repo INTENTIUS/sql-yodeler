@@ -7,7 +7,7 @@ type: reference
 
 `yodel lint` checks the migrations directory against every rule, offline: no server and no dev database. It runs in CI on every pull request; the starter templates' pull request job runs it. Every rule is free.
 
-Exit codes: 0 no error (warnings and silenced findings do not fail), 3 at least one error, 1 lint could not run; with `--replay`, 4 when the target already holds what the history names and `--reset` was not given. `--json` prints the findings as JSON. The output quoted here is from the examples' runs.
+Exit codes: 0 no error (warnings and silenced findings do not fail), 1 at least one error, or lint could not run, or with `--replay` the target already holds what the history names and `--reset` was not given. `--json` prints the findings as JSON. The output quoted here is from the examples' runs.
 
 ## The rules
 
@@ -166,7 +166,7 @@ A statement rule can be silenced for one statement, with a reason the history re
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
 6 migrations: 1 error, 3 warnings, 1 silenced.
-[exit 3]
+[exit 1]
 ```
 
 and a column dropped:
@@ -190,7 +190,7 @@ A statement rule can be silenced for one statement, with a reason the history re
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
 5 migrations: 1 error, 3 warnings, 0 silenced.
-[exit 3]
+[exit 1]
 ```
 
 ## Rule levels
@@ -307,14 +307,14 @@ Some Postgres statements succeed or fail by what is in the table: a unique index
 CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON yodel_34_lint.orders (status);
 ```
 
-Rule `data-dependent`, a warning, flags each one with its pre-check, so a reviewer sees what the statement depends on. `yodel apply` runs the pre-checks with the migration's own [pre-migration checks](migrations.md#pre-migration-checks): before the gate, and again under the lock just before the migration's first statement. A pre-check that returns more than 0 refuses the apply with exit 4, naming the statement and the count, and nothing of the migration is sent:
+Rule `data-dependent`, a warning, flags each one with its pre-check, so a reviewer sees what the statement depends on. `yodel apply` runs the pre-checks with the migration's own [pre-migration checks](migrations.md#pre-migration-checks): before the gate, and again under the lock just before the migration's first statement. A pre-check that returns more than 0 refuses the apply with exit 1, naming the statement and the count, and nothing of the migration is sent:
 
 ```text
 $ yodel apply lint
 yodel apply: refused: a pre-migration check of 20261010T1311-unique-status failed before the gate. Nothing of 20261010T1311-unique-status was applied:
   step 0, CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON yodel_34_lint.orders (status), would fail: 2 values of (status) held by more than one row, which a unique index fails on (pre-check precheck-0: SELECT (SELECT count(*) FROM (SELECT 1 FROM yodel_34_lint.orders WHERE status IS NOT NULL GROUP BY status HAVING count(*) > 1) AS duplicates) AS n)
 Fix the data, then run yodel apply again; if the check is wrong, edit it in migration.json and run yodel lint --update-checksum 20261010T1311-unique-status (the plan digest moves, so the plan is approved again). A statement's pre-check is chant's count of the rows the statement fails on: fix those rows, or change the declaration.
-[exit 4]
+[exit 1]
 ```
 
 Both are from the `lint` claim's run, where `orders` holds two rows of each of two statuses and the declaration gains `CREATE UNIQUE INDEX CONCURRENTLY orders_status_key ON orders (status)`. `yodel lint` reports the same statement:
@@ -359,7 +359,7 @@ $ npx yodel lint
            reason: 600 rows; the copy takes seconds
 
 3 migrations: 1 error, 0 warnings, 1 silenced.
-[exit 3]
+[exit 1]
 ```
 
 For a migration not applied anywhere yet, `--update-checksum <id>` (repeatable) writes the new checksum into its `migration.json` before linting:
@@ -414,15 +414,15 @@ On the declarative path there are no migrations to check. `yodel lint` runs the 
 
 ## The replay check: --replay
 
-`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server and compares the schema each one leaves with the schema it recorded. The first that differs fails the run (rule `replay`, exit 3) and is named. This is what keeps the recorded schemas, which `yodel new` diffs against, true to what the statements do.
+`yodel lint --replay <env>` also replays every migration, in order, into `<env>`'s server and compares the schema each one leaves with the schema it recorded. The first that differs fails the run (rule `replay`, exit 1) and is named. This is what keeps the recorded schemas, which `yodel new` diffs against, true to what the statements do.
 
-`<env>` should be a throwaway server: the emulator (`npx yodel emulator up`), or in CI a service container, as the starter templates' `replay` profile is. The databases or schemas the history names must not exist there yet; otherwise it runs nothing and exits 4:
+`<env>` should be a throwaway server: the emulator (`npx yodel emulator up`), or in CI a service container, as the starter templates' `replay` profile is. The databases or schemas the history names must not exist there yet; otherwise it runs nothing and exits 1:
 
 <!-- quote: clickhouse#replay-refused -->
 ```console
 $ npx yodel lint --replay replay
 yodel lint: refused: replay and dev are the same server (127.0.0.1:8123) and both name shop; the replay would drop dev's database, with or without --reset. Point replay at a throwaway server of its own (a second emulator on another port), or, to empty dev too, add --reset-shared dev. Nothing was run.
-[exit 4]
+[exit 1]
 ```
 
 A checkpoint ([Migrations](migrations.md#checkpoints-yodel-checkpoint)) is replayed on its own: after the chain, the database is emptied again and the checkpoint's statements run into it, and the result must be its recorded schema.
@@ -488,8 +488,8 @@ Each case runs on a database of its own, built on `--env`'s server (default the 
 
 A checkpoint isn't part of the chain the cases build, as in the replay. Nothing is written to a history. At the end the databases are emptied again, unless you pass `--keep`.
 
-`yodel test` never runs on an environment yodel applies to. If the target's history table holds a row, it refuses (exit 4), `--reset` or not. As with the replay check, it also refuses a target that already holds what the history names (unless `--reset`), and a profile that shares its server with another profile naming the same databases (unless `--reset-shared <profile>`).
+`yodel test` never runs on an environment yodel applies to. If the target's history table holds a row, it refuses (exit 1), `--reset` or not. As with the replay check, it also refuses a target that already holds what the history names (unless `--reset`), and a profile that shares its server with another profile naming the same databases (unless `--reset-shared <profile>`).
 
-The run prints each case as `pass`, `FAIL` (with each expectation that did not hold) or `ERROR` (a migration or seed statement that failed, or an unknown migration id), and exits 3 when any case did not pass. `--json` prints the outcome (`schemas/test.schema.json`), `--junit <file>` writes it as JUnit XML (one test suite per file), and `--run <regexp>` runs only the cases whose names match.
+The run prints each case as `pass`, `FAIL` (with each expectation that did not hold) or `ERROR` (a migration or seed statement that failed, or an unknown migration id), and exits 1 when any case did not pass. `--json` prints the outcome (`schemas/test.schema.json`), `--junit <file>` writes it as JUnit XML (one test suite per file), and `--run <regexp>` runs only the cases whose names match.
 
 The examples have tests: `examples/clickhouse/tests/events.test.ts` covers the backfill and the rebuild with rows in the table, and `examples/postgres/tests/orders.test.ts` covers the column rename with rows, plus a constraint and a default. In a project with test files, `yodel ci` adds `yodel test --env replay --reset --junit yodel-test.xml` to the pull request's lint job, after the replay check on the same throwaway server.

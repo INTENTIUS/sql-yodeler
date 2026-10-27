@@ -52,14 +52,14 @@ describe("yodel lint (the command)", () => {
     expect(json(ran)).toMatchObject({ status: "passed", errors: 0, findings: [] });
   });
 
-  it("exits 3 on a fork, naming both migrations, in text and JSON", async () => {
+  it("exits 1 on a fork, naming both migrations, in text and JSON", async () => {
     const p = project();
     const first = add(p.migrations, "create", ch("id UInt64"), 0);
     const a = add(p.migrations, "add-a", ch("id UInt64, a String DEFAULT ''"), 1, first);
     const b = add(p.migrations, "add-b", ch("id UInt64, b String DEFAULT ''"), 2, first);
 
     const text = await yodel(p.at());
-    expect(text.code).toBe(3);
+    expect(text.code).toBe(1);
     expect(text.out).toContain(`error    fork: ${a.id} and ${b.id} both follow ${first.id}`);
     expect(text.out).toContain("3 migrations: 1 error, 0 warnings, 0 silenced.");
 
@@ -68,13 +68,13 @@ describe("yodel lint (the command)", () => {
     expect(doc.findings.map((f) => f.rule)).toEqual(["fork"]);
   });
 
-  it("exits 3 on a destructive change until it is silenced with a reason, and the checksum is recorded", async () => {
+  it("exits 1 on a destructive change until it is silenced with a reason, and the checksum is recorded", async () => {
     const p = project();
     add(p.migrations, "create", ch("id UInt64, gone String"), 0);
     const drop = add(p.migrations, "drop-gone", ch("id UInt64"), 1);
 
     const before = await yodel(p.at());
-    expect(before.code).toBe(3);
+    expect(before.code).toBe(1);
     expect(before.out).toContain(`${drop.id}\n  error    destructive: step 0: SQLCH202 Drop a column on yodel_14.events`);
     expect(before.out).toContain("-- yodel:allow <rule> <reason>");
 
@@ -105,7 +105,7 @@ describe("yodel lint (the command)", () => {
     const p = project();
     add(p.migrations, "create", ch("id UInt64, n UInt32"), 0);
     add(p.migrations, "widen", ch("id UInt64, n UInt64"), 1);
-    expect((await yodel(p.at())).code).toBe(3);
+    expect((await yodel(p.at())).code).toBe(1);
 
     const config = join(p.dir, "yodel.config.ts");
     writeFileSync(config, `export default { lint: { rules: { "ch-mutation": "warning" } } };\n`);

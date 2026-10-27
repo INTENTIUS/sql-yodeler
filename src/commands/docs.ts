@@ -42,9 +42,8 @@ Options:
 Exit codes:
   0  written
   1  nothing written: a bad config, a declaration chant cannot build, an
-     unknown migration id
-  4  refused: the migrations directory is not one chain (a fork, a missing
-     parent)
+     unknown migration id, or a migrations directory that is not one chain
+     (a fork, a missing parent)
 `;
 
 interface DocsArgs {

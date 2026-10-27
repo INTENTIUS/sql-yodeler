@@ -82,7 +82,7 @@ describe("ClickHouse access in a plan", () => {
     const build = { path: "", output: ch(reader, readEvents), dispose: () => undefined };
     expect(declaredChanges(plan([change("grants yodel_46_reader", "SQLCH274", "grants.INSERT ON yodel_46.events", "INSERT ON yodel_46.events")]), build)).toHaveLength(1);
     expect(planExitCode(plan([]))).toBe(0);
-    expect(planExitCode(plan([], [{ object: "yodel_46.odd", type: "ClickHouse::Dictionary", reason: "its definition does not parse" }]))).toBe(2);
+    expect(planExitCode(plan([], [{ object: "yodel_46.odd", type: "ClickHouse::Dictionary", reason: "its definition does not parse" }]))).toBe(1);
   });
 
   it("leaves access to chant's profile switch, and refuses a yodel.config.ts that says otherwise on the declarative path", () => {

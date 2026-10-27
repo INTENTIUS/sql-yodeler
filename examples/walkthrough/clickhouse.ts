@@ -137,7 +137,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel new events-by-id", code: 0, expect: ["ClickHouseRebuildOp"], quote: "steps.md#rebuild-new" },
     { cat: "migrations/{id:events-by-id}/migration.sql" },
     { say: "`yodel lint` flags a rebuild as an error (`ch-rebuild`):" },
-    { run: "npx yodel lint", code: 3, expect: ["ch-rebuild"] },
+    { run: "npx yodel lint", code: 1, expect: ["ch-rebuild"] },
     { say: "The table is small, so the rebuild is fine. Silence the rule for this step with a reason, on the line above it in `migration.sql`:" },
     {
       edit: "migrations/{id:events-by-id}/migration.sql",
@@ -146,7 +146,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
       quote: "steps.md#rebuild-sql",
     },
     { say: "The edit changes the migration's checksum, which lint reports, and the migration has not been applied anywhere, so record the new one:" },
-    { run: "npx yodel lint", code: 3, expect: ["checksum"], quote: "lint.md#checksum" },
+    { run: "npx yodel lint", code: 1, expect: ["checksum"], quote: "lint.md#checksum" },
     { run: "npx yodel lint --update-checksum {id:events-by-id}", code: 0, expect: ["1 silenced"] },
     { run: "git add -A && git commit -q -m 'feat: events sorted by id' && git push -q origin main", code: 0, hide: true },
     { say: "The pull request comment (`yodel plan dev --comment` in CI) is this Markdown:" },
@@ -223,7 +223,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     {
       say: "`yodel lint --replay replay` replays every migration, in order, into the server the `replay` profile names and compares each with the schema it recorded. Here that profile points at the same emulator as dev, which already holds `shop`, so it refuses:",
     },
-    { run: "npx yodel lint --replay replay", code: 4, expect: ["Nothing was run"], quote: "lint.md#replay-refused" },
+    { run: "npx yodel lint --replay replay", code: 1, expect: ["Nothing was run"], quote: "lint.md#replay-refused" },
     { say: "`--reset` drops the database first. In CI the profile points at a throwaway server the job starts. Here it is dev's server, and dev names the same database, so the replay would empty it; `--reset-shared dev` says that is intended, and the check runs last:" },
     { run: "npx yodel lint --replay replay --reset --reset-shared dev", code: 0, expect: ["Every migration replays to its recorded schema."], quote: [{ at: "lint.md#replay", excerpt: { from: "Replay of" } }, { at: "steps.md#replay-rebuild", excerpt: { from: "events-by-id: replaying", to: "events-by-id: matches its recorded schema" } }] },
   ],

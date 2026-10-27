@@ -97,7 +97,7 @@ describe("the report", () => {
     expect(xml).toContain('<testcase classname="tests/events.test.ts" name="fills &lt;country&gt;" time="1.200"/>');
     expect(xml).toContain('<failure message="SELECT 1 returned 2; expected &quot;3&quot;">');
     expect(xml).toContain('<error message="seed statement 0 failed">');
-    expect(testExitCode(run)).toBe(3);
+    expect(testExitCode(run)).toBe(1);
     expect(testExitCode({ ...run, cases: run.cases.slice(0, 1) })).toBe(0);
   });
 });

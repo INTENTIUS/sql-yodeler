@@ -33,15 +33,14 @@
 
 import { relative } from "node:path";
 import { pathToFileURL } from "node:url";
-import { YodelError, type Environment, type Project } from "../project.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import { environmentSettings } from "../config/settings.js";
 import { isCheckpoint, readMigrations, type Migration } from "../migrations/index.js";
 import { migrationsDir } from "../versioned/index.js";
 import { httpPort } from "../history/index.js";
 import { asBackfill, defaultStepRunner, planStep, type RebuildReceiptStore, type StepRunner } from "../steps/index.js";
 import type { BackfillStep } from "../steps/kinds.js";
-import { NOT_FRESH, openReplay, refuseShared, sharedProfiles, type ReplayDriver } from "../replay/index.js";
+import { openReplay, refuseShared, sharedProfiles, type ReplayDriver } from "../replay/index.js";
 import type { Expectation, TestCase } from "./define.js";
 import { testFiles } from "./files.js";
 
@@ -266,18 +265,16 @@ export async function runTests(project: Project, env: Environment, files: readon
     session = await openSession(project, env, processEnv);
     const rows = await session.historyRows();
     if (rows > 0) {
-      throw new YodelError(
+      throw yodelRefusal(
         `refused: ${env.name} has a migration history (${String(rows)} rows in ${environmentSettings(project, env.name, processEnv).historyDatabase}.history): it is an environment yodel applies to, and yodel test empties what the history names. ` +
           `Point --env at a throwaway server's profile (chant emulator up --lexicon sql). Nothing was run.`,
-        EXIT_REFUSED,
       );
     }
     const occupied = await driver.occupied();
     if (occupied.length > 0 && options.reset !== true) {
-      throw new YodelError(
+      throw yodelRefusal(
         `refused: yodel test needs a fresh database, and ${driver.where} already holds ${occupied.join(", ")}. ` +
           `Point --env at a throwaway server, or pass --reset to drop ${occupied.length === 1 ? "it" : "them"} first. Nothing was run.`,
-        NOT_FRESH,
       );
     }
 

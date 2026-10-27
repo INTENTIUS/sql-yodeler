@@ -6,7 +6,7 @@
  * before, and `false` turns it off. Before anything is applied (and before
  * the gate), `yodel apply <env>` reads each required environment's history
  * with that environment's own profile, which outside an apply job is its
- * reader, and refuses (exit 4) any pending migration the history does not
+ * reader, and refuses (exit 3) any pending migration the history does not
  * record as applied with the checksum its files have now. The requirement
  * is read from the working tree's yodel.config.ts and from the base
  * commit's, and both are enforced, so a change that drops its own
@@ -15,9 +15,9 @@
 
 import type { WaveConfig, YodelConfig } from "../config/define.js";
 import { loadYodelConfigAtBase } from "../config/base.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_WAITING } from "../exit.js";
 import type { Migration } from "../migrations/index.js";
-import { resolveEnvironment, YodelError, type Project } from "../project.js";
+import { resolveEnvironment, YodelError, type Project, yodelRefusal } from "../project.js";
 import { closeVersioned, inspect, openVersioned } from "../versioned/engine.js";
 import { splitTarget, tenantTarget } from "../tenants/target.js";
 import type { PendingMigration } from "../versioned/state.js";
@@ -70,7 +70,7 @@ export async function readPromotions(project: Project, env: string, ordered: rea
     try {
       environment = resolveEnvironment(project, req.env);
     } catch (e) {
-      throw new YodelError(`refused: ${env} requires ${req.env} (${req.from}), and ${e instanceof Error ? e.message : String(e)}; nothing was applied`, EXIT_REFUSED);
+      throw yodelRefusal(`refused: ${env} requires ${req.env} (${req.from}), and ${e instanceof Error ? e.message : String(e)}; nothing was applied`);
     }
     const venv = await openVersioned(project, environment);
     try {
@@ -101,10 +101,10 @@ export function promotionRefusal(env: string, promotions: readonly Promotion[]):
   );
   if (lines.length === 0) return undefined;
   const envs = [...new Set(promotions.filter((p) => p.migrations.some((m) => m.ran !== "applied")).map((p) => p.env))];
-  return new YodelError(
+  return yodelRefusal(
     `refused: ${env} applies only migrations ${envs.join(" and ")} applied first, and ${String(lines.length)} pending ${lines.length === 1 ? "one has" : "ones have"} not run there:\n${lines.join("\n")}\n` +
       `Nothing was applied. Apply ${lines.length === 1 ? "it" : "them"} to ${envs.join(" and ")} first.`,
-    EXIT_REFUSED,
+    EXIT_WAITING,
   );
 }
 

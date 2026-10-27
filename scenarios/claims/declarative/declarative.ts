@@ -293,10 +293,10 @@ const NO_DROPS = `import { defineConfig } from "@intentius/sql-yodeler";\n\nexpo
  * The declarative path's review (#249). yodel.config.ts at the base commit
  * declares a policy that refuses destructive changes, and the change drops
  * a column (ClickHouse: events.id; Postgres: orders.amount). yodel lint,
- * offline, passes; yodel lint --env flags the drop destructive (exit 3);
+ * offline, passes; yodel lint --env flags the drop destructive (exit 1);
  * yodel plan --format markdown, what --comment posts, carries the plan
  * comment's marker, the finding, the denied rule and the override command;
- * and yodel apply refuses before the gate (exit 4, status denied), so the
+ * and yodel apply refuses before the gate (exit 7, status denied), so the
  * column is still on the server. The schema and config are put back after.
  * BREAK: the policy arrives with the change rather than before it, so the
  * base commit has none, nothing denies, and yodel apply goes on to the gate.
@@ -317,14 +317,14 @@ async function review(ctx: Ctx, { p }: Declarative): Promise<void> {
     hold(offline.code === 0 && parse<{ declarative?: boolean }>(offline).declarative === true, `yodel lint, offline, exited ${String(offline.code)} on the declared schema: ${offline.out.slice(0, 600)}`);
     const linted = await p.yodel(["lint", "--env", p.env, "--json"]);
     const findings = parse<{ findings: Array<{ rule: string; message: string }> }>(linted).findings;
-    hold(linted.code === 3 && findings.some((f) => f.rule === "destructive" && f.message.includes(column)), `yodel lint --env exited ${String(linted.code)} with no destructive finding on ${table}.${column}: ${JSON.stringify(findings)}`);
+    hold(linted.code === 1 && findings.some((f) => f.rule === "destructive" && f.message.includes(column)), `yodel lint --env exited ${String(linted.code)} with no destructive finding on ${table}.${column}: ${JSON.stringify(findings)}`);
     const md = await p.yodel(["plan", p.env, "--format", "markdown"]);
     for (const want of [`<!-- yodel:plan env=${p.env} -->`, "| **error** | `destructive` |", "| `no-drops` | **denied** |", `yodel override ${p.env} --rule no-drops`]) {
       hold(md.out.includes(want), `the plan comment does not carry ${want}:\n${md.out.slice(0, 1500)}`);
     }
     const applied = await p.yodel(["apply", p.env, "--json"]);
     const status = parse<{ status?: string }>(applied).status;
-    hold(applied.code === 4 && status === "denied", `yodel apply exited ${String(applied.code)} (${String(status)}) on a plan the policy at base denies`);
+    hold(applied.code === 7 && status === "denied", `yodel apply exited ${String(applied.code)} (${String(status)}) on a plan the policy at base denies`);
     hold(await ctx.db.columnExists(table, column), `${table}.${column} is gone from the server after a denied apply`);
   } finally {
     p.write("src/schema.ts", before);

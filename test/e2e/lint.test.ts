@@ -126,7 +126,7 @@ describe.skipIf(!clickhouseReachable)("yodel lint on clickhouse", () => {
     writeFileSync(sqlPath, `${readFileSync(sqlPath, "utf8")}-- edited after it was applied\n`);
 
     const ran = await yodel(at("lint", "--env", "e2e", "--json"));
-    expect(ran.code).toBe(3);
+    expect(ran.code).toBe(1);
     const doc = json(ran) as LintDoc;
     expect(doc.findings.filter((f) => f.rule === "checksum").map((f) => [f.migration, f.level])).toEqual([[first, "error"]]);
     expect(doc.findings.find((f) => f.rule === "checksum")?.message).toContain(`e2e: ${first} was applied with checksum`);

@@ -523,7 +523,7 @@ A statement rule can be silenced for one statement, with a reason the history re
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
 3 migrations: 1 error, 0 warnings, 0 silenced.
-[exit 3]
+[exit 1]
 ```
 
 The table is small, so the rebuild is fine. Silence the rule for this step with a reason, on the line above it in `migration.sql`:
@@ -553,7 +553,7 @@ $ npx yodel lint
            reason: 600 rows; the copy takes seconds
 
 3 migrations: 1 error, 0 warnings, 1 silenced.
-[exit 3]
+[exit 1]
 ```
 
 ```console
@@ -1352,7 +1352,7 @@ No drift: every declared object matches the server.
 ```console
 $ npx yodel lint --replay replay
 yodel lint: refused: replay and dev are the same server (127.0.0.1:8123) and both name shop; the replay would drop dev's database, with or without --reset. Point replay at a throwaway server of its own (a second emulator on another port), or, to empty dev too, add --reset-shared dev. Nothing was run.
-[exit 4]
+[exit 1]
 ```
 
 `--reset` drops the database first. In CI the profile points at a throwaway server the job starts. Here it is dev's server, and dev names the same database, so the replay would empty it; `--reset-shared dev` says that is intended, and the check runs last:

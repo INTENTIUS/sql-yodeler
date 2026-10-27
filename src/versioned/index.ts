@@ -16,8 +16,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Project } from "../project.js";
 import { MIGRATIONS_DIR, MigrationDirectoryError, readMigrations } from "../migrations/index.js";
-import { YodelError } from "../project.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { yodelRefusal } from "../project.js";
 import type { Migration } from "../migrations/index.js";
 import { currentDigest, inspect, integrityRefusal, stepRefusal, type VersionedEnv } from "./engine.js";
 import type { StatusReport } from "./report.js";
@@ -42,13 +41,13 @@ export const BROKEN_CHAIN = "the migrations directory is not one unbroken chain;
 
 /**
  * The migrations in chain order, for apply and status. A directory problem is
- * a refusal (exit 4), as yodel plan reports it: nothing is applied.
+ * a refusal (exit 1), as yodel plan reports it: nothing is applied.
  */
 export function readChain(project: Project): Migration[] {
   try {
     return readMigrations(migrationsDir(project));
   } catch (e) {
-    if (e instanceof MigrationDirectoryError) throw new YodelError(`refused: ${BROKEN_CHAIN}:\n${e.problems.map((p) => `  ${p.message}`).join("\n")}`, EXIT_REFUSED);
+    if (e instanceof MigrationDirectoryError) throw yodelRefusal(`refused: ${BROKEN_CHAIN}:\n${e.problems.map((p) => `  ${p.message}`).join("\n")}`);
     throw e;
   }
 }

@@ -23,7 +23,7 @@ A migration changes data as well as schema. Most of a migration is statements; a
 
 A step and any file it runs are in the migration's checksum, so in the plan digest the approval binds. Its history rows have `kind = 'step'`, and the `succeeded` (or `failed`) row's `note` is the step's summary as JSON. A step that failed or was stopped runs again on the next `yodel apply` and resumes from its receipts, skipping the partitions or batches that finished. `yodel lint --replay` runs rebuild and `PostgresMigrationOp` steps in the replayed database and skips backfills, which move data the replayed database does not have.
 
-Anything else, a manual step or an Op step `yodel apply` does not run (a rebuild in app mode), is refused before anything runs: `yodel plan` and `yodel status` exit 2, `yodel apply` exits 2 and applies nothing, and `yodel lint` reports it (rule `refused-step`). The output quoted here is from the examples' runs; `...` marks lines left out.
+Anything else, a manual step or an Op step `yodel apply` does not run (a rebuild in app mode), is refused before anything runs: `yodel plan` and `yodel status` exit 3, `yodel apply` exits 3 and applies nothing, and `yodel lint` reports it (rule `refused-step`). The output quoted here is from the examples' runs; `...` marks lines left out.
 
 ## ClickHouse rebuilds
 
@@ -424,7 +424,7 @@ The drop is approved the way an apply is: the digest covers each due object by i
 
 ## Manual steps
 
-A change neither a statement nor an Op makes is a manual step: `yodel new` writes it and says what it needs, and `yodel apply` refuses the migration with exit 2 until it is gone. Make the change another way (for example, split it into changes yodel can make, as `-- previously:` does for a rename), delete the migration, and write it again.
+A change neither a statement nor an Op makes is a manual step: `yodel new` writes it and says what it needs, and `yodel apply` refuses the migration with exit 3 until it is gone. Make the change another way (for example, split it into changes yodel can make, as `-- previously:` does for a rename), delete the migration, and write it again.
 
 ## The ownership marker
 

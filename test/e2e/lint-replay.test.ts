@@ -1,8 +1,8 @@
 /**
  * `yodel lint --replay <env>` (#11) against the emulator: a clean history
- * passes, a hand-edited recorded schema fails naming the migration (exit 3),
+ * passes, a hand-edited recorded schema fails naming the migration (exit 1),
  * and a target that already holds the history's database or schema is
- * refused with exit 4 unless --reset. ClickHouse database <prefix>_lint_replay,
+ * refused with exit 1 unless --reset. ClickHouse database <prefix>_lint_replay,
  * Postgres schema <prefix>_lint_replay_pg, through the replay e2e fixtures (profile `emulator`).
  */
 
@@ -75,20 +75,20 @@ describe.skipIf(!clickhouseReachable)("yodel lint --replay on clickhouse", () =>
 
     p.tamperSchema(two.id, build(events(", country LowCardinality(String) DEFAULT ''")));
     const bad = await p.lint();
-    expect(bad.code).toBe(3);
+    expect(bad.code).toBe(1);
     const doc = json(bad) as LintDoc;
     expect(doc.findings.map((f) => [f.rule, f.level, f.migration])).toEqual([["replay", "error", two.id]]);
     expect(doc.findings[0]?.message).toContain(`${two.id}: replaying the history through it does not give the schema it records`);
     expect(doc.replay?.outcome).toBe("differs");
   }, 300_000);
 
-  it("refuses a target that is not fresh with exit 4, and replays into it with --reset", async () => {
+  it("refuses a target that is not fresh with exit 1, and replays into it with --reset", async () => {
     const p = project("replay-clickhouse");
     disposers.push(p.dispose);
     p.next("events", 0, build(events()));
     await clickhouse(`CREATE DATABASE ${DB}`);
     const refused = await p.lint();
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain(`already holds ${DB}`);
     const reset = await p.lint("--reset");
     expect(reset.code, reset.err).toBe(0);
@@ -126,7 +126,7 @@ describe.skipIf(!postgresReachable)("yodel lint --replay on postgres", () => {
 
     p.tamperSchema(two.id, build(orders("status text NOT NULL,\n  note varchar(200)")));
     const bad = await p.lint();
-    expect(bad.code).toBe(3);
+    expect(bad.code).toBe(1);
     const doc = json(bad) as LintDoc;
     expect(doc.findings.map((f) => [f.rule, f.migration])).toEqual([["replay", two.id]]);
     expect(doc.findings[0]?.message).toMatch(/columns\.note\.type: replay has text, migration\.json records (character varying|varchar)\(200\)/);

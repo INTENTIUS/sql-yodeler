@@ -113,7 +113,7 @@ describe("yodel lint --format", () => {
   it("github: the report, then the fork as an error on the newer migration", async () => {
     const { dir, b } = forked();
     const ran = await yodel(["lint", "--format", "github", "--dir", dir]);
-    expect(ran.code).toBe(3);
+    expect(ran.code).toBe(1);
     expect(ran.out).toContain("3 migrations: 1 error, 0 warnings, 0 silenced.");
     expect(ran.out).toMatch(new RegExp(`^::error file=migrations/${b.id}/migration\\.sql,line=1,title=yodel lint fork::.* and ${b.id} both follow `, "m"));
   });
@@ -122,7 +122,7 @@ describe("yodel lint --format", () => {
     const { dir, b } = forked();
     const out = join(dir, "quality.json");
     const ran = await yodel(["lint", "--format", "gitlab", "--output", out, "--dir", dir]);
-    expect(ran.code).toBe(3);
+    expect(ran.code).toBe(1);
     expect(ran.out).not.toContain("::error");
     const issues = JSON.parse(readFileSync(out, "utf8")) as Array<{ check_name: string; severity: string; location: { path: string } }>;
     expect(issues).toMatchObject([{ check_name: "fork", severity: "major", location: { path: `migrations/${b.id}/migration.sql` } }]);

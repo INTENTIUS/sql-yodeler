@@ -470,7 +470,7 @@ describe("yodel apply with an Op step", () => {
     const { venv } = await setup();
     const bf = migration("20261009T1600-fill", null, [backfillStep("fill") as unknown as MigrationStep]);
     const { status } = await inspect(venv, [bf]);
-    expect(() => selectToApply(status, false)).toThrow(expect.objectContaining({ exitCode: 2, message: expect.stringContaining("module backfill.ts is not in") as unknown }));
+    expect(() => selectToApply(status, false)).toThrow(expect.objectContaining({ exitCode: 3, message: expect.stringContaining("module backfill.ts is not in") as unknown }));
   });
 });
 

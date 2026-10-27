@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { projectFromConfig } from "../src/project.js";
 import { checksProblem, computeChecksum, judgeCheck, migrationChecks, parseCheckArg, serializeDocument, verifyChecksum, type Migration, type MigrationCheck } from "../src/migrations/index.js";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { currentDigest, executeApply, inspect, openVersioned, REFUSED, selectToApply, type VersionedEnv } from "../src/versioned/index.js";
+import { currentDigest, executeApply, inspect, openVersioned, selectToApply, type VersionedEnv } from "../src/versioned/index.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
+import { EXIT_FAILED } from "../src/exit.js";
 
 /** `m` with these checks in its migration.json and its checksum recomputed, as yodel new --check writes it. */
 function withChecks(m: Migration, checks: MigrationCheck[]): Migration {
@@ -76,10 +77,10 @@ describe("pre-migration checks (#52)", () => {
     expect(await digest([withChecks(m1, [{ ...empty, sql: "SELECT 1 FROM yodel_8.a WHERE x > 0 LIMIT 1" }])])).not.toBe(base);
   });
 
-  it("run under the lock before the migration's first statement; a failing one refuses with exit 4, names the check, sends nothing of it, and the history records it", async () => {
+  it("run under the lock before the migration's first statement; a failing one refuses with exit 1, names the check, sends nothing of it, and the history records it", async () => {
     const { ch, venv, asked } = await setup(() => [{ "1": 1 }]);
     const checked = withChecks(m2, [empty]);
-    await expect(apply(venv, [m1, checked])).rejects.toMatchObject({ exitCode: REFUSED, message: expect.stringMatching(/check a-is-empty failed: it must return no rows, and returned 1 row/) as unknown });
+    await expect(apply(venv, [m1, checked])).rejects.toMatchObject({ exitCode: EXIT_FAILED, message: expect.stringMatching(/check a-is-empty failed: it must return no rows, and returned 1 row/) as unknown });
     expect(asked).toEqual([empty.sql]);
     expect(ch.sent).toEqual([m1.document.steps[0]?.kind === "statement" ? m1.document.steps[0].sql : ""]);
     const row = ch.rows.find((r) => r.migration_id === checked.id);
@@ -126,11 +127,11 @@ describe("statement pre-checks (#51)", () => {
     ]);
   });
 
-  it("refuse with exit 4 before the first statement when one counts rows, naming the statement and the count", async () => {
+  it("refuse with exit 1 before the first statement when one counts rows, naming the statement and the count", async () => {
     const { ch, venv, asked } = await setup((sql) => [{ n: sql.includes("dup1") ? "2" : "0" }]);
     const two = migration("20261009T1100-two", m1.id, [unique(0), unique(1)]);
     const refused = apply(venv, [m1, two]);
-    await expect(refused).rejects.toMatchObject({ exitCode: REFUSED });
+    await expect(refused).rejects.toMatchObject({ exitCode: EXIT_FAILED });
     const message = await refused.catch((e: unknown) => (e instanceof Error ? e.message : ""));
     expect(message).toContain("step 1, ALTER TABLE yodel_8.a ADD COLUMN c1 UInt8, would fail: 2 values of (x) held by more than one row");
     expect(message).not.toContain("step 0,");

@@ -22,8 +22,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { TenantSet, WaveGate } from "../config/define.js";
 import type { Migration } from "../migrations/index.js";
-import { resolveEnvironment, YodelError, type Project } from "../project.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { resolveEnvironment, YodelError, type Project, yodelRefusal } from "../project.js";
+import { EXIT_MOVED } from "../exit.js";
 import { closeVersioned, openVersioned } from "../versioned/engine.js";
 import { statusReport, type StatusReport } from "../versioned/index.js";
 import { gateAtBase, planWave, viewWavePlan, WAVES_PIPELINE, WavePlanMoved, type PlanWaveOptions, type WavePlanFile } from "../waves/index.js";
@@ -137,7 +137,7 @@ function readSlotPlanSoftly(path: string): SlotPlanFile | undefined {
 /** Reads a slot's plan file. */
 export function readSlotPlan(file: string): SlotPlanFile {
   const path = resolve(file);
-  if (!existsSync(path)) throw new YodelError(`refused: the slot's plan file is not at ${path}. --wave-apply runs inside chant run wave, after it decided the wave; nothing was applied`, EXIT_REFUSED);
+  if (!existsSync(path)) throw yodelRefusal(`refused: the slot's plan file is not at ${path}. --wave-apply runs inside chant run wave, after it decided the wave; nothing was applied`);
   const doc = readSlotPlanSoftly(path);
   if (!doc || typeof doc.planDigest !== "string") throw new YodelError(`${file} is not a plan yodel apply <env>/@<i>of<n> --wave-plan wrote`);
   return doc;
@@ -156,7 +156,7 @@ export async function applySlot(
   log: (line: string) => void,
 ): Promise<number> {
   const planned = readSlotPlan(file);
-  if (planned.environment !== target) throw new YodelError(`refused: ${file} is ${planned.environment}'s plan, not ${target}'s; nothing was applied`, EXIT_REFUSED);
+  if (planned.environment !== target) throw yodelRefusal(`refused: ${file} is ${planned.environment}'s plan, not ${target}'s; nothing was applied`);
   const moved: string[] = [];
   const failed: string[] = [];
   for (const { target: tenant, plan } of planned.tenants) {
@@ -177,7 +177,7 @@ export async function applySlot(
   }
   const applied = planned.tenants.length - moved.length - failed.length;
   log(`${target}: ${String(applied)} of ${String(planned.tenants.length)} tenants applied${moved.length > 0 ? `; moved, not applied: ${moved.join(", ")}` : ""}${failed.length > 0 ? `; failed: ${failed.join(", ")}` : ""}`);
-  return failed.length > 0 ? 1 : moved.length > 0 ? EXIT_REFUSED : 0;
+  return failed.length > 0 ? 1 : moved.length > 0 ? EXIT_MOVED : 0;
 }
 
 // ── What yodel plan and yodel approve show ───────────────────────────────────

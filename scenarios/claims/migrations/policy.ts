@@ -32,7 +32,7 @@ interface LintDoc {
  * A project's own column rule (#227). chant.config.ts `lint.policies`
  * names a check that every table has `created_at timestamptz NOT NULL`. The
  * first migration's `orders` has no such column, so `yodel lint` fails it
- * (exit 3) with an ORG-CREATED-AT finding on that migration. A
+ * (exit 1) with an ORG-CREATED-AT finding on that migration. A
  * `-- yodel:allow ORG-CREATED-AT <reason>` line above the step then
  * silences it, and lint passes.
  * BREAK: the check's rule is taken out, so the table without created_at
@@ -50,7 +50,7 @@ async function body(ctx: Ctx): Promise<void> {
 
   const ran = await p.yodel(["lint", "--json"]);
   const found = parse<LintDoc>(ran).findings.find((f) => f.rule === "ORG-CREATED-AT" && f.migration === id);
-  hold(ran.code === 3 && found !== undefined, `yodel lint exited ${String(ran.code)} with no ORG-CREATED-AT finding on ${id}, whose orders table has no created_at`);
+  hold(ran.code === 1 && found !== undefined, `yodel lint exited ${String(ran.code)} with no ORG-CREATED-AT finding on ${id}, whose orders table has no created_at`);
 
   // Silenced above the step on orders, the finding fails nothing.
   const sql = `migrations/${id}/migration.sql`;

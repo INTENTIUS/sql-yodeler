@@ -3,10 +3,11 @@ import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
 import { appliedBy, withLock } from "../history/index.js";
-import { closeVersioned, findMigrateOp, gitLedger, NOT_APPROVED, openVersioned, verifyApproval, type VersionedEnv } from "../versioned/index.js";
+import { closeVersioned, findMigrateOp, gitLedger, openVersioned, verifyApproval, type VersionedEnv } from "../versioned/index.js";
 import { approveCommand, migrationsApprovalAtBase, portFor, signFlag } from "../approval-mode/index.js";
 import { runnable } from "../chant/runnable.js";
 import { cleanupDigest, cleanupGate, describeRetained, dropRetained, findRetained, retainedServer, type Retained } from "../cleanup/index.js";
+import { EXIT_MOVED, EXIT_WAITING } from "../exit.js";
 
 const usage = "usage: yodel cleanup <env> [--list] [--op <name>] [--json] [--dir <project>]";
 
@@ -135,7 +136,7 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
   try {
     await verifyApproval(ledger, op, digest);
   } catch (e) {
-    if (!(e instanceof YodelError) || e.exitCode !== NOT_APPROVED) throw e;
+    if (!(e instanceof YodelError) || (e.exitCode !== EXIT_WAITING && e.exitCode !== EXIT_MOVED)) throw e;
     // An approval of this digest the mode does not count (an unsigned one under sealed), and why.
     const uncounted = /\((the approval by .* does not count: .*)\)\. Nothing was applied\./s.exec(e.message)?.[1];
     report({ planDigest: digest, approve, chantApprove }, [
@@ -146,7 +147,7 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
       `  ${runnable(approve, project.dir)}`,
       `then run yodel cleanup ${env.name} again.`,
     ]);
-    return NOT_APPROVED;
+    return EXIT_WAITING;
   }
 
   const lock = await venv.driver.acquireLock(appliedBy());

@@ -22,9 +22,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, serializeDocument, writeMigration, type CreatedMigration, type MigrationDocument } from "../../src/migrations/index.js";
 import { loadProject, resolveEnvironment, YodelError } from "../../src/project.js";
-import { NOT_FRESH, renderReplay, replayExitCode, replayFailure, replayHistory, type ReplayResult } from "../../src/replay/index.js";
+import { renderReplay, replayExitCode, replayFailure, replayHistory, type ReplayResult } from "../../src/replay/index.js";
 import { e2eProject, suiteName } from "./names.js";
 import { clickhouse, clickhouseReachable, postgres, postgresReachable } from "./emulator.js";
+import { EXIT_FAILED } from "../../src/exit.js";
 
 const DB = suiteName("replay");
 const PG = `${DB}_pg`;
@@ -149,7 +150,7 @@ describe.skipIf(!clickhouseReachable)("the replay check on clickhouse", () => {
     await clickhouse(`CREATE TABLE ${DB}.stray (x UInt8) ENGINE = MergeTree ORDER BY x`);
     const refused = await p.replay().catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(YodelError);
-    expect((refused as YodelError).exitCode).toBe(NOT_FRESH);
+    expect((refused as YodelError).exitCode).toBe(EXIT_FAILED);
     expect((refused as YodelError).message).toContain(`already holds ${DB}`);
     expect(await count(`EXISTS TABLE ${DB}.stray`)).toBe(1);
 

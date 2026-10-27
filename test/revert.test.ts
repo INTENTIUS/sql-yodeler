@@ -104,9 +104,9 @@ describe("planRevert", () => {
   });
 
   it("refuses a migration that is not applied, or one with a later migration applied", () => {
-    expect(refusal(() => plan([row(1, m0)], m1.id)).exitCode).toBe(4);
+    expect(refusal(() => plan([row(1, m0)], m1.id)).exitCode).toBe(1);
     const later = refusal(() => plan([row(1, m0), row(2, m1)], m0.id));
-    expect(later.exitCode).toBe(4);
+    expect(later.exitCode).toBe(1);
     expect(later.message).toContain(`${m1.id} is applied in e2e after ${m0.id}`);
     expect(refusal(() => plan([], "20261010T0900-nope")).exitCode).toBe(1);
   });
@@ -114,7 +114,7 @@ describe("planRevert", () => {
   it("refuses a data step without a hand-written revert step, and runs the step first with one", () => {
     const rows = [row(1, m0), row(2, m1), row(3, m2)];
     const refused = refusal(() => plan(rows, m2.id));
-    expect(refused.exitCode).toBe(2);
+    expect(refused.exitCode).toBe(3);
     expect(refused.message).toMatch(/data step .*backfill.*--step <file>/);
     const step: RevertStepFile = { file: "revert.sql", sha: "sha256:x", statements: ["ALTER TABLE yodel_8.a UPDATE label = '' WHERE 1"] };
     const p = plan(rows, m2.id, step);
@@ -197,7 +197,7 @@ describe("the policy over a revert (#97)", () => {
     const none = await judgeRevert({ policy, environment: "e2e", dialect: "clickhouse", plan: p, digest: "jcs1-sha256:aa", ledger: () => Promise.resolve(undefined) });
     expect(none).toMatchObject([{ id: "no-drops", outcome: "denied", reasons: [expect.stringMatching(/step 0 .* is destructive/) as unknown] }]);
     const refused = policyRefusal(none, "e2e", "jcs1-sha256:aa", "before the gate", { id: m1.id });
-    expect(refused?.exitCode).toBe(4);
+    expect(refused?.exitCode).toBe(7);
     expect(refused?.message).toContain(`denies the revert of ${m1.id}`);
     expect(refused?.message).toContain(`yodel override e2e --revert ${m1.id} --rule no-drops`);
 

@@ -16,7 +16,6 @@ import {
   overrideSubject,
   policyPlan,
   policyRefusal,
-  REFUSED,
   selectToApply,
   type MigrateOpRef,
   type OverrideSource,
@@ -28,6 +27,7 @@ import { deriveState } from "../src/history/index.js";
 import { renderPlanMarkdown, renderPlanText } from "../src/pr/render.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
+import { EXIT_DENIED } from "../src/exit.js";
 
 const OP: MigrateOpRef = { name: "migrate-prod", filePath: "/p/ops/migrate-prod.op.ts", gate: "approve-migrate-prod", quorum: false };
 const SUBJECT = overrideSubject(OP.name);
@@ -80,7 +80,7 @@ describe("policy over the plan (#53)", () => {
     expect(s[0]).toMatchObject({ outcome: "denied", reasons: [expect.stringMatching(/silences destructive with a reason that does not match/) as unknown] });
 
     const refusal = policyRefusal(prod, "prod", "jcs1-sha256:x", "before the gate");
-    expect(refusal?.exitCode).toBe(REFUSED);
+    expect(refusal?.exitCode).toBe(EXIT_DENIED);
     expect(refusal?.message).toMatch(/rules no-drops, small-runs deny this plan/);
     expect(refusal?.message).toContain('yodel override prod --rule no-drops --rule small-runs --reason "<why>"');
   });
@@ -150,7 +150,7 @@ describe("policy over the plan (#53)", () => {
           return results.flatMap((r) => (r.override ? [r.override] : []));
         },
       });
-    await expect(run(undefined)).rejects.toMatchObject({ exitCode: REFUSED, message: expect.stringMatching(/refused by policy under the lock: rule no-drops denies/) as unknown });
+    await expect(run(undefined)).rejects.toMatchObject({ exitCode: EXIT_DENIED, message: expect.stringMatching(/refused by policy under the lock: rule no-drops denies/) as unknown });
     expect(ch.sent).toEqual([]);
     expect(ch.rows).toEqual([]);
 

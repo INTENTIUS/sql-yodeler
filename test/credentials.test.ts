@@ -107,11 +107,11 @@ function template(edit: (config: string) => string = (t) => t): string {
 }
 
 describe("a project's reader and writer", () => {
-  it("are refused by every command, exit 4 naming them, when they are the same user", async () => {
+  it("are refused by every command, exit 1 naming them, when they are the same user", async () => {
     const dir = template((t) => t.replace(/\.\.\.credentials\(env, "postgres"\)/, '...credentials(env, "postgres", { writer: { user: { env: `${env.toUpperCase()}_POSTGRES_READER_USER` } } })'));
     for (const args of [["config", "check"], ["status", "dev"], ["new", "x"], ["ci", "--check"]]) {
       const ran = await yodel([...args, "--dir", dir]);
-      expect(ran.code, `${args.join(" ")}: ${ran.err}`).toBe(4);
+      expect(ran.code, `${args.join(" ")}: ${ran.err}`).toBe(1);
       expect(ran.err).toContain("refused: sql.profiles.dev: the reader and the writer read their user from the same variable, DEV_POSTGRES_READER_USER");
     }
   });
@@ -119,7 +119,7 @@ describe("a project's reader and writer", () => {
   it("are refused when the variables they name hold the same user", async () => {
     const dir = template();
     const ran = await withEnv({ PROD_POSTGRES_READER_USER: "app", PROD_POSTGRES_WRITER_USER: "app" }, () => yodel(["config", "check", "--dir", dir]));
-    expect(ran.code).toBe(4);
+    expect(ran.code).toBe(1);
     expect(ran.err).toContain("sql.profiles.prod: the reader (PROD_POSTGRES_READER_USER) and the writer (PROD_POSTGRES_WRITER_USER) are the same user, app");
     const apart = await withEnv({ PROD_POSTGRES_READER_USER: "app_r", PROD_POSTGRES_WRITER_USER: "app_w" }, () => yodel(["config", "check", "prod", "--dir", dir]));
     expect(apart.code, apart.err).toBe(0);
@@ -227,12 +227,12 @@ describe("a command that writes, run as the reader (#159)", () => {
     expect(permissionRefusal(new Error("boom"), plain, "yodel apply dev")).toBeUndefined();
   });
 
-  it("refuses yodel apply, revert and init as the reader, exit 4, before reading the server, with no stack trace", async () => {
+  it("refuses yodel apply, revert and init as the reader, exit 1, before reading the server, with no stack trace", async () => {
     const dir = template();
     const vars = { YODEL_ROLE: undefined, DEV_POSTGRES_READER_USER: "app_r", DEV_POSTGRES_WRITER_USER: "app_w" };
     for (const args of [["apply", "dev"], ["apply", "dev", "--execute"], ["revert", "dev", "20261010T0000-x"], ["init", "--from", "dev", "--force"], ["init", "--baseline", "dev"]]) {
       const ran = await withEnv(vars, () => yodel([...args, "--dir", dir]));
-      expect(ran.code, `${args.join(" ")}: ${ran.err}`).toBe(4);
+      expect(ran.code, `${args.join(" ")}: ${ran.err}`).toBe(1);
       expect(ran.err).toMatch(/^yodel \w+: refused: (npx )?yodel .* writes, and this process holds dev's reader, DEV_POSTGRES_READER_USER \(app_r\), because YODEL_ROLE is not set\. Run it as the writer: YODEL_ROLE=writer:dev .*\. Nothing was done\.\n$/);
       expect(ran.out).toBe("");
     }

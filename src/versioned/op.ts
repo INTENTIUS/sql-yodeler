@@ -33,8 +33,9 @@ import { fileURLToPath } from "node:url";
 import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { chantInstall, runChant } from "../chant/process.js";
-import { discoveryError, GATED, readApplyRun, type ApplyRun } from "../chant/apply.js";
+import { discoveryError, readApplyRun, type ApplyRun } from "../chant/apply.js";
 import { REVERT_ENV, REVERT_STEP_ENV } from "./revert.js";
+import { EXIT_WAITING } from "../exit.js";
 
 /** The env var the Apply step reads the approved digest from. */
 export const APPROVED_PLAN_ENV = "YODEL_APPROVED_PLAN";
@@ -222,7 +223,7 @@ export async function runMigrateOp(
       ...(options.revert ? { [REVERT_ENV]: options.revert.id, ...(options.revert.step ? { [REVERT_STEP_ENV]: options.revert.step } : {}) } : {}),
       ...(options.baseline ? { [BASELINE_ENV]: options.baseline } : {}),
     };
-    const result = await runChant(["run", op.name, "--gated-exit", String(GATED)], {
+    const result = await runChant(["run", op.name, "--gated-exit", String(EXIT_WAITING)], {
       cwd: project.dir,
       env,
       ...(options.onOutput ? { onStdout: options.onOutput, onStderr: options.onOutput } : {}),

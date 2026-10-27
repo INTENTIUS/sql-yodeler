@@ -30,11 +30,11 @@ import { baseRef, loadYodelConfigAtBase, type ConfigAtBase } from "../config/bas
 import type { WaveGate, YodelConfig } from "../config/define.js";
 import { createdObjects, stepFindings } from "../lint/statements.js";
 import type { Migration } from "../migrations/index.js";
-import { YodelError, type Project } from "../project.js";
+import { YodelError, type Project, yodelRefusal } from "../project.js";
 import { describeStep } from "../steps/kinds.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_FAILED, EXIT_MOVED, EXIT_WAITING } from "../exit.js";
 import { currentDigest, inspect, selectToApply, type VersionedEnv } from "../versioned/engine.js";
-import { gitLedger, NOT_APPROVED, verifyApproval } from "../versioned/approval.js";
+import { gitLedger, verifyApproval } from "../versioned/approval.js";
 import type { PendingMigration } from "../versioned/state.js";
 import { WAVES_PIPELINE, type WaveRecord } from "./record.js";
 import { enforcePromotion, promotionEvidence, readPromotions, requiredEnvironments, type Promotion } from "./promotion.js";
@@ -149,7 +149,7 @@ async function evidenceAfterPromotion(project: Project, env: string, pending: Re
 export async function planWave(project: Project, venv: VersionedEnv, ordered: readonly Migration[], options: PlanWaveOptions): Promise<WavePlanFile> {
   const { status } = await inspect(venv, ordered);
   const toApply = selectToApply(status, options.allowOutOfOrder);
-  // Before the gate: a pending migration the required environment has not applied refuses here (exit 4).
+  // Before the gate: a pending migration the required environment has not applied refuses here (exit 3).
   // Planned for a review (#48), the wave is planned as after the merge, when the environments before it have run.
   const requires = options.forReview === true ? await evidenceAfterPromotion(project, venv.environment, toApply) : promotionEvidence(await enforcePromotion(project, venv.environment, ordered, toApply));
   const migrations = await currentDigest(venv, status, toApply);
@@ -210,7 +210,7 @@ export async function viewWavePlan(project: Project, venv: VersionedEnv, ordered
 /** `--wave-apply` found the wave plan moved since the wave was decided: nothing was applied. */
 export class WavePlanMoved extends YodelError {
   constructor(message: string) {
-    super(message, 1);
+    super(message, EXIT_MOVED);
     this.name = "WavePlanMoved";
   }
 }
@@ -244,7 +244,7 @@ interface WaveDecision {
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- the caller names the document's shape
 function readJson<T>(path: string, what: string): T {
-  if (!existsSync(path)) throw new YodelError(`refused: ${what} is not at ${path}. --wave-apply runs inside chant run wave, after it decided the wave; nothing was applied`, NOT_APPROVED);
+  if (!existsSync(path)) throw new YodelError(`refused: ${what} is not at ${path}. --wave-apply runs inside chant run wave, after it decided the wave; nothing was applied`, EXIT_FAILED, true);
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T;
   } catch (e) {
@@ -256,7 +256,7 @@ function readJson<T>(path: string, what: string): T {
 function waveOf(spec: WavesSpec, env: string, specFile: string): { k: number; name: string } {
   const i = spec.waves.findIndex((w) => w.runs.some((r) => r.target === env));
   const wave = spec.waves[i];
-  if (!wave) throw new YodelError(`refused: ${specFile} has no wave for ${env}; nothing was applied`, EXIT_REFUSED);
+  if (!wave) throw yodelRefusal(`refused: ${specFile} has no wave for ${env}; nothing was applied`);
   return { k: i + 1, name: wave.name };
 }
 
@@ -276,11 +276,12 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
   if (decision.wave !== k || !member || member.planDigest !== planDigest) {
     throw new YodelError(
       `refused: chant decided wave ${String(k)} (${name}) on ${member ? `plan ${member.planDigest}` : `no plan for ${env}`}, and ${env}'s plan is now ${planDigest}. Nothing was applied; run the wave again.`,
-      NOT_APPROVED,
+      EXIT_MOVED,
+      true,
     );
   }
   const { waveSetDigest } = await import("@intentius/chant/gated-waves");
-  if (waveSetDigest(decision.members) !== decision.digest) throw new YodelError(`refused: chant's decision for wave ${String(k)} does not hold the digest of its own members; nothing was applied`, NOT_APPROVED);
+  if (waveSetDigest(decision.members) !== decision.digest) throw new YodelError(`refused: chant's decision for wave ${String(k)} does not hold the digest of its own members; nothing was applied`, EXIT_FAILED, true);
   // The policy and the approval mode (#48), asked of chant's rule again rather than trusting the record,
   // at yodel's base (../config/base.ts), never at a base the spec in the change names.
   const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
@@ -297,7 +298,7 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
   if (decision.status !== "not-required" || opWaveNeedsApproval(policy.policy, decision.members as never)) {
     throw new YodelError(
       `refused: wave ${String(k)} (${name}) needs an approval of ${decision.digest} under gate ${policy.policy}${how} (read at ${policy.base.slice(0, 12)}), and chant's gate ledger has none${policy.approval === "sealed" ? " that is sealed by a signer at base" : ""}. Nothing was applied.`,
-      NOT_APPROVED,
+      EXIT_WAITING,
     );
   }
   return {
