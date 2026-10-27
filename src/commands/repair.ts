@@ -34,11 +34,11 @@ Options:
 
 Exit codes:
   0  the new checksum is recorded
-  4  refused, nothing written: the migration is not applied in <env> (not
-     run, or part way), its files already match the history, or it is gone
-     from the directory
   5  another apply holds the lock
-  1  anything else: no --reason, a bad config, a server that does not answer
+  1  refused, nothing written: the migration is not applied in <env> (not
+     run, or part way), its files already match the history, or it is gone
+     from the directory; or anything else: no --reason, a bad config, a
+     server that does not answer
 `;
 
 function parseRepairArgs(args: string[]): { id: string; env: string; reason: string; json: boolean; dir: string } {

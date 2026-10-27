@@ -45,7 +45,7 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 
 ## Gaps
 
-`yodel report` exits 4 and lists each gap:
+`yodel report` exits 1 and lists each gap:
 
 - A history row missing. Each environment's history numbers its rows from 1 with no hole, because every run appends at the highest `seq` plus one, under the lock. A hole is a row someone deleted.
 - An applied migration whose plan digest has no approval of the environment's gate on the ledger: the approval was removed, or the migration was applied without one. A baseline recorded by `yodel init --from` has no digest and needs no approval; one recorded by `yodel init --baseline` carries the digest its gate approved.

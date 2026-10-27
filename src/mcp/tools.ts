@@ -165,7 +165,7 @@ export function yodelTools(dir: string): YodelTool[] {
     },
     {
       name: "lint",
-      description: `yodel lint [--env <env>] --json: the lint findings and silences; with env, also against that environment's history. Exit 3 on an error finding. The replay check is not offered: it writes to a database. results: ${schemaId(COMMAND_SCHEMAS.lint)}`,
+      description: `yodel lint [--env <env>] --json: the lint findings and silences; with env, also against that environment's history. Exit 1 on an error finding. The replay check is not offered: it writes to a database. results: ${schemaId(COMMAND_SCHEMAS.lint)}`,
       inputSchema: envInput(false, `${ENV} Optional: compare the migrations with its history.`),
       annotations: READ_ONLY,
       verbs: ["lint"],

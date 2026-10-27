@@ -126,7 +126,7 @@ const statusReport = (dialect: "clickhouse" | "postgres"): StatusReport => ({
     ],
   },
   digest: "sha256:d",
-  refusal: { exitCode: 4, message: "a checksum mismatch" },
+  refusal: { exitCode: 1, message: "a checksum mismatch" },
 });
 
 const chDiff = { changes: [{ object: "events (yodel_58.events)", field: "orderBy", before: "id", after: "(ts, id)", rule: "SQLCH301", class: "rebuild" }], rebuilds: [], hints: ["a drop and an add look like a rename"] };
@@ -210,7 +210,7 @@ describe("each command's --json output validates against its schema", () => {
     expectValid("plan", planJsonVersioned(versionedPlan({ kind: "no-op", message: "no migrations Op for prod\n\ndeclare one" })));
     const wave = { wave: 2, gate: "on-destructive" as const, base: "a".repeat(40), baseSource: "HEAD^1", destructiveSteps: [{ migration: "m1", step: 0, what: "drop", why: "destructive" }], waits: true, planDigest: "sha256:w", digest: "sha256:s", approve: "yodel approve prod --plan sha256:s", chantApprove: "chant approve yodel-apply yodel-apply-wave-2 --plan sha256:s", promotions: [{ env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c", ran: "applied with another checksum" as const, recorded: "c0" }] }], blocked: true };
     expectValid("plan", planJsonVersioned({ ...versionedPlan({ kind: "no-op", message: "no migrations Op for prod" }), wave }));
-    expectValid("plan", planJsonVersioned({ environment: "dev", dialect: "postgres", appliedCount: 0, pending: [], problems: [], refusal: { exitCode: 4, message: "a fork" }, notes: [] }));
+    expectValid("plan", planJsonVersioned({ environment: "dev", dialect: "postgres", appliedCount: 0, pending: [], problems: [], refusal: { exitCode: 1, message: "a fork" }, notes: [] }));
   });
 
   it("apply: versioned (each outcome), --execute and declarative", () => {
@@ -221,7 +221,7 @@ describe("each command's --json output validates against its schema", () => {
       { status: "unchanged" },
       { status: "refused" },
       { status: "refused", preChecks: { migration: "20261010T0910-rebuild", checks: [{ name: "no-nulls", passed: false, detail: "3 rows" }] } },
-      { status: "refused", refusal: { exitCode: 4, message: "refused: prod applies only migrations staging applied first" } },
+      { status: "refused", refusal: { exitCode: 3, message: "refused: prod applies only migrations staging applied first" } },
       { status: "denied", policy: [{ id: "online-only", outcome: "denied", reasons: ["a rebuild is not online"] }] },
       { status: "stood-down", stoodDown: "standing down: main on origin is at b, newer than this run's a" },
       { status: "stood-down", stoodDown: "standing down", op: "migrate-dev" },
@@ -276,7 +276,7 @@ describe("each command's --json output validates against its schema", () => {
       expectValid("lint", json(clean));
       add("fork", events("id UInt64, old String, b String DEFAULT ''"), 2, first);
       const fork = await yodel(["lint", "--json", "--dir", dir]);
-      expect(fork.code).toBe(3);
+      expect(fork.code).toBe(1);
       expectValid("lint", json(fork));
 
       const rules = await yodel(["lint", "--rules", "--json", "--dir", dir]);

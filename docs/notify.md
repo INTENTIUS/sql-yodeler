@@ -34,7 +34,7 @@ A delivery that fails (the receiver is down, it answers 401) is reported on stde
 | Event | Sent by | When |
 |---|---|---|
 | `waiting` | `yodel apply` | the migrations Op stopped at its gate (exit 3); the event carries the approve command |
-| `refused` | `yodel apply`, `yodel plan` | a refusal (exit 4: a checksum mismatch, an out-of-order migration, a failed pre-migration check) or a policy rule that denies the plan |
+| `refused` | `yodel apply`, `yodel plan` | a refusal (exit 1: a checksum mismatch, an out-of-order migration, a failed pre-migration check), a migration the required environment has not applied (exit 3), or a policy rule that denies the plan (exit 7) |
 | `failed` | `yodel apply` | the Op's run failed: a statement, the lock, a plan that moved since approval |
 | `drift` | `yodel drift` (the watch) | a declared object changed out of band or is gone (exit 2) |
 

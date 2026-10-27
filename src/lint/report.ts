@@ -1,11 +1,10 @@
 /** `yodel lint`'s output: text for people, JSON for a CI job, and the exit code. */
 
 import type { Finding, LintReport } from "./check.js";
+import { EXIT_FAILED } from "../exit.js";
 
-/** Exit code: at least one finding at level error that no silence covers. */
-export const LINT_FAILED = 3;
 
-export const lintExitCode = (report: LintReport): number => (report.errors > 0 ? LINT_FAILED : 0);
+export const lintExitCode = (report: LintReport): number => (report.errors > 0 ? EXIT_FAILED : 0);
 
 const plural = (n: number, one: string, many = `${one}s`) => `${String(n)} ${n === 1 ? one : many}`;
 

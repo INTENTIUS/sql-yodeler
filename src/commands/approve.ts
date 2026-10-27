@@ -16,7 +16,7 @@ import { readMigrations } from "../migrations/index.js";
 import { runChant } from "../chant/process.js";
 import { runnableAsWriter } from "../chant/runnable.js";
 import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
-import { EXIT_OUTSTANDING } from "../exit.js";
+import { EXIT_WAITING, EXIT_DECLINED, EXIT_FAILED, EXIT_MOVED } from "../exit.js";
 import { gitLedger } from "../versioned/approval.js";
 import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { closeVersioned, findMigrateOp, hasMigrations, migrationsDir, openVersioned, renderStatus, statusReport, ALLOW_OUT_OF_ORDER_ENV } from "../versioned/index.js";
@@ -24,9 +24,6 @@ import { tenantSetOf } from "../tenants/index.js";
 import { describeTenantSetWave, groupTenants, someNames, viewTenantSetWave, viewTenants } from "../tenants/wave.js";
 import type { Migration } from "../migrations/index.js";
 import type { Project } from "../project.js";
-
-/** Exit code: nothing was approved (no one to ask, a wrong answer, a plan apply would refuse, a plan that moved). */
-export const NOT_APPROVED = 4;
 
 const usage = "usage: yodel approve <env> [--plan <digest>] [--sign [--key <file>]] [--actor <name>] [--no-resume] [--dir <project>] [--op <name>] [--allow-out-of-order]";
 
@@ -51,7 +48,7 @@ gate was reached on a machine, not in CI), there is nothing to resume: run
 yodel apply <env>.
 
 It never approves on its own. With no terminal to ask (a script, CI, an
-agent) it approves nothing and exits 4, and no flag skips the question.
+agent) it approves nothing and exits 1, and no flag skips the question.
 
 A declarative project (no migrations/ directory) approves the plan its
 ApplyOp's gate waits on: yodel apply <env> stops at the gate and records
@@ -108,13 +105,15 @@ Exit codes:
   3  approved, but the waiting job was not resumed (no token, a token the
      forge refused, a push that did not land): chant says why; once that is
      fixed, push chant/lifecycle and run the job again (or let ci.resume's
-     scheduled job start it)
-  4  nothing approved: no terminal to ask, an answer that was not the
-     environment's name, a --plan that is not the plan's, a plan apply would
-     refuse, or a plan that moved while you were asked
-  2  a pending migration has a step yodel apply does not run
-  1  anything else: a bad config, a server that does not answer, chant
-     approve failed
+     scheduled job start it). Also 3, nothing approved: a pending migration
+     the environment it must run on first has not applied, or a step yodel
+     apply does not run
+  4  nothing approved: the plan moved while you were asked, or --plan is not
+     the plan waiting
+  8  nothing approved: the answer was not the environment's name
+  1  nothing approved: no terminal to ask, nothing waits for --plan, a plan
+     apply would refuse; or anything else: a bad config, a server that does
+     not answer, chant approve failed
 `;
 
 /**
@@ -182,7 +181,7 @@ async function record(
         `\nApproved ${digest} for ${op} / ${gate}, but the waiting job was not resumed (chant says why above). ` +
           `Once that is fixed, push chant/lifecycle and run the job again, or let the scheduled resume job (yodel.config.ts ci.resume) start it.\n`,
       );
-      return EXIT_OUTSTANDING;
+      return EXIT_WAITING;
     }
     throw new YodelError(`chant approve ${op} ${gate} failed (exit ${String(ran.code)}); nothing was approved`);
   }
@@ -247,7 +246,7 @@ export const approve: Command = {
           `yodel approve: there is no terminal to ask, so nothing was approved. An approval is a person's decision: ` +
             `run yodel approve ${env.name} yourself at a terminal.\n`,
         );
-        return NOT_APPROVED;
+        return EXIT_FAILED;
       }
       const opName = typeof values.op === "string" ? values.op : undefined;
       const ctx: OtherContext = { project, env, expected, ask, io, resuming, signing };
@@ -277,7 +276,7 @@ export const approve: Command = {
           if (view) {
             if (view.blocked) {
               io.err(`yodel approve: ${describeWave(view)}\nNothing was approved.\n`);
-              return NOT_APPROVED;
+              return EXIT_WAITING;
             }
             if (expected !== undefined && expected !== view.digest) {
               const done = await other();
@@ -288,18 +287,18 @@ export const approve: Command = {
             if (!view.waits) return 0;
             if (expected !== undefined && expected !== view.digest) {
               io.err(`yodel approve: --plan ${expected} is not the plan waiting for ${env.name}, which is ${view.digest}. Nothing was approved.\n`);
-              return NOT_APPROVED;
+              return EXIT_MOVED;
             }
             const answer = (await ask(`\nApprove wave ${String(view.wave)} for ${env.name}, ${view.digest}? Type ${env.name} to approve: `)).trim();
             if (answer !== env.name) {
               io.err(`Not approved: the answer was not ${env.name}.\n`);
-              return NOT_APPROVED;
+              return EXIT_DECLINED;
             }
             const again = await statusReport(venv, ordered, { allowOutOfOrder });
             const now = again.digest ? await waveView(project, env.name, ordered, again.status.pending, again.digest) : undefined;
             if (now?.digest !== view.digest) {
               io.err(`Not approved: the plan moved while you were asked (now ${now?.digest ?? "nothing to apply"}); run yodel approve ${env.name} again.\n`);
-              return NOT_APPROVED;
+              return EXIT_MOVED;
             }
             const { waveGateName } = await import("@intentius/chant/gated-waves");
             const gate = waveGateName(WAVES_PIPELINE, view.wave);
@@ -311,18 +310,18 @@ export const approve: Command = {
         io.out(renderStatus(report));
         if (expected !== undefined && expected !== report.digest) {
           io.err(`yodel approve: --plan ${expected} is not the plan waiting for ${env.name}, which is ${report.digest}. Nothing was approved.\n`);
-          return NOT_APPROVED;
+          return EXIT_MOVED;
         }
         const answer = (await ask(`\nApprove this plan for ${env.name}, ${report.digest}? Type ${env.name} to approve: `)).trim();
         if (answer !== env.name) {
           io.err(`Not approved: the answer was not ${env.name}.\n`);
-          return NOT_APPROVED;
+          return EXIT_DECLINED;
         }
         // The plan is read again: what is approved is what the person saw.
         const again = await statusReport(venv, ordered, { allowOutOfOrder });
         if (again.digest !== report.digest) {
           io.err(`Not approved: the plan moved while you were asked (now ${again.digest ?? "nothing to apply"}); run yodel approve ${env.name} again.\n`);
-          return NOT_APPROVED;
+          return EXIT_MOVED;
         }
         const mode = await migrationsApprovalAtBase(project, env.name);
         if (mode.note) io.err(`${mode.note}\n`);
@@ -356,7 +355,7 @@ async function approveTenantSet(
   for (const t of tenants.filter((x) => x.report.refusal)) io.err(`yodel approve: ${t.target}: ${t.report.refusal?.message ?? ""}\n`);
   if (view.refused.length > 0) {
     io.err(`${describeTenantSetWave(view, tenants.length)}\nNothing was approved.\n`);
-    return NOT_APPROVED;
+    return EXIT_FAILED;
   }
   if (tenants.every((t) => t.plan?.empty)) {
     io.out(`Every tenant of ${set} (${String(tenants.length)}) is up to date: there is nothing to approve.\n`);
@@ -372,23 +371,23 @@ async function approveTenantSet(
   io.out(`${describeTenantSetWave(view, tenants.length)}\n`);
   if (view.blocked.length > 0) {
     io.err("Nothing was approved.\n");
-    return NOT_APPROVED;
+    return EXIT_WAITING;
   }
   if (!view.waits || !view.digest) return 0;
   if (o.expected !== undefined && o.expected !== view.digest) {
     io.err(`yodel approve: --plan ${o.expected} is not the plan waiting for ${set}, which is ${view.digest}. Nothing was approved.\n`);
-    return NOT_APPROVED;
+    return EXIT_MOVED;
   }
   const answer = (await o.ask(`\nApprove wave ${String(view.wave)} for every tenant of ${set}, ${view.digest}? Type ${set} to approve: `)).trim();
   if (answer !== set) {
     io.err(`Not approved: the answer was not ${set}.\n`);
-    return NOT_APPROVED;
+    return EXIT_DECLINED;
   }
   // Every tenant is read again: what is approved is what the person saw.
   const again = await read();
   if (again.view?.digest !== view.digest) {
     io.err(`Not approved: the plan moved while you were asked (now ${again.view?.digest ?? "nothing to approve"}); run yodel approve ${set} again.\n`);
-    return NOT_APPROVED;
+    return EXIT_MOVED;
   }
   const { waveGateName } = await import("@intentius/chant/gated-waves");
   const gate = waveGateName(WAVES_PIPELINE, view.wave);
@@ -465,13 +464,13 @@ async function approveStanding(c: OtherContext, found: { standing: StandingGate;
   const answer = (await c.ask(`\nApprove ${s.digest} for ${env.name}? Type ${env.name} to approve: `)).trim();
   if (answer !== env.name) {
     io.err(`Not approved: the answer was not ${env.name}.\n`);
-    return NOT_APPROVED;
+    return EXIT_DECLINED;
   }
   // What waits is read again: what is approved is what the person saw.
   const again = await findStanding(c.project.dir, gates.filter((g) => g.op === s.op && g.gate === s.gate), undefined);
   if (again?.standing.digest !== s.digest) {
     io.err(`Not approved: the plan waiting at ${s.gate} moved while you were asked (now ${again?.standing.digest ?? "nothing waits"}); run yodel approve ${env.name} again.\n`);
-    return NOT_APPROVED;
+    return EXIT_MOVED;
   }
   return record(io, c.project.dir, s.op, s.gate, s.digest, await c.resuming(c.project.dir), next, "", c.signing(found.mode), c.run);
 }
@@ -512,12 +511,12 @@ export async function approveOther(c: OtherContext, opName?: string, venv?: Vers
       const answer = (await c.ask(`\nApprove dropping these in ${env.name}, ${expected}? Type ${env.name} to approve: `)).trim();
       if (answer !== env.name) {
         c.io.err(`Not approved: the answer was not ${env.name}.\n`);
-        return NOT_APPROVED;
+        return EXIT_DECLINED;
       }
       const now = await cleanupDigest(env.name, (await findRetained(server)).retained);
       if (now !== expected) {
         c.io.err(`Not approved: what is due moved while you were asked (now ${now}); run yodel cleanup ${env.name} again.\n`);
-        return NOT_APPROVED;
+        return EXIT_MOVED;
       }
       return record(c.io, project.dir, migrate.name, cleanupGate(migrate.gate), expected, false, `Drop them with:\n  ${runnableAsWriter(`yodel cleanup ${env.name}`, project.dir, env.profile)}`, "", c.signing(mode), c.run);
     }
@@ -550,14 +549,14 @@ export async function approveDeclarative(c: OtherContext, opName?: string, show:
   if (!waiting) {
     if (expected !== undefined) {
       io.err(`yodel approve: nothing waits at ${op.name} / ${op.gate} for --plan ${expected}. Nothing was approved; run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)}, which stops at the gate and prints the command that approves its plan.\n`);
-      return NOT_APPROVED;
+      return EXIT_FAILED;
     }
     io.out(`Nothing waits at ${op.name} / ${op.gate}: there is nothing to approve. ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} stops at the gate with a plan to approve.\n`);
     return 0;
   }
   if (expected !== undefined && expected !== waiting.standing.digest) {
     io.err(`yodel approve: --plan ${expected} is not the plan waiting for ${env.name}, which is ${waiting.standing.digest}. Nothing was approved.\n`);
-    return NOT_APPROVED;
+    return EXIT_MOVED;
   }
   await show(project, env, io);
   return approveStanding(c, waiting, gates, `Apply it with:\n  ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)}`);

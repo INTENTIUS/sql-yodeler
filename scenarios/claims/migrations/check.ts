@@ -14,7 +14,7 @@ const DROP = "20240201120000_drop_nickname.sql";
  * yodel check (#1): a team keeps goose and tries yodel on its pull
  * requests. A goose directory's first migration is on main; the pull
  * request adds a second that drops a column. `yodel check` runs both into
- * the claim's own schema, lints the new one alone, and fails it (exit 3)
+ * the claim's own schema, lints the new one alone, and fails it (exit 1)
  * with a destructive finding on that file's statement. A
  * `-- yodel:allow destructive <reason>` line in the file then silences it.
  * BREAK: yodel.config.ts turns the destructive rule off, so the drop goes
@@ -31,7 +31,7 @@ async function body(ctx: Ctx): Promise<void> {
   const doc = parse<CheckDoc>(ran);
   hold(doc.checked.length === 1 && doc.checked[0] === DROP, `yodel check linted ${JSON.stringify(doc.checked)}, not the new ${DROP} alone`);
   const found = doc.findings.find((f) => f.rule === "destructive");
-  hold(ran.code === 3 && found?.file === DROP && found.line === 2, `yodel check exited ${String(ran.code)} with ${JSON.stringify(found)}, not a destructive finding on ${DROP} line 2`);
+  hold(ran.code === 1 && found?.file === DROP && found.line === 2, `yodel check exited ${String(ran.code)} with ${JSON.stringify(found)}, not a destructive finding on ${DROP} line 2`);
 
   // Silenced in the file, the drop fails nothing.
   p.edit(`db/migrations/${DROP}`, "-- +goose Up\n", "-- +goose Up\n-- yodel:allow destructive nickname was never read\n");

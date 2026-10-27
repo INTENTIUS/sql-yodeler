@@ -30,9 +30,9 @@ describe("the kinds yodel refuses", () => {
 describe("yodel init --from", () => {
   const found = [describeUnsupported({ kind: "text search parser", schema: "shop", name: "ops" }), describeUnsupported({ kind: "user mapping", name: "app_user" })];
 
-  it("refuses (exit 4) naming each object, and adopts with --skip-unsupported", () => {
+  it("refuses (exit 1) naming each object, and adopts with --skip-unsupported", () => {
     const refusal = unsupportedRefusal("prod", found, false);
-    expect(refusal?.exitCode).toBe(4);
+    expect(refusal?.exitCode).toBe(1);
     expect(refusal?.message).toContain("prod holds 2 objects of a kind chant's sql lexicon cannot declare");
     expect(refusal?.message).toContain("  text search parser shop.ops\n  user mapping app_user");
     expect(refusal?.message).toContain("--skip-unsupported");

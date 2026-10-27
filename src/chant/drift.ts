@@ -25,6 +25,7 @@ import { describeServer, type ServerInfo } from "../server.js";
 import type { Build, BuildOutput } from "./build.js";
 import { CH_ACCESS_TYPES } from "./access.js";
 import { planEnvironment } from "./plan.js";
+import { EXIT_DRIFT } from "../exit.js";
 
 /** The `lexicons.sql` section of `chant lifecycle diff --live --json`. */
 export interface SqlLiveDiff {
@@ -160,12 +161,10 @@ export async function withClickHouseGrants(drift: Drift, project: Project, env: 
   };
 }
 
-/** Exit code: an owned object changed or is gone. */
-export const DRIFTED = 2;
 
 /** `2` on drift; `1` when there is none but part of the environment could not be read; `0` when clean. */
 export function driftExitCode(drift: Drift): number {
-  if (drift.changed.length > 0 || drift.missing.length > 0) return DRIFTED;
+  if (drift.changed.length > 0 || drift.missing.length > 0) return EXIT_DRIFT;
   return drift.unobserved.length > 0 ? 1 : 0;
 }
 

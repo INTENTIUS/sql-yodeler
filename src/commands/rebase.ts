@@ -1,10 +1,10 @@
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Project, yodelRefusal } from "../project.js";
 import { MigrationDirectoryError, refusedSteps, scanMigrations } from "../migrations/index.js";
 import { closeVersioned, migrationsDir, openVersioned } from "../versioned/index.js";
-import { planRebase, REBASE_REFUSED, writeRebase, type RebasePlan } from "../rebase/index.js";
+import { planRebase, writeRebase, type RebasePlan } from "../rebase/index.js";
 
 const usage = "usage: yodel rebase [<id>] [--onto <parent-id>] [--env <env>]... [--force] [--json] [--dir <project>]";
 
@@ -46,12 +46,12 @@ Options:
 
 Exit codes:
   0  rebased, or no fork to rebase
-  4  refused, nothing written: both branches change the same object, a
+  1  refused, nothing written: both branches change the same object, a
      migration to rewrite was edited by hand (without --force), a
      yodel:allow line's statement is gone or changed, a history records one
-     of them, or the moved migration adds nothing on its new parent
-  1  the rebase could not be worked out: no such migration, a fork the
-     defaults cannot settle, a bad config, a server that does not answer
+     of them, or the moved migration adds nothing on its new parent; or the
+     rebase could not be worked out: no such migration, a fork the defaults
+     cannot settle, a bad config, a server that does not answer
 `;
 
 interface RebaseArgs {
@@ -105,10 +105,9 @@ async function checkHistories(project: Project, envs: readonly string[], plan: R
       return rec ? [`${m.id} (${rec.status === "succeeded" ? "applied" : `ran part way, ${rec.status}`})`] : [];
     });
     if (ran.length > 0) {
-      throw new YodelError(
+      throw yodelRefusal(
         `refused: ${name}'s history records ${ran.join(", ")}. Nothing was written. A migration that ran is never rebased: ` +
           `its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).`,
-        REBASE_REFUSED,
       );
     }
   }
@@ -178,10 +177,9 @@ export const rebase: Command = {
       }
       const edited = plan.rewritten.filter((m) => m.handEdited);
       if (edited.length > 0 && !options.force) {
-        throw new YodelError(
+        throw yodelRefusal(
           `refused: ${edited.map((m) => m.id).join(", ")} ${edited.length === 1 ? "has" : "have"} files that differ from what yodel wrote (an edit by hand, or a checksum that no longer matches). ` +
             `Rebasing writes them again from their recorded schema and drops that edit. Nothing was written; pass --force to rebase anyway, then make the edit again.`,
-          REBASE_REFUSED,
         );
       }
       await checkHistories(project, options.envs, plan);

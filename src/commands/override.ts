@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import type { Io } from "../command.js";
 import type { PolicyConfig } from "../config/define.js";
 import { declarativeRefusal } from "../config/settings.js";
@@ -10,7 +10,6 @@ import { declaredChanges, planEnvironment, planExitCode } from "../chant/plan.js
 import { findApplyOp } from "../chant/apply.js";
 import { declarativeDigest } from "../declarative/review.js";
 import { judgeDeclarative } from "../declarative/plan.js";
-import { EXIT_REFUSED } from "../exit.js";
 import { policyAtBase } from "../config/base.js";
 import { runChant } from "../chant/process.js";
 import { runnableAsWriter } from "../chant/runnable.js";
@@ -80,12 +79,11 @@ Options:
 
 Exit codes:
   0  recorded
-  4  nothing recorded: the plan has nothing to apply or apply would refuse
+  1  nothing recorded: the plan has nothing to apply or apply would refuse
      it (with --revert: yodel revert would refuse the revert), a rule that
      does not deny it, a denying rule not given, a name policy.overriders
-     does not list
-  1  anything else: a bad config, a server that does not answer, chant
-     approve failed
+     does not list; or anything else: a bad config, a server that does not
+     answer, chant approve failed
 `;
 
 /** How long the denial `yodel override` records stands; past it, an override of the same plan records a fresh one. */
@@ -134,11 +132,11 @@ export const override: Command = {
       if (rules.length === 0 || reason === "") throw new YodelError(`--rule and --reason are required: an override names the rule and says why\n${usage}`);
       // The policy apply judges: the base commit's (#73).
       const { policy, note } = await policyAtBase(project);
-      if (!policy) throw new YodelError(note ? `${note} There is nothing to override.` : "yodel.config.ts declares no policy, so there is nothing to override", EXIT_REFUSED);
+      if (!policy) throw yodelRefusal(note ? `${note} There is nothing to override.` : "yodel.config.ts declares no policy, so there is nothing to override");
       const unknown = rules.filter((r) => !policy.rules.some((x) => x.id === r));
-      if (unknown.length > 0) throw new YodelError(`no policy rule ${unknown.join(", ")} (policy.rules: ${policy.rules.map((r) => r.id).join(", ")}); nothing recorded`, EXIT_REFUSED);
+      if (unknown.length > 0) throw yodelRefusal(`no policy rule ${unknown.join(", ")} (policy.rules: ${policy.rules.map((r) => r.id).join(", ")}); nothing recorded`);
       if (by !== undefined && !(policy.overriders ?? []).includes(by)) {
-        throw new YodelError(`${by} is not in policy.overriders (${(policy.overriders ?? []).join(", ") || "none"}), so an override by them would not count; nothing recorded`, EXIT_REFUSED);
+        throw yodelRefusal(`${by} is not in policy.overriders (${(policy.overriders ?? []).join(", ") || "none"}), so an override by them would not count; nothing recorded`);
       }
 
       if (!hasMigrations(project)) {
@@ -152,15 +150,15 @@ export const override: Command = {
         let results: RuleResult[];
         let next: string;
         if (revertId !== undefined) {
-          // The revert yodel revert would run (#97): a refusal of it (not applied, a later migration applied) is exit 4 from here too.
+          // The revert yodel revert would run (#97): a refusal of it (not applied, a later migration applied) is exit 1 from here too.
           const { plan, digest: revertDigest } = await currentRevert(venv, ordered, revertId, stepFile !== undefined ? readRevertStep(stepFile, project.dir) : undefined);
           digest = revertDigest;
           results = await judgeRevert({ policy, environment: env.name, dialect: project.dialect, plan, digest: undefined, ledger: () => Promise.resolve(undefined) });
           next = `yodel revert ${env.name} ${revertId}${stepFile !== undefined ? ` --step ${stepFile}` : ""}`;
         } else {
           const report = await statusReport(venv, ordered, { allowOutOfOrder });
-          if (report.refusal) throw new YodelError(`yodel apply would refuse this plan before any policy: ${report.refusal.message}\nNothing recorded.`, EXIT_REFUSED);
-          if (!report.digest) throw new YodelError(`${env.name} has nothing pending: there is no plan to override; nothing recorded`, EXIT_REFUSED);
+          if (report.refusal) throw yodelRefusal(`yodel apply would refuse this plan before any policy: ${report.refusal.message}\nNothing recorded.`);
+          if (!report.digest) throw yodelRefusal(`${env.name} has nothing pending: there is no plan to override; nothing recorded`);
           digest = report.digest;
           results = await judgePlan({ policy, environment: env.name, dialect: project.dialect, toApply: report.status.pending, digest: undefined, ledger: () => Promise.resolve(undefined) });
           next = `yodel apply ${env.name}`;
@@ -187,9 +185,9 @@ async function declarativeOverride(c: { project: Project; env: Environment; io: 
   const build = await buildSchema(project);
   try {
     const plan = await planEnvironment(project, env, build);
-    if (planExitCode(plan) !== 0) throw new YodelError(`yodel apply would refuse this plan before any policy: a change needs its own Op, or a live object could not be read (yodel plan ${env.name} shows which).\nNothing recorded.`, EXIT_REFUSED);
+    if (planExitCode(plan) !== 0) throw yodelRefusal(`yodel apply would refuse this plan before any policy: a change needs its own Op, or a live object could not be read (yodel plan ${env.name} shows which).\nNothing recorded.`);
     const changes = declaredChanges(plan, build);
-    if (changes.length === 0) throw new YodelError(`${env.name} already matches the declared schema: there is no plan to override; nothing recorded`, EXIT_REFUSED);
+    if (changes.length === 0) throw yodelRefusal(`${env.name} already matches the declared schema: there is no plan to override; nothing recorded`);
     const digest = await declarativeDigest(env.name, project.dialect, changes);
     const results = await judgeDeclarative({ policy: c.policy, environment: env.name, dialect: project.dialect, changes, digest, ledger: () => Promise.resolve(undefined) });
     return await recordOverride({ project, env: env.name, io: c.io, subject: overrideSubject(op.name), digest, results, rules: c.rules, reason: c.reason, by: c.by, what: `the plan for ${env.name}`, next: `yodel apply ${env.name}`, verb: "Apply", overriders: c.policy.overriders });
@@ -217,13 +215,13 @@ async function recordOverride(c: {
   const { project, io, subject, digest, results, rules, reason, by, what, next } = c;
   const notDenying = rules.filter((r) => results.find((x) => x.id === r)?.outcome !== "denied");
   if (notDenying.length > 0) {
-    throw new YodelError(`${notDenying.join(", ")} ${notDenying.length === 1 ? "does" : "do"} not deny ${what} (${digest}); an override answers a denial. Nothing recorded.`, EXIT_REFUSED);
+    throw yodelRefusal(`${notDenying.join(", ")} ${notDenying.length === 1 ? "does" : "do"} not deny ${what} (${digest}); an override answers a denial. Nothing recorded.`);
   }
   // One override answers the whole denial: chant binds it to every rule that denies the plan.
   const denied = results.filter((x) => x.outcome === "denied").map((x) => x.id);
   const missing = denied.filter((r) => !rules.includes(r));
   if (missing.length > 0) {
-    throw new YodelError(`${missing.join(", ")} also ${missing.length === 1 ? "denies" : "deny"} ${what} (${digest}); an override names every rule that denies the plan: add ${missing.map((r) => `--rule ${r}`).join(" ")}. Nothing recorded.`, EXIT_REFUSED);
+    throw yodelRefusal(`${missing.join(", ")} also ${missing.length === 1 ? "denies" : "deny"} ${what} (${digest}); an override names every rule that denies the plan: add ${missing.map((r) => `--rule ${r}`).join(" ")}. Nothing recorded.`);
   }
   for (const rule of denied) io.out(`${rule} denies ${digest}:\n${(results.find((x) => x.id === rule)?.reasons ?? []).map((x) => `  ${x}`).join("\n")}\n`);
 

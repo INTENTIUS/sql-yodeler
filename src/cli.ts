@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "./command.js";
 import { commands } from "./commands/index.js";
 import { version } from "./version.js";
-import { EXIT_CODES, PLAN_PENDING_NOTE } from "./exit.js";
+import { EXIT_CODES, PLAN_PENDING_NOTE, useChantExitTable } from "./exit.js";
 
 /** Where the docs are published from docs/. */
 export const DOCS_URL = "https://intentius.io/sql-yodeler/";
@@ -55,6 +55,8 @@ export async function main(
   io: Io,
   list: readonly Command[] = commands,
 ): Promise<number> {
+  // The codes every verb exits by, from chant's table when the installed chant has it (#288).
+  await useChantExitTable();
   const verbAt = argv.findIndex((a) => !a.startsWith("-"));
   const globals = verbAt === -1 ? argv : argv.slice(0, verbAt);
 

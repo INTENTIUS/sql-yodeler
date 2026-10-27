@@ -5,11 +5,10 @@
  */
 
 import type { CaseResult, TestRun } from "./run.js";
+import { EXIT_FAILED } from "../exit.js";
 
-/** Exit code: a case failed, or could not run. */
-export const TESTS_FAILED = 3;
 
-export const testExitCode = (run: TestRun): number => (run.cases.some((c) => c.status !== "passed") ? TESTS_FAILED : 0);
+export const testExitCode = (run: TestRun): number => (run.cases.some((c) => c.status !== "passed") ? EXIT_FAILED : 0);
 
 const count = (run: TestRun, status: CaseResult["status"]) => run.cases.filter((c) => c.status === status).length;
 

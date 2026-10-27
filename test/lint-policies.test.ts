@@ -107,7 +107,7 @@ describe("yodel lint: the project's own checks (#227)", () => {
     const p = project("lint-postgres", PG_POLICY);
     const bad = add(p.migrations, "events", pg(pgEvents("timestamp")), 0);
     const ran = await yodel(p.at("--json"));
-    expect(ran.code, ran.err).toBe(3);
+    expect(ran.code, ran.err).toBe(1);
     const doc = json(ran) as LintDoc;
     expect(doc.findings.filter((f) => f.rule === "ORG-CREATED-AT")).toEqual([
       expect.objectContaining({ level: "error", migration: bad, object: "yodel_14.events", message: expect.stringMatching(/^step \d+: yodel_14\.events needs created_at timestamptz NOT NULL$/) as unknown }),
@@ -125,7 +125,7 @@ describe("yodel lint: the project's own checks (#227)", () => {
     const p = project("lint-clickhouse", CH_POLICY);
     add(p.migrations, "events", ch(chEvents("Nullable(String)")), 0);
     const ran = await yodel(p.at());
-    expect(ran.code, ran.err).toBe(3);
+    expect(ran.code, ran.err).toBe(1);
     expect(ran.out).toMatch(/error {4}ORG-SORT-KEY: step \d+: yodel_14\.events\.kind is Nullable and in the sort key/);
 
     const rules = await yodel(p.at("--rules"));

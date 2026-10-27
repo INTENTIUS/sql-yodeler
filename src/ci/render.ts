@@ -421,7 +421,7 @@ export const REPORT_DIR = "yodel-report";
 
 /**
  * `yodel report <env>` as JSON and as the HTML run view, into REPORT_DIR.
- * It runs whatever the job's outcome, and a gap it reports (exit 4) does not
+ * It runs whatever the job's outcome, and a gap it reports (exit 1) does not
  * fail the job: the report is for reading. `yodel` is the project's, named
  * by path, since GitLab's after_script does not keep before_script's PATH;
  * in the yodel image, the image's, which is on PATH.

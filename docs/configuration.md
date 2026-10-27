@@ -92,15 +92,15 @@ profiles: {
 
 A process connects as the reader unless `YODEL_ROLE` is `writer` (every environment) or `writer:<env>` (that one); only `<env>`'s wave job sets `writer:<env>`. `YODEL_CREDENTIALS`, its older name, is still read when `YODEL_ROLE` is not set; when both are set, `YODEL_ROLE` wins. Each role reads its user and password from a variable, by default `<ENV>_<DIALECT>_READER_USER`, `<ENV>_<DIALECT>_READER_PASSWORD`, `<ENV>_<DIALECT>_WRITER_USER` and `<ENV>_<DIALECT>_WRITER_PASSWORD` (`DEV_POSTGRES_READER_USER`), the names `yodel ci` maps the forge's secrets to. The third argument replaces a role's user or password: `credentials("prod", "postgres", { writer: { user: { env: "APP_MIGRATOR" } } })`. The starter templates' profiles are made this way.
 
-Every command refuses the project, exit 4, when an environment's reader and writer are one identity: both read their user from the same variable, the two variables hold the same user name, or both read their password from the same variable. A job holding such a reader could write.
+Every command refuses the project, exit 1, when an environment's reader and writer are one identity: both read their user from the same variable, the two variables hold the same user name, or both read their password from the same variable. A job holding such a reader could write.
 
-A command that writes (`yodel apply`, `yodel revert`, `yodel init`) refuses, exit 4, before its gate and before it connects, when it would run as an environment's reader:
+A command that writes (`yodel apply`, `yodel revert`, `yodel init`) refuses, exit 1, before its gate and before it connects, when it would run as an environment's reader:
 
 ```text
 yodel apply: refused: npx yodel apply dev writes, and this process holds dev's reader, DEV_CLICKHOUSE_READER_USER (reader), because YODEL_ROLE is not set. Run it as the writer: YODEL_ROLE=writer:dev npx yodel apply dev. Nothing was done.
 ```
 
-`yodel apply --plan` and `--digest`, and `yodel revert --dry-run`, only read, and run as the reader. Each command yodel prints for a person to run that writes (`then run ... again` after a gate stop, `yodel approve`'s `Apply it with`, `yodel override`'s) starts with `YODEL_ROLE=writer:<env>` for a profile made with `credentials()`. A server that refuses a write for want of a privilege (a profile without `credentials()`, or a writer missing a grant) is reported the same way, in one line naming the user and the server's message, exit 4.
+`yodel apply --plan` and `--digest`, and `yodel revert --dry-run`, only read, and run as the reader. Each command yodel prints for a person to run that writes (`then run ... again` after a gate stop, `yodel approve`'s `Apply it with`, `yodel override`'s) starts with `YODEL_ROLE=writer:<env>` for a profile made with `credentials()`. A server that refuses a write for want of a privilege (a profile without `credentials()`, or a writer missing a grant) is reported the same way, in one line naming the user and the server's message, exit 1.
 
 ```text
 yodel status: refused: sql.profiles.prod: the reader (PROD_POSTGRES_READER_USER) and the writer (PROD_POSTGRES_WRITER_USER) are the same user, app, so a job that holds the reader can write. Give each role its own database user.
@@ -161,7 +161,7 @@ On GitHub the step requests the job's OIDC token for the cloud's audience and wr
 
 `yodel config check [<env>...]` prints each environment's settings and where each came from: the server, the role this process connects as, each role's user and password variable and whether it is set here (or the token source), the history's database, the topology and the lock settings. It never prints a password.
 
-`--write-probe` tries a write with the credentials this process holds and exits 4 when the server lets it through: a `CREATE TABLE` in the environment's first schema inside a transaction that is rolled back (Postgres), or a `Memory` table in its first database, dropped at once (ClickHouse). Only a refusal for want of privilege counts as "cannot write"; a probe that cannot tell is an error. Every pull request plan job `yodel ci` renders runs it before the plan, with each reader the job holds (`yodel config check prod dev --write-probe`), so a pull request job that holds a writer fails. The pull request job that records the plans a `pr-review` wave's review approves (`yodel-apply-plans.yml`, GitLab's `yodel-apply-record-plans`) runs it too, before `chant run wave --record-plans`, with the reader of every environment a wave applies.
+`--write-probe` tries a write with the credentials this process holds and exits 1 when the server lets it through: a `CREATE TABLE` in the environment's first schema inside a transaction that is rolled back (Postgres), or a `Memory` table in its first database, dropped at once (ClickHouse). Only a refusal for want of privilege counts as "cannot write"; a probe that cannot tell is an error. Every pull request plan job `yodel ci` renders runs it before the plan, with each reader the job holds (`yodel config check prod dev --write-probe`), so a pull request job that holds a writer fails. The pull request job that records the plans a `pr-review` wave's review approves (`yodel-apply-plans.yml`, GitLab's `yodel-apply-record-plans`) runs it too, before `chant run wave --record-plans`, with the reader of every environment a wave applies.
 
 ### Least privilege on each forge
 

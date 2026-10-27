@@ -17,7 +17,7 @@
   ],
   "properties": {
     "status": {
-      "description": "failed when a finding at level error is not silenced: the command exits 3.",
+      "description": "failed when a finding at level error is not silenced: the command exits 1.",
       "enum": [
         "passed",
         "failed"

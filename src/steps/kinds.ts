@@ -17,7 +17,7 @@
  *   rename or type change across kinds (`./postgres-migration.ts`, #13).
  *
  * Everything else (a manual step, a rebuild in app mode) is refused before
- * anything runs, with exit 2.
+ * anything runs, with exit 3.
  */
 
 import { createHash } from "node:crypto";

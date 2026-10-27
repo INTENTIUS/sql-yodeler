@@ -67,7 +67,7 @@ describe("yodel plan --part (#237)", () => {
   });
 
   it("makes a plan apply would refuse a failed member, with no digest", () => {
-    const part = planPart(plan({ digest: undefined, refusal: { exitCode: 4, message: "20261012T0900-zero was applied with another checksum" } }), "db");
+    const part = planPart(plan({ digest: undefined, refusal: { exitCode: 1, message: "20261012T0900-zero was applied with another checksum" } }), "db");
     expect(part.member.status).toBe("failed");
     expect(part.member.planDigest).toBeNull();
   });

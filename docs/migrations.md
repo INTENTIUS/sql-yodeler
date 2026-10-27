@@ -261,7 +261,7 @@ What a check must return is its `expect`:
 
 A bare table name means the migration's default database (ClickHouse) or schema (Postgres). A check runs read-only: on ClickHouse with `readonly = 2`, on Postgres in a `READ ONLY` transaction that is rolled back, under the profile's `lockTimeoutMs` and `scanTimeoutMs`.
 
-`yodel apply <env>` runs the first pending migration's checks before it runs the migrations Op, so a run that would be refused stops before anyone is asked to approve it. The Op's Apply step runs every pending migration's checks again under the lock, just before that migration's first statement, when earlier migrations in the same run have already applied. A check that fails, or whose query the server refuses, refuses the apply with exit 4 and names the check; nothing of that migration is sent. Under the lock the history records the outcome: the migration's `started` row carries the checks' results in `note`, and a refusal is a `failed` migration row whose `error` names the check. A migration resuming part way does not run its checks again, since they held before its first statement.
+`yodel apply <env>` runs the first pending migration's checks before it runs the migrations Op, so a run that would be refused stops before anyone is asked to approve it. The Op's Apply step runs every pending migration's checks again under the lock, just before that migration's first statement, when earlier migrations in the same run have already applied. A check that fails, or whose query the server refuses, refuses the apply with exit 1 and names the check; nothing of that migration is sent. Under the lock the history records the outcome: the migration's `started` row carries the checks' results in `note`, and a refusal is a `failed` migration row whose `error` names the check. A migration resuming part way does not run its checks again, since they held before its first statement.
 
 In the Postgres example a CHECK constraint's validation has a pre-check ([Statements that can fail on the data](lint.md#statements-that-can-fail-on-the-data)), and one order has an amount of 0:
 
@@ -271,7 +271,7 @@ $ npx yodel apply dev
 yodel apply: refused: a pre-migration check of 20261010T1723-coupons failed before the gate. Nothing of 20261010T1723-coupons was applied:
   step 1, ALTER TABLE shop.orders ADD CONSTRAINT orders_amount_positive CHECK (amount > 0) NOT VALID, would fail: 1 rows that fail the check orders_amount_positive (amount > 0) (pre-check precheck-1: SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0))
 Fix the data, then run yodel apply again; if the check is wrong, edit it in migration.json and run yodel lint --update-checksum 20261010T1723-coupons (the plan digest moves, so the plan is approved again). A statement's pre-check is chant's count of the rows the statement fails on: fix those rows, or change the declaration.
-[exit 4]
+[exit 1]
 ```
 
 The checks are part of `migration.json`, so of the checksum and the plan digest: adding, editing or removing one moves the digest, and the plan is approved again. To change a check of a migration not yet applied anywhere, edit it and run `yodel lint --update-checksum <id>`. `yodel plan` lists each pending migration's checks, and the pull request comment shows them in a table under the migration's steps.
@@ -357,13 +357,13 @@ Pending: none
 
 ## Out-of-order migrations
 
-A pending migration that the chain puts before one already applied is out of order. It can happen when a migration that ran in an environment is moved in the chain afterwards, as below. `yodel apply` refuses it (exit 4) and never skips it:
+A pending migration that the chain puts before one already applied is out of order. It can happen when a migration that ran in an environment is moved in the chain afterwards, as below. `yodel apply` refuses it (exit 1) and never skips it:
 
 <!-- quote: postgres#out-of-order -->
 ```console
 $ npx yodel apply dev
 yodel apply: refused: 20261010T1725-add-gift is out of order: the chain puts it before 20261010T1725-index-placed-at, which is already applied. Nothing was applied. Pass --allow-out-of-order to apply it now (in chain order); it is never skipped.
-[exit 4]
+[exit 1]
 ```
 
 `--allow-out-of-order` applies it, in chain order, behind the same approval as any other run:
@@ -405,7 +405,7 @@ migrations/
   warning  SQLPG112: step 0: orders.email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
 
 7 migrations: 1 error, 3 warnings, 1 silenced.
-[exit 3]
+[exit 1]
 ```
 
 `yodel rebase [<id>] [--onto <parent>]` moves a migration onto a new parent: its change (its recorded schema against its old parent's) is applied to the new parent's recorded schema, its statements are diffed again, and its files and checksum are written again. Migrations after it move with it. Ids do not change. With no `<id>` it resolves the directory's one fork by moving the newer of the two (by the timestamp in its id) onto the end of the other's branch.
@@ -416,7 +416,7 @@ A migration that ran somewhere must not be rebased: its statements already ran i
 ```console
 $ npx yodel rebase 20261010T1725-index-placed-at --onto 20261010T1725-add-gift --env dev
 yodel rebase: refused: dev's history records 20261010T1725-index-placed-at (applied). Nothing was written. A migration that ran is never rebased: its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).
-[exit 4]
+[exit 1]
 ```
 
 The fix it names is to move the other migration instead: here `yodel rebase <add-gift> --onto <index-placed-at> --env dev`. Without `--env`, no history is checked, and the rebase says so:
@@ -429,7 +429,7 @@ Rebased 20261010T1725-index-placed-at onto 20261010T1725-add-gift (it followed 2
 No history was checked (--env): make sure none of these ran anywhere before merging.
 ```
 
-`yodel rebase` also refuses (exit 4, nothing written) when both branches change the same object differently (resolve it by hand: delete the migration and run `yodel new` again), when a migration it would rewrite was edited by hand (unless `--force`, which drops the edits), or when the moved migration adds nothing on its new parent. A `-- yodel:allow` line ([Lint](lint.md)) does not count as an edit by hand: the rebase writes it again above the same statement, and says how many it carried over. When the statement a line silenced is gone from the rebased migration or changed, the rebase refuses (exit 4, nothing written) and names the line; remove it, record the checksum with `yodel lint --update-checksum <id>`, rebase, and silence what the new statements need.
+`yodel rebase` also refuses (exit 1, nothing written) when both branches change the same object differently (resolve it by hand: delete the migration and run `yodel new` again), when a migration it would rewrite was edited by hand (unless `--force`, which drops the edits), or when the moved migration adds nothing on its new parent. A `-- yodel:allow` line ([Lint](lint.md)) does not count as an edit by hand: the rebase writes it again above the same statement, and says how many it carried over. When the statement a line silenced is gone from the rebased migration or changed, the rebase refuses (exit 4, nothing written) and names the line; remove it, record the checksum with `yodel lint --update-checksum <id>`, rebase, and silence what the new statements need.
 
 ## Checkpoints: yodel checkpoint
 
@@ -448,15 +448,15 @@ The checkpoint is a migration like any other, so its checksum covers its stateme
 - rule `checkpoint` (an error, offline): its recorded schema still hashes to its mark, and so does its parent's. An edit to either, even with the checksum recorded again, fails here.
 - `--replay <env>` replays the chain without the checkpoint, then the checkpoint alone into the emptied database, and compares the result with its recorded schema. Statements that do not create that schema fail the replay (rule `replay`), naming the checkpoint.
 
-With both, a fresh environment that starts from the checkpoint ends at the schema an environment that ran the chain has. Write another checkpoint later the same way; a fresh environment starts at the newest. `yodel checkpoint` refuses (exit 4) when the newest migration is a checkpoint already.
+With both, a fresh environment that starts from the checkpoint ends at the schema an environment that ran the chain has. Write another checkpoint later the same way; a fresh environment starts at the newest. `yodel checkpoint` refuses (exit 1) when the newest migration is a checkpoint already.
 
 ## Reverting: yodel revert
 
-`yodel revert <env> <id>` undoes migration `<id>` in `<env>`. Each migration records the schema after it, and its parent records the schema before it, so the reverse is planned offline: the statements that take `<id>`'s recorded schema back to its parent's (an empty schema for the first migration), diffed by chant as `yodel new` diffs. Only the newest migration applied in the environment can be reverted, since a later one was written against it; anything else refuses (exit 4). So does a checkpoint the environment started from (it created the whole schema, and nothing before it ran there), and a migration a checkpoint left out there ([Checkpoints](#checkpoints-yodel-checkpoint)); both refusals name the checkpoint. `--dry-run` prints the statements, each with its rule and class (a drop is marked destructive), and the digest, and runs nothing.
+`yodel revert <env> <id>` undoes migration `<id>` in `<env>`. Each migration records the schema after it, and its parent records the schema before it, so the reverse is planned offline: the statements that take `<id>`'s recorded schema back to its parent's (an empty schema for the first migration), diffed by chant as `yodel new` diffs. Only the newest migration applied in the environment can be reverted, since a later one was written against it; anything else refuses (exit 1). So does a checkpoint the environment started from (it created the whole schema, and nothing before it ran there), and a migration a checkpoint left out there ([Checkpoints](#checkpoints-yodel-checkpoint)); both refusals name the checkpoint. `--dry-run` prints the statements, each with its rule and class (a drop is marked destructive), and the digest, and runs nothing.
 
-It goes through the environment's migrations Op, as `yodel apply` does. The Op's Plan step prints the revert's digest (its statements, the history and the live schema), the gate binds the approval to that digest, and the Apply step plans the revert again under the lock, refuses if the digest moved, checks the approval in chant's gate ledger, and runs it. A run that stops at the gate prints the command that approves the revert, `yodel approve <env> --plan <digest>` (exit 3); approve, then run `yodel revert` again. The policy in `yodel.config.ts`, read at the base commit, is judged over the revert's statements before the gate and again under the lock, as it is over an apply: a rule that refuses drops refuses a revert that drops what the migration added (exit 4), unless `yodel override <env> --revert <id>` recorded an override for the revert's digest ([Policy and overrides](approval.md#reverts)).
+It goes through the environment's migrations Op, as `yodel apply` does. The Op's Plan step prints the revert's digest (its statements, the history and the live schema), the gate binds the approval to that digest, and the Apply step plans the revert again under the lock, refuses if the digest moved, checks the approval in chant's gate ledger, and runs it. A run that stops at the gate prints the command that approves the revert, `yodel approve <env> --plan <digest>` (exit 3); approve, then run `yodel revert` again. The policy in `yodel.config.ts`, read at the base commit, is judged over the revert's statements before the gate and again under the lock, as it is over an apply: a rule that refuses drops refuses a revert that drops what the migration added (exit 7), unless `yodel override <env> --revert <id>` recorded an override for the revert's digest ([Policy and overrides](approval.md#reverts)).
 
-Statements carry the schema back, never data. A migration with a data step (a backfill) is refused (exit 2) unless `--step <file>` names a hand-written revert step: SQL statements, each ending with `;` at the end of a line, that undo what the data step did. They run before the reverse statements, and their text is in the digest. A reverse that would need an Op or a manual step (a ClickHouse sort key changed back, a Postgres column renamed back) is refused (exit 2): write it as a new migration with `yodel new`.
+Statements carry the schema back, never data. A migration with a data step (a backfill) is refused (exit 3) unless `--step <file>` names a hand-written revert step: SQL statements, each ending with `;` at the end of a line, that undo what the data step did. They run before the reverse statements, and their text is in the digest. A reverse that would need an Op or a manual step (a ClickHouse sort key changed back, a Postgres column renamed back) is refused (exit 2): write it as a new migration with `yodel new`.
 
 The history gets a `revert` row for each statement as it starts, succeeds or fails, then a migration row whose status is `reverted`. A revert that fails part way resumes at the statement that failed, and the migration stays applied until the `reverted` row is written. After it, the migration is pending again, and `yodel status` marks it `reverted <when> by <who>` (`reverted` in `--json`); the audit log of `yodel report` lists the revert. The next `yodel apply` would apply it again, every statement of it, so delete it or rewrite it (`yodel new <name> --replace`) first. On Postgres, a history table made before `yodel revert` existed has its `kind` and `status` checks widened the first time a revert writes to it.
 
@@ -469,7 +469,7 @@ An applied migration whose files changed no longer matches the checksum its hist
 $ npx yodel apply dev
 yodel apply: refused: the history does not match the migrations directory; nothing was applied:
   20261010T1725-index-placed-at was applied with checksum sha256:8b0a50449f82a2bc1c63fb8c868eb6968dba13b9ab5b02ccc43c8fd231659117, but its files now hash to sha256:6be6d45f55c4fa14ed67b2b22471f217f92ba3115bcc5c10fa154c99ef1a281f; if the edit is intended, record it with yodel repair 20261010T1725-index-placed-at --reason ... <env>
-[exit 4]
+[exit 1]
 ```
 
 When the edit is intended (here, the rebase above; or a statement edited after a server upgrade made it invalid), `yodel repair <id> --reason "<text>" <env>` appends a row with the files' new checksum and the reason, under the apply lock. Nothing runs on the server: the edit is recorded, not applied. Repair each environment the migration ran in.
@@ -483,4 +483,4 @@ Repaired 20261010T1725-index-placed-at in dev's history (yodeler).
   reason: rebased onto add-gift after it ran on dev
 ```
 
-`yodel status` then lists the migration with the time it was applied and who applied it, and the repair (when, by whom, and why) under it, as in [yodel status](#yodel-status) below. It refuses (exit 4) when the migration is not applied in that environment, when its files already match, or when it is gone from the directory. When the edit is to a migration applied nowhere yet, there is no history to repair: `yodel lint --update-checksum <id>` writes the new checksum into its `migration.json` ([Lint](lint.md)).
+`yodel status` then lists the migration with the time it was applied and who applied it, and the repair (when, by whom, and why) under it, as in [yodel status](#yodel-status) below. It refuses (exit 1) when the migration is not applied in that environment, when its files already match, or when it is gone from the directory. When the edit is to a migration applied nowhere yet, there is no history to repair: `yodel lint --update-checksum <id>` writes the new checksum into its `migration.json` ([Lint](lint.md)).

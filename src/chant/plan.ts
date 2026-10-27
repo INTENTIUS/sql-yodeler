@@ -10,6 +10,7 @@ import type { PgSchemaDiff } from "@intentius/chant-lexicon-sql/postgres/plan/di
 import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classifier";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import type { Build } from "./build.js";
+import { EXIT_WAITING, EXIT_FAILED } from "../exit.js";
 
 /** A plan for one environment, in either dialect. */
 export interface Plan {
@@ -26,17 +27,16 @@ export interface Plan {
   refused: ClassifiedChange[];
 }
 
-/** Exit code: the plan has a change that needs a rebuild (or expand-and-contract) Op. */
-export const PLAN_NEEDS_OP = 2;
 
 /**
- * `2` when any change needs its own Op, or a live object in the declared
- * databases could not be read (chant's `unreadable`, an object whose
- * definition does not parse, #46): a plan that cannot say what it would do
- * to it is not one to apply. `0` otherwise.
+ * `1` when a live object in the declared databases could not be read
+ * (chant's `unreadable`, an object whose definition does not parse, #46): a
+ * plan that cannot say what it would do to it is not one to apply. `3` when
+ * any change needs its own Op, which a person runs. `0` otherwise.
  */
 export function planExitCode(plan: Plan): number {
-  return plan.refused.length > 0 || unreadableOf(plan).length > 0 ? PLAN_NEEDS_OP : 0;
+  if (unreadableOf(plan).length > 0) return EXIT_FAILED;
+  return plan.refused.length > 0 ? EXIT_WAITING : 0;
 }
 
 /** The live objects a ClickHouse plan could not read, as chant names them. */

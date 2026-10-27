@@ -207,7 +207,7 @@ describe.each(dialects)("yodel rebase keeps yodel:allow lines on $name", (d) => 
     const line = sql.split("\n").indexOf("-- yodel:allow destructive old is empty") + 1;
 
     const ran = await yodel(p.at("rebase", ours.id, "--onto", theirs.id));
-    expect(ran.code).toBe(4);
+    expect(ran.code).toBe(1);
     expect(ran.err).toContain(`refused: ${ours.id} has a yodel:allow line for a statement the rebase does not keep as it was`);
     expect(ran.err).toContain(`migration.sql line ${String(line)}: -- yodel:allow destructive old is empty`);
     expect(ran.err).toContain("which the rebased migration no longer has");
@@ -226,7 +226,7 @@ describe.each(dialects)("yodel rebase keeps yodel:allow lines on $name", (d) => 
     const other = p.add("add-b", 10, p.build(d.table("orders", d.created), d.table("b", d.idOnly)), base);
 
     const refused = await yodel(p.at("rebase", risky.id, "--onto", other.id));
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain("differ from what yodel wrote");
 
     const forced = await yodel(p.at("rebase", risky.id, "--onto", other.id, "--force", "--json"));

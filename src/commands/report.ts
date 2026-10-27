@@ -10,9 +10,8 @@ import type { AuditEntry } from "../report/audit.js";
 import { appendAudit, compareAudit, describeEntry, readAuditFile } from "../report/jsonl.js";
 import { collectReport, type Report } from "../report/model.js";
 import { renderReportHtml, renderReportText } from "../report/render.js";
+import { EXIT_FAILED } from "../exit.js";
 
-/** Exit code: a gap in the sources, or an audit file entry they no longer give. */
-export const REPORT_GAPS = 4;
 
 const usage = "usage: yodel report [<env>...] [--json] [--html <file>] [--audit <file> [--check]] [--dir <project>]";
 
@@ -45,10 +44,9 @@ Options:
 
 Exit codes:
   0  read, no gaps
-  4  a gap: a history row missing, an applied migration with no approval on
+  1  a gap: a history row missing, an applied migration with no approval on
      the ledger, or (with --audit) an entry of the file no longer in the
-     sources
-  1  an environment could not be read, or a bad config
+     sources; or an environment could not be read, or a bad config
 `;
 
 interface ReportArgs {
@@ -125,7 +123,7 @@ export const report: Command = {
       else io.out(renderReportText(r, auditFile ? { check: { file: auditFile.path, missing: auditFile.missing.map(describeEntry), appended: auditFile.appended } } : {}));
       if (a.html && !a.json) io.err(`yodel report: wrote the run view to ${a.html}\n`);
 
-      if (r.gaps.length > 0 || (auditFile?.missing.length ?? 0) > 0) return REPORT_GAPS;
+      if (r.gaps.length > 0 || (auditFile?.missing.length ?? 0) > 0) return EXIT_FAILED;
       return r.environments.some((e) => e.error) ? 1 : 0;
     }),
 };

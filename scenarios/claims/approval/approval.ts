@@ -46,7 +46,7 @@ export async function approvalPart(ctx: Ctx, p: Project): Promise<void> {
  * Pre-migration checks (#52): a migration written with `yodel new --check`
  * that may run only while the main table is empty. The table is empty when
  * the plan is approved; a row arrives after. The Op's Apply step, handed the
- * approval, refuses under the lock (exit 4) naming the check, and the
+ * approval, refuses under the lock (exit 1) naming the check, and the
  * history records the refusal; yodel apply then refuses before the gate.
  * The column never reaches the server.
  * BREAK: the check is removed and the checksum updated, so the migration
@@ -75,11 +75,11 @@ export async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
   await ctx.db.exec(ctx.dialect === "ch" ? `INSERT INTO ${table} (id, kind, ts) VALUES (1, 'k', now())` : `INSERT INTO ${table} (amount) VALUES (1)`);
 
   const step = await p.yodel(["apply", p.env, "--execute"], { env: { YODEL_APPROVED_PLAN: gated.doc.planDigest } });
-  hold(step.code === 4 && step.err.includes("check table-empty failed"), `the approved Apply step with a row in ${table} exited ${String(step.code)}, not 4 naming check table-empty: ${step.err.slice(-400)}`);
+  hold(step.code === 1 && step.err.includes("check table-empty failed"), `the approved Apply step with a row in ${table} exited ${String(step.code)}, not 1 naming check table-empty: ${step.err.slice(-400)}`);
   const recorded = await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}' AND status = 'failed' AND error LIKE '%check table-empty failed%'`);
   hold(recorded === 1, `the history records ${String(recorded)} refusals of ${id} by check table-empty`);
   const before = await p.apply();
-  hold(before.ran.code === 4 && before.doc.status === "refused", `yodel apply with a row in ${table} exited ${String(before.ran.code)}, status ${String(before.doc.status)}, not refused before the gate`);
+  hold(before.ran.code === 1 && before.doc.status === "refused", `yodel apply with a row in ${table} exited ${String(before.ran.code)}, status ${String(before.doc.status)}, not refused before the gate`);
   hold(!(await ctx.db.columnExists(mainTable(ctx), "note")), `${table}.note is on the server: the migration ran on a table that was not empty`);
 
   // Leave the project with nothing pending for the next part: the table emptied, the migration applied.
@@ -90,7 +90,7 @@ export async function preCheckPart(ctx: Ctx, p: Project): Promise<void> {
 /**
  * Policy over the plan (#53): yodel.config.ts refuses a drop in this
  * environment. A migration that drops a table is refused before the gate
- * (exit 4) naming the rule. An override recorded with yodel override lets
+ * (exit 7) naming the rule. An override recorded with yodel override lets
  * the plan apply, and the history records the override and its reason.
  * Which overrides count (the digest, the rules, the overriders, spent once)
  * is chant's override gate, and its claims. The policy is read at the base
@@ -122,7 +122,7 @@ async function policyOverApply(ctx: Ctx, p: Project): Promise<void> {
   const base = ctx.broken ? { YODEL_BASE: "HEAD" } : {};
 
   const denied = await p.apply([], base);
-  hold(denied.ran.code === 4 && denied.doc.status === "denied", `yodel apply of a drop under the no-drops rule exited ${String(denied.ran.code)}, status ${String(denied.doc.status)}, not denied`);
+  hold(denied.ran.code === 7 && denied.doc.status === "denied", `yodel apply of a drop under the no-drops rule exited ${String(denied.ran.code)}, status ${String(denied.doc.status)}, not denied`);
   hold(!(await gone()), "the dropped object is gone though the policy denied the plan");
 
   const over = await p.yodel(["override", p.env, "--rule", "no-drops", "--reason", "nothing reads it since TICKET-7", "--by", "alice"], { env: base });
@@ -163,7 +163,7 @@ function withoutRevertPolicy(ctx: Ctx, p: Project): string[] {
 /**
  * Policy over a revert (#97): the base commit's policy refuses drops here.
  * A table is added and applied; yodel revert of that migration, which
- * drops the table, is denied before the gate (exit 4) naming the rule, and
+ * drops the table, is denied before the gate (exit 7) naming the rule, and
  * the table stays. An override recorded with yodel override --revert for
  * the revert's digest lets it through the policy: the revert stops at the
  * gate, runs once approved, the table is gone, and the reverted row
@@ -189,7 +189,7 @@ async function policyOverRevert(ctx: Ctx, p: Project): Promise<void> {
 
   const denied = await revert();
   const doc = parseOr<{ status?: string; policy?: Array<{ id: string; outcome: string }> }>(denied, {});
-  hold(denied.code === 4 && doc.status === "denied" && doc.policy?.some((r) => r.id === "no-drops" && r.outcome === "denied") === true, `yodel revert of a migration that added a table, under the no-drops rule, exited ${String(denied.code)}, status ${String(doc.status)}, not denied by no-drops`);
+  hold(denied.code === 7 && doc.status === "denied" && doc.policy?.some((r) => r.id === "no-drops" && r.outcome === "denied") === true, `yodel revert of a migration that added a table, under the no-drops rule, exited ${String(denied.code)}, status ${String(doc.status)}, not denied by no-drops`);
   hold(await there(), "the table is gone though the policy denied its revert");
 
   const over = await p.yodel(["override", p.env, "--revert", id, "--rule", "no-drops", "--reason", "added by mistake in TICKET-8", "--by", "alice"]);
@@ -358,9 +358,9 @@ function withoutSharedRefusal(ctx: Ctx, p: Project): string[] {
  * check --write-probe connects (the token minted) and the server refuses
  * the write; with the writer (YODEL_ROLE=writer:<env>) the probe's
  * write goes through and it exits 4. With the writer's user variable
- * holding the reader's user, yodel refuses the project, exit 4 naming both
+ * holding the reader's user, yodel refuses the project, exit 1 naming both
  * variables and the user, and nothing runs. yodel apply with the reader
- * (#159) refuses before the gate, exit 4 naming YODEL_ROLE=writer:<env>,
+ * (#159) refuses before the gate, exit 1 naming YODEL_ROLE=writer:<env>,
  * and the history is as it was. The profile is put back after.
  * BREAK: yodel is built without those refusals, so the shared config runs
  * and the apply as the reader goes on to the gate or the server's refusal.
@@ -385,12 +385,12 @@ export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
     const read = await p.yodel(["config", "check", p.env, "--write-probe"], { env: apart, ...bin });
     must(read.code === 0 && read.out.includes("write probe   cannot write") && read.out.includes("password a command token (node)"), `yodel config check --write-probe with the reader exited ${String(read.code)}: ${read.out}${read.err}`);
     const wrote = await p.yodel(["config", "check", p.env, "--write-probe"], { env: { ...apart, YODEL_ROLE: `writer:${p.env}` }, ...bin });
-    must(wrote.code === 4 && wrote.err.includes("the credentials this process holds can write"), `yodel config check --write-probe with the writer exited ${String(wrote.code)}, not 4: ${wrote.out}${wrote.err}`);
+    must(wrote.code === 1 && wrote.err.includes("the credentials this process holds can write"), `yodel config check --write-probe with the writer exited ${String(wrote.code)}, not 4: ${wrote.out}${wrote.err}`);
 
     const shared = await p.yodel(["status", p.env], { env: { ...apart, CLAIM_WRITER_USER: reader }, ...bin });
     hold(
-      shared.code === 4 && shared.err.includes(`the reader (CLAIM_READER_USER) and the writer (CLAIM_WRITER_USER) are the same user, ${reader}`),
-      `yodel status with the reader's user as the writer's exited ${String(shared.code)}, not 4 naming both: ${shared.err.slice(-400)}`,
+      shared.code === 1 && shared.err.includes(`the reader (CLAIM_READER_USER) and the writer (CLAIM_WRITER_USER) are the same user, ${reader}`),
+      `yodel status with the reader's user as the writer's exited ${String(shared.code)}, not 1 naming both: ${shared.err.slice(-400)}`,
     );
 
     // An apply as the reader (#159) refuses before the gate and writes nothing to the history.
@@ -399,8 +399,8 @@ export async function readerWriterPart(ctx: Ctx, p: Project): Promise<void> {
     const asReader = await p.yodel(["apply", p.env], { env: apart, ...bin });
     const after = await history();
     hold(
-      asReader.code === 4 && asReader.err.includes(`YODEL_ROLE=writer:${p.env}`) && !asReader.err.includes("\n    at ") && after === before,
-      `yodel apply as the reader exited ${String(asReader.code)}, not 4 naming YODEL_ROLE=writer:${p.env}${after === before ? "" : ", and the history moved"}: ${asReader.err.slice(-400)}`,
+      asReader.code === 1 && asReader.err.includes(`YODEL_ROLE=writer:${p.env}`) && !asReader.err.includes("\n    at ") && after === before,
+      `yodel apply as the reader exited ${String(asReader.code)}, not 1 naming YODEL_ROLE=writer:${p.env}${after === before ? "" : ", and the history moved"}: ${asReader.err.slice(-400)}`,
     );
   } finally {
     p.write("chant.config.ts", config);

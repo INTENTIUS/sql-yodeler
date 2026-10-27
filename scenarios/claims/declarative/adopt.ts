@@ -140,7 +140,7 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
 /**
  * An object of a kind yodel cannot declare (#251): the schema holds an
  * operator, which chant's sql lexicon has no declaration for (its import
- * refuses it, INTENTIUS/chant#3911). yodel init --from refuses (exit 4)
+ * refuses it, INTENTIUS/chant#3911). yodel init --from refuses (exit 1)
  * naming it, and writes nothing, so nothing is left out of an adopted schema
  * in silence. It runs before the shared adoption, on the claim's schema, and
  * drops what it made.
@@ -156,7 +156,7 @@ async function unsupportedPart(ctx: Ctx): Promise<void> {
     if (ctx.broken) ctx.log("BREAK: yodel built to go on past the refusal of an object it cannot declare");
     const args = ["init", "--from", p.env];
     const ran = yodel ? await yodel.ask("", args) : await p.yodel(args);
-    hold(ran.code === 4 && ran.err.includes(`operator ${n}.===(integer,integer)`), `yodel init --from exited ${String(ran.code)} without naming the operator ${n}.=== it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
+    hold(ran.code === 1 && ran.err.includes(`operator ${n}.===(integer,integer)`), `yodel init --from exited ${String(ran.code)} without naming the operator ${n}.=== it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
     hold(p.migrationIds().length === 0, "yodel init --from wrote a migration although it refused");
   } finally {
     // The history too: under BREAK=1 init goes on and records a baseline, which the adoption after this would refuse.

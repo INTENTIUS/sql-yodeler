@@ -144,7 +144,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse", () => {
   it("refuses to adopt again, and writes nothing", async () => {
     const before = readFileSync(join(dir, "src", "schema.ts"), "utf8");
     const ran = await yodel(at("init", "--from", "e2e", "--force"));
-    expect(ran.code).toBe(4);
+    expect(ran.code).toBe(1);
     expect(ran.err).toContain("already holds migrations");
     expect(readFileSync(join(dir, "src", "schema.ts"), "utf8")).toBe(before);
     expect(readdirSync(join(dir, "migrations"))).toEqual([doc.migration.id]);
@@ -189,7 +189,7 @@ describe.skipIf(!clickhouseReachable)("yodel init --from on clickhouse, refused"
     mkdirSync(join(dir, "src"));
     writeFileSync(join(dir, "src", "mine.ts"), "export {};\n");
     const ran = await yodel(["init", "--from", "e2e", "--dir", dir]);
-    expect(ran.code).toBe(4);
+    expect(ran.code).toBe(1);
     expect(ran.err).toContain("already declares a schema (mine.ts)");
     expect(existsSync(join(dir, "migrations"))).toBe(false);
     expect(readdirSync(join(dir, "src"))).toEqual(["mine.ts"]);

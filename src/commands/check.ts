@@ -67,10 +67,10 @@ Options:
 
 Exit codes:
   0  no errors
-  3  at least one error, or a migration the server refused
-  4  the throwaway server's scope holds something and --reset was not given
-  1  the check could not run: no directory, an unknown tool, a server that
-     does not answer
+  1  at least one error, or a migration the server refused; the throwaway
+     server's scope holds something and --reset was not given; or the check
+     could not run: no directory, an unknown tool, a server that does not
+     answer
 `;
 
 interface CheckArgs {

@@ -261,7 +261,7 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
     writeMigration(migrations(), late);
     // yodel rebase reads the Postgres history: three is applied there, so it is never moved.
     const notRebased = await yodel(at("rebase", three.id, "--env", "e2e"));
-    expect(notRebased.code).toBe(4);
+    expect(notRebased.code).toBe(1);
     expect(notRebased.err).toContain(`e2e's history records ${three.id} (applied)`);
     expect((JSON.parse(readFileSync(join(three.dir, "migration.json"), "utf8")) as MigrationDocument).parent).toBe(two.id);
     // Rebased by hand: three now follows late. Its files change, so the history's checksum no longer matches.
@@ -269,10 +269,10 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
     const moved = { ...doc, checksum: computeChecksum({ sql: three.files.sql, json: doc }) };
     writeFileSync(join(three.dir, "migration.json"), serializeDocument(moved));
 
-    const mismatch = await status(4);
+    const mismatch = await status(1);
     expect(mismatch.mismatches).toMatchObject([{ kind: "applied", id: three.id }]);
     const refused = await yodel(at("apply", "e2e"));
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain(`${three.id} was applied with checksum`);
 
     const repaired = await yodel(at("repair", three.id, "e2e", "--reason", `rebased onto ${late.id}`, "--json"));
@@ -280,11 +280,11 @@ describe.skipIf(!postgresReachable)("the versioned path on postgres", () => {
     expect(json(repaired)).toMatchObject({ repaired: true, id: three.id, newChecksum: moved.checksum });
     expect(await one(`SELECT note FROM ${HISTORY}.history WHERE migration_id = '${three.id}' ORDER BY seq DESC LIMIT 1`)).toEqual({ note: `rebased onto ${late.id}` });
 
-    const lateStatus = await status(4);
+    const lateStatus = await status(1);
     expect(lateStatus.mismatches).toEqual([]);
     expect(lateStatus.outOfOrder).toEqual([late.id]);
     const notAllowed = await yodel(at("apply", "e2e"));
-    expect(notAllowed.code).toBe(4);
+    expect(notAllowed.code).toBe(1);
     expect(notAllowed.err).toMatch(new RegExp(`${late.id} is out of order.*--allow-out-of-order`));
     expect(await one<{ t: string | null }>(`SELECT to_regclass('${S}.c')::text AS t`)).toEqual({ t: null });
 

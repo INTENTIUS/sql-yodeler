@@ -19,12 +19,10 @@
  * order of applied migrations is unchanged.
  */
 
-import { YodelError } from "../project.js";
+import { YodelError, yodelRefusal } from "../project.js";
 import { isApplied, MIGRATION_ROW, type HistoryRow, type HistoryState, type MigrationRecord, type RunContext } from "../history/index.js";
 import { computeChecksum, type Migration } from "../migrations/index.js";
 
-/** Exit code: refused, nothing written (not applied, already matching, or gone from the directory). */
-export const REPAIR_REFUSED = 4;
 
 export interface RepairCheck {
   record: MigrationRecord;
@@ -38,24 +36,22 @@ export interface RepairCheck {
 export function checkRepair(m: Migration | undefined, id: string, state: HistoryState, environment: string): RepairCheck {
   const record = state.byId.get(id);
   if (!m) {
-    throw new YodelError(
+    throw yodelRefusal(
       record
         ? `refused: ${id} is in ${environment}'s history, but the migrations directory no longer has it; restore its directory (repair records an edit to a migration's files, not its removal)`
         : `refused: ${id} is not in the migrations directory`,
-      REPAIR_REFUSED,
     );
   }
-  if (!record) throw new YodelError(`refused: ${id} has not run in ${environment}: its history has no row for it. Nothing to repair; an edit to a pending migration needs none.`, REPAIR_REFUSED);
+  if (!record) throw yodelRefusal(`refused: ${id} has not run in ${environment}: its history has no row for it. Nothing to repair; an edit to a pending migration needs none.`);
   if (!isApplied(record)) {
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: ${id} is not applied in ${environment}: it ran part way (its latest row is ${record.status}). ` +
         `A migration that failed part way may be edited before it resumes, as long as the statements that succeeded are unchanged; yodel apply resumes it. Repair is for an applied migration.`,
-      REPAIR_REFUSED,
     );
   }
   const newChecksum = computeChecksum(m.files);
   if (record.checksum === newChecksum) {
-    throw new YodelError(`refused: ${id}'s files already hash to the checksum ${environment}'s history records (${newChecksum}); nothing to repair`, REPAIR_REFUSED);
+    throw yodelRefusal(`refused: ${id}'s files already hash to the checksum ${environment}'s history records (${newChecksum}); nothing to repair`);
   }
   return { record, oldChecksum: record.checksum, newChecksum };
 }

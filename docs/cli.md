@@ -64,17 +64,20 @@ Docs: https://intentius.io/sql-yodeler/
 
 Exit codes (yodel <command> --help lists a command's own):
   0  done, or nothing to do
-  1  an error
-  2  something yodel will not do itself (a change that needs an Op it does not
-     run, a manual step); for yodel drift, drift found
-  3  something outstanding: apply stopped at its approval gate, status found
-     pending migrations, lint found errors
-  4  refused, nothing done: a checksum mismatch, an applied migration gone from
-     the directory, an out-of-order migration, a fork or another problem in the
-     migrations directory, a migration the environment it must run on first has
-     not applied, an environment whose reader and writer are one identity, a
-     command that writes run with an environment's reader
+  1  failed, or refused for a reason no approval fixes: a bad config, a checksum
+     mismatch, an applied migration gone from the directory, an out-of-order
+     migration, a fork or another problem in the migrations directory, an
+     environment whose reader and writer are one identity, a command that writes
+     run with an environment's reader, lint errors
+  2  for yodel drift, drift found
+  3  waiting for a person: apply stopped at its approval gate, status found
+     pending migrations, a migration the environment it must run on first has
+     not applied, a change that needs an Op yodel does not run, a manual step
+  4  the plan moved: the approved plan, or the one a wave decided on, is not the
+     plan that would apply now; nothing applied
   5  another apply holds the lock
+  7  a policy rule denies the plan and no override counts; nothing applied
+  8  yodel approve: the answer was not the environment's name; nothing approved
   yodel plan exits 0 when migrations are pending: it reports, and a CI job that
   posts the plan on a pull request should not fail because the pull request adds
   a migration. To gate on pending migrations, use yodel status.
@@ -82,18 +85,20 @@ Exit codes (yodel <command> --help lists a command's own):
 
 ## Exit codes
 
-`yodel <command> --help` lists each command's options and exit codes. The exit codes mean the same across commands where they can:
+yodel exits by chant's one exit-code table, the same numbers terragucci and plywood use; [chant's exit codes reference](https://intentius.io/chant/reference/exit-codes/) has the whole table. `yodel <command> --help` lists each command's options and the codes it can return:
 
 | Code | Meaning |
 |---|---|
 | 0 | done, or nothing to do |
-| 1 | an error |
-| 2 | something yodel will not do itself (a change that needs an Op it does not run, a manual step); for `yodel drift`, drift found |
-| 3 | something outstanding: apply stopped at its approval gate, status found pending migrations, lint found errors |
-| 4 | refused, nothing done: a checksum mismatch, an applied migration gone from the directory, an out-of-order migration, a fork or another problem in the migrations directory, a migration the environment it must run on first has not applied, an environment whose reader and writer are one identity, a command that writes run with an environment's reader |
+| 1 | failed, or refused for a reason no approval fixes: a bad config, a checksum mismatch, an applied migration gone from the directory, an out-of-order migration, a fork or another problem in the migrations directory, an environment whose reader and writer are one identity, a command that writes run with an environment's reader, lint errors |
+| 2 | for `yodel drift`, drift found |
+| 3 | waiting for a person: apply stopped at its approval gate, status found pending migrations, a migration the environment it must run on first has not applied, a change that needs an Op yodel does not run, a manual step |
+| 4 | the plan moved: the approved plan, or the one a wave decided on, is not the plan that would apply now; nothing applied |
 | 5 | another apply holds the lock |
+| 7 | a policy rule denies the plan and no override counts; nothing applied |
+| 8 | `yodel approve`: the answer was not the environment's name; nothing approved |
 
-`yodel apply` exits with the code of its Op's Apply step, so a lock held by another apply is 5 there too. `yodel plan` exits 0 when migrations are pending: it reports, and a CI job that posts the plan on a pull request should not fail because the pull request adds a migration. To gate on pending migrations, use `yodel status`.
+chant's table also has 6, a newer push applies instead, which yodel itself does not return: `yodel apply --stand-down` exits 0. A refusal no approval fixes is 1, so a pipeline tells a broken migrations directory from a waiting gate (3), a moved plan (4) and a policy denial (7). `yodel apply` exits with the code of its Op's Apply step, so a lock held by another apply is 5 there too. `yodel plan` exits 0 when migrations are pending: it reports, and a CI job that posts the plan on a pull request should not fail because the pull request adds a migration. To gate on pending migrations, use `yodel status`.
 
 ## JSON output
 

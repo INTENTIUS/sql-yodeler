@@ -1,14 +1,14 @@
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Project, yodelRefusal } from "../project.js";
 import { migrationId } from "../migrations/index.js";
 import { adopt, BASELINE_NAME, planBaseline, projectBaseline, type Adopted } from "../init/index.js";
-import { GATED, gatedCommands } from "../chant/apply.js";
+import { gatedCommands } from "../chant/apply.js";
 import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_WAITING } from "../exit.js";
 import { isApplied } from "../history/index.js";
 import { closeVersioned, findMigrateOp, inspect, openVersioned, readChain, runMigrateOp } from "../versioned/index.js";
 
@@ -56,7 +56,7 @@ restamps their comments.
 baseline (the project's first migration) records against <env>'s live
 database, offline from migration.json: every object must be there as the
 baseline declares it, and nothing else in the profile's databases or
-schemas. A difference refuses (exit 4), naming each object and what
+schemas. A difference refuses (exit 1), naming each object and what
 differs, and nothing is recorded. When they match, records the baseline
 applied in <env>'s history, without running it, through <env>'s migrations
 Op, as yodel apply does: its Plan step compares again and prints the
@@ -83,18 +83,18 @@ Exit codes:
   0  adopted: declarations and the baseline written, the baseline recorded
      applied (--baseline: the baseline recorded applied in <env>)
   3  (--baseline) stopped at the gate, waiting for approval of the record
-  4  refused, nothing written: the source directory already declares a
-     schema (without --force), the project already has migrations, the
-     history already records migrations, the environment holds nothing or
-     an object of a kind yodel cannot declare (without --skip-unsupported), or
-     a ClickHouse profile with no databases or with the history's database;
-     --baseline: the project has no migrations, <env>'s history records
-     any, or <env>'s live schema is not the baseline's; or the run holds
-     <env>'s reader (YODEL_ROLE is not writer or writer:<env>), or
-     the server refused the user a privilege
   5  another apply holds the lock; nothing recorded, nothing kept
   1  anything else failed, and nothing was kept: a bad config, a server it
-     cannot read, a build or a plan that is not clean after the import
+     cannot read, a build or a plan that is not clean after the import.
+     Refused with nothing written, also 1: the source directory already
+     declares a schema (without --force), the project already has
+     migrations, the history already records migrations, the environment
+     holds nothing or an object of a kind yodel cannot declare (without
+     --skip-unsupported), or a ClickHouse profile with no databases or with
+     the history's database; --baseline: the project has no migrations,
+     <env>'s history records any, or <env>'s live schema is not the
+     baseline's; or the run holds <env>'s reader (YODEL_ROLE is not writer
+     or writer:<env>), or the server refused the user a privilege
 `;
 
 interface InitArgs {
@@ -211,7 +211,7 @@ async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Pr
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this record${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
         if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again.\n`);
       }
-      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, EXIT_WAITING);
     }
     if (ran.status === "failed") {
       const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;
@@ -243,7 +243,7 @@ export const init: Command = {
       // init writes the history (#159): the reader refuses before anything is read, naming the variable that picks the writer.
       const command = runnable(a.baseline !== undefined ? `yodel init --baseline ${env.name}` : `yodel init --from ${env.name}${a.force ? " --force" : ""}`, project.dir);
       const asReader = readerRefusal(env.profile, command);
-      if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+      if (asReader) throw yodelRefusal(asReader);
       try {
         if (a.baseline !== undefined) return await recordIn(project, a.baseline, a, io);
         const adopted = await adopt(project, env, { force: a.force, skipUnsupported: a.skipUnsupported, name: a.name, log: (l) => { io.err(`${l}\n`); } });
@@ -251,7 +251,7 @@ export const init: Command = {
         return 0;
       } catch (e) {
         const denied = permissionRefusal(e, env.profile, command);
-        if (denied) throw new YodelError(denied, EXIT_REFUSED);
+        if (denied) throw yodelRefusal(denied);
         throw e;
       }
     }),

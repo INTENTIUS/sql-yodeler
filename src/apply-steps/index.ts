@@ -18,7 +18,7 @@
  *   under the lock, never when the wave is planned (#107).
  * - In order: a step that fails stops the ones after it, unless its
  *   `onFailure` is `approve`. A `before` step that fails refuses the run
- *   (exit 4); an `after` step that fails fails it (exit 1), the migrations
+ *   (exit 1); an `after` step that fails fails it (exit 1), the migrations
  *   applied.
  * - Outside the waves (`yodel apply <env>`) the same hooks are made from
  *   yodel.config.ts at the base commit ({@link stepsAtBase}, {@link
@@ -33,9 +33,9 @@ import { spawnSync } from "node:child_process";
 import type { OpWaveApplyHooksRun, OpWaveExec, OpWaveHook, OpWaveHookMoment, OpWaveHooks, OpWaveHooksFile } from "@intentius/chant/op";
 import type { ApplyStep, ApplySteps } from "../config/define.js";
 import { loadYodelConfigAtBase } from "../config/base.js";
-import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
+import { EXIT_WAITING } from "../exit.js";
 import { judgeCheck } from "../migrations/checks.js";
-import { YodelError, type Project } from "../project.js";
+import { YodelError, type Project, yodelRefusal } from "../project.js";
 import type { VersionedDriver } from "../versioned/driver.js";
 
 export type StepWhen = "before" | "after";
@@ -238,7 +238,7 @@ export const heldSteps = (outcomes: readonly StepOutcome[]): string[] => outcome
 
 /**
  * The refusal for a moment's hooks that did not let the apply go on, or
- * undefined: a `before` step that failed (exit 4, nothing applied), a held
+ * undefined: a `before` step that failed (exit 1, nothing applied), a held
  * one with no approval standing (exit 3), an `after` step that failed (exit
  * 1, the migrations applied).
  */
@@ -248,15 +248,14 @@ export function stepsRefusal(env: string, ran: StepHooksRun, when: string, appro
   const failed = ran.outcomes.filter((o) => !o.passed && o.onFailure === "fail");
   if (ran.run.moment === "after-apply") return new YodelError(`${env}: the migrations are applied, and an after step failed ${when}:\n${lines(failed)}`, 1);
   if (ran.run.failed || failed.length > 0) {
-    return new YodelError(
+    return yodelRefusal(
       `refused: a before step of ${env} failed ${when}; nothing was applied:\n${lines(failed)}\n` +
         `Fix the cause and run again, or, for a check a person may wave through, give the step onFailure: "approve" (at the base commit).`,
-      EXIT_REFUSED,
     );
   }
   const held = ran.outcomes.filter((o) => !o.passed && o.onFailure === "approve");
   const why = held.length > 0 ? lines(held) : ran.run.held.map((h) => `  ${h}`).join("\n");
-  return new YodelError(`refused: a before step of ${env} failed with onFailure approve ${when}, and no approval of this plan stands; nothing was applied:\n${why}${approve ? `\nApprove it with: ${approve}` : ""}`, EXIT_OUTSTANDING);
+  return new YodelError(`refused: a before step of ${env} failed with onFailure approve ${when}, and no approval of this plan stands; nothing was applied:\n${why}${approve ? `\nApprove it with: ${approve}` : ""}`, EXIT_WAITING);
 }
 
 /** The steps a history row's note records, if any. */

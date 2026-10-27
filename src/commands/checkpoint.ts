@@ -2,8 +2,7 @@ import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
-import { EXIT_REFUSED } from "../exit.js";
-import { loadProject, YodelError } from "../project.js";
+import { loadProject, YodelError, yodelRefusal } from "../project.js";
 import { createCheckpoint, isCheckpoint, MIGRATIONS_DIR, migrationId, newestMigration, readMigrations, verifyChecksum, writeMigration } from "../migrations/index.js";
 
 const usage = "usage: yodel checkpoint <name> [--json] [--dir <project>]";
@@ -35,8 +34,8 @@ Exit codes:
   0  the checkpoint was written
   1  no checkpoint could be made: a bad config, a migrations directory that
      is not one chain, no migration yet, a recorded schema that declares
-     nothing or that statements alone cannot create
-  4  refused, nothing written: the newest migration is a checkpoint already
+     nothing or that statements alone cannot create, or the newest migration
+     is a checkpoint already (nothing written)
 `;
 
 /** `yodel checkpoint <name>`; the exit codes are in `help`. */
@@ -60,7 +59,7 @@ export const checkpoint: Command = {
       const dir = join(project.dir, MIGRATIONS_DIR);
       const parent = newestMigration(readMigrations(dir));
       if (!parent) throw new YodelError(`no migration yet in ${dir}; a checkpoint creates the newest migration's recorded schema (yodel new <name> first)`);
-      if (isCheckpoint(parent)) throw new YodelError(`refused: the newest migration, ${parent.id}, is a checkpoint already. Nothing written.`, EXIT_REFUSED);
+      if (isCheckpoint(parent)) throw yodelRefusal(`refused: the newest migration, ${parent.id}, is a checkpoint already. Nothing written.`);
       if (!verifyChecksum(parent).ok) io.err(`yodel checkpoint: warning: ${parent.id}'s files no longer match its recorded checksum; the checkpoint creates its recorded schema as it stands\n`);
       const made = createCheckpoint({ name, parent });
       const path = writeMigration(dir, made);

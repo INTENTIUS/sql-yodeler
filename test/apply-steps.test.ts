@@ -107,7 +107,7 @@ describe("running steps through chant's runner", () => {
     ]);
     expect(heldSteps(got.outcomes)).toEqual(["broken"]);
     const refusal = stepsRefusal("prod", got, "under the lock");
-    expect(refusal?.exitCode).toBe(4);
+    expect(refusal?.exitCode).toBe(1);
     expect(refusal?.message).toMatch(/before step no failed \(exit 2: nope\)/);
     expect(refusal?.message).not.toMatch(/broken/);
   });

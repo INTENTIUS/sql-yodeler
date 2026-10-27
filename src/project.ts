@@ -11,20 +11,31 @@ import { dirname, join, resolve } from "node:path";
 import type { SqlConfig, SqlProfile } from "@intentius/chant-lexicon-sql/config";
 import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
 import type { YodelConfig } from "./config/define.js";
+import { EXIT_FAILED } from "./exit.js";
 import { splitTarget, TENANT_NAME } from "./tenants/target.js";
 
 export type { SqlDialect, SqlProfile };
 
-/** An error a verb reports as one line on stderr, with the exit code it ends with. */
+/**
+ * An error a verb reports as one line on stderr, with the exit code it ends
+ * with. `refused` marks a refusal (nothing was done, and the run reports
+ * `refused`, not `failed`), which chant's table gives no code of its own:
+ * most are `failed` (1), a policy denial `denied` (7), an unmet promotion
+ * `waiting` (3).
+ */
 export class YodelError extends Error {
   constructor(
     message: string,
-    readonly exitCode = 1,
+    readonly exitCode: number = EXIT_FAILED,
+    readonly refused = false,
   ) {
     super(message);
     this.name = "YodelError";
   }
 }
+
+/** A refusal: nothing was done. `failed` (1) unless the refusal has a row of its own in chant's table. */
+export const yodelRefusal = (message: string, exitCode: number = EXIT_FAILED): YodelError => new YodelError(message, exitCode, true);
 
 /** The parts of a loaded `chant.config.ts` yodel reads. */
 export interface ProjectConfig {
@@ -146,7 +157,7 @@ export async function loadProject(start: string = process.cwd()): Promise<Projec
   // An environment whose reader and writer are one identity is refused before anything reads or writes (#50).
   const { sharedCredentialsIn } = await import("./credentials.js");
   const shared = sharedCredentialsIn(config.sql?.profiles ?? {});
-  if (shared) throw new YodelError(`refused: ${shared}`, 4);
+  if (shared) throw yodelRefusal(`refused: ${shared}`);
   const { loadYodelConfig } = await import("./config/load.js");
   const yodel = await loadYodelConfig(dir, Object.keys(config.sql?.profiles ?? {}));
   return projectFromConfig(dir, loaded.configPath ?? join(dir, "chant.config.ts"), config, yodel);

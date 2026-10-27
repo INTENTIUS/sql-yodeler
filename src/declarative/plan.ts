@@ -162,8 +162,8 @@ function policyMarkdown(results: readonly RuleResult[], environment: string): st
 /**
  * Why there is no plan to approve yet although the environment has an
  * ApplyOp, and what to do instead, or undefined: `yodel apply` refuses a
- * change that needs its own Op or a live object it could not read (exit 2),
- * and a policy denial before the gate (exit 4), so approving the gate would
+ * change that needs its own Op or a live object it could not read (exit 3 and
+ * 1), and a policy denial before the gate (exit 7), so approving the gate would
  * approve nothing it runs.
  */
 export function approvalHeld(p: DeclarativePlan): string | undefined {
@@ -198,7 +198,7 @@ export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?
   if (access.length > 0) out.push("", "#### Access", "", ...access.map((l) => `- ${cell(l)}`));
   const unreadable = unreadableOf(p.plan);
   if (p.plan.refused.length > 0 || unreadable.length > 0) {
-    out.push("", `**\`yodel apply\` would refuse (exit 2)**, and applies nothing: ${unreadable.length > 0 ? `${unreadable.map((u) => `\`${cell(u.object)}\``).join(", ")} could not be read` : `${String(p.plan.refused.length)} change${p.plan.refused.length === 1 ? "" : "s"} need${p.plan.refused.length === 1 ? "s" : ""} ${p.plan.refused.length === 1 ? "its" : "their"} own Op`}.`);
+    out.push("", `**\`yodel apply\` would refuse (exit ${String(planExitCode(p.plan))})**, and applies nothing: ${unreadable.length > 0 ? `${unreadable.map((u) => `\`${cell(u.object)}\``).join(", ")} could not be read` : `${String(p.plan.refused.length)} change${p.plan.refused.length === 1 ? "" : "s"} need${p.plan.refused.length === 1 ? "s" : ""} ${p.plan.refused.length === 1 ? "its" : "their"} own Op`}.`);
   }
   if (p.lint.findings.length > 0) {
     out.push("", `#### Lint (${String(p.lint.errors)} error${p.lint.errors === 1 ? "" : "s"}, ${String(p.lint.warnings)} warning${p.lint.warnings === 1 ? "" : "s"})`, "", "| Level | Rule | Finding |", "|---|---|---|");

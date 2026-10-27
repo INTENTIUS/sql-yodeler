@@ -110,10 +110,10 @@ describe("the plan comment's markdown", () => {
   });
 
   it("lists integrity problems and apply's refusal", () => {
-    const md = renderPlanMarkdown(clickhousePlan({ digest: undefined, refusal: { exitCode: 4, message: "refused: the history does not match" } }));
+    const md = renderPlanMarkdown(clickhousePlan({ digest: undefined, refusal: { exitCode: 1, message: "refused: the history does not match" } }));
     expect(md).toContain("#### Integrity problems (1)");
     expect(md).toContain("- 20261009T0900-zero was applied with checksum sha256:a");
-    expect(md).toContain("would refuse (exit 4)");
+    expect(md).toContain("would refuse (exit 1)");
     expect(md).not.toContain("yodel approve");
   });
 

@@ -16,8 +16,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { GateResolutionRecord } from "@intentius/chant/lifecycle/gate-ledger";
 import { gitGateLedgerPort, memoryGateLedgerPort, type GateLedgerPort } from "@intentius/chant/op/gate";
 import { sealGateApproval } from "@intentius/chant/workspace/trust/seal";
-import { NOT_APPROVED, verifyApproval } from "../src/versioned/approval.js";
+import { verifyApproval } from "../src/versioned/approval.js";
 import type { MigrateOpRef } from "../src/versioned/op.js";
+import { EXIT_WAITING } from "../src/exit.js";
 
 const DIGEST = `jcs1-sha256:${"a".repeat(64)}`;
 const GATE = "approve-migrate-prod";
@@ -83,7 +84,7 @@ describe.skipIf(!hasSshKeygen)("a quorum at base, counted by --execute", () => {
 
   it("refuses, saying what is missing, when the quorum at base is not met", async () => {
     const dir = repo({ count: 2 });
-    await expect(verifyApproval(portFor(dir, true, "alice"), op(false), DIGEST)).rejects.toMatchObject({ exitCode: NOT_APPROVED, message: expect.stringMatching(/quorum at base is not met/) as unknown });
+    await expect(verifyApproval(portFor(dir, true, "alice"), op(false), DIGEST)).rejects.toMatchObject({ exitCode: EXIT_WAITING, message: expect.stringMatching(/quorum at base is not met/) as unknown });
     // One person approving twice is one approver.
     await expect(verifyApproval(portFor(dir, true, "alice", "alice"), op(false), DIGEST)).rejects.toThrow(/quorum at base is not met/);
   });
@@ -104,7 +105,7 @@ describe.skipIf(!hasSshKeygen)("a quorum at base, counted by --execute", () => {
   it("counts nothing from a quorum declared only in the Op, with none at base", async () => {
     const dir = repo(undefined);
     await expect(verifyApproval(portFor(dir, false, "alice", "bob"), op(true), DIGEST)).rejects.toMatchObject({
-      exitCode: NOT_APPROVED,
+      exitCode: EXIT_WAITING,
       message: expect.stringMatching(/declared only in the Op.*identity\.gates\.approve-migrate-prod\.quorum/s) as unknown,
     });
     // And one the change adds to the declaration is no quorum at base.

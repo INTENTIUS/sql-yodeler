@@ -137,12 +137,12 @@ Options:
 
 Exit codes:
   0  no errors (warnings and silenced findings do not fail)
-  3  at least one error (a replay that differs counts)
-  4  --replay: the target already holds what the history names, and --reset
-     was not given, or another profile binds the same server and names one
-     of them and --reset-shared does not name it; nothing was run
-  1  lint could not run: a bad config, an unknown migration for
-     --update-checksum, a server that does not answer (--env)
+  1  at least one error (a replay that differs counts); --replay: the target
+     already holds what the history names, and --reset was not given, or
+     another profile binds the same server and names one of them and
+     --reset-shared does not name it (nothing was run); or lint could not
+     run: a bad config, an unknown migration for --update-checksum, a server
+     that does not answer (--env)
 `;
 
 interface LintArgs {
@@ -300,7 +300,7 @@ export const lint: Command = {
       if (a.replay !== undefined) {
         const env = resolveEnvironment(project, a.replay);
         if (scanMigrations(dir).ordered) {
-          // A target that is not fresh throws here, exit 4, before anything is linted or run.
+          // A target that is not fresh throws here, exit 1, before anything is linted or run.
           replay = await replayHistory(project, env, { reset: a.reset, resetShared: a.resetShared, keep: a.keep, log: (l) => { io.err(`replay: ${l}\n`); } });
           options.rules = [...projectRules, replayRule(replay)];
         } else {

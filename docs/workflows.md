@@ -98,7 +98,7 @@ Run again, the same command applies the plan; the [example](../examples/clickhou
 What the declarative path does and does not do:
 
 - An `ApplyOp` with no `delete` option runs with delete mode `never` (its output says `delete mode: never`): a drop stays in the plan, and `yodel apply` says so when changes remain after the Op. `delete: "owned-only"` or `"gated"` on the `ApplyOp` lets it drop (chant's `ApplyOp` options).
-- A change no statement makes in place (a ClickHouse sort-key change, a Postgres column rename or type change across kinds) makes `yodel plan` exit 2, and `yodel apply` applies nothing. Those changes are steps of a migration on the versioned path ([Data migrations](steps.md)).
+- A change no statement makes in place (a ClickHouse sort-key change, a Postgres column rename or type change across kinds) makes `yodel plan` exit 3, and `yodel apply` applies nothing. Those changes are steps of a migration on the versioned path ([Data migrations](steps.md)).
 - It keeps no history. What the database is, is what the live catalog says; `yodel drift` compares the two ([Drift](drift.md)).
 - The topology comes from `sql.profiles.<env>.topology` only ([Topology](topology.md)).
 - chant marks the objects it creates with an ownership marker in their comment (`[chant managed-by=chant]`) and never touches an object the project does not declare.
@@ -116,7 +116,7 @@ npx yodel plan dev --comment  # the plan comment, with the findings and the poli
 - `yodel lint`, with no server, runs the sql lexicon's schema checks (`SQLCH1xx`, `SQLPG1xx`), the project's own checks (`chant.config.ts` `lint.policies`) and `lint.naming` over the build of `src/`. With `--env <env>` it also plans `src/` against that environment and checks each planned change against the rules that read a change's rule and class: `destructive`, `pg-rewrite`, `pg-access`, `ch-mutation`, `ch-rebuild`, `ch-access`, and `refused-step` for a change that needs its own Op. The plan carries no statement, so `pg-lock`, `data-dependent` and `pg-signature`, which read one, are for migrations.
 - Nothing is silenced here, since there is no `migration.sql` to hold a `-- yodel:allow` line. `yodel.config.ts` `lint.rules` sets a rule's level, as on the versioned path.
 - `yodel plan <env>` prints chant's plan with those findings, each policy rule's outcome (`yodel.config.ts` `policy`, read at the base commit) and how the ApplyOp's gate is approved. When `yodel apply` would refuse the plan (a change that needs its own Op, a live object it could not read, or a policy denial), the approval section and `--json`'s `approval.message` say what to do instead, and there is no `approval.command`. `--comment` posts it on the pull request, updating the one posted before, with the same marker the versioned comment uses. The comment names no server address. `yodel ci` already renders the `plan-<env>` job that runs it.
-- A policy rule sees one entry in `pending`, `declared`, whose steps are the planned changes (each a `statement` with its object, class, rule and `destructive`, and no `sql`), and `plan.declarative` is `true`. A rule that denies the plan makes `yodel apply` refuse (exit 4) before the ApplyOp runs. `yodel override <env> --rule <id> --reason <text>` records an override for exactly these changes, under the ApplyOp's name; it stops counting once the live database or `src/` moves, and `yodel apply` spends it once the ApplyOp applies, not when it stops at the gate. The gate still asks for its own approval.
+- A policy rule sees one entry in `pending`, `declared`, whose steps are the planned changes (each a `statement` with its object, class, rule and `destructive`, and no `sql`), and `plan.declarative` is `true`. A rule that denies the plan makes `yodel apply` refuse (exit 7) before the ApplyOp runs. `yodel override <env> --rule <id> --reason <text>` records an override for exactly these changes, under the ApplyOp's name; it stops counting once the live database or `src/` moves, and `yodel apply` spends it once the ApplyOp applies, not when it stops at the gate. The gate still asks for its own approval.
 
 ## What each path has
 
@@ -131,7 +131,7 @@ npx yodel plan dev --comment  # the plan comment, with the findings and the poli
 | History, resume, `yodel report`, `yodel revert` | no history | yes |
 | `--allow-out-of-order`, `yodel rebase`, `yodel repair` | no: there are no migrations to order | yes |
 | The replay check (`yodel lint --replay`) | no | yes |
-| Data migrations: rebuild, backfill and expand-and-contract steps | no: a change that needs one exits 2 | yes |
+| Data migrations: rebuild, backfill and expand-and-contract steps | no: a change that needs one exits 3 | yes |
 | Waves and their gate policies (`always`, `on-destructive`, `never`) | no: a wave plans and applies migrations | yes |
 | Tenant sets | no | yes |
 | The apply lock and `--lock-wait` | no: chant's ApplyOp applies | yes |
@@ -154,7 +154,7 @@ npx yodel apply dev           # behind the migrations Op's gate
 
 ## More than one environment
 
-Each environment is a profile in `chant.config.ts`, with its own history. The starter templates' apply pipeline applies them in the order of `yodel.config.ts` `waves` after every push to main, one job per environment, each waiting for the one before; a wave that stops at its gate stops the ones after it. Each wave has its own gate policy (`always`, `on-destructive` or `never`), read from the commit the push merged onto, and applies only migrations the environment before it has applied: prod refuses (exit 4) a migration staging's history does not record. [Approval](approval.md#waves-a-gate-per-environment) has how a wave plans, waits and applies.
+Each environment is a profile in `chant.config.ts`, with its own history. The starter templates' apply pipeline applies them in the order of `yodel.config.ts` `waves` after every push to main, one job per environment, each waiting for the one before; a wave that stops at its gate stops the ones after it. Each wave has its own gate policy (`always`, `on-destructive` or `never`), read from the commit the push merged onto, and applies only migrations the environment before it has applied: prod refuses (exit 3) a migration staging's history does not record. [Approval](approval.md#waves-a-gate-per-environment) has how a wave plans, waits and applies.
 
 ## The pipelines: yodel ci
 

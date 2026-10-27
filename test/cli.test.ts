@@ -67,7 +67,7 @@ describe("yodel", () => {
   it("says a verb is not implemented yet", async () => {
     for (const verb of notBuilt) {
       const { code, err } = await run([verb, "prod"]);
-      expect(code).toBe(2);
+      expect(code).toBe(1);
       expect(err).toBe(`yodel ${verb}: not implemented yet\n`);
     }
   });
