@@ -858,8 +858,11 @@ interface WavesSpec {
   op: string;
   /** The wave gate pattern, under chant's product pipeline (#289): `yodel-apply-wave-{k}`, the names chant gives the gates without it. */
   gateName?: string;
-  plan: string[];
-  apply: string[];
+  /** yodel's callbacks, `yodel apply {target} --wave-plan|--wave-apply`; absent when the sql capability plans and applies (#291). */
+  plan?: string[];
+  apply?: string[];
+  /** The sql lexicon's capability (chant#4569), in place of `plan` and `apply` (#291). */
+  step?: { kind: "sql-migrate"; environment: string; spec: string };
   branches: string[];
   waves: Array<{
     name: string;
@@ -878,15 +881,35 @@ interface WavesSpec {
 /**
  * The waves spec. What the file holds is the same for every forge; each
  * forge's jobs get their own variables on top (`variables`).
+ *
+ * With `step` (#291), a chant whose sql lexicon has the `sql-migrate`
+ * capability (chant#4569): the spec names the capability, and chant plans
+ * and applies each run through it, which calls the same engine entry points
+ * (`yodel apply <env> --wave-plan` and `--wave-apply`) by a fixed argv. The
+ * spec then has no `plan` or `apply` callback. Without it, the callbacks.
+ *
+ * The steps around apply (#64) under `step`: chant refuses `hooks.apply.runBy:
+ * "apply"` with a capability step, and it would run apply-stage hooks
+ * around the step itself, outside the engine's lock, while `--wave-apply`
+ * with no CHANT_HOOKS runs the steps at base under its lock as well. So the
+ * spec keeps only the `before.plan` SQL checks, which chant runs when it
+ * plans the wave (one that fails with `onFailure: "approve"` holds the wave
+ * for a person), and `--wave-apply` runs every step under its lock, read at
+ * the base commit, as it does run by hand. A step runs once, under the
+ * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }, options: { step?: boolean } = {}): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
     name: APPLY_PIPELINE,
     op: `migrate-${first.env}`,
-    plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", WAVES_SPEC],
-    apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", WAVES_SPEC],
+    ...(options.step
+      ? { step: { kind: SQL_MIGRATE, environment: "{target}", spec: WAVES_SPEC } }
+      : {
+          plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", WAVES_SPEC],
+          apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", WAVES_SPEC],
+        }),
     branches: [MAIN],
     waves: waves.map((w) => ({
       name: w.env,
@@ -896,16 +919,38 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
       ...(w.approval !== undefined && w.approval !== "ledger" ? { approval: w.approval } : {}),
       ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
       // The steps around apply (#64) as chant's stage hooks, which the apply runs under its lock (#206).
-      ...hooksOf(w.steps),
+      ...hooksOf(w.steps, options.step === true),
     })),
     ...(resume ? { resume } : {}),
   };
 }
 
-/** A wave's stage hooks from its steps, when it has any. */
-function hooksOf(steps: ApplySteps | undefined): { hooks?: OpWaveHooks } {
+/** The sql lexicon's capability for a versioned environment (chant#4569). */
+export const SQL_MIGRATE = "sql-migrate";
+
+/**
+ * Whether the installed sql lexicon plans and applies through chant (#291):
+ * it exports `sqlCapabilityPlugin` (chant#4569), and the chant that ships
+ * with it runs an op wave's `step`. A lazy import, with the specifier in a
+ * variable, so a published lexicon without it keeps the callbacks.
+ */
+export async function hasSqlCapability(): Promise<boolean> {
+  const specifier = "@intentius/chant-lexicon-sql/capability-plugin";
+  try {
+    const m = (await import(specifier)) as { sqlCapabilityPlugin?: unknown };
+    return m.sqlCapabilityPlugin !== undefined && m.sqlCapabilityPlugin !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** A wave's stage hooks from its steps, when it has any; under a capability `step`, the `before.plan` checks only ({@link wavesSpec}). */
+function hooksOf(steps: ApplySteps | undefined, step = false): { hooks?: OpWaveHooks } {
   const hooks = stepHooks(steps);
-  return hooks ? { hooks } : {};
+  if (!hooks) return {};
+  if (!step) return { hooks };
+  const plan = hooks.before?.plan;
+  return plan && plan.length > 0 ? { hooks: { before: { plan } } } : {};
 }
 
 interface WavesPipelineResult {
@@ -927,7 +972,9 @@ export async function applyPipelines(dir: string, envs: Environments, product?: 
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<WavesPipelineResult>;
   };
   const named = (forge: Forge, spec: WavesSpec) => (product ? productWaves(product, forge, spec) : { spec, jobs: [] });
-  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves)).spec, null, 2)}\n` }];
+  // Through chant's product pipeline, the sql capability plans and applies (#291) when the installed lexicon has it.
+  const step = { step: product !== undefined && (await hasSqlCapability()) };
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves, undefined, undefined, step)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const variables = (forge: Forge) => (env: string) => {
     const wave = waves.find((w) => w.env === env);
@@ -981,7 +1028,7 @@ export async function applyPipelines(dir: string, envs: Environments, product?: 
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
-    const { spec, jobs } = named(forge, wavesSpec(waves, variables(forge), envs.resume));
+    const { spec, jobs } = named(forge, wavesSpec(waves, variables(forge), envs.resume, step));
     const result = await generateOpWavesPipeline(
       spec,
       forge,
