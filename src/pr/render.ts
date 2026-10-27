@@ -21,7 +21,7 @@ import { describeResults, overrideCommand, type RuleResult } from "../versioned/
 import { describeWave, type Promotion } from "../waves/index.js";
 
 /** Whether a required environment's history records the migration applied. */
-const ranOn = (p: Promotion, id: string): string => p.migrations.find((m) => m.id === id)?.ran ?? "not read";
+export const ranOn = (p: Promotion, id: string): string => p.migrations.find((m) => m.id === id)?.ran ?? "not read";
 
 /** The marker that identifies one environment's plan comment. */
 export const commentMarker = (env: string): string => `<!-- yodel:plan env=${env} -->`;
@@ -185,7 +185,7 @@ function opStepMarkdown({ index, step, source }: PendingView["steps"][number], r
 const indent = (s: string) => s.split("\n").map((l) => (l ? `  ${l}` : l)).join("\n");
 
 /** The policy's outcome (#53): a table of the rules, then how to override a denial. */
-function policyMarkdown(results: readonly RuleResult[], environment: string): string[] {
+export function policyMarkdown(results: readonly RuleResult[], environment: string): string[] {
   const out = ["#### Policy", "", "| Rule | Outcome | Why |", "|---|---|---|"];
   for (const r of results) {
     const outcome = r.outcome === "allowed" ? "allowed" : r.outcome === "denied" ? "**denied**" : `overridden by ${cell(r.override?.by ?? "")}`;
