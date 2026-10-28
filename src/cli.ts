@@ -3,6 +3,7 @@ import type { Command, Io } from "./command.js";
 import { commands } from "./commands/index.js";
 import { version } from "./version.js";
 import { EXIT_CODES, PLAN_PENDING_NOTE, useChantExitTable } from "./exit.js";
+import { useChantTraces } from "./mcp/chant-hook.js";
 import { CHANT_VERB, runChantVerb } from "./commands/chant.js";
 
 /** Where the docs are published from docs/. */
@@ -58,6 +59,8 @@ export async function main(
 ): Promise<number> {
   // The codes every verb exits by, from chant's table when the installed chant has it (#288).
   await useChantExitTable();
+  // Traces with yodel's prefix through chant's OTLP exporter (#297), when an endpoint is set and chant has it.
+  await useChantTraces().catch(() => false);
   const verbAt = argv.findIndex((a) => !a.startsWith("-"));
   const globals = verbAt === -1 ? argv : argv.slice(0, verbAt);
 
