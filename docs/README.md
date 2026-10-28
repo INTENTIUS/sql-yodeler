@@ -28,6 +28,7 @@ Rebuilds, renames and backfills run once, inside the migration. No recurring job
 | [Lint](lint.md) | the rules, `yodel:allow` silences, rule levels, `--env`, and the replay check (`--replay`) |
 | [Lint and plan on pull requests only](lint-and-plan.md) | `ci: { apply: false }`: lint, the replay check and the plan comment on every pull request with readers only, no apply pipeline, and turning apply on later |
 | [Setting up each forge](forges.md) | GitHub, GitLab and Forgejo side by side: the pipeline files, where the readers' and the writer's secrets go, the tokens for the plan comment, the drift watch and resuming, cloud roles over OIDC, runners and pull requests from forks |
+| [SQL Yodeler on chant CI](chant-ci.md) | which parts of the pipelines are chant's and which are SQL Yodeler's, each part chant takes over from chant 0.124.55, and `yodel upgrade` |
 | [Applying from Kubernetes](kubernetes.md) | a Job or Helm hook that runs `yodel apply <env>` before a rollout: the CI image, the checkout with `chant/lifecycle`, the writer from a Secret, approving first, the exit codes, and the lock between two rollouts |
 | [Running yodel alongside Terraform](terraform.md) | Terraform creates the database or schema, the reader and writer users and their secrets; the pipeline then runs `yodel apply <env>`; where each tool's state lives |
 | [Approval](approval.md) | the migrations Op and its gate, the plan digest, the pull request comment, and what happens when the digest moves |

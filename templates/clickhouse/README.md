@@ -71,7 +71,7 @@ If 127.0.0.1 reaches another server (a ClickHouse installed on this machine), `j
 
 Each environment has two ClickHouse users. `chant.config.ts` picks the reader unless `YODEL_CREDENTIALS=writer` (every environment) or `writer:<env>` (that one), and only an environment's wave job sets that, for its own environment.
 
-`credentials()` in `chant.config.ts` gives each profile both. yodel refuses the project (exit 4) when an environment's reader and writer are the same user or read the same variable, and every pull request plan job runs `yodel config check <env> --write-probe` first, which fails the job when its credentials can write. A password can be a short-lived token instead of a variable (`{ token: "command", command: ["./mint.sh"] }`, which prints the password; see SQL Yodeler's configuration docs); `npm run ci` then leaves its secret out of the jobs.
+`credentials()` in `chant.config.ts` gives each profile both. yodel refuses the project when an environment's reader and writer are the same user or read the same variable, and every pull request plan job runs `yodel config check <env> --write-probe` first, which fails the job when its credentials can write. A password can be a short-lived token instead of a variable (`{ token: "command", command: ["./mint.sh"] }`, which prints the password; see SQL Yodeler's configuration docs); `npm run ci` then leaves its secret out of the jobs.
 
 | Variable | Held by |
 |---|---|
@@ -97,8 +97,8 @@ On your machine, put an environment's variables in `.env` (or export them) to ru
 |---|---|---|---|
 | a pull request to main | `lint` | `npm run ci:check`, `yodel lint`, and `yodel lint --replay replay --reset`: every migration replayed into a throwaway server the job starts as a service (profile `replay`) and compared with the schema it recorded | none (the service's own) |
 | | `plan-<env>` | `yodel plan <env> --comment`: one comment per environment with the pending migrations and the plan digest | reader, and a forge token that can comment |
-| a push to main | `wave-<k>-<env>`, one per wave of `yodel.config.ts` `waves`, each needing the one before | `chant run wave`: `yodel apply <env> --wave-plan`, the wave's gate, `yodel apply <env> --wave-apply` | writer |
-| on each watch's schedule (and by hand) | `watch-<env>` | `chant run watch-<env>`, then `yodel drift <env> --issue`: drift against the newest applied migration, and the environment's tracking issue | reader |
+| a push to main | `wave-<k>-<env>`, one per wave of `yodel.config.ts` `waves`, each needing the one before | chant runs the wave: `yodel apply <env> --wave-plan`, the wave's gate, `yodel apply <env> --wave-apply` | writer |
+| on each watch's schedule (and by hand) | `watch-<env>` | chant runs the `watch-<env>` Op, then `yodel drift <env> --issue`: drift against the newest applied migration, and the environment's tracking issue | reader |
 
 Each plan and wave job also runs `yodel report <env>` (JSON and the HTML run view) into `yodel-report/`, whatever the job's outcome, and keeps it as the job's artifact (`yodel-report-<job>`). The wave, plan and watch jobs pass `YODEL_WEBHOOK_URL` and `YODEL_WEBHOOK_KEY` from the forge's secrets for webhook events (`notify` in `yodel.config.ts`); while they are unset, yodel sends nothing.
 
@@ -110,7 +110,7 @@ Each environment is a wave of the apply pipeline, with a gate policy in `yodel.c
 npx yodel approve dev --plan jcs1-sha256:...
 ```
 
-Run it at a terminal: it shows the plan, asks you to type the environment's name, records the approval as a commit on the `chant/lifecycle` branch and pushes it (every job fetches that branch), and starts a job that waits at the gate again. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; `yodel approve` records the approval and starts the failed job again. A wave applies only migrations the wave before it has applied: `yodel apply <env>` reads that environment's history and refuses (exit 4, nothing applied) a migration it does not record, so approve prod's wave once dev has run it. If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
+Run it at a terminal: it shows the plan, asks you to type the environment's name, records the approval as a commit on the `chant/lifecycle` branch and pushes it (every job fetches that branch), and starts a job that waits at the gate again. Approve before merging, and the wave after the merge goes through. A wave with nothing approved applies nothing, prints the command, and fails, and the waves after it do not run; `yodel approve` records the approval and starts the failed job again. A wave applies only migrations the wave before it has applied: `yodel apply <env>` reads that environment's history and refuses (nothing applied) a migration it does not record, so approve prod's wave once dev has run it. If anything the digest covers changes after the approval (another migration, the live schema), the gate asks again and the comment says what moved.
 
 ### Drift
 

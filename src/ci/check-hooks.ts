@@ -23,7 +23,7 @@
  * with no workspace declaration, the lint job runs the commands itself, as
  * before.
  */
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CheckTool } from "../config/define.js";
@@ -114,10 +114,12 @@ export function checkPresets(p: PresetInput): CheckHook[] {
  * the same name replaced). Written on a copy, so rendering touches nothing;
  * `yodel ci` writes the result, and `yodel ci --check` compares it.
  */
-export function declarationWithHooks(chant: ChantCheckHooks, dir: string, file: string, hooks: readonly CheckHook[]): string {
+export function declarationWithHooks(chant: ChantCheckHooks, dir: string, file: string, hooks: readonly CheckHook[], content?: string): string {
   const scratch = mkdtempSync(join(tmpdir(), "yodel-check-hooks-"));
   try {
-    copyFileSync(join(dir, file), join(scratch, file));
+    // `content` is a declaration not on disk yet: the one `yodel upgrade` is about to write.
+    if (content === undefined) copyFileSync(join(dir, file), join(scratch, file));
+    else writeFileSync(join(scratch, file), content);
     for (const hook of hooks) chant.writeCiHook(scratch, "check", hook);
     return readFileSync(join(scratch, file), "utf8");
   } finally {

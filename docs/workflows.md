@@ -183,9 +183,33 @@ export const gitlab = {
 
 By default every job runs in `node:22-bookworm` (GitHub's plan jobs on the runner, with `setup-node`) and installs the project's packages with `npm ci`. `ci.image` runs every job in the CI image instead, `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`, which a release publishes with Node, yodel, chant and the lexicons on it: no job runs `npm ci` or `setup-node`, and a checkout resolves chant and the lexicons from the image. It is taken only pinned by its digest, which the release's `image` job writes to its summary, so a job never runs a different image under the same tag. Use the version the project's `package.json` installs, so the image's yodel renders the same pipelines `yodel ci --check` compares; a project whose jobs need packages of their own leaves `image` unset.
 
-### Traces
+### Upgrading the pipelines to chant 0.124.55
 
-With `OTEL_EXPORTER_OTLP_ENDPOINT` set in the apply jobs and a chant that has the OTLP exporter (the release after 0.124.51, chant#4555), each wave job sends one trace as OTLP/JSON over HTTP. The job is the first span, each wave a span below it, and each environment a span in its wave. yodel configures chant's exporter with the `yodel` prefix, so the attributes read `yodel.<name>`. Without the endpoint, or on a chant without the exporter, nothing is sent.
+From chant 0.124.55 the pipelines run on chant's product pipeline, the one terragucci and plywood use ([SQL Yodeler on chant CI](chant-ci.md#from-chant-012455) has each part). A project made from a template before then, or one whose chant is older, moves in one commit:
+
+1. Install SQL Yodeler's latest release, then chant and the sql lexicon at the floor, pinned as the templates pin them:
+
+   ```sh
+   npm install @intentius/sql-yodeler@latest
+   npm install -E @intentius/chant@0.124.55 @intentius/chant-lexicon-sql@0.124.55
+   ```
+
+2. Run `npx yodel upgrade`. It lists the parts of chant CI the installed chant has, adds `chant.workspace.json` when the project has no workspace declaration, and renders every file `yodel ci` renders. `yodel upgrade --check` writes nothing and names the files it would write. With a chant before 0.124.55 it writes nothing, exits 1 and prints the install line above.
+
+3. Commit what it wrote with `package.json` and `package-lock.json`, in one commit, and open a pull request.
+
+The files that change, for each forge the project renders:
+
+| File | What changes |
+|---|---|
+| `chant.workspace.json` | new, when the project had no workspace declaration: the project as the workspace, with yodel's checks in `ci.hooks.check` |
+| `yodel-waves.json` | `gateName`, the `sql-migrate` step in place of the `plan` and `apply` command lines, `standDown: true`, and, when the project has steps, only the `before.plan` SQL checks in its hooks |
+| `.github/workflows/yodel-apply.yml`, `.forgejo/workflows/yodel-apply.yml`, `.gitlab/yodel-apply.gitlab-ci.yml` | each wave job runs `yodel chant run wave`, with no `YODEL_LOCK_WAIT` or `YODEL_STAND_DOWN`; on GitHub and GitLab a wave job whose writer a cloud token source mints logs in through chant |
+| `.github/workflows/yodel-pr.yml`, `.forgejo/workflows/yodel-pr.yml`, `.gitlab-ci.yml` | the lint job runs `yodel chant ci check --base <base>` in place of its own steps; on GitHub and GitLab a plan job whose reader a cloud token source mints logs in through chant |
+| `watch-<env>.yml` on GitHub and Forgejo, `.gitlab/yodel-watch.gitlab-ci.yml` | `yodel chant run watch-<env>` |
+| `yodel-apply-plans.yml`, `yodel-apply-resume.yml` (GitHub and Forgejo, when the project has them) | `yodel chant` in place of `chant` |
+
+chant reads the check hooks from the declaration at the pull request's base, and the upgrade's own pull request has none there, so its lint job runs no hook and says so in its log. From the next pull request on, the hooks run. The secrets, the gates and the approvals already recorded stay as they are.
 
 ## ClickHouse objects
 

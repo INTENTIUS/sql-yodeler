@@ -22,6 +22,7 @@ import { revert } from "./revert.js";
 import { report } from "./report.js";
 import { status } from "./status.js";
 import { test } from "./test.js";
+import { upgrade } from "./upgrade.js";
 
 /** Every verb, in the order `yodel --help` lists them. */
 export const commands: readonly Command[] = [
@@ -42,6 +43,7 @@ export const commands: readonly Command[] = [
   drift,
   docs,
   ci,
+  upgrade,
   config,
   rebase,
   repair,

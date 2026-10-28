@@ -40,10 +40,6 @@ Every entry comes from a history row or a ledger line, so the log cannot say som
 | `refused` | a failed migration row naming a pre-migration check |
 | `failed` | any other failed migration row: a statement, an Op step |
 | `repaired` | a succeeded row after the migration was applied (`yodel repair`) |
-| `wave-run` | a run record of the apply pipeline's wave job that ran the environment, on chant's run ledger (`local/runs__yodel-apply.jsonl`), with the wave, the job, its exit code and how the environment's run ended |
-| `spent` | an approval an apply spent, from `_gates/<op>/applied.jsonl` with the line that says how the apply ended: a wave's apply, a drop `yodel cleanup` asked for, or a baseline `yodel init --baseline` asked for |
-
-The `wave-run` and `spent` entries need a chant that writes run records and gated requests (the release after 0.124.51). On a ledger written before that there are none, and the rest of the log is unchanged.
 
 `--audit audit.jsonl` keeps the log as a file, one entry per line. Each run appends the entries the file does not have yet and never rewrites a line. `--audit audit.jsonl --check` appends nothing. Instead it names every entry of the file that the sources no longer give: a ledger line or a history row removed since the file was written. A CI job that keeps `audit.jsonl` as an artifact, or commits it, can run `--check` before it appends.
 
