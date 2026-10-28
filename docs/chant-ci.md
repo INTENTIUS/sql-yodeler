@@ -32,7 +32,7 @@ Each job that runs chant runs `yodel chant <args>` in its place. `yodel chant` r
 
 ### Exit codes
 
-yodel reads its exit codes from chant's table, which terragucci and plywood use too. The numbers are the ones [The commands](cli.md#exit-codes) lists. [chant's exit codes reference](https://intentius.io/chant/reference/exit-codes/) has the table for every product.
+yodel reads its exit codes from chant's table, which terragucci and plywood use too, with 9 (`misplaced`, a refused job guard) read from it when the installed chant has it. The numbers are the ones [The commands](cli.md#exit-codes) lists. [chant's exit codes reference](https://intentius.io/chant/reference/exit-codes/) has the table for every product.
 
 ### The apply waves
 

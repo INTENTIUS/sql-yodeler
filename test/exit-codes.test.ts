@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
-import { EXIT_CODES, FALLBACK_EXIT, PLAN_PENDING_NOTE, useChantExitTable } from "../src/exit.js";
+import { EXIT_CODES, EXIT_MISPLACED, FALLBACK_EXIT, PLAN_PENDING_NOTE, useChantExitTable } from "../src/exit.js";
 import { help } from "../src/cli.js";
 import { commands } from "../src/commands/index.js";
 import { projectFromConfig } from "../src/project.js";
@@ -25,12 +25,17 @@ afterEach(() => {
 /** yodel exits by chant's one table (#288, chant#4553). */
 describe("chant's exit-code table (#288)", () => {
   it("the fallback has chant's numbers, and chant's table, when the installed chant exports it, is the same", async () => {
-    expect(FALLBACK_EXIT).toEqual({ done: 0, failed: 1, drift: 2, waiting: 3, moved: 4, held: 5, superseded: 6, denied: 7, declined: 8 });
+    expect(FALLBACK_EXIT).toEqual({ done: 0, failed: 1, drift: 2, waiting: 3, moved: 4, held: 5, superseded: 6, denied: 7, declined: 8, misplaced: 9 });
     const specifier = "@intentius/chant/exit-codes";
     const chant = await import(specifier).then((m: { CHANT_EXIT?: unknown }) => m.CHANT_EXIT, () => undefined);
     const from = await useChantExitTable();
     expect(from).toBe(chant === undefined ? "fallback" : "chant");
-    if (chant !== undefined) expect(chant).toEqual(FALLBACK_EXIT);
+    if (chant !== undefined) {
+      // A chant released before chant#4624 has no `misplaced`; its table is the fallback's without 9.
+      const { misplaced, ...earlier } = FALLBACK_EXIT;
+      expect(chant).toEqual("misplaced" in (chant as object) ? FALLBACK_EXIT : earlier);
+      expect(EXIT_MISPLACED).toBe(misplaced);
+    }
   });
 
   it("every command's --help lists only codes on chant's table, each once", async () => {

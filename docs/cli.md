@@ -101,7 +101,7 @@ yodel exits by chant's one exit-code table, the same numbers terragucci and plyw
 | 7 | a policy rule denies the plan and no override counts; nothing applied |
 | 8 | `yodel approve`: the answer was not the environment's name; nothing approved |
 
-chant's table also has 6, a newer push applies instead, which yodel itself does not return: `yodel apply --stand-down` exits 0. A refusal no approval fixes is 1, so a pipeline tells a broken migrations directory from a waiting gate (3), a moved plan (4) and a policy denial (7). `yodel apply` exits with the code of its Op's Apply step, so a lock held by another apply is 5 there too. `yodel plan` exits 0 when migrations are pending: it reports, and a CI job that posts the plan on a pull request should not fail because the pull request adds a migration. To gate on pending migrations, use `yodel status`.
+chant's table also has 6, a newer push applies instead, which yodel itself does not return: `yodel apply --stand-down` exits 0. It has 9 (`misplaced`) too, a job guard refused because the job runs where it is not set to run; the guard in a generated job exits 9 before yodel starts, and yodel does not return it either. A chant released before 9 was added has no such row, and yodel keeps the number. A refusal no approval fixes is 1, so a pipeline tells a broken migrations directory from a waiting gate (3), a moved plan (4) and a policy denial (7). `yodel apply` exits with the code of its Op's Apply step, so a lock held by another apply is 5 there too. `yodel plan` exits 0 when migrations are pending: it reports, and a CI job that posts the plan on a pull request should not fail because the pull request adds a migration. To gate on pending migrations, use `yodel status`.
 
 ## JSON output
 
