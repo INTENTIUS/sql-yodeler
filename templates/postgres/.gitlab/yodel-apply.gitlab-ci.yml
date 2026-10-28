@@ -29,15 +29,13 @@ wave-1-dev:
   variables:
     GIT_DEPTH: '0'
     YODEL_CREDENTIALS: writer:dev
-    YODEL_LOCK_WAIT: '10m'
-    YODEL_STAND_DOWN: '1'
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
   script:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
-    - chant run wave --spec yodel-waves.json --wave 1
+    - yodel chant run wave --spec yodel-waves.json --wave 1
   allow_failure:
     exit_codes:
       - 1
@@ -58,8 +56,6 @@ wave-2-prod:
   variables:
     GIT_DEPTH: '0'
     YODEL_CREDENTIALS: writer:prod
-    YODEL_LOCK_WAIT: '10m'
-    YODEL_STAND_DOWN: '1'
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"'
   needs:
@@ -68,7 +64,7 @@ wave-2-prod:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
-    - chant run wave --spec yodel-waves.json --wave 2
+    - yodel chant run wave --spec yodel-waves.json --wave 2
   allow_failure:
     exit_codes:
       - 1

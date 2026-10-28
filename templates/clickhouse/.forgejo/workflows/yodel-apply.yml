@@ -34,8 +34,6 @@ jobs:
     container: node:22-bookworm
     env:
       YODEL_CREDENTIALS: writer:dev
-      YODEL_LOCK_WAIT: '10m'
-      YODEL_STAND_DOWN: '1'
       DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
       DEV_CLICKHOUSE_WRITER_USER: '${{ secrets.DEV_CLICKHOUSE_WRITER_USER }}'
       DEV_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.DEV_CLICKHOUSE_WRITER_PASSWORD }}'
@@ -49,7 +47,7 @@ jobs:
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: Plan, gate and apply wave 1 (dev)
-        run: chant run wave --spec yodel-waves.json --wave 1
+        run: yodel chant run wave --spec yodel-waves.json --wave 1
       - name: Keep the job's outcome
         if: always()
         uses: https://code.forgejo.org/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1
@@ -75,8 +73,6 @@ jobs:
     container: node:22-bookworm
     env:
       YODEL_CREDENTIALS: writer:prod
-      YODEL_LOCK_WAIT: '10m'
-      YODEL_STAND_DOWN: '1'
       PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
       PROD_CLICKHOUSE_WRITER_USER: '${{ secrets.PROD_CLICKHOUSE_WRITER_USER }}'
       PROD_CLICKHOUSE_WRITER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_WRITER_PASSWORD }}'
@@ -97,7 +93,7 @@ jobs:
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - name: Plan, gate and apply wave 2 (prod)
-        run: chant run wave --spec yodel-waves.json --wave 2
+        run: yodel chant run wave --spec yodel-waves.json --wave 2
       - name: Keep the job's outcome
         if: always()
         uses: https://code.forgejo.org/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3.2.1

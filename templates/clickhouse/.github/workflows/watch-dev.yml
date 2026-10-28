@@ -32,7 +32,7 @@ jobs:
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
       - run: git remote set-url --push origin no-push://the-drift-watch-only-reads
-      - run: chant run watch-dev
+      - run: yodel chant run watch-dev
         env:
           GITHUB_TOKEN: '${{ github.token }}'
       - run: yodel drift dev --issue

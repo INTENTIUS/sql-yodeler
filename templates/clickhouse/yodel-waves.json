@@ -1,24 +1,12 @@
 {
   "name": "yodel-apply",
   "op": "migrate-dev",
-  "plan": [
-    "yodel",
-    "apply",
-    "{target}",
-    "--wave-plan",
-    "{plan}",
-    "--spec",
-    "yodel-waves.json"
-  ],
-  "apply": [
-    "yodel",
-    "apply",
-    "{target}",
-    "--wave-apply",
-    "{plan}",
-    "--spec",
-    "yodel-waves.json"
-  ],
+  "step": {
+    "kind": "sql-migrate",
+    "environment": "{target}",
+    "spec": "yodel-waves.json"
+  },
+  "standDown": true,
   "branches": [
     "main"
   ],
@@ -43,5 +31,6 @@
       ],
       "gate": "always"
     }
-  ]
+  ],
+  "gateName": "yodel-apply-wave-{k}"
 }

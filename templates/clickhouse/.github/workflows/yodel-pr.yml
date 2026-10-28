@@ -43,16 +43,10 @@ jobs:
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
         run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
-      - name: The pipelines are up to date
-        run: yodel ci --check
-      - name: sql-types.d.ts is up to date
-        run: chant sql types --check
-      - name: yodel lint
-        run: yodel lint --format github
       - name: Wait for the replay server (replay-clickhouse)
         run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "replay-clickhouse", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-clickhouse:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
-      - name: yodel lint --replay
-        run: yodel lint --replay replay --reset
+      - name: Check hooks at the base (chant ci check)
+        run: yodel chant ci check --base ${{ github.event.pull_request.base.sha }}
   plan-dev:
     runs-on: ubuntu-latest
     env:

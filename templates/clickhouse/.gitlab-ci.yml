@@ -57,11 +57,8 @@ lint:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   script:
-    - yodel ci --check
-    - chant sql types --check
-    - yodel lint --format gitlab --output gl-code-quality-report.json
     - node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "replay-clickhouse", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-clickhouse:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
-    - yodel lint --replay replay --reset
+    - yodel chant ci check --base $CI_MERGE_REQUEST_DIFF_BASE_SHA
   services:
     - name: clickhouse/clickhouse-server:26.8.15.10
       alias: replay-clickhouse

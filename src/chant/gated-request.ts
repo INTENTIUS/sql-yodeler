@@ -8,7 +8,7 @@
  * `finished` lines in `_gates/<op>/applied.jsonl`. `chant ledger gates` and
  * `chant query` read them.
  *
- * The installed chant has them from its release after 0.124.51.
+ * The installed chant has them from chant 0.124.55.
  * {@link gatedRequests} imports `@intentius/chant/lifecycle/gated-request`
  * lazily, with the specifier in a variable, so this compiles and runs on a
  * published chant without it: the callers then keep their own gate on the

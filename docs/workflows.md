@@ -209,6 +209,8 @@ The files that change, for each forge the project renders:
 | `watch-<env>.yml` on GitHub and Forgejo, `.gitlab/yodel-watch.gitlab-ci.yml` | `yodel chant run watch-<env>` |
 | `yodel-apply-plans.yml`, `yodel-apply-resume.yml` (GitHub and Forgejo, when the project has them) | `yodel chant` in place of `chant` |
 
+With `chant.workspace.json` in it the project is a workspace root, where `chant build` and `chant lint` refuse with WSP000 unless they build the root project alone. yodel's own builds pass `--root-only`; for the ones you run yourself, add `rootOnly: true` to `chant.config.ts`, as the templates have it.
+
 chant reads the check hooks from the declaration at the pull request's base, and the upgrade's own pull request has none there, so its lint job runs no hook and says so in its log. From the next pull request on, the hooks run. The secrets, the gates and the approvals already recorded stay as they are.
 
 ## ClickHouse objects
