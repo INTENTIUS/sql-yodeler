@@ -16,8 +16,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { OpConfig } from "@intentius/chant/op/types";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { migrateOpParts } from "../src/versioned/op.js";
+import { chantProduct } from "../src/ci-words.js";
+import { chantCheckHooks, YODEL_PRESETS } from "../src/ci/check-hooks.js";
 import {
   applyPipelines,
+  render,
   environments,
   FORGEJO_UPLOAD_ARTIFACT,
   readerVariables,
@@ -54,6 +57,16 @@ function files(dir: string, at = dir): string[] {
     return statSync(abs).isDirectory() ? files(dir, abs) : [relative(dir, abs)];
   });
 }
+
+/**
+ * Whether the installed chant has the product pipeline and the check hooks.
+ * The committed templates are what the published chant this checkout pins
+ * renders: yodel's own pipelines before chant's CI, and chant's product
+ * pipeline once the release that moves the floor (#299) has run
+ * `npm run templates:render` (#298). Each case below checks the one the
+ * installed chant gives.
+ */
+const onChantCi = (await chantProduct()) !== undefined && (await chantCheckHooks()) !== undefined;
 
 const PIPELINES = (f: string) => f.startsWith(".github/") || f.startsWith(".forgejo/") || f.startsWith(".gitlab");
 
@@ -143,7 +156,13 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("commits the pull request and apply pipelines yodel ci renders", async () => {
     const envs = await environments(dir);
-    for (const file of [...review(envs), ...(await applyPipelines(dir, envs))]) {
+    // On chant's CI every file yodel ci renders, the workspace declaration with its check hooks among them (#298).
+    const rendered = onChantCi ? await render(dir) : [...review(envs), ...(await applyPipelines(dir, envs))];
+    if (onChantCi) {
+      expect(rendered.map((f) => f.path)).toContain("chant.workspace.json");
+      expect(manifest.files).toContain("chant.workspace.json");
+    }
+    for (const file of rendered) {
       expect(readFileSync(join(dir, file.path), "utf8"), file.path).toBe(file.content);
     }
   });
@@ -151,13 +170,22 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
   it("applies as chant waves, one per environment in order, each job needing the one before and running chant run wave", () => {
     const spec = JSON.parse(readFileSync(join(dir, WAVES_SPEC), "utf8")) as ReturnType<typeof wavesSpec>;
     expect(spec.waves.map((w) => [w.name, w.gate])).toEqual([["dev", "always"], ["prod", "always"]]);
-    expect(spec.plan).toContain("--wave-plan");
-    expect(spec.apply).toContain("--wave-apply");
+    if (onChantCi) {
+      // The sql lexicon's capability plans and applies each run, with no callback (#291).
+      expect(spec.step?.kind).toBe("sql-migrate");
+      expect(spec.plan).toBeUndefined();
+      expect(spec.apply).toBeUndefined();
+    } else {
+      expect(spec.plan).toContain("--wave-plan");
+      expect(spec.apply).toContain("--wave-apply");
+    }
+    // Through the product pipeline the wave jobs run chant as the yodel bin (#289).
+    const wave2 = `${onChantCi ? "yodel chant" : "chant"} run wave --spec ${WAVES_SPEC} --wave 2`;
     for (const f of [".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
       const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { needs?: string[]; steps: Array<{ run?: string }> }> };
       expect(Object.keys(doc.jobs), f).toEqual(["wave-1-dev", "wave-2-prod"]);
       expect(doc.jobs["wave-2-prod"]?.needs, f).toEqual(["wave-1-dev"]);
-      expect(doc.jobs["wave-2-prod"]?.steps.map((s) => s.run), f).toContain(`chant run wave --spec ${WAVES_SPEC} --wave 2`);
+      expect(doc.jobs["wave-2-prod"]?.steps.map((s) => s.run), f).toContain(wave2);
     }
     const gitlab = load(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { needs?: string[]; stage?: string }>;
     expect(gitlab["wave-2-prod"]?.needs).toEqual(["wave-1-dev"]);
@@ -251,6 +279,19 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
   });
 
   it("lints and runs the replay check on pull requests", () => {
+    if (onChantCi) {
+      // The checks are hooks in the declaration, which chant reads at the base and the lint job runs (#294).
+      const declaration = JSON.parse(readFileSync(join(dir, "chant.workspace.json"), "utf8")) as { ci?: { hooks?: { check?: Array<{ name?: string; command: string[] }> } } };
+      const hooks = declaration.ci?.hooks?.check ?? [];
+      expect(hooks.map((h) => h.name)).toEqual(YODEL_PRESETS.filter((n) => n !== "yodel-test" && n !== "yodel-check"));
+      expect(hooks.find((h) => h.name === "yodel-replay")?.command.join(" ")).toBe(REPLAY);
+      for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
+        const text = readFileSync(join(dir, f), "utf8");
+        expect(text, f).toContain("yodel chant ci check --base ");
+        expect(text, f).toContain("yodel plan dev --comment");
+      }
+      return;
+    }
     for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
       const text = readFileSync(join(dir, f), "utf8");
       // The findings as the forge shows them (#129).

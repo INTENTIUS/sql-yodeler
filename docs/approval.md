@@ -141,8 +141,6 @@ The token comes from `CHANT_FORGE_TOKEN`, else `GITHUB_TOKEN` or `GH_TOKEN` (Git
 - When the approval is recorded but no job was started (no token, a token the forge refused, a push that did not land), chant says why and `yodel approve` exits 3. Once that is fixed, run the job again, or leave it to the [scheduled resume job](#the-scheduled-resume-job).
 - When no CI job waits (the gate was reached by `yodel apply` on your machine), there is nothing to resume; run `yodel apply <env>`. In a repository with no remote, `yodel approve` records the approval and resumes nothing.
 
-With a chant that confirms at a terminal (the release after 0.124.51, chant#4575), the question is chant's: chant shows the gate, its pending fact and the plan stored on `chant/lifecycle` that the fact cites, and asks you to type the environment's name (the tenant set's, for a set), as `chant approve` does for every product. A wrong answer exits 8 and a plan that moved while you were asked exits 4, as before. yodel still reads its plan again after the answer, and `YODEL_OWN_CONFIRM=1` keeps yodel's own question.
-
 It never approves without a person at the terminal: with no terminal to ask (a script, CI, a coding agent) it approves nothing and exits 1, and no flag skips the question. A script that records approvals itself takes chant's command from the `--json` output's `chantApprove` field.
 
 ### The scheduled resume job

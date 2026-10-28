@@ -89,8 +89,6 @@ lock: no KeeperMap on this server (KeeperMap is disabled because 'keeper_map_pat
 
 A cluster, a `Replicated` database and Cloud never fall back: without the `KeeperMap` lock, the apply refuses. [Migrations](migrations.md#the-apply-lock) says how to clear a lock.
 
-In CI the waves take chant's lock grain as well, once the installed chant has it (the release after 0.124.51, chant#4552 and chant#4571). The sql lexicon gives a SQL member the `target` grain, its environment, and refuses `ci.lockGrain: resource`, since the engine applies a whole environment's migrations at once. chant holds a lease on the environment for the length of the wave's apply, and an apply that finds it held exits 5 (`held`). The engine's own lock above still guards the history under it, with `lockTtl`, and catches an apply from a laptop. A wave that a newer commit on main will apply anyway stands down and exits 6 (`superseded`), through `standDown` in `yodel-waves.json` ([chant's op waves guide](https://intentius.io/chant/guide/op-waves/#stand-down-for-a-newer-commit)). The apply jobs then carry no `YODEL_LOCK_WAIT` or `YODEL_STAND_DOWN`; with a published chant they keep both. [Target locks](https://intentius.io/chant/guide/target-locks/) has the grain.
-
 ## What has been run where
 
 The examples run on a single node (the emulator). `test/e2e/topology.test.ts` applies one migrations directory to the emulator and to a `Replicated` database on a scratch two-replica cluster with Keeper, and `test/e2e/keeper.test.ts` runs the lock and the replicated history on that cluster (both need Docker and `YODEL_E2E_KEEPER=1`).

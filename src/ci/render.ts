@@ -1612,11 +1612,14 @@ export function review(envs: Environments): RenderedFile[] {
  * Forgejo job annotates the files and a GitLab job writes the code quality
  * report its artifact keeps.
  */
-export async function checkHooksDeclaration(dir: string, envs_: Environments): Promise<RenderedFile | undefined> {
+export async function checkHooksDeclaration(dir: string, envs_: Environments, declaration?: RenderedFile): Promise<RenderedFile | undefined> {
   const chant = await chantCheckHooks();
   const file = declarationFile(dir);
-  if (!chant || !file) return undefined;
-  return { path: file, content: declarationWithHooks(chant, dir, file, checkHooksOf(envs_)) };
+  if (!chant) return undefined;
+  if (file) return { path: file, content: declarationWithHooks(chant, dir, file, checkHooksOf(envs_)) };
+  // A declaration `yodel upgrade` adds, rendered before it is written (#298).
+  if (declaration) return { path: declaration.path, content: declarationWithHooks(chant, dir, declaration.path, checkHooksOf(envs_), declaration.content) };
+  return undefined;
 }
 
 /** The forge a rendered file is for; undefined for the waves spec, which every forge's apply reads. */
@@ -1631,8 +1634,11 @@ export function forgeOf(path: string): Forge | undefined {
  * Every file `yodel ci` writes. Through chant's product pipeline when the
  * installed chant has it (#289), unless `options.product` is false, which
  * renders with yodel's own generator as a chant before chant#4550 does.
+ * `options.declaration` is a workspace declaration to render the check
+ * hooks into when the project has none on disk: the one `yodel upgrade`
+ * adds (#298).
  */
-export async function render(dir: string, options: { product?: boolean } = {}): Promise<RenderedFile[]> {
+export async function render(dir: string, options: { product?: boolean; declaration?: RenderedFile } = {}): Promise<RenderedFile[]> {
   const envs = await environments(dir);
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
@@ -1640,7 +1646,7 @@ export async function render(dir: string, options: { product?: boolean } = {}): 
   // The cloud login through chant's ci-identity (#296), with the product pipeline, when chant and the sql lexicon have it.
   useChantTrade(product ? await chantTrade() : undefined);
   // The check on chant's check moment (#294), with the product pipeline, when chant has the moment and the project a declaration.
-  const hooks = product ? await checkHooksDeclaration(dir, envs) : undefined;
+  const hooks = product ? await checkHooksDeclaration(dir, envs, options.declaration) : undefined;
   const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
   const files = [...review(reviewed), ...(hooks ? [hooks] : []), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
