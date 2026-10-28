@@ -266,10 +266,29 @@ function claimsTable(names, rows) {
 	return `| Claim | What it says | Plain, broken | Last run |\n|---|---|---|---|\n${lines.join('\n')}\n`;
 }
 
+/** The product-scenario rows claims cite (scenarios/product-proofs.json) and the version the claims are about (package.json's). */
+function productProofs() {
+	const file = new URL('scenarios/product-proofs.json', repo);
+	const proofs = existsSync(file) ? JSON.parse(read(file)).proofs : [];
+	return { proofs, version: JSON.parse(read(new URL('package.json', repo))).version };
+}
+
+/**
+ * The product-scenario rows that cite one of `names`, as a table with a link
+ * to each row and whether it counts (its engine version is `version`); empty
+ * when none cites them. scenarios/product-proofs.ts has the rules.
+ */
+export function productRowsMarkdown(names, { proofs, version }) {
+	const rows = proofs.filter((p) => names.includes(p.claim));
+	if (!rows.length) return '';
+	const lines = rows.map((p) => `| \`${p.claim}\` | ${p.repo} | [${p.scenario}](https://github.com/${p.repo}/commit/${p.commit}) | \`${p.commit}\`, ${p.date} | ${p.engine_version} | ${p.engine_version === version ? 'yes' : `no, the claims are about ${version}`} |`);
+	return `\n\nProduct scenario rows cited by these claims count only at the version the claims are about. They add to the claims' own runs and never replace them.\n\n| Claim | Repo | Scenario | Commit, date | Engine version | Counts |\n|---|---|---|---|---|---|\n${lines.join('\n')}\n`;
+}
+
 /** "Proven by" at the end of a page, and on a draft a note at the top naming what is not proven yet. */
-function claimsSections(front, rows) {
+function claimsSections(front, rows, proofs = productProofs()) {
 	if (!front.claims.length) return { top: '', bottom: '' };
-	const bottom = `\n\n## Proven by\n\nThe scenario claims below run what this page describes against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). [Claims status](claims.md) lists every claim.\n\n${claimsTable(front.claims, rows)}`;
+	const bottom = `\n\n## Proven by\n\nThe scenario claims below run what this page describes against a real server, once plain (it passes) and once with the behaviour broken (the claim catches it). [Claims status](claims.md) lists every claim.\n\n${claimsTable(front.claims, rows)}${productRowsMarkdown(front.claims, proofs)}`;
 	const pending = front.claims.filter((name) => !(rows.get(name) ?? []).length || !(rows.get(name) ?? []).every(holds));
 	const top = front.draft && pending.length
 		? `:::caution[Not proven yet]\nThis page is a draft: ${pending.map((c) => `\`${c}\``).join(', ')} ${pending.length === 1 ? 'does' : 'do'} not pass plain and get caught broken in the claims record yet (pending or not recorded), so what it describes may not hold. It is left out of llms.txt until ${pending.length === 1 ? 'it does' : 'they do'}.\n:::\n\n`

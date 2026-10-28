@@ -73,8 +73,9 @@
  * glob matches it; a path no line matches runs every claim, and docs,
  * tests and the other inert paths the file lists run none. The runner
  * prints one line per claim picked naming the paths and lines that picked
- * it. It is for local runs: the claims workflow runs every claim on every
- * pull request, since a pull request merges only on a full green run.
+ * it. It is for local runs. The claims workflow (claims.yml) runs only when a
+ * person starts it, and nothing merges or releases on a claim run
+ * (AGENTS.md, Claims and the bench are not part of development).
  * A new file under src/ needs a line there (test/claim-paths.test.ts).
  *
  * The forge claim needs a local Forgejo (scenarios/forges/forgejo.ts says
