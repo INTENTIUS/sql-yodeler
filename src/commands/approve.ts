@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import type { GateResolutionRecord, PendingGateRecord } from "@intentius/chant/lifecycle/gate-ledger";
+import { isPendingGateExpired, latestPendingGate, latestResolutionForPlan } from "@intentius/chant/lifecycle/gate-ledger-select";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment } from "../project.js";
@@ -9,6 +10,7 @@ import { findApplyOp } from "../chant/apply.js";
 import { cleanupDigest, cleanupGate, describeRetained, findRetained, retainedServer } from "../cleanup/index.js";
 import { gatedRequests } from "../chant/gated-request.js";
 import { storedPlanText } from "../chant/stored-plan.js";
+import { chantConfirm, confirmApproval } from "../chant/confirm.js";
 import { baselineGate } from "../init/index.js";
 import { gateAtBase } from "../waves/index.js";
 import { waveApproval } from "../approval-mode/index.js";
@@ -19,7 +21,7 @@ import { readMigrations } from "../migrations/index.js";
 import { runChant } from "../chant/process.js";
 import { runnableAsWriter } from "../chant/runnable.js";
 import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
-import { EXIT_WAITING, EXIT_DECLINED, EXIT_FAILED, EXIT_MOVED } from "../exit.js";
+import { EXIT_WAITING, EXIT_FAILED, EXIT_MOVED } from "../exit.js";
 import { gitLedger } from "../versioned/approval.js";
 import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { closeVersioned, findMigrateOp, hasMigrations, migrationsDir, openVersioned, renderStatus, statusReport, ALLOW_OUT_OF_ORDER_ENV } from "../versioned/index.js";
@@ -52,6 +54,10 @@ yodel apply <env>.
 
 It never approves on its own. With no terminal to ask (a script, CI, an
 agent) it approves nothing and exits 1, and no flag skips the question.
+With a chant that confirms at a terminal (chant#4575), chant asks the
+question: it shows the gate, its pending fact and the stored plan the fact
+cites, and asks for the environment's name. YODEL_OWN_CONFIRM=1 keeps
+yodel's own question.
 
 A declarative project (no migrations/ directory) approves the plan its
 ApplyOp's gate waits on: yodel apply <env> stops at the gate and records
@@ -288,8 +294,8 @@ export const approve: Command = {
             io.out(renderStatus(report));
             io.out(`${describeWave(view)}\n`);
             if (!view.waits) return 0;
-            // The plan the wave's pending fact cites (#292, chant#4551), as chant stored it.
-            {
+            // The plan the wave's pending fact cites (#292, chant#4551), as chant stored it; chant's confirmation (#295) shows it itself.
+            if (!(await chantConfirm())) {
               const { waveGateName } = await import("@intentius/chant/gated-waves");
               const stored = await storedPlanText(project.dir, await gitLedger(project.dir), WAVES_PIPELINE, waveGateName(WAVES_PIPELINE, view.wave), view.digest);
               if (stored) io.out(`\n${stored}`);
@@ -298,10 +304,10 @@ export const approve: Command = {
               io.err(`yodel approve: --plan ${expected} is not the plan waiting for ${env.name}, which is ${view.digest}. Nothing was approved.\n`);
               return EXIT_MOVED;
             }
-            const answer = (await ask(`\nApprove wave ${String(view.wave)} for ${env.name}, ${view.digest}? Type ${env.name} to approve: `)).trim();
-            if (answer !== env.name) {
-              io.err(`Not approved: the answer was not ${env.name}.\n`);
-              return EXIT_DECLINED;
+            {
+              const { waveGateName } = await import("@intentius/chant/gated-waves");
+              const declined = await confirmApproval({ io, ask, dir: project.dir, op: WAVES_PIPELINE, gate: waveGateName(WAVES_PIPELINE, view.wave), digest: view.digest, target: env.name, question: `\nApprove wave ${String(view.wave)} for ${env.name}, ${view.digest}? Type ${env.name} to approve: ` });
+              if (declined !== undefined) return declined;
             }
             const again = await statusReport(venv, ordered, { allowOutOfOrder });
             const now = again.digest ? await waveView(project, env.name, ordered, again.status.pending, again.digest) : undefined;
@@ -321,11 +327,8 @@ export const approve: Command = {
           io.err(`yodel approve: --plan ${expected} is not the plan waiting for ${env.name}, which is ${report.digest}. Nothing was approved.\n`);
           return EXIT_MOVED;
         }
-        const answer = (await ask(`\nApprove this plan for ${env.name}, ${report.digest}? Type ${env.name} to approve: `)).trim();
-        if (answer !== env.name) {
-          io.err(`Not approved: the answer was not ${env.name}.\n`);
-          return EXIT_DECLINED;
-        }
+        const declined = await confirmApproval({ io, ask, dir: project.dir, op: op.name, gate: op.gate, digest: report.digest, target: env.name, question: `\nApprove this plan for ${env.name}, ${report.digest}? Type ${env.name} to approve: ` });
+        if (declined !== undefined) return declined;
         // The plan is read again: what is approved is what the person saw.
         const again = await statusReport(venv, ordered, { allowOutOfOrder });
         if (again.digest !== report.digest) {
@@ -387,18 +390,15 @@ async function approveTenantSet(
     io.err(`yodel approve: --plan ${o.expected} is not the plan waiting for ${set}, which is ${view.digest}. Nothing was approved.\n`);
     return EXIT_MOVED;
   }
-  const answer = (await o.ask(`\nApprove wave ${String(view.wave)} for every tenant of ${set}, ${view.digest}? Type ${set} to approve: `)).trim();
-  if (answer !== set) {
-    io.err(`Not approved: the answer was not ${set}.\n`);
-    return EXIT_DECLINED;
-  }
+  const { waveGateName } = await import("@intentius/chant/gated-waves");
+  const declined = await confirmApproval({ io, ask: o.ask, dir: project.dir, op: WAVES_PIPELINE, gate: waveGateName(WAVES_PIPELINE, view.wave), digest: view.digest, target: set, question: `\nApprove wave ${String(view.wave)} for every tenant of ${set}, ${view.digest}? Type ${set} to approve: ` });
+  if (declined !== undefined) return declined;
   // Every tenant is read again: what is approved is what the person saw.
   const again = await read();
   if (again.view?.digest !== view.digest) {
     io.err(`Not approved: the plan moved while you were asked (now ${again.view?.digest ?? "nothing to approve"}); run yodel approve ${set} again.\n`);
     return EXIT_MOVED;
   }
-  const { waveGateName } = await import("@intentius/chant/gated-waves");
   const gate = waveGateName(WAVES_PIPELINE, view.wave);
   return record(io, project.dir, WAVES_PIPELINE, gate, view.digest, await o.resuming(project.dir), `Run wave ${String(view.wave)}'s deciding job again (push chant/lifecycle first if chant did not).`, "", o.signing(view.approval));
 }
@@ -447,11 +447,10 @@ export function standingGate(
   gate: string,
   now: string = new Date().toISOString(),
 ): StandingGate | undefined {
-  const facts = ledger.pending.filter((p) => p.gate === gate).sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0));
-  const p = facts.at(-1);
-  if (!p?.planDigest || p.expiresAt <= now) return undefined;
-  const answered = ledger.resolutions.some((r) => r.gate === gate && r.planDigest === p.planDigest && r.timestamp >= p.timestamp);
-  if (answered) return undefined;
+  // chant's own selectors (#295): the newest pending fact of the gate, and an approval of its plan since.
+  const p = latestPendingGate([...ledger.pending], gate);
+  if (!p?.planDigest || isPendingGateExpired(p, now)) return undefined;
+  if (latestResolutionForPlan([...ledger.resolutions], gate, p.timestamp, p.planDigest).resolution) return undefined;
   return { op, gate, digest: p.planDigest, at: p.timestamp, ...(p.description ? { description: p.description } : {}) };
 }
 
@@ -470,13 +469,13 @@ async function approveStanding(c: OtherContext, found: { standing: StandingGate;
   const { io, env } = c;
   const s = found.standing;
   io.out(`${s.op} is waiting at gate "${s.gate}" for approval of ${s.digest}, since ${s.at}${s.description ? ` (${s.description})` : ""}.\n`);
-  const stored = await storedPlanText(c.project.dir, await gitLedger(c.project.dir), s.op, s.gate, s.digest);
-  if (stored) io.out(`\n${stored}`);
-  const answer = (await c.ask(`\nApprove ${s.digest} for ${env.name}? Type ${env.name} to approve: `)).trim();
-  if (answer !== env.name) {
-    io.err(`Not approved: the answer was not ${env.name}.\n`);
-    return EXIT_DECLINED;
+  // The stored plan the fact cites (#292); chant's confirmation (#295) shows it itself.
+  if (!(await chantConfirm())) {
+    const stored = await storedPlanText(c.project.dir, await gitLedger(c.project.dir), s.op, s.gate, s.digest);
+    if (stored) io.out(`\n${stored}`);
   }
+  const declined = await confirmApproval({ io, ask: c.ask, dir: c.project.dir, op: s.op, gate: s.gate, digest: s.digest, target: env.name, question: `\nApprove ${s.digest} for ${env.name}? Type ${env.name} to approve: ` });
+  if (declined !== undefined) return declined;
   // What waits is read again: what is approved is what the person saw.
   const again = await findStanding(c.project.dir, gates.filter((g) => g.op === s.op && g.gate === s.gate), undefined);
   if (again?.standing.digest !== s.digest) {
@@ -521,11 +520,8 @@ export async function approveOther(c: OtherContext, opName?: string, venv?: Vers
     const { retained } = await findRetained(server);
     if (retained.some((r) => r.due) && (await cleanupDigest(env.name, retained)) === expected) {
       c.io.out(`yodel cleanup ${env.name} drops, once approved:\n${retained.filter((r) => r.due).map((r) => `  ${describeRetained(r)}\n`).join("")}Plan digest: ${expected}\n`);
-      const answer = (await c.ask(`\nApprove dropping these in ${env.name}, ${expected}? Type ${env.name} to approve: `)).trim();
-      if (answer !== env.name) {
-        c.io.err(`Not approved: the answer was not ${env.name}.\n`);
-        return EXIT_DECLINED;
-      }
+      const declined = await confirmApproval({ io: c.io, ask: c.ask, dir: project.dir, op: migrate.name, gate: cleanupGate(migrate.gate), digest: expected, target: env.name, question: `\nApprove dropping these in ${env.name}, ${expected}? Type ${env.name} to approve: ` });
+      if (declined !== undefined) return declined;
       const now = await cleanupDigest(env.name, (await findRetained(server)).retained);
       if (now !== expected) {
         c.io.err(`Not approved: what is due moved while you were asked (now ${now}); run yodel cleanup ${env.name} again.\n`);
