@@ -1,4 +1,42 @@
 {
   "format": 1,
-  "proofs": []
+  "proofs": [],
+  "pending": [
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-forge-clickhouse",
+      "claim": "forge",
+      "note": "lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (ClickHouse template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-forge-postgres",
+      "claim": "forge",
+      "note": "lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (Postgres template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-waves-clickhouse",
+      "claim": "waves",
+      "note": "dev and prod applied as two waves on a Forgejo runner, each behind its own gate, each approved with yodel approve (ClickHouse template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-waves-postgres",
+      "claim": "waves",
+      "note": "dev and prod applied as two waves on a Forgejo runner, each behind its own gate, each approved with yodel approve (Postgres template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-approval-clickhouse",
+      "claim": "approval",
+      "note": "the digest-bound gate, the gate read at the base, an override for a denied drop, and the audit, in CI (ClickHouse template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-approval-postgres",
+      "claim": "approval",
+      "note": "the digest-bound gate, the gate read at the base, an override for a denied drop, and the audit, in CI (Postgres template)"
+    }
+  ]
 }

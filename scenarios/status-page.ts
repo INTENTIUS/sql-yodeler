@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { claims as allClaims } from "./claims/index.js";
 import type { Claim, Dialect } from "./lib/claim.js";
 import { docsPages, pagesByClaim } from "./docs-claims.js";
-import { claimedVersion, proofsFor, readProductProofs, rowLink, type ProductScenarioProof } from "./product-proofs.js";
+import { claimedVersion, proofsFor, readPendingCitations, readProductProofs, rowLink, type PendingCitation, type ProductScenarioProof } from "./product-proofs.js";
 import { readRecord, type ClaimsRecord, type Stamp } from "./record.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,6 +67,7 @@ export function renderPage(
   pages: Map<string, string[]> = citedBy(),
   proofs: readonly ProductScenarioProof[] = readProductProofs(proofsPath, claims.map((c) => c.name)),
   version: string = claimedVersion(packagePath),
+  pending: readonly PendingCitation[] = readPendingCitations(proofsPath, allClaims.map((c) => c.name)),
 ): string {
   const byKey = new Map((record?.rows ?? []).map((r) => [`${r.claim}:${r.dialect}`, r]));
   const cited = (name: string) => (pages.get(name) ?? []).map((f) => `[${f.replace(/\.md$/, "")}](${f})`).join(", ");
@@ -100,7 +101,7 @@ export function renderPage(
       out.push(r ? `${head} ${verdict(r.plain, r.needs)} | ${verdict(r.break, r.needs)} | ${commitOf(r)} | ${when(r.recorded)} | ${cited(c.name)} |` : `${head} not recorded | not recorded | | | ${cited(c.name)} |`);
     }
   }
-  out.push("", ...proofSection(claims, proofs, version));
+  out.push("", ...proofSection(claims, proofs, version), ...pendingSection(claims, pending));
   return `${out.join("\n")}\n`;
 }
 
@@ -118,6 +119,16 @@ function proofSection(claims: readonly Claim[], proofs: readonly ProductScenario
   for (const { proof: p, counted } of rows) {
     out.push(`| ${p.claim} | ${p.repo} | [${p.scenario}](${rowLink(p)}) | \`${p.commit}\` | ${p.date} | ${p.engine_version} | ${counted ? "yes" : `no, the claims are about ${version}`} |`);
   }
+  return out;
+}
+
+/** The scenarios claims will cite once their rows are recorded: none of them a run. */
+function pendingSection(claims: readonly Claim[], pending: readonly PendingCitation[]): string[] {
+  const order = new Map(claims.map((c, i) => [c.name, i]));
+  const rows = pending.filter((p) => order.has(p.claim)).sort((a, b) => (order.get(a.claim) ?? 0) - (order.get(b.claim) ?? 0));
+  if (!rows.length) return [];
+  const out = ["", "These harness scenarios have no recorded row yet. Each is listed here as pending until its row is recorded and cited above.", "", "| Claim | Repo | Scenario | To record |", "|---|---|---|---|"];
+  for (const p of rows) out.push(`| ${p.claim} | ${p.repo} | \`${p.scenario}\` | ${cell(p.note)} |`);
   return out;
 }
 

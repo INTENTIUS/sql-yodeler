@@ -5,6 +5,11 @@
  * after approval (a migration added), the apply applies nothing and
  * `yodel plan` says what moved. Objects in database <prefix>_pr_comment, the
  * history in <prefix>_pr_comment_history (./names.ts). The comment goes to a local GitHub-shaped fake.
+ *
+ * The first case is retired on a chant with the e2e harness
+ * (./harness-fallback.ts): the sy-approval and sy-forge scenarios show it
+ * on the harness's Forgejo then. The other two are yodel plan's own output
+ * and run on every chant.
  */
 
 import { execFileSync } from "node:child_process";
@@ -17,6 +22,7 @@ import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
+import { harnessCovers } from "./harness-fallback.js";
 import { e2eProject, suiteName } from "./names.js";
 
 const DB = suiteName("pr_comment");
@@ -114,7 +120,7 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
     expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   };
 
-  it("posts the digest the gate asks for; approving it lets the apply after merge run", async () => {
+  it.skipIf(harnessCovers)("posts the digest the gate asks for; approving it lets the apply after merge run", async () => {
     const one = next("one", "id UInt64");
 
     const posted = await comment();
