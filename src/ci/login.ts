@@ -33,6 +33,87 @@
 import type { AwsLogin, AzureLogin, CiLogin, CloudLogins, GcpLogin } from "../config/define.js";
 import type { CloudToken, Role } from "../credentials.js";
 
+// ── Through chant's ci-identity (#296) ──────────────────────────────────────
+//
+// With a chant whose ci-identity trades a job's OIDC token for every cloud
+// (chant#4554) and a sql lexicon whose token sources mint from what the
+// trade left (chant#4572), the login is chant's: one trade step, which runs
+// from `/` with no file of the checkout in reach, writes the cloud's
+// variables for the job's later steps, and the database token is minted by
+// the lexicon with no cloud command line in the image. yodel keeps only the
+// mapping from yodel.config.ts `ci.login` to chant's trade spec. Forgejo,
+// which gives a job no OIDC token, keeps yodel's own login from the
+// runner's token file.
+
+/** One job's trade, in chant's `CloudTradeSpec` shape, the parts yodel fills. */
+export interface TradeSpec {
+  aws?: { role: string; region: string; audience: string };
+  gcp?: { serviceAccount: string; provider: string; audience: string };
+  azure?: { clientId: string; tenantId: string; audience: string; database: true };
+}
+
+/** The parts of chant's `ci-identity` yodel calls. */
+export interface ChantTrade {
+  tradeLine(out: string, format: "github-env" | "sh"): string;
+  gitlabTradeLines(extraUnset?: readonly string[]): string[];
+  gitlabTradeIdTokens(spec: TradeSpec): Record<string, { aud: string }>;
+  TRADE_SPEC_ENV: string;
+}
+
+let trade: ChantTrade | undefined;
+
+/** The trade the next render uses, or none for yodel's own login. {@link chantTrade} finds it; tests set their own. */
+export function useChantTrade(t: ChantTrade | undefined): void {
+  trade = t;
+}
+
+/** Whether logins render through chant's trade. */
+export const tradesThroughChant = (): boolean => trade !== undefined;
+
+/**
+ * chant's trade, when the installed chant has it with the database token
+ * (`AZURE_DATABASE_TOKEN_ENV`, chant#4572) and the sql lexicon mints from a
+ * traded identity (`tradedToken`); else undefined. Both are imported lazily,
+ * with the specifiers in variables, so a published chant keeps yodel's login.
+ */
+export async function chantTrade(): Promise<ChantTrade | undefined> {
+  const identity = "@intentius/chant/ci-identity";
+  const tokens = "@intentius/chant-lexicon-sql/token-source";
+  try {
+    const m = (await import(identity)) as Partial<ChantTrade> & { AZURE_DATABASE_TOKEN_ENV?: unknown };
+    const t = (await import(tokens)) as { tradedToken?: unknown };
+    const ok = typeof m.tradeLine === "function" && typeof m.gitlabTradeLines === "function" && typeof m.gitlabTradeIdTokens === "function" && typeof m.TRADE_SPEC_ENV === "string" && typeof m.AZURE_DATABASE_TOKEN_ENV === "string" && typeof t.tradedToken === "function";
+    return ok ? (m as ChantTrade) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** yodel.config.ts `ci.login` for a job's logins, as chant's trade spec. */
+export function tradeSpec(logins: readonly Login[]): TradeSpec {
+  const spec: TradeSpec = {};
+  for (const l of logins) {
+    if (l.cloud === "aws") spec.aws = { role: l.config.roleArn, region: l.config.region ?? "us-east-1", audience: audience(l) };
+    else if (l.cloud === "gcp") spec.gcp = { serviceAccount: l.config.serviceAccount, provider: l.config.workloadIdentityProvider, audience: audience(l) };
+    // entra signs in to Azure Database for PostgreSQL with a token for its own scope.
+    else spec.azure = { clientId: l.config.clientId, tenantId: l.config.tenantId, audience: audience(l), database: true };
+  }
+  return spec;
+}
+
+/** A GitLab job's `id_tokens` for its logins through chant's trade, or undefined for yodel's own. */
+export function tradeIdTokens(logins: readonly Login[]): Record<string, { aud: string }> | undefined {
+  return trade && logins.length > 0 ? trade.gitlabTradeIdTokens(tradeSpec(logins)) : undefined;
+}
+
+/** The trade's steps for a job on GitHub or GitLab. */
+function tradeSteps(t: ChantTrade, forge: "github" | "gitlab", logins: readonly Login[]): LoginSteps {
+  const spec = JSON.stringify(tradeSpec(logins));
+  const name = `Cloud identity (chant ci-identity: ${logins.map((l) => l.cloud).join(", ")})`;
+  if (forge === "gitlab") return { steps: [{ name, lines: t.gitlabTradeLines() }], variables: { [t.TRADE_SPEC_ENV]: spec } };
+  return { steps: [{ name, lines: [`export ${t.TRADE_SPEC_ENV}=${quote(spec)}`, t.tradeLine("$GITHUB_ENV", "github-env")] }], variables: {} };
+}
+
 export type Cloud = keyof CloudLogins;
 export const CLOUDS: readonly Cloud[] = ["aws", "gcp", "azure"];
 
@@ -129,6 +210,7 @@ const STEP_NAME: Record<Cloud, string> = { aws: "Log in to AWS (web identity)", 
  * without a `tokenFile` is left out: the runner's own identity mints there.
  */
 export function loginSteps(forge: LoginForge, logins: readonly Login[]): LoginSteps {
+  if (trade && forge !== "forgejo" && logins.length > 0) return tradeSteps(trade, forge, logins);
   const out: LoginSteps = { steps: [], variables: {} };
   for (const l of logins) {
     const file = l.config.tokenFile ?? defaultTokenFile(forge, l.cloud);
@@ -168,6 +250,7 @@ const FIELDS: Record<Cloud, Record<string, { re: RegExp; what: string; required:
     roleArn: { re: ROLE_ARN, what: "a role ARN, arn:aws:iam::<account>:role/<name>", required: true },
     tokenFile: { re: TOKEN_FILE, what: "a file path", required: false },
     sessionName: { re: SESSION_NAME, what: "2 to 64 of letters, digits and +=,.@_-", required: false },
+    region: { re: /^[a-z]{2}(-[a-z]+)+-\d+$/, what: "an AWS region, such as eu-west-1", required: false },
   },
   gcp: {
     workloadIdentityProvider: { re: PROVIDER, what: "projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>", required: true },

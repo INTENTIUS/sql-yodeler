@@ -345,6 +345,12 @@ export interface AwsLogin {
   tokenFile?: string;
   /** `AWS_ROLE_SESSION_NAME`. Default: `yodel`. */
   sessionName?: string;
+  /**
+   * The region the role is assumed in, and `AWS_REGION` after a login
+   * through chant's ci-identity (#296), which an `rds-iam` token is signed
+   * for unless the token source names its own. Default `us-east-1`.
+   */
+  region?: string;
 }
 
 export interface GcpLogin {

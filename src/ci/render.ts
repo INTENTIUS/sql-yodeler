@@ -83,7 +83,7 @@ import { pathToFileURL } from "node:url";
 import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
-import { audience, CLOUD_OF, jobLogins, loginSteps, type Login, type LoginSteps } from "./login.js";
+import { audience, chantTrade, CLOUD_OF, jobLogins, loginSteps, tradeIdTokens, tradesThroughChant, useChantTrade, type Login, type LoginSteps } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
@@ -278,7 +278,13 @@ const cloudsOf = (envs: Pick<Environments, "credentials">, held: ReadonlyArray<r
 ];
 
 /** A GitLab job's `id_tokens` for `clouds`, each for its login's audience when the job logs in (#132): GCP's is the workload identity provider's own. */
-const idTokens = (clouds: readonly CloudToken[], logins: readonly Login[] = []): Record<string, { aud: string }> =>
+const idTokens = (clouds: readonly CloudToken[], logins: readonly Login[] = []): Record<string, { aud: string }> => ({
+  ...ownIdTokens(clouds.filter((c) => !(tradesThroughChant() && logins.some((l) => l.cloud === CLOUD_OF[c]))), logins),
+  // Through chant's trade (#296), the logins' tokens come in chant's variables.
+  ...(tradeIdTokens(logins) ?? {}),
+});
+
+const ownIdTokens = (clouds: readonly CloudToken[], logins: readonly Login[]): Record<string, { aud: string }> =>
   Object.fromEntries(
     clouds.map((c) => {
       const login = logins.find((l) => l.cloud === CLOUD_OF[c]);
@@ -1598,6 +1604,8 @@ export async function render(dir: string, options: { product?: boolean } = {}): 
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   const product = options.product === false ? undefined : await chantProduct();
+  // The cloud login through chant's ci-identity (#296), with the product pipeline, when chant and the sql lexicon have it.
+  useChantTrade(product ? await chantTrade() : undefined);
   // The check on chant's check moment (#294), with the product pipeline, when chant has the moment and the project a declaration.
   const hooks = product ? await checkHooksDeclaration(dir, envs) : undefined;
   const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
