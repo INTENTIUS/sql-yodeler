@@ -273,8 +273,8 @@ describe("planRevert with a checkpoint", () => {
     const state = deriveState([row(1, cp)]);
     const status = compareHistory(ordered, state);
     const own = refusal(() => planRevert({ environment: "e2e", ordered, status, state, id: cp.id }));
-    expect([own.exitCode, own.message]).toEqual([4, expect.stringContaining(`${cp.id} is the checkpoint e2e started from`)]);
+    expect([own.exitCode, own.message]).toEqual([1, expect.stringContaining(`${cp.id} is the checkpoint e2e started from`)]);
     const past = refusal(() => planRevert({ environment: "e2e", ordered, status, state, id: m1.id }));
-    expect([past.exitCode, past.message]).toEqual([4, expect.stringContaining(`comes before the checkpoint ${cp.id}`)]);
+    expect([past.exitCode, past.message]).toEqual([1, expect.stringContaining(`comes before the checkpoint ${cp.id}`)]);
   });
 });
