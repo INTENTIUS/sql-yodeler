@@ -89,6 +89,8 @@ import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } 
 import { loadYodelConfig } from "../config/load.js";
 import { testFiles } from "../testing/files.js";
 import { CODE_QUALITY_FILE } from "../lint/annotations.js";
+import { chantCheckHooks, checkPresets, declarationFile, declarationWithHooks, type CheckHook } from "./check-hooks.js";
+import type { CheckTool } from "../config/define.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
@@ -197,6 +199,34 @@ export interface Environments {
    * pull requests. The pipeline is one job, yodel check, and nothing else.
    */
   checkOnly?: true;
+  /** yodel.config.ts `ci.tools` (#294): the SQL tools run as check hooks beside yodel's checks. */
+  tools?: readonly CheckTool[];
+  /**
+   * The lint job runs chant's check moment (#294, chant#4556): `yodel chant
+   * ci check` with the hooks read from the workspace declaration at the
+   * pull request's base. Set by {@link render} when the installed chant has
+   * the moment and the project has a declaration.
+   */
+  checkHooks?: true;
+}
+
+/** The line the lint job runs chant's check moment with (#294): the hooks are read at the pull request's base. */
+export const checkHooksLine = (forge: Forge): string =>
+  `yodel chant ci check --base ${forge === "gitlab" ? "$CI_MERGE_REQUEST_DIFF_BASE_SHA" : "${{ github.event.pull_request.base.sha }}"}`;
+
+/** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
+export function checkHooksOf(envs_: Environments): CheckHook[] {
+  const forge: Forge = "github";
+  return checkPresets({
+    dialect: envs_.dialect,
+    // --format forge: one list of hooks for every forge, each job printing its own forge's format.
+    commands: { ci: CI_CHECK, types: TYPES_CHECK, lint: `${LINT} --format forge --output ${CODE_QUALITY_FILE}`, replay: REPLAY, test: TEST, check: checkCommand(forge).replace(/--format \S+( --output \S+)?$/, `--format forge --output ${CODE_QUALITY_FILE}`) },
+    typedColumns: envs_.typedColumns === true,
+    replay: envs_.replay,
+    tests: envs_.tests === true,
+    check: envs_.check === true,
+    tools: envs_.tools ?? [],
+  });
 }
 
 /** Whether the apply pipeline is rendered: unless yodel.config.ts `ci.apply` is false. */
@@ -549,7 +579,8 @@ function checkJob(forge: Actions, dialect: Dialect, tc: Toolchain): AJob {
   });
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false): AJob {
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false, hooks = false): AJob {
+  if (hooks) return checkHooksJob(forge, dialect, replay, tc);
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
@@ -575,6 +606,25 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
       ...(tests ? [new Step({ name: "yodel test", run: TEST })] : []),
       ...(check ? [new Step({ name: "yodel check", run: checkCommand(forge) })] : []),
     ],
+  });
+}
+
+/**
+ * The lint job on chant's check moment (#294): the replay server when the
+ * project has one, then `yodel chant ci check`, which runs the hooks the
+ * declaration at the pull request's base names. The job runs in IMAGE with
+ * the replay server, as {@link lintJob} does.
+ */
+function checkHooksJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain): AJob {
+  const container = replay || inContainer(forge, tc);
+  const steps = [...setupSteps(container, tc), new Step({ name: "Check hooks at the base (chant ci check)", run: checkHooksLine(forge) })];
+  if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
+  const { svc, services, env } = replayService(dialect);
+  return new ActionsJob({
+    ...runner(container, tc),
+    services,
+    env,
+    steps: [...setupSteps(container, tc), new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }), new Step({ name: "Check hooks at the base (chant ci check)", run: checkHooksLine(forge) })],
   });
 }
 
@@ -604,7 +654,7 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
   const { dialect, names: envs, replay, waves, jobs: own } = envs_;
   const tc = toolchainOf(envs_);
   if (envs_.checkOnly) return checkOnlyActions(forge, envs_);
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true) };
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true, envs_.checkHooks === true) };
   for (const env of envs) {
     const read = [env, ...requiredOf(waves, env)];
     jobs[`plan-${env}`] = new ActionsJob({
@@ -722,11 +772,11 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
+            script: envs_.checkHooks === true ? [waitFor(svc.name, svc.port), checkHooksLine("gitlab")] : [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
-        : { script: [CI_CHECK, ...types, lintCommand("gitlab")] }),
+        : { script: envs_.checkHooks === true ? [checkHooksLine("gitlab")] : [CI_CHECK, ...types, lintCommand("gitlab")] }),
       // The code quality report, kept when lint fails too: that is when it has something to show.
       artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
     }),
@@ -1438,6 +1488,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.login ? { login: ci.login } : {}),
     ...(ci?.apply === false ? { apply: false as const } : {}),
     ...(check ? { check: true as const } : {}),
+    ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
   };
 }
 
@@ -1514,6 +1565,21 @@ export function review(envs: Environments): RenderedFile[] {
   return [actionsReview("github", envs), actionsReview("forgejo", envs), gitlabPipeline(envs)];
 }
 
+/**
+ * The workspace declaration with yodel's check presets in `ci.hooks.check`
+ * (#294), or undefined when the installed chant has no check moment or the
+ * project has no declaration. The hooks are one list for every forge: the
+ * lint and check presets print with `--format forge`, so a GitHub or
+ * Forgejo job annotates the files and a GitLab job writes the code quality
+ * report its artifact keeps.
+ */
+export async function checkHooksDeclaration(dir: string, envs_: Environments): Promise<RenderedFile | undefined> {
+  const chant = await chantCheckHooks();
+  const file = declarationFile(dir);
+  if (!chant || !file) return undefined;
+  return { path: file, content: declarationWithHooks(chant, dir, file, checkHooksOf(envs_)) };
+}
+
 /** The forge a rendered file is for; undefined for the waves spec, which every forge's apply reads. */
 export function forgeOf(path: string): Forge | undefined {
   if (path.startsWith(".github/")) return "github";
@@ -1532,8 +1598,11 @@ export async function render(dir: string, options: { product?: boolean } = {}): 
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   const product = options.product === false ? undefined : await chantProduct();
+  // The check on chant's check moment (#294), with the product pipeline, when chant has the moment and the project a declaration.
+  const hooks = product ? await checkHooksDeclaration(dir, envs) : undefined;
+  const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
-  const files = [...review(envs), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
+  const files = [...review(reviewed), ...(hooks ? [hooks] : []), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
   return files.filter((f) => {
     const forge = forgeOf(f.path);
     return forge === undefined || forges.includes(forge);

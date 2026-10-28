@@ -457,6 +457,33 @@ Every migration replays to its recorded schema.
 
 File paths are relative to the forge's checkout (`GITHUB_WORKSPACE`, `CI_PROJECT_DIR`), or to the project's directory outside CI. In a declarative project a finding is about the declared schema or a plan, not a file, so GitHub and Forgejo show it on the run rather than on a file, and GitLab places it on the project's directory. `yodel ci` renders each forge's lint job with its format, and on GitLab keeps the report as the job's `artifacts:reports:codequality`, when the job fails too. `--json` is `--format json`.
 
+`--format forge` picks the format of the forge the job runs on: `gitlab` under GitLab CI, `github` under GitHub or Forgejo Actions, and `text` elsewhere. The check hooks below use it, so one list of hooks serves every forge.
+
+## The check on chant's check hooks
+
+With a chant that has the check moment (the release after 0.124.51, chant#4556) and a workspace declaration in the project (`chant.workspace.json`), `yodel ci` writes yodel's checks into the declaration's `ci.hooks.check` as presets, and the lint job runs `yodel chant ci check --base <the pull request's base>`. The presets, in the order the job runs them:
+
+| Hook | Runs | When |
+|---|---|---|
+| `yodel-ci-check` | `yodel ci --check` | always |
+| `yodel-sql-types` | `chant sql types --check` | the project commits `sql-types.d.ts` |
+| `yodel-lint` | `yodel lint --format forge` | always |
+| `yodel-replay` | `yodel lint --replay replay --reset` | chant.config.ts declares the `replay` profile |
+| `yodel-test` | `yodel test --env replay --reset --junit yodel-test.xml` | the replay profile, and `tests/*.test.ts` |
+| `yodel-check` | `yodel check --env replay --reset --base origin/main --format forge` | the replay profile, and yodel.config.ts `check` |
+| `squawk` | `squawk migrations/*/migration.sql` | yodel.config.ts `ci.tools` names it (Postgres only) |
+| `sqlfluff` | `sqlfluff lint migrations --dialect <dialect>` | yodel.config.ts `ci.tools` names it |
+
+squawk and sqlfluff are off unless `ci.tools` names them, and each must be installed where the lint job runs (the job's image, or a step in `ci.jobs`). yodel ships no rule of its own that repeats theirs.
+
+```ts
+export default defineConfig({ ci: { tools: ["squawk", "sqlfluff"] } });
+```
+
+chant reads the hooks from the declaration at the pull request's base, so a pull request that removes one still runs it, and a hook a pull request adds runs once it is merged. Each hook runs with no forge token and no cloud credentials. The job's log shows each one's output, so `yodel lint`'s annotations still appear on GitHub and Forgejo, and on GitLab the job keeps the code quality report as before. `.chant/check/check-hooks.json` lists each hook with its result and exit code, and the job fails on the first hook that fails. `yodel ci --check` compares the declaration's hooks with the presets too.
+
+A project with no workspace declaration, or a published chant without the check moment, keeps the lint job's own steps.
+
 ## Tests on the replayed database: yodel test
 
 The replay check shows each migration gives the schema it recorded. It doesn't show that the data survives a migration, that a backfill fills what it should, or that a view returns the right rows: the replayed database has no data, and the replay skips backfills. `yodel test` runs tests for those, written in `tests/*.test.ts`:

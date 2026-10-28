@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { APPROVAL_MODES, CI_FORGES, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
@@ -193,8 +193,12 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools)`);
+  const tools = value.tools;
+  if (tools !== undefined && !(Array.isArray(tools) && tools.every((t) => (CHECK_TOOLS as readonly unknown[]).includes(t)) && new Set(tools).size === tools.length)) {
+    throw new YodelError(`${where}.tools: a list of ${CHECK_TOOLS.join(", ")}, each once`);
+  }
   if (value.apply !== undefined && typeof value.apply !== "boolean") throw new YodelError(`${where}.apply: true (the default) or false`);
   if (value.apply === false && value.resume !== undefined) {
     throw new YodelError(`${where}: resume starts again the apply pipeline's waves, which apply: false leaves out; remove ci.resume, or ci.apply`);
