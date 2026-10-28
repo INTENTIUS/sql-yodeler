@@ -6,12 +6,12 @@
  * test/exit-codes.test.ts keeps them in agreement.
  *
  * The table is chant's `CHANT_EXIT`, read from `@intentius/chant/exit-codes`
- * by {@link useChantExitTable} when the installed chant has it. A chant
+ * by {@link useChantExitTable} when the installed chant has it. Code 9 (`misplaced`, chant#4624) is read the same way when chant's table has it. A chant
  * released before that subpath has no table to read, so yodel keeps
  * {@link FALLBACK_EXIT}, the same numbers.
  */
 
-/** chant's table, as chant#4553 set it: the fallback for a chant that does not export it. */
+/** chant's table, as chant#4553 set it and chant#4624 extended it with 9: the fallback for a chant that does not export it. */
 export const FALLBACK_EXIT = {
   done: 0,
   failed: 1,
@@ -22,7 +22,11 @@ export const FALLBACK_EXIT = {
   superseded: 6,
   denied: 7,
   declined: 8,
+  misplaced: 9,
 } as const;
+
+/** The names a chant table must carry for yodel to read it. `misplaced` came later (chant#4624): a table without it still counts, and 9 stays the fallback's. */
+const REQUIRED: ReadonlyArray<ExitName> = ["done", "failed", "drift", "waiting", "moved", "held", "superseded", "denied", "declined"];
 
 /** A name in chant's table. */
 export type ExitName = keyof typeof FALLBACK_EXIT;
@@ -47,6 +51,8 @@ export let EXIT_SUPERSEDED: number = FALLBACK_EXIT.superseded;
 export let EXIT_DENIED: number = FALLBACK_EXIT.denied;
 /** An answer at a confirmation that does not approve. */
 export let EXIT_DECLINED: number = FALLBACK_EXIT.declined;
+/** A job guard refused: the job runs where it is not set to run (`chant ci check-job`). yodel itself does not return it: the guard in a generated job exits 9 before yodel starts. */
+export let EXIT_MISPLACED: number = FALLBACK_EXIT.misplaced;
 
 /** Each code yodel returns and what it means, one line each. */
 export let EXIT_CODES: ReadonlyArray<readonly [number, string]> = exitCodes();
@@ -82,8 +88,7 @@ export function useChantExitTable(): Promise<"chant" | "fallback"> {
     } catch {
       return "fallback";
     }
-    const names = Object.keys(FALLBACK_EXIT) as ExitName[];
-    if (!table || !names.every((name) => typeof table[name] === "number")) return "fallback";
+    if (!table || !REQUIRED.every((name) => typeof table[name] === "number")) return "fallback";
     const code = (name: ExitName): number => table[name] as number;
     EXIT_OK = code("done");
     EXIT_FAILED = code("failed");
@@ -94,6 +99,7 @@ export function useChantExitTable(): Promise<"chant" | "fallback"> {
     EXIT_SUPERSEDED = code("superseded");
     EXIT_DENIED = code("denied");
     EXIT_DECLINED = code("declined");
+    EXIT_MISPLACED = typeof table.misplaced === "number" ? table.misplaced : FALLBACK_EXIT.misplaced;
     EXIT_CODES = exitCodes();
     return "chant";
   })();
