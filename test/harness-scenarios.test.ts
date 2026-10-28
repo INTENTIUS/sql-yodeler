@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { claims } from "../scenarios/claims/index.js";
 import { dialectOf, readScenarios, scenariosDir, setupOf, SETUPS } from "../scenarios/harness/catalog.js";
-import { isHarness, lintLocal, loadHarness, needsHarness, type Scenario } from "../scenarios/harness/harness.js";
+import { lintLocal, loadHarness, type Scenario } from "../scenarios/harness/harness.js";
 import { isOverlay } from "../scenarios/harness/overlays.js";
 import { readPendingCitations } from "../scenarios/product-proofs.js";
 import { proofsPath } from "../scenarios/status-page.js";
@@ -93,14 +93,8 @@ describe("the scenario lint", () => {
   });
 });
 
-describe("chant's harness, when it is installed", () => {
-  it("counts a module only with the floor and every member", () => {
-    expect(isHarness({})).toBe(false);
-    expect(isHarness({ E2E_HARNESS_FLOOR: "0.125.0" })).toBe(false);
-    expect(needsHarness()).toContain("E2E_HARNESS_FLOOR");
-  });
-
-  it.skipIf(!harness)("lints every scenario file with chant's own lint", () => {
-    for (const s of all) expect(harness?.lintScenario(s), s.id).toEqual([]);
+describe("chant's harness", () => {
+  it("lints every scenario file with chant's own lint", () => {
+    for (const s of all) expect(harness.lintScenario(s), s.id).toEqual([]);
   });
 });

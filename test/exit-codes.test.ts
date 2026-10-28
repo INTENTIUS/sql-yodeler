@@ -31,10 +31,8 @@ describe("chant's exit-code table (#288)", () => {
     const from = await useChantExitTable();
     expect(from).toBe(chant === undefined ? "fallback" : "chant");
     if (chant !== undefined) {
-      // A chant released before chant#4624 has no `misplaced`; its table is the fallback's without 9.
-      const { misplaced, ...earlier } = FALLBACK_EXIT;
-      expect(chant).toEqual("misplaced" in (chant as object) ? FALLBACK_EXIT : earlier);
-      expect(EXIT_MISPLACED).toBe(misplaced);
+      expect(chant).toEqual(FALLBACK_EXIT);
+      expect(EXIT_MISPLACED).toBe(FALLBACK_EXIT.misplaced);
     }
   });
 

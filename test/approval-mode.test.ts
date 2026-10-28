@@ -166,7 +166,7 @@ describe("yodel ci, for approval modes", () => {
       const file = files.find((f) => f.path === path);
       expect(file, path).toBeDefined();
       const doc = parseYAMLDocument(file?.content ?? "") as { on: Record<string, unknown>; permissions?: Record<string, string>; jobs: Record<string, { env: Record<string, string>; steps: Array<{ run?: string }> }> };
-      expect(Object.keys(doc.on)).toEqual(["pull_request"]);
+      expect(Object.keys(doc.on)).toEqual(["pull_request", "pull_request_review"]);
       const job = doc.jobs["record-plans"];
       expect(job?.steps.some((s) => s.run === "chant run wave --spec yodel-waves.json --record-plans")).toBe(true);
       // It shows it holds no writer before it plans (#130).

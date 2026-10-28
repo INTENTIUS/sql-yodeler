@@ -1,15 +1,10 @@
 /**
- * #16 end to end against the emulator's ClickHouse: the pull request comment
- * carries the digest the migrations Op's gate asks for; `chant approve`
- * with that digest lets the apply after merge run; and when the plan moved
- * after approval (a migration added), the apply applies nothing and
- * `yodel plan` says what moved. Objects in database <prefix>_pr_comment, the
+ * #16 end to end against the emulator's ClickHouse: when the plan moved after
+ * approval (a migration added), the apply applies nothing and `yodel plan`
+ * says what moved. The comment carrying the digest the gate asks for, and the
+ * approval and apply after it, are the sy-approval and sy-forge scenarios on
+ * chant's e2e harness (scenarios/harness/, #302). Objects in database <prefix>_pr_comment, the
  * history in <prefix>_pr_comment_history (./names.ts). The comment goes to a local GitHub-shaped fake.
- *
- * The first case is retired on a chant with the e2e harness
- * (./harness-fallback.ts): the sy-approval and sy-forge scenarios show it
- * on the harness's Forgejo then. The other two are yodel plan's own output
- * and run on every chant.
  */
 
 import { execFileSync } from "node:child_process";
@@ -22,7 +17,6 @@ import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
-import { harnessCovers } from "./harness-fallback.js";
 import { e2eProject, suiteName } from "./names.js";
 
 const DB = suiteName("pr_comment");
@@ -119,43 +113,6 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
     const ran = await runChant(command.split(" ").slice(1), { cwd: dir });
     expect(ran.code, `${ran.stdout}\n${ran.stderr}`).toBe(0);
   };
-
-  it.skipIf(harnessCovers)("posts the digest the gate asks for; approving it lets the apply after merge run", async () => {
-    const one = next("one", "id UInt64");
-
-    const posted = await comment();
-    expect(posted.code, posted.err).toBe(0);
-    expect(posted.err).toContain("created the plan comment on github acme/db#16");
-    expect(comments).toHaveLength(1);
-    const body = comments[0]?.body ?? "";
-    expect(body.startsWith("<!-- yodel:plan env=e2e -->")).toBe(true);
-    expect(body).toContain(`#### \`${one}\``);
-    expect(body).toMatch(new RegExp(`\\| 0 \\| statement \\| SQLCH\\d+ \\| \\w+ \\| \`${DB}\` \\|`));
-    const digest = /Plan digest the apply gate binds: `(jcs1-sha256:[0-9a-f]{64})`/.exec(body)?.[1];
-    const command = /```sh\n(chant approve migrate-e2e approve-migrate-e2e --plan jcs1-sha256:[0-9a-f]{64})\n```/.exec(body)?.[1];
-    expect(command).toBe(`chant approve migrate-e2e approve-migrate-e2e --plan ${String(digest)}`);
-
-    // The digest the Op's Plan step prints, which its gate binds, is the comment's.
-    const step = await yodel(at("apply", "e2e", "--digest"));
-    expect(step.out.trim()).toBe(digest);
-
-    // Approve from the comment alone, with no run having reached the gate.
-    await approve(command ?? "");
-    const shown = await plan();
-    expect(shown.approval).toMatchObject({ holds: true, digest });
-
-    // "After merge": the apply runs through the gate.
-    const applied = await yodel(at("apply", "e2e", "--json"));
-    expect(applied.code, applied.err).toBe(0);
-    expect((json(applied) as { status: string }).status).toBe("applied");
-    expect(Number((await clickhouse(`EXISTS TABLE ${DB}.a`)).trim())).toBe(1);
-
-    // The comment updates in place: one comment, nothing pending now.
-    const again = await comment();
-    expect(again.err).toContain("updated the plan comment");
-    expect(comments).toHaveLength(1);
-    expect(comments[0]?.body).toContain("Nothing pending");
-  }, 300_000);
 
   it("a different digest at merge applies nothing, and says what moved", async () => {
     next("two", "id UInt64, y String DEFAULT ''");
