@@ -1,18 +1,11 @@
 /**
  * chant's e2e harness (INTENTIUS/chant#4587), as sql-yodeler reaches it.
  *
- * The harness is `@intentius/chant/e2e-harness`, which no published chant
- * has yet. sql-yodeler imports it lazily, with the specifier in a variable,
- * and counts it present only when the module exports `E2E_HARNESS_FLOOR`
- * and every function the scenarios use. Without it, the harness scenarios
- * refuse with "needs chant <floor>", and the claims keep their own runs:
- * the forge claim (scenarios/claims/forge.ts) and the end-to-end tests
- * test/e2e/pr-comment.test.ts and test/e2e/forgejo.test.ts, which run only
- * on a chant without the harness (test/e2e/harness-fallback.ts).
- *
- * The types below are the parts of the harness's contracts the scenarios
- * read, written here so sql-yodeler compiles against the published chant.
- * They follow e2e-scenario/v1 and pr-report/v1 as chant's schemas give them.
+ * The harness is `@intentius/chant/e2e-harness`, in chant from 0.124.56, the
+ * floor sql-yodeler installs. The types below are the parts of the harness's
+ * contracts the scenarios read, and `loadHarness` gives the module as that
+ * shape. They follow e2e-scenario/v1 and pr-report/v1 as chant's schemas give
+ * them.
  */
 
 /** What a scenario step does (e2e-scenario/v1 `do`). */
@@ -123,49 +116,13 @@ export interface Harness {
   CLAIM_OP: string;
 }
 
-/** The members a chant's harness must export for sql-yodeler to use it. */
-export const HARNESS_MEMBERS = [
-  "lintScenario",
-  "runClaim",
-  "ForgejoForge",
-  "forgejoApi",
-  "SafeRun",
-  "claimRow",
-  "recordClaimRow",
-  "claimRowsOf",
-  "renderClaims",
-  "harnessUrls",
-  "harnessStack",
-] as const;
-
-/** The subpath, in a variable, so a published chant without it still compiles and loads. */
-const HARNESS_SPECIFIER = "@intentius/chant/e2e-harness";
-
-/** Whether `m` is a harness this code can drive: the floor is exported, and every member is there. */
-export function isHarness(m: unknown): m is Harness {
-  if (typeof m !== "object" || m === null) return false;
-  const r = m as Record<string, unknown>;
-  return typeof r.E2E_HARNESS_FLOOR === "string" && HARNESS_MEMBERS.every((k) => typeof r[k] === "function") && typeof r.HARNESS_HOSTS === "object";
-}
-
-let loaded: Promise<Harness | undefined> | undefined;
-
-/** chant's harness, or undefined on a chant without it. */
-export function loadHarness(): Promise<Harness | undefined> {
-  loaded ??= (async () => {
-    try {
-      const m: unknown = await import(HARNESS_SPECIFIER);
-      return isHarness(m) ? m : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
+/** chant's harness, `@intentius/chant/e2e-harness` (chant 0.124.56 and later). */
+export function loadHarness(): Promise<Harness> {
+  loaded ??= import("@intentius/chant/e2e-harness").then((m) => m as unknown as Harness);
   return loaded;
 }
 
-/** The refusal on a chant without the harness. */
-export const needsHarness = (): string =>
-  "the harness scenarios need chant's e2e harness (@intentius/chant/e2e-harness, E2E_HARNESS_FLOOR), which the installed chant does not have; the claims keep their own runs (npm run claims)";
+let loaded: Promise<Harness> | undefined;
 
 /**
  * Every reason `s` is not a scenario sql-yodeler's runner can drive, by the

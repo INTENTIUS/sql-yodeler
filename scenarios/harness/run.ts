@@ -43,7 +43,7 @@ import { claims } from "../claims/index.js";
 import { run } from "../lib/exec.js";
 import { repoRoot } from "../lib/project.js";
 import { dialectOf, readScenarios, setupOf } from "./catalog.js";
-import { lintLocal, loadHarness, needsHarness, type Harness, type Scenario } from "./harness.js";
+import { lintLocal, loadHarness, type Harness, type Scenario } from "./harness.js";
 import { YodelReports, type CommitStatus } from "./reports.js";
 
 const claimNames = claims.map((c) => c.name);
@@ -191,10 +191,6 @@ export async function main(argv: string[]): Promise<number> {
   }
   const selected = (argv.length ? argv : [...scenarios.keys()]).map((id) => scenarios.get(id)?.scenario).filter((s): s is Scenario => s !== undefined);
   const h = await loadHarness();
-  if (!h) {
-    process.stderr.write(`${needsHarness()}\n`);
-    return 3;
-  }
   for (const s of selected) {
     const findings = [...h.lintScenario(s), ...lintLocal(s, claimNames)];
     if (findings.length) {

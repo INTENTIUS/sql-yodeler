@@ -6,7 +6,7 @@
  * test/exit-codes.test.ts keeps them in agreement.
  *
  * The table is chant's `CHANT_EXIT`, read from `@intentius/chant/exit-codes`
- * by {@link useChantExitTable} when the installed chant has it. Code 9 (`misplaced`, chant#4624) is read the same way when chant's table has it. A chant
+ * by {@link useChantExitTable} when the installed chant has it. Code 9 (`misplaced`, chant#4624) is read the same way. A chant
  * released before that subpath has no table to read, so yodel keeps
  * {@link FALLBACK_EXIT}, the same numbers.
  */
@@ -25,8 +25,8 @@ export const FALLBACK_EXIT = {
   misplaced: 9,
 } as const;
 
-/** The names a chant table must carry for yodel to read it. `misplaced` came later (chant#4624): a table without it still counts, and 9 stays the fallback's. */
-const REQUIRED: ReadonlyArray<ExitName> = ["done", "failed", "drift", "waiting", "moved", "held", "superseded", "denied", "declined"];
+/** The names a chant table must carry for yodel to read it. */
+const REQUIRED: ReadonlyArray<ExitName> = ["done", "failed", "drift", "waiting", "moved", "held", "superseded", "denied", "declined", "misplaced"];
 
 /** A name in chant's table. */
 export type ExitName = keyof typeof FALLBACK_EXIT;
@@ -99,7 +99,7 @@ export function useChantExitTable(): Promise<"chant" | "fallback"> {
     EXIT_SUPERSEDED = code("superseded");
     EXIT_DENIED = code("denied");
     EXIT_DECLINED = code("declined");
-    EXIT_MISPLACED = typeof table.misplaced === "number" ? table.misplaced : FALLBACK_EXIT.misplaced;
+    EXIT_MISPLACED = code("misplaced");
     EXIT_CODES = exitCodes();
     return "chant";
   })();

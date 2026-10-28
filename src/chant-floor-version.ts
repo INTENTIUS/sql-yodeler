@@ -8,7 +8,7 @@
  */
 
 /** The first chant (and sql lexicon) whose CI yodel's pipelines run on. */
-export const CHANT_CI_FLOOR = "0.124.55";
+export const CHANT_CI_FLOOR = "0.124.56";
 
 /** The packages a project pins at the floor, chant and the sql lexicon, at one version as the templates pin them. */
 export const CHANT_PACKAGES = ["@intentius/chant", "@intentius/chant-lexicon-sql"] as const;

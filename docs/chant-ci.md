@@ -22,9 +22,9 @@ SQL Yodeler's pipelines run on [chant](https://intentius.io/chant/)'s CI, as ter
 
 chant never applies a migration itself. It runs the engine through `yodel` commands, and the engine checks the approval on chant's ledger again under its own lock before it applies, so `yodel apply --execute` with the writer's credentials outside CI still needs the approval.
 
-## From chant 0.124.55
+## From chant 0.124.56
 
-chant 0.124.55 has the product pipeline terragucci and plywood use, and more of a SQL Yodeler project's pipeline moves onto chant there. `yodel upgrade` moves a project in one commit ([Upgrading the pipelines to chant 0.124.55](workflows.md#upgrading-the-pipelines-to-chant-012455)), and `yodel ci` keeps rendering the same files after it. The sections below say what each part does from then on. The gates, the approval modes, the tenant sets and the secrets each job holds stay as they are, and so do the op and gate names, `yodel-apply` and `yodel-apply-wave-<k>`, so approvals already on `chant/lifecycle` keep counting.
+chant 0.124.56 has the product pipeline terragucci and plywood use, and more of a SQL Yodeler project's pipeline moves onto chant there. `yodel upgrade` moves a project in one commit ([Upgrading the pipelines to chant 0.124.56](workflows.md#upgrading-the-pipelines-to-chant-012456)), and `yodel ci` keeps rendering the same files after it. The sections below say what each part does from then on. The gates, the approval modes, the tenant sets and the secrets each job holds stay as they are, and so do the op and gate names, `yodel-apply` and `yodel-apply-wave-<k>`, so approvals already on `chant/lifecycle` keep counting.
 
 ### The pipelines
 

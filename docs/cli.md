@@ -18,8 +18,8 @@ Everything a SQL Yodeler project needs is a `yodel` command, and the starter tem
 | the template's `just` targets | optional shortcuts that print the command they run; [the table in Your first migration](getting-started.md#the-same-steps-with-just) lists them. |
 | `yodel check` | lints another tool's migrations (golang-migrate, goose, Flyway, dbmate) on your pull requests while that tool keeps applying them ([Try it without switching](from-other-tools.md#try-it-without-switching)). |
 | `yodel mcp` | read-only tools for a coding agent, over MCP ([Set up with a coding agent](agents.md#read-only-tools-yodel-mcp)). |
-| `yodel upgrade` | once, after installing chant 0.124.55 or later: moves the pipelines onto chant's product pipeline in one commit ([Upgrading the pipelines to chant 0.124.55](workflows.md#upgrading-the-pipelines-to-chant-012455)). |
-| `yodel chant <args>` | the line the rendered jobs run chant with on chant 0.124.55 or later, in yodel's words ([The pipelines](chant-ci.md#the-pipelines)). People run yodel's own commands; `yodel --help` does not list it. |
+| `yodel upgrade` | once, after installing chant 0.124.56 or later: moves the pipelines onto chant's product pipeline in one commit ([Upgrading the pipelines to chant 0.124.56](workflows.md#upgrading-the-pipelines-to-chant-012456)). |
+| `yodel chant <args>` | the line the rendered jobs run chant with on chant 0.124.56 or later, in yodel's words ([The pipelines](chant-ci.md#the-pipelines)). People run yodel's own commands; `yodel --help` does not list it. |
 | the JSON Schemas | for anything that parses `yodel`'s output: [JSON output](#json-output). |
 
 yodel runs [chant](https://intentius.io/chant/)'s CLI underneath (`chant init`, `chant emulator`, `chant run`, `chant approve`), so you never need to; [chant's CLI reference](https://intentius.io/chant/cli/overview/) is there for the curious.
