@@ -40,6 +40,8 @@ A delivery that fails (the receiver is down, it answers 401) is reported on stde
 
 The apply pipeline's wave jobs (`chant run wave`, see [approval](approval.md)) send the same events from `yodel apply`'s wave modes. `--wave-plan` makes the decision chant makes right after it, from the same sources (the wave's policy at the base commit, and the gate ledger), and sends `waiting` when the wave will wait, with the wave's set digest and the command that approves it, `yodel approve <env> --plan <digest>` (and chant's own in `approve.chant`, for a script). `--wave-plan` and `--wave-apply` send `refused` for a refusal (an environment before this one has not applied a migration, a wave with no decision that lets it through) and `failed` for anything else that stops them. The job's exit code is chant's: 3 for a wave that waits, which is yodel's code for an approval outstanding too, and 1 when an apply failed or refused.
 
+The event names are chant's, the same four every product on chant sends. The header names start with `x-yodel`, the product word yodel's pipeline uses for its status contexts and comments, and the `approve` command is the approve line of yodel's words, `yodel approve <env> --plan <digest>`.
+
 The body is chant's notify event, `chant.notify/v1`, the same one chant's own waves and other products built on chant send. yodel sets `source` to `sql-yodeler` and puts the command that sent it in `detail.command`. [schemas/event.schema.json](../schemas/event.schema.json) (`https://intentius.io/sql-yodeler/schemas/v1/event.schema.json`) describes what yodel sends:
 
 ```json
