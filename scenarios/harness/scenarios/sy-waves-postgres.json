@@ -1,0 +1,146 @@
+{
+  "$schema": "https://intentius.io/chant/schemas/e2e-harness/e2e-scenario/v1/e2e-scenario.schema.json",
+  "contract": 1,
+  "id": "sy-waves-postgres",
+  "product": "sql-yodeler",
+  "claim": "waves",
+  "title": "The Postgres starter template's apply waves on a Forgejo runner, one per environment behind its own gate",
+  "tree": {
+    "base": "../../../templates/postgres"
+  },
+  "reportUrl": "s3://yodel-harness/sy-waves-postgres/reports",
+  "steps": [
+    {
+      "id": "note",
+      "do": "open",
+      "branch": "add-note",
+      "overlay": "add-note",
+      "title": "feat: a note column"
+    },
+    {
+      "id": "note-plan",
+      "do": "plan",
+      "pull": "note",
+      "expect": [
+        {
+          "report": {
+            "status": "planned"
+          }
+        }
+      ]
+    },
+    {
+      "id": "note-merge",
+      "do": "merge",
+      "pull": "note",
+      "label": "merged with no approval: each wave waits at its own gate"
+    },
+    {
+      "id": "dev-waits",
+      "do": "apply",
+      "merge": "note-merge",
+      "label": "wave 1 (dev) waits at its gate with nothing applied",
+      "expect": [
+        {
+          "report": {
+            "status": "gated",
+            "components": {
+              "dev": "gated"
+            },
+            "only": true
+          }
+        },
+        {
+          "ledger": {
+            "op": "yodel-apply",
+            "status": "gated"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-approve",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "approve",
+        "dev"
+      ],
+      "label": "yodel approve dev, which resumes the waiting job",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "prod-waits",
+      "do": "apply",
+      "merge": "note-merge",
+      "label": "dev applied; wave 2 (prod) waits at its own gate",
+      "expect": [
+        {
+          "report": {
+            "status": "gated",
+            "components": {
+              "dev": "applied",
+              "prod": "gated"
+            },
+            "only": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prod-approve",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "approve",
+        "prod"
+      ],
+      "label": "yodel approve prod",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "both-applied",
+      "do": "apply",
+      "merge": "note-merge",
+      "label": "both waves applied, each behind its own approval",
+      "expect": [
+        {
+          "report": {
+            "status": "applied",
+            "components": {
+              "dev": "applied",
+              "prod": "applied"
+            },
+            "only": true
+          }
+        },
+        {
+          "ledger": {
+            "op": "yodel-apply",
+            "status": "ok",
+            "count": 2
+          }
+        }
+      ]
+    }
+  ],
+  "break": {
+    "env": {
+      "BREAK": "1",
+      "YODEL_HARNESS_BREAK": "gate-never"
+    },
+    "note": "The base renders both waves with gate: never, so wave 1 applies with no approval and the dev-waits step's report is applied, not gated."
+  }
+}

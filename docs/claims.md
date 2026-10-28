@@ -29,3 +29,20 @@ Each docs page names the claims that prove it, and `npm run check` fails when a 
 | waves | ClickHouse | the apply pipeline runs one wave per environment, each behind its gate policy, approved with yodel approve; a wave applies only what the wave before applied, yodel report finds each wave's approvals, a tenant set's migrations reach every tenant behind one gate, and the steps around apply run once under the lock and are recorded | pass | caught | `bb8cccc` | 2026-10-12 16:22 UTC | [approval](approval.md), [workflows](workflows.md) |
 | waves | Postgres | the apply pipeline runs one wave per environment, each behind its gate policy, approved with yodel approve; a wave applies only what the wave before applied, yodel report finds each wave's approvals, a tenant set's migrations reach every tenant behind one gate, and the steps around apply run once under the lock and are recorded | pass | caught | `bb8cccc` | 2026-10-12 16:22 UTC | [approval](approval.md), [workflows](workflows.md) |
 | forge | ClickHouse | a project from the starter template, on Forgejo: apply only after approval, lint with replay and the plan comment on a pull request, and the approved change applied on merge; a sealed wave applies only on an approval sealed by a signer listed at the base, and a pr-review wave on the review of a writer other than the author; a pull request job cannot write, a forked migration fails lint and is annotated, a stale or hand-edited pipeline fails yodel ci --check, a project with ci.apply: false and no apply pipeline passes it and gets the plan comment, the CI image pinned by digest runs a pull request's jobs, a command token source mints the reader's password, and the drift watch keeps one tracking issue | pass | caught | `868ff97` | 2026-10-10 21:57 UTC | [chant-ci](chant-ci.md), [forges](forges.md), [lint-and-plan](lint-and-plan.md) |
+
+## Product scenario rows
+
+A claim can also cite one row of a product's scenario on the shared e2e harness (`scenarios/product-proofs.json`). A row names the repo, the scenario, the claim, the product commit, the date and the yodel version it ran, and counts only when that version is the one the claims are about, 0.11.0 here. A row at another version is listed and marked not counted. A cited row never replaces the claim's own run above.
+
+No product scenario row is cited yet.
+
+These harness scenarios have no recorded row yet. Each is listed here as pending until its row is recorded and cited above.
+
+| Claim | Repo | Scenario | To record |
+|---|---|---|---|
+| approval | INTENTIUS/sql-yodeler | `sy-approval-clickhouse` | the digest-bound gate, the gate read at the base, an override for a denied drop, and the audit, in CI (ClickHouse template) |
+| approval | INTENTIUS/sql-yodeler | `sy-approval-postgres` | the digest-bound gate, the gate read at the base, an override for a denied drop, and the audit, in CI (Postgres template) |
+| waves | INTENTIUS/sql-yodeler | `sy-waves-clickhouse` | dev and prod applied as two waves on a Forgejo runner, each behind its own gate, each approved with yodel approve (ClickHouse template) |
+| waves | INTENTIUS/sql-yodeler | `sy-waves-postgres` | dev and prod applied as two waves on a Forgejo runner, each behind its own gate, each approved with yodel approve (Postgres template) |
+| forge | INTENTIUS/sql-yodeler | `sy-forge-clickhouse` | lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (ClickHouse template) |
+| forge | INTENTIUS/sql-yodeler | `sy-forge-postgres` | lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (Postgres template) |

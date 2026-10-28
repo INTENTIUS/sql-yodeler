@@ -67,8 +67,8 @@ import { run, type Ran } from "../lib/exec.js";
 import { repoRoot } from "../lib/project.js";
 import { NODE_IMAGE, type Forge, type ForgeRepo, type ForgeRun } from "./forge.js";
 
-const READER = { user: "yodel_34_reader", password: "yodel-34-reader" };
-const WRITER = { user: "yodel_34_writer", password: "yodel-34-writer" };
+export const READER = { user: "yodel_34_reader", password: "yodel-34-reader" };
+export const WRITER = { user: "yodel_34_writer", password: "yodel-34-writer" };
 /** Whether the run breaks `part`: BREAK=1 breaks every part, BREAK=<part> that one. */
 const breaks = (outer: Ctx, part: string): boolean => outer.broken && (outer.breaking === undefined || outer.breaking === part);
 
@@ -98,8 +98,8 @@ interface State {
   fork?: { checks: ForgeRun; forked: string };
 }
 
-/** The reader and the writer for the template's dev profile, on the emulator. */
-async function users(ctx: Ctx): Promise<void> {
+/** The reader and the writer for the template's dev profile, on the emulator (the harness scenarios make them the same way). */
+export async function users(ctx: Pick<Ctx, "dialect" | "db">): Promise<void> {
   const { name, history } = ctx.db;
   if (ctx.dialect === "ch") {
     for (const sql of [

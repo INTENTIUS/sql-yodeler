@@ -7,7 +7,9 @@
  *
  * One table row per claim and dialect in scenarios/claims/index.ts, in that
  * order. A claim and dialect the record has no row for shows as "not
- * recorded". test/claims-page.test.ts fails when the committed page is not
+ * recorded". Below the table, the product-scenario rows claims cite
+ * (scenarios/product-proofs.ts) are listed with a link to each, marked as
+ * counting only when the row ran the version package.json names. test/claims-page.test.ts fails when the committed page is not
  * what this renders from the committed record.
  */
 
@@ -17,12 +19,15 @@ import { fileURLToPath } from "node:url";
 import { claims as allClaims } from "./claims/index.js";
 import type { Claim, Dialect } from "./lib/claim.js";
 import { docsPages, pagesByClaim } from "./docs-claims.js";
+import { claimedVersion, proofsFor, readPendingCitations, readProductProofs, rowLink, type PendingCitation, type ProductScenarioProof } from "./product-proofs.js";
 import { readRecord, type ClaimsRecord, type Stamp } from "./record.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const recordPath = join(root, "scenarios", "claims-record.json");
 export const pagePath = join(root, "docs", "claims.md");
 export const pageCommand = "npm run claims:page";
+export const proofsPath = join(root, "scenarios", "product-proofs.json");
+export const packagePath = join(root, "package.json");
 
 const dialectName: Record<Dialect, string> = { ch: "ClickHouse", pg: "Postgres" };
 
@@ -56,7 +61,14 @@ export function citedBy(): Map<string, string[]> {
  * The page for `record` (undefined: no record yet), one row per claim and
  * dialect in `claims`, each with the docs pages that name the claim.
  */
-export function renderPage(record: ClaimsRecord | undefined, claims: readonly Claim[] = allClaims, pages: Map<string, string[]> = citedBy()): string {
+export function renderPage(
+  record: ClaimsRecord | undefined,
+  claims: readonly Claim[] = allClaims,
+  pages: Map<string, string[]> = citedBy(),
+  proofs: readonly ProductScenarioProof[] = readProductProofs(proofsPath, claims.map((c) => c.name)),
+  version: string = claimedVersion(packagePath),
+  pending: readonly PendingCitation[] = readPendingCitations(proofsPath, allClaims.map((c) => c.name)),
+): string {
   const byKey = new Map((record?.rows ?? []).map((r) => [`${r.claim}:${r.dialect}`, r]));
   const cited = (name: string) => (pages.get(name) ?? []).map((f) => `[${f.replace(/\.md$/, "")}](${f})`).join(", ");
   const out: string[] = [
@@ -89,7 +101,35 @@ export function renderPage(record: ClaimsRecord | undefined, claims: readonly Cl
       out.push(r ? `${head} ${verdict(r.plain, r.needs)} | ${verdict(r.break, r.needs)} | ${commitOf(r)} | ${when(r.recorded)} | ${cited(c.name)} |` : `${head} not recorded | not recorded | | | ${cited(c.name)} |`);
     }
   }
+  out.push("", ...proofSection(claims, proofs, version), ...pendingSection(claims, pending));
   return `${out.join("\n")}\n`;
+}
+
+/** The product-scenario rows the claims cite, one table row each. */
+function proofSection(claims: readonly Claim[], proofs: readonly ProductScenarioProof[], version: string): string[] {
+  const out = [
+    "## Product scenario rows",
+    "",
+    `A claim can also cite one row of a product's scenario on the shared e2e harness (\`scenarios/product-proofs.json\`). A row names the repo, the scenario, the claim, the product commit, the date and the yodel version it ran, and counts only when that version is the one the claims are about, ${version} here. A row at another version is listed and marked not counted. A cited row never replaces the claim's own run above.`,
+    "",
+  ];
+  const rows = claims.flatMap((c) => proofsFor(proofs, c.name, version));
+  if (!rows.length) return [...out, "No product scenario row is cited yet."];
+  out.push("| Claim | Repo | Scenario | Commit | Date | Engine version | Counts |", "|---|---|---|---|---|---|---|");
+  for (const { proof: p, counted } of rows) {
+    out.push(`| ${p.claim} | ${p.repo} | [${p.scenario}](${rowLink(p)}) | \`${p.commit}\` | ${p.date} | ${p.engine_version} | ${counted ? "yes" : `no, the claims are about ${version}`} |`);
+  }
+  return out;
+}
+
+/** The scenarios claims will cite once their rows are recorded: none of them a run. */
+function pendingSection(claims: readonly Claim[], pending: readonly PendingCitation[]): string[] {
+  const order = new Map(claims.map((c, i) => [c.name, i]));
+  const rows = pending.filter((p) => order.has(p.claim)).sort((a, b) => (order.get(a.claim) ?? 0) - (order.get(b.claim) ?? 0));
+  if (!rows.length) return [];
+  const out = ["", "These harness scenarios have no recorded row yet. Each is listed here as pending until its row is recorded and cited above.", "", "| Claim | Repo | Scenario | To record |", "|---|---|---|---|"];
+  for (const p of rows) out.push(`| ${p.claim} | ${p.repo} | \`${p.scenario}\` | ${cell(p.note)} |`);
+  return out;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

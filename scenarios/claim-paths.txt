@@ -36,6 +36,9 @@ scenarios/record.ts                    -
 scenarios/images.ts                    -
 scenarios/claims-record.json           -
 scenarios/status-page.ts               -
+scenarios/product-proofs.ts            -
+scenarios/product-proofs.json          -
+scenarios/harness/                     -
 
 # What every claim stands on: the build, the runner and its fixtures.
 package.json                           ALL
