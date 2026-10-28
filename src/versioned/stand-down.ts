@@ -10,6 +10,14 @@
  * that cannot be told (no branch, no origin, a fetch that fails, a tip that
  * does not contain this commit, as after a force-push) is not a newer
  * commit: the apply goes ahead.
+ *
+ * chant does the same for every product's waves (chant#4581, #293): a waves
+ * spec with `standDown: true` exits 6 (`superseded`), and `yodel ci`
+ * renders that in place of `YODEL_STAND_DOWN` once the installed chant has
+ * it. With such a chant, {@link newerCommit} is chant's
+ * `newerCommitOnBranch`, so `yodel apply --stand-down` at a terminal and
+ * chant's wave job answer the question the same way. The copy below is the
+ * fallback for a published chant without it.
  */
 
 import { execFile } from "node:child_process";
@@ -47,8 +55,32 @@ export async function runBranch(dir: string, env: NodeJS.ProcessEnv): Promise<st
   return (await git(dir, ["symbolic-ref", "--quiet", "--short", "HEAD"])) || undefined;
 }
 
-/** The newer commit on the run's branch, or `undefined` when there is none or it cannot be told. */
+type NewerCommitOnBranch = (cwd: string, env?: NodeJS.ProcessEnv, head?: string) => Promise<NewerCommit | undefined>;
+
+let chants: Promise<NewerCommitOnBranch | undefined> | undefined;
+
+/** chant's `newerCommitOnBranch` (chant#4581), once, or undefined when the installed chant has none. */
+export function chantNewerCommit(): Promise<NewerCommitOnBranch | undefined> {
+  chants ??= (async () => {
+    const specifier = "@intentius/chant/op";
+    try {
+      const m = (await import(specifier)) as { OP_WAVE_STAND_DOWN_FLOOR?: unknown; newerCommitOnBranch?: unknown };
+      return typeof m.OP_WAVE_STAND_DOWN_FLOOR === "string" && typeof m.newerCommitOnBranch === "function" ? (m.newerCommitOnBranch as NewerCommitOnBranch) : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  return chants;
+}
+
+/** The newer commit on the run's branch, or `undefined` when there is none or it cannot be told: chant's answer when chant has it, else yodel's own. */
 export async function newerCommit(dir: string, env: NodeJS.ProcessEnv = process.env): Promise<NewerCommit | undefined> {
+  const chant = await chantNewerCommit();
+  return chant ? chant(dir, env) : ownNewerCommit(dir, env);
+}
+
+/** yodel's own answer, for a published chant without chant#4581. */
+export async function ownNewerCommit(dir: string, env: NodeJS.ProcessEnv = process.env): Promise<NewerCommit | undefined> {
   const branch = await runBranch(dir, env);
   if (!branch) return undefined;
   const head = await git(dir, ["rev-parse", "HEAD"]);
