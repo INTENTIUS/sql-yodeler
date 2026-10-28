@@ -4,7 +4,8 @@ import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { EXIT_FAILED, EXIT_OK } from "../exit.js";
 import { loadProject, YodelError } from "../project.js";
-import { CHANT_CI_FLOOR, chantParts, installedVersion, installLine } from "../chant-floor.js";
+import { chantParts, installedVersion } from "../chant-floor.js";
+import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
 import type { RenderedFile } from "../ci/render.js";
 
 const usage = "usage: yodel upgrade [--check] [--dir <project>]";
