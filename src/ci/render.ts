@@ -47,7 +47,10 @@
  *   second apply: it waits for the first's lock (YODEL_LOCK_WAIT), and an
  *   apply whose commit is no longer main's tip stands down
  *   (YODEL_STAND_DOWN), since the newer commit's waves apply the same
- *   environments.
+ *   environments. With a chant that has the lock grain and stand-down
+ *   (#293), chant does both: its lease on the environment exits 5 for the
+ *   apply that finds it held, and `standDown` in the spec exits 6 for one
+ *   a newer commit supersedes; the jobs carry neither variable.
  * - watch-<env>: the environment's WatchOp on its own schedule, rendered by
  *   chant's generateOpsPipeline, with the reader's credentials. After the
  *   Op, `yodel drift <env> --issue` compares the server with the schema the
@@ -919,6 +922,8 @@ interface WavesSpec {
   apply?: string[];
   /** The sql lexicon's capability (chant#4569), in place of `plan` and `apply` (#291). */
   step?: { kind: "sql-migrate"; environment: string; spec: string };
+  /** chant stands an apply down for a newer commit on the branch (#293, chant#4581), exit 6. */
+  standDown?: true;
   branches: string[];
   waves: Array<{
     name: string;
@@ -954,7 +959,7 @@ interface WavesSpec {
  * the base commit, as it does run by hand. A step runs once, under the
  * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }, options: { step?: boolean } = {}): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }, options: { step?: boolean; chantLocks?: boolean } = {}): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
@@ -966,6 +971,8 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
           plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", WAVES_SPEC],
           apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", WAVES_SPEC],
         }),
+    // chant's stand-down (#293): the job applies nothing and exits 6 when a newer commit on main will apply the same environments.
+    ...(options.step && options.chantLocks ? { standDown: true as const } : {}),
     branches: [MAIN],
     waves: waves.map((w) => ({
       name: w.env,
@@ -979,6 +986,30 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
     })),
     ...(resume ? { resume } : {}),
   };
+}
+
+/**
+ * Whether the installed chant locks and stands down the waves itself (#293):
+ * `@intentius/chant/op` exports `OP_WAVE_STAND_DOWN_FLOOR` and
+ * `newerCommitOnBranch` (chant#4581), and the sql lexicon gives SQL members
+ * their lock grain, the environment (`sqlDefaultLockGrain`, chant#4571, on
+ * chant#4552's grain). Then the apply jobs carry no lock settings of their
+ * own: chant's lease on the target keeps two applies of one environment
+ * apart and exits 5 (`held`) for the one that finds it taken, the engine's
+ * own lock still guards the history under it, and a superseded apply exits
+ * 6 (`superseded`). Lazy imports, with the specifiers in variables, so a
+ * published chant keeps YODEL_LOCK_WAIT and YODEL_STAND_DOWN.
+ */
+export async function chantLocksWaves(): Promise<boolean> {
+  const op = "@intentius/chant/op";
+  const grain = "@intentius/chant-lexicon-sql/lock-grain";
+  try {
+    const m = (await import(op)) as { OP_WAVE_STAND_DOWN_FLOOR?: unknown; newerCommitOnBranch?: unknown };
+    const g = (await import(grain)) as { sqlDefaultLockGrain?: unknown };
+    return typeof m.OP_WAVE_STAND_DOWN_FLOOR === "string" && typeof m.newerCommitOnBranch === "function" && typeof g.sqlDefaultLockGrain === "function";
+  } catch {
+    return false;
+  }
 }
 
 /** The sql lexicon's capability for a versioned environment (chant#4569). */
@@ -1029,7 +1060,9 @@ export async function applyPipelines(dir: string, envs: Environments, product?: 
   };
   const named = (forge: Forge, spec: WavesSpec) => (product ? productWaves(product, forge, spec) : { spec, jobs: [] });
   // Through chant's product pipeline, the sql capability plans and applies (#291) when the installed lexicon has it.
-  const step = { step: product !== undefined && (await hasSqlCapability()) };
+  const capable = product !== undefined && (await hasSqlCapability());
+  // chant's lock grain and stand-down (#293), under the capability, when chant has them.
+  const step = { step: capable, chantLocks: capable && (await chantLocksWaves()) };
   const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves, undefined, undefined, step)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const variables = (forge: Forge) => (env: string) => {
@@ -1037,7 +1070,7 @@ export async function applyPipelines(dir: string, envs: Environments, product?: 
     const required = wave?.requires;
     return {
       YODEL_CREDENTIALS: `writer:${env}`,
-      ...APPLY_LOCK,
+      ...(step.chantLocks ? {} : APPLY_LOCK),
       ...(forge === "gitlab"
         ? {}
         : {
