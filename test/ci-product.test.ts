@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { render, WAVES_SPEC, type RenderedFile } from "../src/ci/render.js";
+import { APPLY_LOCK, chantLocksWaves, hasSqlCapability, render, WAVES_SPEC, type RenderedFile } from "../src/ci/render.js";
 import { YODEL_CHANT_BIN } from "../src/ci-words.js";
 import { PRODUCT } from "./helpers/chant-bin.js";
 import { repoRoot } from "./helpers/run.js";
@@ -39,19 +39,32 @@ function project(dialect: "clickhouse" | "postgres", ci: string, waves?: string)
   return dir;
 }
 
-/** A file's document with every `yodel chant ` command read as `chant `, and the spec's gate pattern dropped. */
+/** Whether the installed chant plans and applies each run through the sql lexicon's capability (#291), and stands a wave down for a newer commit (#293). */
+const CAPABILITY = await hasSqlCapability();
+const STAND_DOWN = await chantLocksWaves();
+/** Whether chant stands a wave down and holds its lease, in place of the wave jobs' YODEL_LOCK_WAIT and YODEL_STAND_DOWN (#293). */
+const CHANT_STANDS_DOWN = CAPABILITY && STAND_DOWN;
+
+/**
+ * A file's document with every `yodel chant ` command read as `chant `, and
+ * the spec's gate pattern dropped. The spec's plan and apply callbacks, or
+ * the capability's step and stand-down in their place, are dropped too, and
+ * with chant's stand-down so is the wave jobs' own lock and stand-down
+ * (APPLY_LOCK, #293): the second case checks which one the installed chant
+ * gives.
+ */
 function normalized(file: RenderedFile): unknown {
   if (file.path === WAVES_SPEC) {
     const spec = JSON.parse(file.content) as Record<string, unknown>;
     expect(spec.gateName === undefined || spec.gateName === "yodel-apply-wave-{k}", file.path).toBe(true);
-    delete spec.gateName;
-    return spec;
+    const dropped = new Set(["gateName", "plan", "apply", "step", "standDown"]);
+    return Object.fromEntries(Object.entries(spec).filter(([k]) => !dropped.has(k)));
   }
   const doc = parseYAMLDocument(file.content);
   const walk = (v: unknown): unknown => {
     if (typeof v === "string") return v.replace(new RegExp(`(^|\\n)${YODEL_CHANT_BIN} `, "g"), "$1chant ");
     if (Array.isArray(v)) return v.map(walk);
-    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]));
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).filter(([k]) => !(CHANT_STANDS_DOWN && k in APPLY_LOCK)).map(([k, x]) => [k, walk(x)]));
     return v;
   };
   return walk(doc);
@@ -89,11 +102,22 @@ describe.skipIf(!PRODUCT)("yodel ci through chant's product pipeline (#289)", ()
         file.path.endsWith("yodel-pr.yml") || file.path === ".gitlab-ci.yml" ? lines.filter((l) => l.includes("chant sql types --check")) : [],
       );
     }
-    const spec = JSON.parse(after.find((f) => f.path === WAVES_SPEC)?.content ?? "{}") as { name?: string; gateName?: string };
+    const spec = JSON.parse(after.find((f) => f.path === WAVES_SPEC)?.content ?? "{}") as { name?: string; gateName?: string; plan?: string[]; apply?: string[]; step?: unknown; standDown?: boolean };
     expect(spec.name).toBe("yodel-apply");
     expect(spec.gateName).toBe("yodel-apply-wave-{k}");
+    if (CAPABILITY) {
+      // The sql lexicon's capability plans and applies each run, with no callback (#291).
+      expect(spec.step).toEqual({ kind: "sql-migrate", environment: "{target}", spec: WAVES_SPEC });
+      expect([spec.plan, spec.apply]).toEqual([undefined, undefined]);
+      expect(spec.standDown).toBe(STAND_DOWN ? true : undefined);
+    } else {
+      expect(spec.plan).toContain("--wave-plan");
+      expect(spec.apply).toContain("--wave-apply");
+    }
     const apply = parseYAMLDocument(after.find((f) => f.path === ".github/workflows/yodel-apply.yml")?.content ?? "") as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
     expect(apply.jobs["wave-2-prod"]?.steps.map((s) => s.run)).toContain(`${YODEL_CHANT_BIN} run wave --spec ${WAVES_SPEC} --wave 2`);
+    const applyText = after.find((f) => f.path === ".github/workflows/yodel-apply.yml")?.content ?? "";
+    for (const k of Object.keys(APPLY_LOCK)) expect(applyText.includes(k), k).toBe(!CHANT_STANDS_DOWN);
   });
 
   it("the pull request pipeline is yodel's own until chant can plan a SQL environment (chant#4569, #290)", async () => {

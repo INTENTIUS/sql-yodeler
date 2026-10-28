@@ -12,7 +12,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { checkYodelConfig } from "../src/config/load.js";
 import { repoRoot, yodel } from "./helpers/run.js";
-import { CHANT } from "./helpers/chant-bin.js";
+import { CHANT, PRODUCT } from "./helpers/chant-bin.js";
+import { WAVES_SPEC } from "../src/ci/render.js";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -116,8 +117,10 @@ describe("yodel ci", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
     const rendered = wrote.out.trim().split("\n").map((l) => l.replace(/^wrote /, ""));
-    expect(rendered).toHaveLength(11);
-    for (const f of rendered) {
+    // Through chant's product pipeline yodel ci also writes the waves spec (#289), which names no image.
+    expect(rendered).toHaveLength(PRODUCT ? 12 : 11);
+    expect(rendered.includes(WAVES_SPEC)).toBe(PRODUCT);
+    for (const f of rendered.filter((f) => f !== WAVES_SPEC)) {
       const text = readFileSync(join(dir, f), "utf8");
       expect(text, f).not.toContain("npm ci");
       expect(text, f).not.toContain("node_modules/.bin");
