@@ -10,9 +10,11 @@ import { claims } from "../scenarios/claims/index.js";
 import {
   claimedVersion,
   counts,
+  parsePending,
   parseProductProofs,
   proofFields,
   proofsFor,
+  readPendingCitations,
   readProductProofs,
   rowLink,
   type ProductScenarioProof,
@@ -93,7 +95,35 @@ describe("docs/claims.md", () => {
   });
 
   it("says so when no row is cited", () => {
-    expect(renderPage(undefined, forge, new Map(), [], "0.11.0")).toContain("No product scenario row is cited yet.");
+    expect(renderPage(undefined, forge, new Map(), [], "0.11.0", [])).toContain("No product scenario row is cited yet.");
+  });
+
+  it("lists a pending citation as pending, never as a row", () => {
+    const page = renderPage(undefined, forge, new Map(), [], "0.11.0", [{ repo: "INTENTIUS/sql-yodeler", scenario: "sy-forge-postgres", claim: "forge", note: "the forge loop" }]);
+    expect(page).toContain("No product scenario row is cited yet.");
+    expect(page).toContain("| forge | INTENTIUS/sql-yodeler | `sy-forge-postgres` | the forge loop |");
+  });
+});
+
+describe("pending citations", () => {
+  const pending = { repo: "INTENTIUS/sql-yodeler", scenario: "sy-waves-clickhouse", claim: "waves", note: "two waves" };
+
+  it("takes none when the file has no pending list", () => {
+    expect(parsePending({ format: 1, proofs: [] }, names)).toEqual({ pending: [], problems: [] });
+  });
+
+  it("takes a citation with the repo, the scenario, the claim and a note", () => {
+    expect(parsePending({ ...file(), pending: [pending] }, names)).toEqual({ pending: [pending], problems: [] });
+  });
+
+  it("refuses a citation missing its note, of an unknown claim or a bad scenario id", () => {
+    const { pending: got, problems } = parsePending({ ...file(), pending: [{ ...pending, note: "" }, { ...pending, claim: "nope" }, { ...pending, scenario: "Sy Waves" }] }, names);
+    expect(got).toEqual([]);
+    expect(problems).toEqual(["pending[0]: note must be a non-empty string", "pending[1]: claim nope is not in scenarios/claims/index.ts", 'pending[2]: scenario "Sy Waves" is not a scenario id such as sy-forge']);
+  });
+
+  it("reads the committed file's citations", () => {
+    expect(readPendingCitations(proofsPath, names).length).toBeGreaterThan(0);
   });
 });
 

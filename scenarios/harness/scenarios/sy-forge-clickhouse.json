@@ -1,0 +1,112 @@
+{
+  "$schema": "https://intentius.io/chant/schemas/e2e-harness/e2e-scenario/v1/e2e-scenario.schema.json",
+  "contract": 1,
+  "id": "sy-forge-clickhouse",
+  "product": "sql-yodeler",
+  "claim": "forge",
+  "title": "The ClickHouse starter template on Forgejo: lint with replay, the plan comment and the approved apply",
+  "tree": {
+    "base": "../../../templates/clickhouse"
+  },
+  "reportUrl": "s3://yodel-harness/sy-forge-clickhouse/reports",
+  "steps": [
+    {
+      "id": "note",
+      "do": "open",
+      "branch": "add-note",
+      "overlay": "add-note",
+      "title": "feat: a note column",
+      "label": "the pull request gets the plan comment",
+      "expect": [
+        {
+          "comment": "<!-- yodel:plan env=dev -->"
+        },
+        {
+          "comment": "Plan digest the apply gate binds:"
+        }
+      ]
+    },
+    {
+      "id": "note-plan",
+      "do": "plan",
+      "pull": "note",
+      "label": "lint with the replay, the plan and the project's own job pass, and the server is unchanged",
+      "expect": [
+        {
+          "report": {
+            "status": "planned",
+            "components": {
+              "lint": "passed",
+              "plan-dev": "passed",
+              "project-job": "passed"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "note-approve",
+      "do": "approve",
+      "pull": "note",
+      "label": "the approve command the plan comment gives, for its digest"
+    },
+    {
+      "id": "note-merge",
+      "do": "merge",
+      "pull": "note"
+    },
+    {
+      "id": "note-apply",
+      "do": "apply",
+      "merge": "note-merge",
+      "label": "the approved plan applies on merge",
+      "expect": [
+        {
+          "report": {
+            "status": "applied",
+            "components": {
+              "dev": "applied"
+            },
+            "only": true
+          }
+        },
+        {
+          "ledger": {
+            "op": "yodel-apply",
+            "status": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fork",
+      "do": "open",
+      "branch": "fork-note",
+      "overlay": "fork",
+      "title": "feat: the newest migration again, a fork"
+    },
+    {
+      "id": "fork-plan",
+      "do": "plan",
+      "pull": "fork",
+      "label": "lint fails the forked migration",
+      "expect": [
+        {
+          "report": {
+            "status": "failed",
+            "components": {
+              "lint": "failed"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "break": {
+    "env": {
+      "BREAK": "1",
+      "YODEL_HARNESS_BREAK": "skip-approval"
+    },
+    "note": "The pull request is merged without yodel approve, so its apply waits at the gate and the note-apply step's report is gated, not applied."
+  }
+}

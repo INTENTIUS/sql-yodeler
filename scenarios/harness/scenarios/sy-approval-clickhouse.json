@@ -1,0 +1,228 @@
+{
+  "$schema": "https://intentius.io/chant/schemas/e2e-harness/e2e-scenario/v1/e2e-scenario.schema.json",
+  "contract": 1,
+  "id": "sy-approval-clickhouse",
+  "product": "sql-yodeler",
+  "claim": "approval",
+  "title": "The ClickHouse starter template's approvals in CI: the digest-bound gate, the policy read at the base, an override and the audit",
+  "tree": {
+    "base": "../../../templates/clickhouse"
+  },
+  "reportUrl": "s3://yodel-harness/sy-approval-clickhouse/reports",
+  "steps": [
+    {
+      "id": "note",
+      "do": "open",
+      "branch": "add-note",
+      "overlay": "add-note",
+      "title": "feat: a note column",
+      "label": "the plan comment names the digest the gate asks for",
+      "expect": [
+        {
+          "comment": "<!-- yodel:plan env=dev -->"
+        },
+        {
+          "comment": "Plan digest the apply gate binds:"
+        }
+      ]
+    },
+    {
+      "id": "note-plan",
+      "do": "plan",
+      "pull": "note",
+      "expect": [
+        {
+          "report": {
+            "status": "planned"
+          }
+        }
+      ]
+    },
+    {
+      "id": "note-approve",
+      "do": "approve",
+      "pull": "note",
+      "label": "the approve command the plan comment gives, for its digest"
+    },
+    {
+      "id": "note-merge",
+      "do": "merge",
+      "pull": "note"
+    },
+    {
+      "id": "note-apply",
+      "do": "apply",
+      "merge": "note-merge",
+      "label": "the approval of that digest lets the apply run",
+      "expect": [
+        {
+          "report": {
+            "status": "applied",
+            "components": {
+              "dev": "applied"
+            },
+            "only": true
+          }
+        },
+        {
+          "ledger": {
+            "op": "yodel-apply",
+            "status": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "id": "loosen",
+      "do": "open",
+      "branch": "loosen-gate",
+      "overlay": "loosen-gate",
+      "title": "ci: dev's wave never waits, and an audit column",
+      "label": "the change sets dev's gate to never in yodel.config.ts and adds a migration"
+    },
+    {
+      "id": "loosen-merge",
+      "do": "merge",
+      "pull": "loosen"
+    },
+    {
+      "id": "loosen-waits",
+      "do": "apply",
+      "merge": "loosen-merge",
+      "label": "the gate is read at the base commit, so the change cannot loosen its own",
+      "expect": [
+        {
+          "report": {
+            "status": "gated",
+            "components": {
+              "dev": "gated"
+            },
+            "only": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "loosen-approve",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "approve",
+        "dev"
+      ],
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "loosen-apply",
+      "do": "apply",
+      "merge": "loosen-merge",
+      "expect": [
+        {
+          "report": {
+            "status": "applied",
+            "components": {
+              "dev": "applied"
+            },
+            "only": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "drop",
+      "do": "open",
+      "branch": "drop-note",
+      "overlay": "drop-note",
+      "title": "feat: drop the note column",
+      "label": "a drop, which the base's policy rule no-drops denies"
+    },
+    {
+      "id": "drop-merge",
+      "do": "merge",
+      "pull": "drop"
+    },
+    {
+      "id": "drop-denied",
+      "do": "apply",
+      "merge": "drop-merge",
+      "label": "the policy denies the plan, so the wave fails with nothing applied",
+      "expect": [
+        {
+          "report": {
+            "components": {
+              "dev": "failed"
+            },
+            "only": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "drop-override",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "override",
+        "dev",
+        "--rule",
+        "no-drops",
+        "--reason",
+        "nothing reads the note column"
+      ],
+      "label": "yodel override dev, recorded for this digest, then the apply started again",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "drop-apply",
+      "do": "apply",
+      "merge": "drop-merge",
+      "expect": [
+        {
+          "report": {
+            "status": "applied",
+            "components": {
+              "dev": "applied"
+            },
+            "only": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "audit",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "audit",
+        "dev"
+      ],
+      "label": "yodel report dev finds every applied migration's approval or override and no gap",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    }
+  ],
+  "break": {
+    "env": {
+      "BREAK": "1",
+      "YODEL_HARNESS_BREAK": "skip-approval"
+    },
+    "note": "The pull request is merged without yodel approve, so the note-apply step's report is gated, not applied."
+  }
+}

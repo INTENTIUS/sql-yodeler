@@ -1,21 +1,34 @@
 /**
- * The forge claim's forge: a local Forgejo (the one terragucci's stack
- * runs at http://localhost:3300, whose runner puts job containers on the
- * network where the emulator answers as `clickhouse` and `pgdb`). Its
- * Actions run .forgejo/workflows on each push and pull request.
+ * The forge claim's forge: the Forgejo of chant's e2e harness
+ * (INTENTIUS/chant#4587; its compose project with the sql profile), whose
+ * runner puts job containers on the project network, where the sql
+ * emulator answers as `clickhouse` and `postgres`. Its Actions run
+ * .forgejo/workflows on each push and pull request. The defaults are the
+ * harness's own (HARNESS_PORTS and HARNESS_HOSTS in
+ * @intentius/chant/e2e-harness), written here so the claim runs on a chant
+ * without the harness too.
  *
- *   YODEL_CLAIMS_FORGEJO_URL        default http://localhost:3300
+ *   YODEL_CLAIMS_FORGEJO_URL        default http://localhost:3391
  *   YODEL_CLAIMS_FORGEJO_USER       default yodel34
  *   YODEL_CLAIMS_FORGEJO_PASSWORD   required: without it the claim fails (--skip forge skips it)
  *   YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL  the emulator as a job sees it, default http://clickhouse:8123
- *   YODEL_CLAIMS_FORGEJO_POSTGRES_URL    default postgres://pgdb:5432/postgres
+ *   YODEL_CLAIMS_FORGEJO_POSTGRES_URL    default postgres://postgres:chant@postgres:5432/postgres
+ *
+ * With chant's harness installed, the forge, waves and approval claims also
+ * run as the scenarios in scenarios/harness/, which record the rows
+ * docs/claims.md cites.
  */
 
 import type { Ctx } from "../lib/claim.js";
 import type { Forge, ForgeIssue, ForgeRepo, ForgeRun } from "./forge.js";
 
+/** chant's harness: Forgejo's host port, and the servers as a job on the project network reaches them. */
+const HARNESS_FORGEJO = "http://localhost:3391";
+const HARNESS_JOB_CLICKHOUSE = "http://clickhouse:8123";
+const HARNESS_JOB_POSTGRES = "postgres://postgres:chant@postgres:5432/postgres";
+
 export const forgejo = {
-  url: (process.env.YODEL_CLAIMS_FORGEJO_URL ?? "http://localhost:3300").replace(/\/+$/, ""),
+  url: (process.env.YODEL_CLAIMS_FORGEJO_URL ?? HARNESS_FORGEJO).replace(/\/+$/, ""),
   user: process.env.YODEL_CLAIMS_FORGEJO_USER ?? "yodel34",
   password: process.env.YODEL_CLAIMS_FORGEJO_PASSWORD ?? "",
 };
@@ -157,7 +170,7 @@ async function waitAll(ctx: Ctx, repo: string, sha: string, event: string): Prom
 export function forgejoForge(): Forge {
   return {
     name: "Forgejo",
-    jobUrl: (d) => (d === "ch" ? (process.env.YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL ?? "http://clickhouse:8123") : (process.env.YODEL_CLAIMS_FORGEJO_POSTGRES_URL ?? "postgres://pgdb:5432/postgres")),
+    jobUrl: (d) => (d === "ch" ? (process.env.YODEL_CLAIMS_FORGEJO_CLICKHOUSE_URL ?? HARNESS_JOB_CLICKHOUSE) : (process.env.YODEL_CLAIMS_FORGEJO_POSTGRES_URL ?? HARNESS_JOB_POSTGRES)),
     async repo(ctx, name, secrets): Promise<ForgeRepo> {
       if (!forgejo.password) throw new Error("YODEL_CLAIMS_FORGEJO_PASSWORD is not set; the forge claim needs the local Forgejo");
       const repo = `${forgejo.user}/${name}`;

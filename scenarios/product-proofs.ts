@@ -21,6 +21,12 @@
  *     ]
  *   }
  *
+ * A scenario whose row is not recorded yet can be listed under "pending"
+ * with the repo, the scenario, the claim it will record and a note: it
+ * shows on the page as pending, never as a run, and counts for nothing.
+ * The harness scenarios in scenarios/harness/scenarios/ (#302) are listed
+ * there until the maintainer records their rows.
+ *
  * The six fields are the ones choudoufu's live/smoke/claims.json and
  * plunge's claims source use for the same kind. A row counts toward its
  * claim only when its engine_version is the version the claim is about,
@@ -129,4 +135,44 @@ export function claimedVersion(packageJson: string): string {
   const v = (JSON.parse(readFileSync(packageJson, "utf8")) as { version?: unknown }).version;
   if (typeof v !== "string") throw new Error(`${packageJson} has no version`);
   return v;
+}
+
+/** A scenario a claim will cite once its row is recorded: listed as pending, never counted. */
+export interface PendingCitation {
+  repo: string;
+  scenario: string;
+  claim: string;
+  /** What the row will record, in a phrase. */
+  note: string;
+}
+
+/** The pending citations in a parsed file (none when it has no "pending"), or the problems with them. */
+export function parsePending(doc: unknown, claims: readonly string[]): { pending: PendingCitation[]; problems: string[] } {
+  const raw = (doc as { pending?: unknown } | null)?.pending;
+  if (raw === undefined) return { pending: [], problems: [] };
+  if (!Array.isArray(raw)) return { pending: [], problems: ["pending must be a list"] };
+  const problems: string[] = [];
+  (raw as unknown[]).forEach((p, i) => {
+    const at = `pending[${String(i)}]`;
+    if (p === null || typeof p !== "object" || Array.isArray(p)) {
+      problems.push(`${at}: must be an object`);
+      return;
+    }
+    const r = p as Record<string, unknown>;
+    for (const f of ["repo", "scenario", "claim"] as const) {
+      const v = r[f];
+      if (typeof v !== "string" || !patterns[f].re.test(v)) problems.push(`${at}: ${f} ${JSON.stringify(v)} is not ${patterns[f].shape}`);
+    }
+    if (typeof r.note !== "string" || r.note === "") problems.push(`${at}: note must be a non-empty string`);
+    if (typeof r.claim === "string" && patterns.claim.re.test(r.claim) && !claims.includes(r.claim)) problems.push(`${at}: claim ${r.claim} is not in scenarios/claims/index.ts`);
+  });
+  return { pending: problems.length ? [] : (raw as PendingCitation[]), problems };
+}
+
+/** The pending citations in `file` (none when it does not exist); throws with every problem when they are wrong. */
+export function readPendingCitations(file: string, claims: readonly string[]): PendingCitation[] {
+  if (!existsSync(file)) return [];
+  const { pending, problems } = parsePending(JSON.parse(readFileSync(file, "utf8")), claims);
+  if (problems.length) throw new Error(`${file}:\n  ${problems.join("\n  ")}`);
+  return pending;
 }
