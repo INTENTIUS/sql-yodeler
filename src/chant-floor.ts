@@ -12,7 +12,8 @@
  *
  * chant names that release `NEXT_RELEASE` until the maintainer cuts it
  * (chant's packages/core/src/release-floors.ts, `CI_PRODUCT_FLOOR`). The
- * release of yodel that takes it as its floor (#299) sets this constant to
+ * release of yodel that takes it as its floor (#299) sets CHANT_CI_FLOOR
+ * (src/chant-floor-version.ts, re-exported here) to
  * the version chant published, and test/upgrade.test.ts checks that the
  * docs name the same one.
  */
@@ -29,14 +30,7 @@ import { chantConfirm } from "./chant/confirm.js";
 import { chantHooks } from "./mcp/chant-hook.js";
 import { useChantExitTable } from "./exit.js";
 
-/** The first chant (and sql lexicon) whose CI yodel's pipelines run on. */
-export const CHANT_CI_FLOOR = "0.124.55";
-
-/** The packages a project pins at the floor, chant and the sql lexicon, at one version as the templates pin them. */
-export const CHANT_PACKAGES = ["@intentius/chant", "@intentius/chant-lexicon-sql"] as const;
-
-/** The line that installs the floor, exact as the templates pin chant. */
-export const installLine = (version: string = CHANT_CI_FLOOR): string => `npm install -E ${CHANT_PACKAGES.map((p) => `${p}@${version}`).join(" ")}`;
+export { CHANT_CI_FLOOR, CHANT_PACKAGES, installLine } from "./chant-floor-version.js";
 
 /**
  * The version of `pkg` that yodel's own imports resolve to, or undefined

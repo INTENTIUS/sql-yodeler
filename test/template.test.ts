@@ -7,7 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { opExportName } from "../src/chant/export-name.js";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,6 +18,7 @@ import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { migrateOpParts } from "../src/versioned/op.js";
 import { chantProduct } from "../src/ci-words.js";
 import { chantCheckHooks, YODEL_PRESETS } from "../src/ci/check-hooks.js";
+import { TEMPLATE_DECLARATION_NAME, upgradeFiles, writeRendered } from "../src/commands/upgrade.js";
 import {
   applyPipelines,
   render,
@@ -75,8 +76,37 @@ afterAll(() => {
   for (const t of temps) rmSync(t, { recursive: true, force: true });
 });
 
+/** Whether a committed template is on chant's CI already: templates:render lists the workspace declaration in its manifest. */
+const committedOnChantCi = (d: Dialect): boolean =>
+  (JSON.parse(readFileSync(join(templateDir(d), "chant.template.json"), "utf8")) as { files: string[] }).files.includes("chant.workspace.json");
+
+/**
+ * The template the cases read. With chant's CI installed (a packed chant, or
+ * a release before #299 renders the templates) and the committed template
+ * still staged, a scratch copy rendered as `npm run templates:render`
+ * renders it: what `yodel upgrade` writes with the declaration named
+ * `{{chant:name}}`, and the declaration in chant.template.json. The
+ * committed files are never rendered against an unpublished chant (#298).
+ */
+async function templateUnderTest(d: Dialect): Promise<string> {
+  if (!onChantCi || committedOnChantCi(d)) return templateDir(d);
+  const dir = mkdtempSync(join(tmpdir(), `yodel-template-staged-${d}-`));
+  temps.push(dir);
+  cpSync(templateDir(d), dir, { recursive: true });
+  symlinkSync(join(root, "node_modules"), join(dir, "node_modules"));
+  const { files: rendered } = await upgradeFiles(dir, { declarationName: TEMPLATE_DECLARATION_NAME });
+  writeRendered(dir, rendered, { out: () => undefined, err: () => undefined }, false);
+  const manifestFile = join(dir, "chant.template.json");
+  const manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as { files: string[] };
+  for (const f of rendered) if (f.path.startsWith("chant.workspace.") && !manifest.files.includes(f.path)) manifest.files.push(f.path);
+  writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+  return dir;
+}
+
+const UNDER_TEST = Object.fromEntries(await Promise.all(DIALECTS.map(async (d) => [d, await templateUnderTest(d)] as const))) as Record<Dialect, string>;
+
 describe.each(DIALECTS)("templates/%s", (dialect) => {
-  const dir = templateDir(dialect);
+  const dir = UNDER_TEST[dialect];
   const manifest = JSON.parse(readFileSync(join(dir, "chant.template.json"), "utf8")) as {
     parameters: Record<string, { default?: string }>;
     files: string[];
@@ -102,7 +132,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     const made = files(project);
     expect(made).not.toContain("chant.template.json");
     expect(made).toContain(".chant/workspace.lock.json");
-    for (const f of files(dir).filter((f) => f !== "chant.template.json")) expect(made).toContain(f);
+    // chant init reads the committed template, staged or not.
+    for (const f of files(templateDir(dialect)).filter((f) => f !== "chant.template.json")) expect(made).toContain(f);
     for (const f of made) expect(readFileSync(join(project, f), "utf8"), f).not.toContain("{{chant:");
 
     const config = readFileSync(join(project, "chant.config.ts"), "utf8");
@@ -330,7 +361,7 @@ describe("yodel ci and the templates' scripts", () => {
 
   it("ends each watch with yodel drift --issue, with a token that can write issues", () => {
     for (const dialect of DIALECTS) {
-      const dir = templateDir(dialect);
+      const dir = UNDER_TEST[dialect];
       for (const forge of [".github", ".forgejo"]) {
         const doc = load(readFileSync(join(dir, forge, "workflows", "watch-dev.yml"), "utf8")) as { permissions?: Record<string, string>; jobs: Record<string, { env?: Record<string, string>; steps: Array<{ run?: string }> }> };
         const job = doc.jobs["watch-dev"];
