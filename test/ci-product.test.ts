@@ -10,7 +10,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -18,18 +18,18 @@ import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { APPLY_LOCK, chantLocksWaves, hasSqlCapability, render, WAVES_SPEC, type RenderedFile } from "../src/ci/render.js";
 import { YODEL_CHANT_BIN } from "../src/ci-words.js";
 import { PRODUCT } from "./helpers/chant-bin.js";
-import { repoRoot } from "./helpers/run.js";
+import { copyTemplate, repoRoot } from "./helpers/run.js";
 
 const temps: string[] = [];
 afterAll(() => {
   for (const t of temps) rmSync(t, { recursive: true, force: true });
 });
 
-/** A copy of a template with `ci` and `waves` replaced, resolving chant and the lexicons from this checkout. */
+/** A copy of a template with no workspace declaration, `ci` and `waves` replaced, resolving chant and the lexicons from this checkout. */
 function project(dialect: "clickhouse" | "postgres", ci: string, waves?: string): string {
   const dir = mkdtempSync(join(tmpdir(), `yodel-ci-product-${dialect}-`));
   temps.push(dir);
-  cpSync(join(repoRoot, "templates", dialect), dir, { recursive: true });
+  copyTemplate(dialect, dir);
   symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
   const config = join(dir, "yodel.config.ts");
   let text = readFileSync(config, "utf8").replace(/^ {2}ci: .*$/m, `  ci: ${ci},`);

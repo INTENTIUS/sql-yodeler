@@ -4,7 +4,7 @@
     "name": {
       "type": "string",
       "default": "postgres-schema",
-      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,39}$",
       "description": "The package name in package.json"
     },
     "schema": {
@@ -20,5 +20,13 @@
       "description": "The schema for yodel's history table"
     }
   },
-  "files": ["package.json", "chant.config.ts", "yodel.config.ts", "src/schema.ts", "src/sql-types.d.ts", "README.md"]
+  "files": [
+    "package.json",
+    "chant.config.ts",
+    "yodel.config.ts",
+    "src/schema.ts",
+    "src/sql-types.d.ts",
+    "README.md",
+    "chant.workspace.json"
+  ]
 }

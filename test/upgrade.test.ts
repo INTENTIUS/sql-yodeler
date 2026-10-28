@@ -8,14 +8,15 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { CHANT_CI_FLOOR, chantParts, installedVersion, installLine } from "../src/chant-floor.js";
 import { declarationAbove, newDeclaration, TEMPLATE_DECLARATION_NAME, upgradeFiles, workspaceName } from "../src/commands/upgrade.js";
 import { PRODUCT } from "./helpers/chant-bin.js";
-import { repoRoot, yodel } from "./helpers/run.js";
+import { copyTemplate, repoRoot, yodel } from "./helpers/run.js";
+import { render } from "../src/ci/render.js";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -28,11 +29,19 @@ const scratch = (name: string): string => {
   return dir;
 };
 
-/** A project as 0.10.1's template made it: the template's files, chant and the lexicons from this checkout, in a repository. */
-function project(dialect: "clickhouse" | "postgres"): string {
+/**
+ * A project as 0.10.1's template made it: the template's files with no
+ * workspace declaration and the pipelines from yodel's own generator, chant
+ * and the lexicons from this checkout, in a repository.
+ */
+async function project(dialect: "clickhouse" | "postgres"): Promise<string> {
   const dir = scratch(dialect);
-  cpSync(join(repoRoot, "templates", dialect), dir, { recursive: true });
+  copyTemplate(dialect, dir);
   symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
+  for (const f of await render(dir, { product: false })) {
+    mkdirSync(dirname(join(dir, f.path)), { recursive: true });
+    writeFileSync(join(dir, f.path), f.content);
+  }
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   return dir;
 }
@@ -122,7 +131,7 @@ describe("the workspace declaration yodel upgrade adds", () => {
 
 describe.skipIf(PRODUCT)("yodel upgrade on a chant without the product pipeline", () => {
   it("writes nothing, exits 1 and names the floor's install line", async () => {
-    const dir = project("postgres");
+    const dir = await project("postgres");
     const before = readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8");
     const ran = await yodel(["upgrade", "--dir", dir]);
     expect(ran.code).toBe(1);
@@ -136,7 +145,7 @@ describe.skipIf(PRODUCT)("yodel upgrade on a chant without the product pipeline"
 
 describe.skipIf(!PRODUCT).each(["clickhouse", "postgres"] as const)("yodel upgrade of a project made from the %s template", (dialect) => {
   it("writes the declaration and the pipelines in one go, then yodel ci --check and yodel upgrade --check pass", async () => {
-    const dir = project(dialect);
+    const dir = await project(dialect);
     const check = await yodel(["upgrade", "--check", "--dir", dir]);
     expect(check.code).toBe(1);
     expect(check.err).toContain("chant.workspace.json");
@@ -159,7 +168,7 @@ describe.skipIf(!PRODUCT).each(["clickhouse", "postgres"] as const)("yodel upgra
   });
 
   it("gives the templates' declaration the name parameter, for templates:render", async () => {
-    const dir = project(dialect);
+    const dir = await project(dialect);
     const { files } = await upgradeFiles(dir, { declarationName: TEMPLATE_DECLARATION_NAME });
     const declaration = files.find((f) => f.path === "chant.workspace.json");
     expect((JSON.parse(declaration?.content ?? "{}") as { name?: string }).name).toBe("{{chant:name}}");

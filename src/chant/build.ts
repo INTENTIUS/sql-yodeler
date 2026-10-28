@@ -47,7 +47,9 @@ export async function buildSchema(project: Project, options: { out?: string; env
   try {
     // The DDL sources (#67) first: their declarations are part of the build.
     const synced = await syncSources(project, options.env ? { env: options.env } : {});
-    const result = await runChant(["build", project.sourceDir, "--lexicon", "sql", "-o", path], {
+    // --root-only: a project with its own chant.workspace.json (a template's, or one `yodel upgrade` wrote) is a
+    // declared workspace root, where chant build refuses with WSP000 unless told to build the root project alone.
+    const result = await runChant(["build", project.sourceDir, "--lexicon", "sql", "--root-only", "-o", path], {
       cwd: project.dir,
       ...(options.env ? { env: options.env } : {}),
     });

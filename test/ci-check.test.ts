@@ -5,13 +5,13 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { checkYodelConfig } from "../src/config/load.js";
-import { repoRoot, yodel } from "./helpers/run.js";
+import { copyTemplate, repoRoot, yodel } from "./helpers/run.js";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -68,7 +68,7 @@ export default {
   it("adds yodel check to a yodel project's lint job, after the replay check on the same server", async () => {
     const dir = mkdtempSync(join(tmpdir(), "yodel-ci-check-"));
     temps.push(dir);
-    cpSync(join(repoRoot, "templates", "clickhouse"), dir, { recursive: true });
+    copyTemplate("clickhouse", dir);
     symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
     const config = join(dir, "yodel.config.ts");
     writeFileSync(config, readFileSync(config, "utf8").replace(/^export default \{$/m, 'export default {\n  check: { dir: "legacy/migrations" },'));

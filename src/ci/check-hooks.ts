@@ -17,7 +17,7 @@
  * annotations still reach the pull request; on GitLab the lint preset
  * writes the code quality report the job keeps as its artifact.
  *
- * The installed chant has the check moment from its release after 0.124.51.
+ * The installed chant has the check moment from chant 0.124.55.
  * {@link chantCheckHooks} imports `@intentius/chant/components/check-hooks`
  * lazily, with the specifier in a variable; without it, or in a project
  * with no workspace declaration, the lint job runs the commands itself, as

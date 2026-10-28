@@ -10,12 +10,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { backfillTemplate } from "../src/steps/backfill.js";
-import { repoRoot } from "./helpers/run.js";
+import { copyTemplate, repoRoot } from "./helpers/run.js";
 
 type Dialect = "clickhouse" | "postgres";
 
@@ -30,13 +30,18 @@ const lexiconVersion = (JSON.parse(readFileSync(join(repoRoot, "node_modules", L
 /** Where each template's events table is, as an output names it: its default database or schema. */
 const SCHEMA: Record<Dialect, string> = { clickhouse: "app", postgres: "app" };
 
-/** Copies `templates/<dialect>` to `dir`, each {{chant:<param>}} given its default. */
+/**
+ * Copies `templates/<dialect>` to `dir`, each {{chant:<param>}} given its
+ * default. The template's own chant.workspace.json stays behind: a member
+ * sits under the workspace's declaration, as `yodel upgrade` leaves one.
+ */
 function template(dialect: Dialect, dir: string): void {
   const from = join(repoRoot, "templates", dialect);
-  cpSync(from, dir, { recursive: true });
+  copyTemplate(dialect, dir);
   const manifest = JSON.parse(readFileSync(join(from, "chant.template.json"), "utf8")) as { parameters: Record<string, { default: string }>; files: string[] };
   for (const f of manifest.files) {
     const path = join(dir, f);
+    if (!existsSync(path)) continue;
     writeFileSync(path, readFileSync(path, "utf8").replace(/\{\{chant:([A-Za-z_][A-Za-z0-9_]*)\}\}/g, (_, name: string) => manifest.parameters[name]?.default ?? name));
   }
   rmSync(join(dir, "chant.template.json"));

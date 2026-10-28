@@ -39,6 +39,7 @@ Created:
   .gitlab/yodel-apply.gitlab-ci.yml
   .gitlab/yodel-watch.gitlab-ci.yml
   chant.config.ts
+  chant.workspace.json
   justfile
   migrations/.gitkeep
   ops/migrate-dev.op.ts
@@ -66,7 +67,7 @@ The first migration creates what `src/schema.ts` declares. `yodel new` needs no 
 <!-- quote: template#template-new -->
 ```console
 $ npx yodel new init
-Wrote migrations/20261010T1725-init/ (2 statements; the first migration)
+Wrote migrations/20261028T0725-init/ (2 statements; the first migration)
 $ npx yodel lint
 1 migration: 0 errors, 0 warnings, 0 silenced.
 ```

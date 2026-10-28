@@ -38,6 +38,9 @@ function postgres(env: string, url: string) {
 
 export default {
   lexicons: ["sql"],
+  // chant.workspace.json makes this directory a workspace root, where chant build and chant lint
+  // refuse (WSP000) unless they build the root project alone. This project is its only member.
+  rootOnly: true,
   // The declared schema. chant builds only this directory, not ops/ or scripts/.
   sourceDir: "src",
   sql: {

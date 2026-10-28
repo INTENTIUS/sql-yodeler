@@ -1,6 +1,6 @@
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { main } from "../../src/cli.js";
@@ -22,6 +22,17 @@ export async function yodel(argv: string[]): Promise<Ran> {
   const io: Io = { out: (t) => (out += t), err: (t) => (err += t) };
   const code = await main(argv, io);
   return { code, out, err };
+}
+
+/**
+ * Copies `templates/<dialect>` to `dir`, leaving out the template's
+ * chant.workspace.json. A project with no declaration of its own (made
+ * before 0.11.0 and not upgraded yet, or a member under a declaration above
+ * it) is what these cases render: yodel's own lint job, not chant's check
+ * hooks. test/template.test.ts reads the templates as they are.
+ */
+export function copyTemplate(dialect: "clickhouse" | "postgres", dir: string): void {
+  cpSync(join(repoRoot, "templates", dialect), dir, { recursive: true, filter: (src) => basename(src) !== "chant.workspace.json" });
 }
 
 /** `JSON.parse` of a run's stdout. */

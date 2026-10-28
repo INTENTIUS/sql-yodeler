@@ -1,0 +1,50 @@
+{
+  "name": "{{chant:name}}",
+  "schema": 1,
+  "minReader": "0.124.55",
+  "members": [],
+  "ci": {
+    "hooks": {
+      "check": [
+        {
+          "name": "yodel-ci-check",
+          "command": [
+            "yodel",
+            "ci",
+            "--check"
+          ]
+        },
+        {
+          "name": "yodel-sql-types",
+          "command": [
+            "chant",
+            "sql",
+            "types",
+            "--check"
+          ]
+        },
+        {
+          "name": "yodel-lint",
+          "command": [
+            "yodel",
+            "lint",
+            "--format",
+            "forge",
+            "--output",
+            "gl-code-quality-report.json"
+          ]
+        },
+        {
+          "name": "yodel-replay",
+          "command": [
+            "yodel",
+            "lint",
+            "--replay",
+            "replay",
+            "--reset"
+          ]
+        }
+      ]
+    }
+  }
+}

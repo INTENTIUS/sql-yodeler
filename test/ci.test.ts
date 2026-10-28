@@ -5,14 +5,14 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { checkYodelConfig } from "../src/config/load.js";
-import { repoRoot, yodel } from "./helpers/run.js";
-import { CHANT, PRODUCT } from "./helpers/chant-bin.js";
+import { copyTemplate, repoRoot, yodel } from "./helpers/run.js";
+import { CHANT } from "./helpers/chant-bin.js";
 import { WAVES_SPEC } from "../src/ci/render.js";
 
 const temps: string[] = [];
@@ -20,11 +20,11 @@ afterAll(() => {
   for (const t of temps) rmSync(t, { recursive: true, force: true });
 });
 
-/** A copy of the ClickHouse template, resolving chant and the lexicons from this checkout. */
+/** A copy of the ClickHouse template with no workspace declaration, resolving chant and the lexicons from this checkout. */
 function project(ci: string, jobs?: string): string {
   const dir = mkdtempSync(join(tmpdir(), "yodel-ci-"));
   temps.push(dir);
-  cpSync(join(repoRoot, "templates", "clickhouse"), dir, { recursive: true });
+  copyTemplate("clickhouse", dir);
   symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
   const config = join(dir, "yodel.config.ts");
   const text = readFileSync(config, "utf8").replace(/^ {2}ci: .*$/m, `  ci: ${ci},`);
@@ -117,10 +117,11 @@ describe("yodel ci", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
     const rendered = wrote.out.trim().split("\n").map((l) => l.replace(/^wrote /, ""));
-    // Through chant's product pipeline yodel ci also writes the waves spec (#289), which names no image.
-    expect(rendered).toHaveLength(PRODUCT ? 12 : 11);
-    expect(rendered.includes(WAVES_SPEC)).toBe(PRODUCT);
-    for (const f of rendered.filter((f) => f !== WAVES_SPEC)) {
+    // yodel ci writes the files that change. The waves spec (#289) names no image, so it is written only when the
+    // template's committed spec is not the one this chant gives.
+    const pipelines = rendered.filter((f) => f !== WAVES_SPEC);
+    expect(pipelines).toHaveLength(11);
+    for (const f of pipelines) {
       const text = readFileSync(join(dir, f), "utf8");
       expect(text, f).not.toContain("npm ci");
       expect(text, f).not.toContain("node_modules/.bin");
