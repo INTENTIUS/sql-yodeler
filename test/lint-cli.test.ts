@@ -159,6 +159,6 @@ describe("yodel lint (the command)", () => {
     const help = await yodel(["lint", "--help"]);
     expect(help.code).toBe(0);
     expect(help.out).toContain("-- yodel:allow <rule> <reason>");
-    expect(help.out).toContain("3  at least one error");
+    expect(help.out).toContain("1  at least one error");
   });
 });

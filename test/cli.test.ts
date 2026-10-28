@@ -90,7 +90,8 @@ describe("yodel", () => {
       const { code, out } = await run([verb, "--help"]);
       expect(code).toBe(0);
       expect(out).toMatch(new RegExp(`^usage: yodel ${verb} <env>`));
-      expect(out).toMatch(/Exit codes:\n {2}0 [\s\S]*\n {2}2 [\s\S]*\n {2}1 /);
+      // 0 first, a code a person acts on or drift between, 1 last (chant's table, #288).
+      expect(out).toMatch(/Exit codes:\n {2}0 [\s\S]*\n {2}[2-8] [\s\S]*\n {2}1 /);
     }
     expect((await run(["apply", "-h"])).out).toContain("  3  stopped at the gate");
     expect((await run(["new", "--help"])).out).toMatch(/^usage: yodel new <name>[\s\S]*Exit codes:\n {2}0 [\s\S]*\n {2}1 /);

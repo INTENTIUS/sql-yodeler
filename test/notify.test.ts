@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readSchema } from "../src/schemas.js";
 import { checkYodelConfig } from "../src/config/load.js";
 import { waveFailure } from "../src/commands/apply.js";
-import { YodelError } from "../src/project.js";
+import { YodelError, yodelRefusal } from "../src/project.js";
 import { repoRoot } from "./helpers/run.js";
 import {
   eventFromDrift,
@@ -184,7 +184,7 @@ describe("which outcomes send an event", () => {
   it("apply's wave modes (#87): a wave that will wait, a refusal, a failure", () => {
     const approve = "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:w";
     expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }], gatePlanDigest: "jcs1-sha256:w", approve })).toMatchObject({ event: "waiting", digest: "jcs1-sha256:w", approve: { command: approve }, targets: ["a"] });
-    expect(eventFromRun("apply", waveFailure("prod", new YodelError("refused: prod applies only migrations staging applied first", 4)))).toMatchObject({ event: "refused", reason: "refused: prod applies only migrations staging applied first" });
+    expect(eventFromRun("apply", waveFailure("prod", yodelRefusal("refused: prod applies only migrations staging applied first", 3)))).toMatchObject({ event: "refused", reason: "refused: prod applies only migrations staging applied first" });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("refused: wave 2 (prod) needs an approval", 3)))).toMatchObject({ event: "refused" });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("a statement failed", 1)))).toMatchObject({ event: "failed", reason: "apply failed (exit 1)" });
   });
