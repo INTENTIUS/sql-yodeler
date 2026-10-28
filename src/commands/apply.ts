@@ -2,10 +2,10 @@ import { parseArgs } from "node:util";
 import { accessReview, renderAccessReview } from "../chant/access.js";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, type SqlDialect, yodelRefusal } from "../project.js";
 import { buildSchema } from "../chant/build.js";
-import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, unreadableOf, PLAN_NEEDS_OP } from "../chant/plan.js";
-import { findApplyOp, GATED, gatedCommands, runApplyOp } from "../chant/apply.js";
+import { declaredChanges, planEnvironment, planExitCode, planJson, renderPlan, unreadableOf } from "../chant/plan.js";
+import { findApplyOp, gatedCommands, runApplyOp } from "../chant/apply.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
@@ -16,7 +16,7 @@ import { policyAtBase } from "../config/base.js";
 import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
-import { EXIT_OUTSTANDING, EXIT_REFUSED } from "../exit.js";
+import { EXIT_WAITING, EXIT_DENIED } from "../exit.js";
 import { describeStep, heldSteps, runSqlStep, runStepHooks, sqlStepOfArgv, STEP_SQL_FLAG, stepsAtBase, stepsHooksFile, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
 import type { OpWaveHooksFile } from "@intentius/chant/op";
 import { approveCommand, migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
@@ -170,7 +170,7 @@ Two paths, chosen by the project:
 
   The policy in yodel.config.ts (policy.rules) is judged over the plan
   before the gate and again under the lock: a rule that denies it refuses
-  (exit 4) naming the rule, unless someone policy.overriders lists recorded
+  (exit 7) naming the rule, unless someone policy.overriders lists recorded
   an override for exactly this plan digest (yodel override <env> --rule <id>
   --reason <text>). An override counts once: the Apply step spends it, and
   the history records the overrides a run relied on.
@@ -178,7 +178,7 @@ Two paths, chosen by the project:
   A migration's pre-migration checks (checks in its migration.json, read-only
   queries) run against the environment: the first pending migration's before
   the gate, and every migration's under the lock just before its first
-  statement. One that fails refuses (exit 4), naming it, and nothing of that
+  statement. One that fails refuses (exit 1), naming it, and nothing of that
   migration is applied.
 
   <env> can be one tenant of a tenant set, <env>/<tenant> (yodel.config.ts
@@ -192,7 +192,7 @@ Two paths, chosen by the project:
 - Declarative: no migrations. Plans the declared schema against the live
   database, then runs the project's ApplyOp for the environment behind its
   plan-bound gate. The policy (yodel.config.ts policy, at the base commit)
-  judges the plan first: a rule that denies it refuses (exit 4) before the
+  judges the plan first: a rule that denies it refuses (exit 7) before the
   ApplyOp runs, unless an override counts for exactly these changes (yodel
   override <env>), which is spent once the ApplyOp applies. Waves, tenant
   sets, --allow-out-of-order and the lock read a history of migrations, so
@@ -201,10 +201,10 @@ Two paths, chosen by the project:
 
 Both paths write. For a profile made with credentials(), yodel apply runs
 as the writer only under YODEL_ROLE=writer or writer:<env>; as the
-reader it refuses before the gate (exit 4), and the command it prints to
+reader it refuses before the gate (exit 1), and the command it prints to
 run again after a gate stop carries YODEL_ROLE=writer:<env>. A server
 that refuses a write for want of a privilege is told in one line naming the
-user (exit 4).
+user (exit 1).
 
 Options:
   --json                print the outcome as JSON
@@ -253,25 +253,27 @@ The apply pipeline's wave jobs (chant run wave, ${WAVES_SPEC_FILE}) run three mo
 Exit codes:
   0  applied, or nothing to apply, or (--stand-down) stood down for a newer
      commit, applying nothing
-  2  a change needs its own Op (declarative), or a pending migration has a
-     manual step or an Op step apply does not run (versioned: it runs
-     ClickHouseRebuildOp in materialized-view mode and backfill steps on
-     ClickHouse, PostgresMigrationOp on Postgres);
-     nothing was applied
-  3  stopped at the gate, waiting for approval of this plan
-  4  versioned: refused, nothing applied: a checksum mismatch, an applied
-     migration gone from the directory, an out-of-order migration
-     without --allow-out-of-order, a pre-migration check that failed, a
-     policy rule that denies the plan with no override, or a pending
-     migration the environment this one requires (yodel.config.ts
-     waves[].requires, default the wave before) does not record as applied
-     with the same checksum. Declarative: a policy rule that denies the
-     plan with no override. Either path: the run holds <env>'s reader
-     (YODEL_ROLE is not writer or writer:<env>), which refuses before
-     the gate, or the server refused the user a privilege
+  3  stopped at the gate, waiting for approval of this plan; or nothing was
+     applied because a person acts first: a change needs its own Op
+     (declarative), a pending migration has a manual step or an Op step
+     apply does not run (versioned: it runs ClickHouseRebuildOp in
+     materialized-view mode and backfill steps on ClickHouse,
+     PostgresMigrationOp on Postgres), or a pending migration the
+     environment this one requires (yodel.config.ts waves[].requires,
+     default the wave before) does not record as applied with the same
+     checksum
+  4  the plan moved since it was approved (or since chant decided the
+     wave); nothing was applied
   5  versioned: another apply holds the lock (after --lock-wait, if given)
+  7  a policy rule denies the plan and no override counts; nothing was
+     applied
   1  anything else failed: a statement (the history records where; rerun to
-     resume), a plan that moved since approval, a bad config
+     resume), a bad config. Refused with nothing applied, also 1: a checksum
+     mismatch, an applied migration gone from the directory, an out-of-order
+     migration without --allow-out-of-order, a pre-migration check that
+     failed, a live object that could not be read (declarative), the run
+     holds <env>'s reader (YODEL_ROLE is not writer or writer:<env>), or the
+     server refused the user a privilege
 `;
 
 interface ApplyArgs {
@@ -371,14 +373,14 @@ export const apply: Command = {
       const command = `yodel apply ${a.env}`;
       const writes = !a.plan && !a.digest && a.wavePlan === undefined && a.stepArgv === undefined;
       const asReader = writes ? readerRefusal(profile, runnable(command, project.dir)) : undefined;
-      if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+      if (asReader) throw yodelRefusal(asReader);
       // An apply made from a chant release (#277) names it; one at another commit than the release's is refused before anything runs.
       if (writes && a.release !== undefined) a.releaseDigest = await releaseToApply(project.dir, a.release);
       try {
         return await applyIn(project, a, args, io);
       } catch (e) {
         const denied = permissionRefusal(e, profile, runnable(command, project.dir));
-        if (denied) throw new YodelError(denied, EXIT_REFUSED);
+        if (denied) throw yodelRefusal(denied);
         throw e;
       }
     });
@@ -475,11 +477,12 @@ async function versionedApply(project: Project, env: Environment, a: ApplyArgs, 
   return code;
 }
 
-/** The outcome a wave mode's error is: refused (exit 4, or 3 for a wave with no decision that lets it through; nothing applied) or failed. */
+/** The outcome a wave mode's error is: refused (a refusal, or 3 for a wave with no decision that lets it through; nothing applied) or failed. */
 export function waveFailure(environment: string, e: unknown): Record<string, unknown> {
   const message = e instanceof Error ? e.message : String(e);
   const exitCode = e instanceof YodelError ? e.exitCode : 1;
-  return exitCode === EXIT_REFUSED || exitCode === EXIT_OUTSTANDING ? { environment, status: "refused", refusal: { message } } : { environment, status: "failed", exitCode, reason: message };
+  const refused = e instanceof YodelError && (e.refused || exitCode === EXIT_WAITING);
+  return refused ? { environment, status: "refused", refusal: { message } } : { environment, status: "failed", exitCode, reason: message };
 }
 
 /** The document a run printed (or would have, with --json), for the event it sends. */
@@ -609,11 +612,12 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     const planned = readWavePlan(a.waveApply);
     const { policy: basePolicy, note: policyNote } = await policyAtBase(project);
     if (policyNote) io.err(`${policyNote}\n`);
-    if (planned.environment !== env.name) throw new YodelError(`refused: ${a.waveApply} is ${planned.environment}'s plan, not ${env.name}'s; nothing was applied`, EXIT_REFUSED);
+    if (planned.environment !== env.name) throw yodelRefusal(`refused: ${a.waveApply} is ${planned.environment}'s plan, not ${env.name}'s; nothing was applied`);
     const cwd = process.cwd();
     let wave: WaveRecord | undefined;
     let before: StepOutcome[] = [];
     // The steps (#64) are the wave's stage hooks, which chant hands this run in CHANT_HOOKS (#206); run by hand, they are the steps at base.
+    // Under the sql capability (#291) chant hands none, and the spec carries only the before.plan checks, so the steps at base run here, once, under the lock.
     const { readOpWaveHooksFile } = await import("@intentius/chant/op");
     const handed = readOpWaveHooksFile(undefined, cwd);
     const steps = handed ? undefined : await stepsAtBase(project, env.name);
@@ -694,7 +698,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
       ...(a.lockWaitMs !== undefined ? { lockWaitMs: a.lockWaitMs } : {}),
       ...(a.standDown ? { standDown: standingDown(project, env) } : {}),
       approve: async (digest) => {
-        // Under the lock: every pending migration ran first where this environment requires (exit 4 otherwise).
+        // Under the lock: every pending migration ran first where this environment requires (exit 3 otherwise).
         await enforcePromotion(project, env.name, ordered, (await inspect(venv, ordered)).status.pending);
         const by = await verifyApproval(ledger, op, digest);
         admittedBy = { approver: by.approver, admission: by.admission };
@@ -760,9 +764,9 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
   try {
     await enforcePromotion(project, env.name, ordered, report.status.pending);
   } catch (e) {
-    if (!(e instanceof YodelError) || e.exitCode !== EXIT_REFUSED) throw e;
+    if (!(e instanceof YodelError) || !e.refused) throw e;
     if (!a.json) io.err(`yodel apply: ${e.message}\n`);
-    return emit({ status: "refused", refusal: { exitCode: EXIT_REFUSED, message: e.message } }, EXIT_REFUSED);
+    return emit({ status: "refused", refusal: { exitCode: e.exitCode, message: e.message } }, e.exitCode);
   }
 
   // The first pending migration's checks (#52) read the data as it is now: one that fails refuses before anyone is asked to approve. The Apply step runs every migration's again under the lock.
@@ -843,7 +847,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
           `which shows the plan and asks you first; then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`,
       );
     }
-    return emit({ status: "gated", op: op.name, gate: op.gate, ...(stale ? { moved: stale.moved } : {}), ...commands, ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, GATED);
+    return emit({ status: "gated", op: op.name, gate: op.gate, ...(stale ? { moved: stale.moved } : {}), ...commands, ...(run.planDigest ? { gatePlanDigest: run.planDigest } : {}) }, EXIT_WAITING);
   }
 
   const after = await statusReport(venv, ordered, { allowOutOfOrder: a.allowOutOfOrder });
@@ -911,10 +915,11 @@ async function declarativeRun(
       const review = renderAccessReview(await accessReview(project, env.name, before.diff.changes, build.output), env.name);
       if (review.length > 0) io.out(`\n${review.join("\n")}\n`);
     }
-    if (planExitCode(before) === PLAN_NEEDS_OP) {
+    const planCode = planExitCode(before);
+    if (planCode !== 0) {
       const unreadable = unreadableOf(before);
       if (!json) io.err(`yodel apply: refused: ${unreadable.length > 0 ? `${unreadable.map((u) => u.object).join(", ")} could not be read` : `${String(before.refused.length)} change(s) need their own Op`}; nothing was applied\n`);
-      return report({ status: "refused", plan: planJson(before) }, PLAN_NEEDS_OP);
+      return report({ status: "refused", plan: planJson(before) }, planCode);
     }
     const changes = declaredChanges(before, build);
     if (changes.length === 0) {
@@ -945,7 +950,7 @@ async function declarativeRun(
     const denied = policyRefusal(policy, env.name, digest, "before the gate");
     if (denied) {
       if (!json) io.err(`yodel apply: ${denied.message}\n`);
-      return report({ status: "denied", plan: planJson(before), ...withPolicy }, EXIT_REFUSED);
+      return report({ status: "denied", plan: planJson(before), ...withPolicy }, EXIT_DENIED);
     }
 
     if (!json) io.out(`\nRunning ${op.name} (${op.filePath})\n`);
@@ -956,7 +961,7 @@ async function declarativeRun(
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this plan${run.planDigest ? ` (${run.planDigest})` : ""}.\n`);
         if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nwhich shows the plan and asks you first; then run ${runnableAsWriter(`yodel apply ${env.name}`, project.dir, env.profile)} again.\n`);
       }
-      return report({ status: "gated", gate: op.gate, ...commands, ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before), ...withPolicy }, GATED);
+      return report({ status: "gated", gate: op.gate, ...commands, ...(run.planDigest ? { planDigest: run.planDigest } : {}), plan: planJson(before), ...withPolicy }, EXIT_WAITING);
     }
     if (run.status === "failed") {
       if (!json) io.err(`yodel apply: chant run ${op.name} failed (exit ${String(run.code)})\n`);

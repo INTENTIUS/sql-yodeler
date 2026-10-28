@@ -19,6 +19,17 @@
  * | `refused`            | a failed migration row naming a pre-migration check           |
  * | `failed`             | any other failed migration row                                |
  * | `repaired`           | a succeeded migration row after it was applied (`yodel repair`) |
+ * | `wave-run`           | a run record of the apply pipeline's wave job that ran the environment (chant#4551, `<env>/runs__yodel-apply.jsonl`) |
+ * | `spent`              | an approval an apply spent, with how the apply ended: a line of `_gates/<op>/applied.jsonl` and its `finished` line (chant's `applies` table) |
+ *
+ * A migration a wave applied takes its wave from the ledger first (ruling B
+ * on #300): the wave job's run record that lists the environment applied
+ * at the time of the history row, with its wave's gate and set digest.
+ * Without one (an apply made before chant wrote run records) it takes the
+ * wave the history row's note copied from chant's decision. The run record
+ * says nothing of whether the wave needed an approval, so the note's status
+ * is kept when there is one, and an approval spent on the wave's gate for
+ * that digest makes it approved.
  *
  * Each entry's `id` is a hash of what it says and where it came from, so
  * deriving again from the same sources gives the same ids, and an audit.jsonl
@@ -44,7 +55,7 @@ import type { HistoryRow } from "../history/index.js";
 import { waveRecordOf } from "../waves/record.js";
 import { describeStep, stepsOfNote } from "../apply-steps/index.js";
 
-export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted", "step"] as const;
+export const AUDIT_KINDS = ["approval-requested", "approved", "override", "silenced", "applied", "refused", "failed", "repaired", "reverted", "step", "wave-run", "spent"] as const;
 export type AuditKind = (typeof AUDIT_KINDS)[number];
 
 export type AuditSource = { ledger: string; op: string; gate: string } | { history: string; seq: number; run: string };
@@ -100,6 +111,55 @@ export interface OverrideLedgerInput {
   lines: readonly GateLedgerLine[];
 }
 
+/** One run record of the apply pipeline's wave jobs (chant#4551), the parts read here. */
+export interface WaveRunRecord {
+  id: string;
+  started: string;
+  ended: string;
+  status: string;
+  wave: {
+    spec: string;
+    number: number;
+    name: string;
+    job: string;
+    digest?: string;
+    exitCode: number;
+    applied: readonly string[];
+    failed: readonly string[];
+    moved: readonly string[];
+    blocked?: Readonly<Record<string, string>>;
+  };
+}
+
+/** The apply pipeline's run records, read from chant's run ledger. */
+export interface WaveRunInput {
+  /** `<env>/runs__<op>.jsonl`. */
+  path: string;
+  /** chant's name for wave k's gate. */
+  gateOf: (k: number) => string;
+  records: readonly WaveRunRecord[];
+}
+
+/** One `applied` or `changes` line of `_gates/<op>/applied.jsonl`, joined with its `finished` line: a row of chant's `applies` table. */
+export interface AppliedLine {
+  gate: string;
+  planDigest: string;
+  timestamp: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  runId?: string;
+  finished?: { timestamp: string; result: string; detail?: Readonly<Record<string, string | number | boolean>> };
+}
+
+/** An op's applies, for the gates of this environment. */
+export interface AppliesInput {
+  op: string;
+  /** `_gates/<op>/applied.jsonl`. */
+  path: string;
+  gates: ReadonlySet<string>;
+  lines: readonly AppliedLine[];
+}
+
 export interface AuditInput {
   environment: string;
   /** `<database>.history`, for the entries' source. */
@@ -111,6 +171,10 @@ export interface AuditInput {
   overrides?: OverrideLedgerInput | undefined;
   /** The waves' gate ledger, when the project's apply pipeline runs waves. */
   waves?: WaveLedgerInput | undefined;
+  /** The apply pipeline's run records (chant#4551), when the ledger has them. */
+  runs?: WaveRunInput | undefined;
+  /** The applies under an approval on this environment's gates (chant#4551). */
+  applies?: readonly AppliesInput[] | undefined;
   /** Whether two digests are the same plan (chant's samePlanDigest). Default: equal strings. */
   sameDigest?: (a: string | undefined, b: string | undefined) => boolean;
 }
@@ -143,6 +207,70 @@ function entry(fields: Omit<AuditEntry, "id">): AuditEntry {
 
 const CHECK_FAILED = /\bcheck \S+ failed\b/;
 
+/** Whether the run record ran `environment`: a step of one of its phases is named for it. */
+const ranTarget = (r: WaveRunRecord, environment: string): boolean =>
+  [r.wave.applied, r.wave.failed, r.wave.moved, Object.keys(r.wave.blocked ?? {})].some((list) => list.includes(environment));
+
+/** Whether `at` (a history time) falls within the run record's job. */
+const within = (r: WaveRunRecord, at: string): boolean => {
+  const t = timeKey(isoTime(at));
+  return timeKey(r.started) <= t && t <= timeKey(r.ended);
+};
+
+/**
+ * The wave a started row's migration was applied by: the ledger's run
+ * record first (ruling B on #300), else the history note's copy of chant's
+ * decision.
+ */
+function waveOfRow(input: AuditInput, recordedAt: string, note: { gate: string; digest: string; status: "approved" | "not-required" } | undefined): AuditEntry["wave"] {
+  const run = input.runs?.records.filter((r) => r.wave.digest && r.wave.applied.includes(input.environment) && within(r, recordedAt)).at(-1);
+  if (!run?.wave.digest || !input.runs) return note ? { gate: note.gate, digest: note.digest, status: note.status } : undefined;
+  const gate = input.runs.gateOf(run.wave.number);
+  const digest = run.wave.digest;
+  const same = input.sameDigest ?? ((a, b) => a === b);
+  const spent = (input.applies ?? []).some((a) => a.lines.some((l) => l.gate === gate && same(l.planDigest, digest)));
+  const status = spent ? "approved" : note && note.gate === gate && same(note.digest, digest) ? note.status : "approved";
+  return { gate, digest, status };
+}
+
+/** The apply pipeline's wave jobs that ran this environment, one entry each (chant#4551). */
+function fromRuns(environment: string, runs: WaveRunInput): AuditEntry[] {
+  return runs.records
+    .filter((r) => ranTarget(r, environment))
+    .map((r) => {
+      const w = r.wave;
+      const outcome = w.applied.includes(environment) ? "applied" : w.failed.includes(environment) ? "failed" : w.moved.includes(environment) ? "moved" : `blocked by ${w.blocked?.[environment] ?? "another run"}`;
+      return entry({
+        at: r.ended,
+        environment,
+        kind: "wave-run",
+        ...(w.digest ? { digest: w.digest } : {}),
+        detail: `wave ${String(w.number)} (${w.name}), ${w.job} job, exit ${String(w.exitCode)}: ${environment} ${outcome}; run ${r.id}`,
+        source: { ledger: runs.path, op: w.spec, gate: runs.gateOf(w.number) },
+      });
+    });
+}
+
+/** The approvals spent on this environment's gates, each with how its apply ended (chant#4551). */
+function fromApplies(environment: string, applies: readonly AppliesInput[]): AuditEntry[] {
+  return applies.flatMap((a) =>
+    a.lines
+      .filter((l) => a.gates.has(l.gate))
+      .map((l) => {
+        const end = l.finished ? `${l.finished.result} at ${l.finished.timestamp}${l.finished.detail ? ` (${Object.entries(l.finished.detail).map(([k, v]) => `${k} ${String(v)}`).join(", ")})` : ""}` : "not finished";
+        return entry({
+          at: l.timestamp,
+          environment,
+          kind: "spent",
+          ...(l.approvedBy ? { by: l.approvedBy } : {}),
+          digest: l.planDigest,
+          detail: `the approval${l.approvedAt ? ` of ${l.approvedAt}` : ""} spent by an apply, ${end}${l.runId ? `; run ${l.runId}` : ""}`,
+          source: { ledger: a.path, op: a.op, gate: l.gate },
+        });
+      }),
+  );
+}
+
 function fromHistory(input: AuditInput): AuditEntry[] {
   const { environment, history } = input;
   const out: AuditEntry[] = [];
@@ -167,8 +295,8 @@ function fromHistory(input: AuditInput): AuditEntry[] {
     const base = { at: isoTime(r.recorded_at ?? ""), environment, by: r.applied_by, migration: r.migration_id, ...(r.plan_digest ? { digest: r.plan_digest } : {}), source };
     if (r.status === "started") {
       steps(r, base);
-      const w = waveRecordOf(r.note);
-      if (w) waveOf.set(r.migration_id, { gate: w.gate, digest: w.digest, status: w.status });
+      const w = waveOfRow(input, r.recorded_at ?? "", waveRecordOf(r.note));
+      if (w) waveOf.set(r.migration_id, w);
       else waveOf.delete(r.migration_id);
       let list: Array<{ step?: number; rule?: string; reason?: string }> = [];
       try {
@@ -279,6 +407,8 @@ export function deriveAudit(input: AuditInput): { entries: AuditEntry[]; gaps: A
     ...(input.ledger ? fromLedger(input.environment, input.ledger, new Set([input.ledger.gate]), true) : []),
     ...(input.overrides ? fromOverrides(input.environment, input.overrides) : []),
     ...(input.waves ? fromWaves(input.environment, input.waves, history) : []),
+    ...(input.runs ? fromRuns(input.environment, input.runs) : []),
+    ...(input.applies ? fromApplies(input.environment, input.applies) : []),
   ].sort(byTime);
   const gaps: AuditGap[] = [];
 

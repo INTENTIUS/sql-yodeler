@@ -158,7 +158,7 @@ describe("the versioned plan", () => {
     writeMigration(join(project.dir, "migrations"), changed);
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: null });
     expect(plan.problems.join("\n")).toMatch(new RegExp(`${m1.id} was applied with checksum`));
-    expect(plan.refusal?.exitCode).toBe(4);
+    expect(plan.refusal?.exitCode).toBe(1);
     expect(plan.digest).toBeUndefined();
   });
 

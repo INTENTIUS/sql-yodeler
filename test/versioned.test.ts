@@ -13,17 +13,16 @@ import {
   migrateOpParts,
   openVersioned,
   outOfOrder,
-  REFUSED,
   selectMigrateOp,
   selectToApply,
   statusReport,
   verifyApproval,
-  NOT_APPROVED,
   type MigrateOpRef,
   type VersionedEnv,
 } from "../src/versioned/index.js";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
 import { edited, FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
+import { EXIT_FAILED, EXIT_MOVED, EXIT_WAITING } from "../src/exit.js";
 
 const m1 = migration("20261009T1000-one", null, ["CREATE DATABASE yodel_8", "CREATE TABLE yodel_8.a (x UInt8) ENGINE = MergeTree ORDER BY x"]);
 const m2 = migration("20261009T1100-two", m1.id, ["ALTER TABLE yodel_8.a ADD COLUMN y UInt8", "ALTER TABLE yodel_8.a ADD COLUMN z UInt8", "CREATE TABLE yodel_8.b (x UInt8) ENGINE = MergeTree ORDER BY x"]);
@@ -125,7 +124,7 @@ describe("executeApply", () => {
     const rewritten = edited(m2, ["ALTER TABLE yodel_8.a ADD COLUMN yy UInt8", "ALTER TABLE yodel_8.a ADD COLUMN z UInt8", "CREATE TABLE yodel_8.b (x UInt8) ENGINE = MergeTree ORDER BY x"]);
     const bad = (await inspect(venv, [m1, rewritten])).status;
     expect(bad.mismatches).toMatchObject([{ kind: "part-way", id: m2.id, statement: 0 }]);
-    expect(() => selectToApply(bad, false)).toThrow(expect.objectContaining({ exitCode: REFUSED }));
+    expect(() => selectToApply(bad, false)).toThrow(expect.objectContaining({ exitCode: EXIT_FAILED }));
 
     ch.sent = [];
     await approveAndApply(venv, [m1, fixed]);
@@ -144,10 +143,10 @@ describe("executeApply", () => {
     } catch (e) {
       refusal = e;
     }
-    expect(refusal).toMatchObject({ exitCode: REFUSED });
+    expect(refusal).toMatchObject({ exitCode: EXIT_FAILED });
     expect((refusal as Error).message).toMatch(new RegExp(`${m1.id} was applied with checksum .*yodel repair`));
     ch.sent = [];
-    await expect(executeApply(venv, [changed, m2], { approvedDigest: "jcs1-sha256:" + "0".repeat(64), allowOutOfOrder: false, approve: noApproval, log: quiet })).rejects.toMatchObject({ exitCode: REFUSED });
+    await expect(executeApply(venv, [changed, m2], { approvedDigest: "jcs1-sha256:" + "0".repeat(64), allowOutOfOrder: false, approve: noApproval, log: quiet })).rejects.toMatchObject({ exitCode: EXIT_FAILED });
     expect(ch.sent).toEqual([]);
   });
 
@@ -182,7 +181,7 @@ describe("executeApply", () => {
     expect(selectToApply(status, true).map((p) => p.id)).toEqual([late.id]);
 
     ch.sent = [];
-    await expect(approveAndApply(venv, ordered)).rejects.toMatchObject({ exitCode: REFUSED });
+    await expect(approveAndApply(venv, ordered)).rejects.toMatchObject({ exitCode: EXIT_FAILED });
     expect(ch.sent).toEqual([]);
     const result = await approveAndApply(venv, ordered, { allowOutOfOrder: true });
     expect(result.applied).toEqual([late.id]);
@@ -199,7 +198,7 @@ describe("executeApply", () => {
     expect(ch.rows).toEqual([]);
   });
 
-  it("refuses a manual step, and an Op step apply does not run, with exit 2, and never skips it", async () => {
+  it("refuses a manual step, and an Op step apply does not run, with exit 3, and never skips it", async () => {
     const { ch, venv } = await setup();
     const rebuild: MigrationStep = {
       kind: "op",
@@ -217,7 +216,7 @@ describe("executeApply", () => {
     const withOp = migration("20261009T1300-rebuild", null, ["CREATE DATABASE yodel_8", rebuild, manual]);
     const { status } = await inspect(venv, [withOp]);
     expect(() => selectToApply(status, false)).toThrow(
-      expect.objectContaining({ exitCode: 2, message: expect.stringMatching(/step 1: ClickHouseRebuildOp .* in app mode[\s\S]*step 2: a manual step for v/) as unknown }),
+      expect.objectContaining({ exitCode: 3, message: expect.stringMatching(/step 1: ClickHouseRebuildOp .* in app mode[\s\S]*step 2: a manual step for v/) as unknown }),
     );
     expect(ch.sent).toEqual([]);
   });
@@ -230,7 +229,7 @@ describe("the approval --execute checks in chant's gate ledger", () => {
     const digest = await currentDigest(venv, status, status.pending);
     const empty = memoryGateLedgerPort();
     const run = executeApply(venv, [m1], { approvedDigest: digest, allowOutOfOrder: false, approve: (d) => verifyApproval(empty, OP, d), log: quiet });
-    await expect(run).rejects.toMatchObject({ exitCode: NOT_APPROVED, message: expect.stringContaining("holds no approval of migrate-e2e / approve-migrate-e2e") as unknown });
+    await expect(run).rejects.toMatchObject({ exitCode: EXIT_WAITING, message: expect.stringContaining("holds no approval of migrate-e2e / approve-migrate-e2e") as unknown });
     expect(ch.sent).toEqual([]);
     expect(ch.rows).toEqual([]);
   });
@@ -262,16 +261,18 @@ describe("the approval --execute checks in chant's gate ledger", () => {
       admission: { op: OP.name, gate: OP.gate, resolvedAt: "2026-10-09T12:00:00.000Z" },
     });
     await expect(verifyApproval(approvedLedger(other), OP, digest)).rejects.toThrow(new RegExp(`newest approval of that gate is for ${other}`));
-    await expect(verifyApproval(approvedLedger(digest), { ...OP, gate: "another-gate" }, digest)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
+    // The newest approval is for another digest: the plan moved since it was approved (#288).
+    await expect(verifyApproval(approvedLedger(other), OP, digest)).rejects.toMatchObject({ exitCode: EXIT_MOVED });
+    await expect(verifyApproval(approvedLedger(digest), { ...OP, gate: "another-gate" }, digest)).rejects.toMatchObject({ exitCode: EXIT_WAITING });
     // The gate asked again after the approval: that approval no longer answers it.
     const stale = memoryGateLedgerPort({
       resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z", planDigest: digest }],
       pending: [{ version: 1, kind: "pending", op: OP.name, gate: OP.gate, timestamp: "2026-10-09T13:00:00.000Z", expiresAt: "2026-10-11T13:00:00.000Z", planDigest: digest }],
     });
-    await expect(verifyApproval(stale, OP, digest)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
+    await expect(verifyApproval(stale, OP, digest)).rejects.toMatchObject({ exitCode: EXIT_WAITING });
     // An approval recorded before plan-bound gates (no digest) never counts.
     const legacy = memoryGateLedgerPort({ resolutions: [{ version: 1, op: OP.name, gate: OP.gate, resolvedBy: "alice", timestamp: "2026-10-09T12:00:00.000Z" }] });
-    await expect(verifyApproval(legacy, OP, digest)).rejects.toMatchObject({ exitCode: NOT_APPROVED });
+    await expect(verifyApproval(legacy, OP, digest)).rejects.toMatchObject({ exitCode: EXIT_WAITING });
     // A quorum only the Op declares is the change's to edit: refused (the quorum at base is test/quorum-at-base.test.ts).
     await expect(verifyApproval(approvedLedger(digest), { ...OP, quorum: true }, digest)).rejects.toThrow(/quorum/);
   });

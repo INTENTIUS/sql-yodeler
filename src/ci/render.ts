@@ -47,7 +47,10 @@
  *   second apply: it waits for the first's lock (YODEL_LOCK_WAIT), and an
  *   apply whose commit is no longer main's tip stands down
  *   (YODEL_STAND_DOWN), since the newer commit's waves apply the same
- *   environments.
+ *   environments. With a chant that has the lock grain and stand-down
+ *   (#293), chant does both: its lease on the environment exits 5 for the
+ *   apply that finds it held, and `standDown` in the spec exits 6 for one
+ *   a newer commit supersedes; the jobs carry neither variable.
  * - watch-<env>: the environment's WatchOp on its own schedule, rendered by
  *   chant's generateOpsPipeline, with the reader's credentials. After the
  *   Op, `yodel drift <env> --issue` compares the server with the schema the
@@ -71,6 +74,10 @@
  * image ghcr.io/intentius/sql-yodeler pinned by its digest, every job runs
  * in that image instead, which carries node, yodel, chant and the lexicons
  * on PATH, and no job runs `npm ci` ({@link Toolchain}).
+ *
+ * With a chant that has `@intentius/chant/ci-product` (chant#4550), yodel ci
+ * renders through chant's product pipeline with yodel's words (#289,
+ * ../ci-words.ts): {@link productWaves}.
  */
 
 import { existsSync } from "node:fs";
@@ -79,12 +86,14 @@ import { pathToFileURL } from "node:url";
 import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
-import { audience, CLOUD_OF, jobLogins, loginSteps, type Login, type LoginSteps } from "./login.js";
+import { audience, chantTrade, CLOUD_OF, jobLogins, loginSteps, tradeIdTokens, tradesThroughChant, useChantTrade, type Login, type LoginSteps } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
 import { testFiles } from "../testing/files.js";
 import { CODE_QUALITY_FILE } from "../lint/annotations.js";
+import { chantCheckHooks, checkPresets, declarationFile, declarationWithHooks, type CheckHook } from "./check-hooks.js";
+import type { CheckTool } from "../config/define.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
@@ -109,6 +118,7 @@ import {
   WorkflowRule,
 } from "@intentius/chant-lexicon-gitlab";
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
+import { chantProduct, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
 export const FORGES: readonly Forge[] = ["github", "gitlab", "forgejo"];
@@ -192,6 +202,34 @@ export interface Environments {
    * pull requests. The pipeline is one job, yodel check, and nothing else.
    */
   checkOnly?: true;
+  /** yodel.config.ts `ci.tools` (#294): the SQL tools run as check hooks beside yodel's checks. */
+  tools?: readonly CheckTool[];
+  /**
+   * The lint job runs chant's check moment (#294, chant#4556): `yodel chant
+   * ci check` with the hooks read from the workspace declaration at the
+   * pull request's base. Set by {@link render} when the installed chant has
+   * the moment and the project has a declaration.
+   */
+  checkHooks?: true;
+}
+
+/** The line the lint job runs chant's check moment with (#294): the hooks are read at the pull request's base. */
+export const checkHooksLine = (forge: Forge): string =>
+  `yodel chant ci check --base ${forge === "gitlab" ? "$CI_MERGE_REQUEST_DIFF_BASE_SHA" : "${{ github.event.pull_request.base.sha }}"}`;
+
+/** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
+export function checkHooksOf(envs_: Environments): CheckHook[] {
+  const forge: Forge = "github";
+  return checkPresets({
+    dialect: envs_.dialect,
+    // --format forge: one list of hooks for every forge, each job printing its own forge's format.
+    commands: { ci: CI_CHECK, types: TYPES_CHECK, lint: `${LINT} --format forge --output ${CODE_QUALITY_FILE}`, replay: REPLAY, test: TEST, check: checkCommand(forge).replace(/--format \S+( --output \S+)?$/, `--format forge --output ${CODE_QUALITY_FILE}`) },
+    typedColumns: envs_.typedColumns === true,
+    replay: envs_.replay,
+    tests: envs_.tests === true,
+    check: envs_.check === true,
+    tools: envs_.tools ?? [],
+  });
 }
 
 /** Whether the apply pipeline is rendered: unless yodel.config.ts `ci.apply` is false. */
@@ -243,7 +281,13 @@ const cloudsOf = (envs: Pick<Environments, "credentials">, held: ReadonlyArray<r
 ];
 
 /** A GitLab job's `id_tokens` for `clouds`, each for its login's audience when the job logs in (#132): GCP's is the workload identity provider's own. */
-const idTokens = (clouds: readonly CloudToken[], logins: readonly Login[] = []): Record<string, { aud: string }> =>
+const idTokens = (clouds: readonly CloudToken[], logins: readonly Login[] = []): Record<string, { aud: string }> => ({
+  ...ownIdTokens(clouds.filter((c) => !(tradesThroughChant() && logins.some((l) => l.cloud === CLOUD_OF[c]))), logins),
+  // Through chant's trade (#296), the logins' tokens come in chant's variables.
+  ...(tradeIdTokens(logins) ?? {}),
+});
+
+const ownIdTokens = (clouds: readonly CloudToken[], logins: readonly Login[]): Record<string, { aud: string }> =>
   Object.fromEntries(
     clouds.map((c) => {
       const login = logins.find((l) => l.cloud === CLOUD_OF[c]);
@@ -421,7 +465,7 @@ export const REPORT_DIR = "yodel-report";
 
 /**
  * `yodel report <env>` as JSON and as the HTML run view, into REPORT_DIR.
- * It runs whatever the job's outcome, and a gap it reports (exit 4) does not
+ * It runs whatever the job's outcome, and a gap it reports (exit 1) does not
  * fail the job: the report is for reading. `yodel` is the project's, named
  * by path, since GitLab's after_script does not keep before_script's PATH;
  * in the yodel image, the image's, which is on PATH.
@@ -544,7 +588,8 @@ function checkJob(forge: Actions, dialect: Dialect, tc: Toolchain): AJob {
   });
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false): AJob {
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false, hooks = false): AJob {
+  if (hooks) return checkHooksJob(forge, dialect, replay, tc);
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
@@ -570,6 +615,25 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
       ...(tests ? [new Step({ name: "yodel test", run: TEST })] : []),
       ...(check ? [new Step({ name: "yodel check", run: checkCommand(forge) })] : []),
     ],
+  });
+}
+
+/**
+ * The lint job on chant's check moment (#294): the replay server when the
+ * project has one, then `yodel chant ci check`, which runs the hooks the
+ * declaration at the pull request's base names. The job runs in IMAGE with
+ * the replay server, as {@link lintJob} does.
+ */
+function checkHooksJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain): AJob {
+  const container = replay || inContainer(forge, tc);
+  const steps = [...setupSteps(container, tc), new Step({ name: "Check hooks at the base (chant ci check)", run: checkHooksLine(forge) })];
+  if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
+  const { svc, services, env } = replayService(dialect);
+  return new ActionsJob({
+    ...runner(container, tc),
+    services,
+    env,
+    steps: [...setupSteps(container, tc), new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }), new Step({ name: "Check hooks at the base (chant ci check)", run: checkHooksLine(forge) })],
   });
 }
 
@@ -599,7 +663,7 @@ export function actionsReview(forge: Actions, envs_: Environments): RenderedFile
   const { dialect, names: envs, replay, waves, jobs: own } = envs_;
   const tc = toolchainOf(envs_);
   if (envs_.checkOnly) return checkOnlyActions(forge, envs_);
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true) };
+  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true, envs_.checkHooks === true) };
   for (const env of envs) {
     const read = [env, ...requiredOf(waves, env)];
     jobs[`plan-${env}`] = new ActionsJob({
@@ -717,11 +781,11 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
+            script: envs_.checkHooks === true ? [waitFor(svc.name, svc.port), checkHooksLine("gitlab")] : [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
-        : { script: [CI_CHECK, ...types, lintCommand("gitlab")] }),
+        : { script: envs_.checkHooks === true ? [checkHooksLine("gitlab")] : [CI_CHECK, ...types, lintCommand("gitlab")] }),
       // The code quality report, kept when lint fails too: that is when it has something to show.
       artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
     }),
@@ -851,8 +915,15 @@ export const APPLY_PIPELINE = "yodel-apply";
 interface WavesSpec {
   name: string;
   op: string;
-  plan: string[];
-  apply: string[];
+  /** The wave gate pattern, under chant's product pipeline (#289): `yodel-apply-wave-{k}`, the names chant gives the gates without it. */
+  gateName?: string;
+  /** yodel's callbacks, `yodel apply {target} --wave-plan|--wave-apply`; absent when the sql capability plans and applies (#291). */
+  plan?: string[];
+  apply?: string[];
+  /** The sql lexicon's capability (chant#4569), in place of `plan` and `apply` (#291). */
+  step?: { kind: "sql-migrate"; environment: string; spec: string };
+  /** chant stands an apply down for a newer commit on the branch (#293, chant#4581), exit 6. */
+  standDown?: true;
   branches: string[];
   waves: Array<{
     name: string;
@@ -871,15 +942,37 @@ interface WavesSpec {
 /**
  * The waves spec. What the file holds is the same for every forge; each
  * forge's jobs get their own variables on top (`variables`).
+ *
+ * With `step` (#291), a chant whose sql lexicon has the `sql-migrate`
+ * capability (chant#4569): the spec names the capability, and chant plans
+ * and applies each run through it, which calls the same engine entry points
+ * (`yodel apply <env> --wave-plan` and `--wave-apply`) by a fixed argv. The
+ * spec then has no `plan` or `apply` callback. Without it, the callbacks.
+ *
+ * The steps around apply (#64) under `step`: chant refuses `hooks.apply.runBy:
+ * "apply"` with a capability step, and it would run apply-stage hooks
+ * around the step itself, outside the engine's lock, while `--wave-apply`
+ * with no CHANT_HOOKS runs the steps at base under its lock as well. So the
+ * spec keeps only the `before.plan` SQL checks, which chant runs when it
+ * plans the wave (one that fails with `onFailure: "approve"` holds the wave
+ * for a person), and `--wave-apply` runs every step under its lock, read at
+ * the base commit, as it does run by hand. A step runs once, under the
+ * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }, options: { step?: boolean; chantLocks?: boolean } = {}): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
     name: APPLY_PIPELINE,
     op: `migrate-${first.env}`,
-    plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", WAVES_SPEC],
-    apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", WAVES_SPEC],
+    ...(options.step
+      ? { step: { kind: SQL_MIGRATE, environment: "{target}", spec: WAVES_SPEC } }
+      : {
+          plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", WAVES_SPEC],
+          apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", WAVES_SPEC],
+        }),
+    // chant's stand-down (#293): the job applies nothing and exits 6 when a newer commit on main will apply the same environments.
+    ...(options.step && options.chantLocks ? { standDown: true as const } : {}),
     branches: [MAIN],
     waves: waves.map((w) => ({
       name: w.env,
@@ -889,16 +982,62 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
       ...(w.approval !== undefined && w.approval !== "ledger" ? { approval: w.approval } : {}),
       ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
       // The steps around apply (#64) as chant's stage hooks, which the apply runs under its lock (#206).
-      ...hooksOf(w.steps),
+      ...hooksOf(w.steps, options.step === true),
     })),
     ...(resume ? { resume } : {}),
   };
 }
 
-/** A wave's stage hooks from its steps, when it has any. */
-function hooksOf(steps: ApplySteps | undefined): { hooks?: OpWaveHooks } {
+/**
+ * Whether the installed chant locks and stands down the waves itself (#293):
+ * `@intentius/chant/op` exports `OP_WAVE_STAND_DOWN_FLOOR` and
+ * `newerCommitOnBranch` (chant#4581), and the sql lexicon gives SQL members
+ * their lock grain, the environment (`sqlDefaultLockGrain`, chant#4571, on
+ * chant#4552's grain). Then the apply jobs carry no lock settings of their
+ * own: chant's lease on the target keeps two applies of one environment
+ * apart and exits 5 (`held`) for the one that finds it taken, the engine's
+ * own lock still guards the history under it, and a superseded apply exits
+ * 6 (`superseded`). Lazy imports, with the specifiers in variables, so a
+ * published chant keeps YODEL_LOCK_WAIT and YODEL_STAND_DOWN.
+ */
+export async function chantLocksWaves(): Promise<boolean> {
+  const op = "@intentius/chant/op";
+  const grain = "@intentius/chant-lexicon-sql/lock-grain";
+  try {
+    const m = (await import(op)) as { OP_WAVE_STAND_DOWN_FLOOR?: unknown; newerCommitOnBranch?: unknown };
+    const g = (await import(grain)) as { sqlDefaultLockGrain?: unknown };
+    return typeof m.OP_WAVE_STAND_DOWN_FLOOR === "string" && typeof m.newerCommitOnBranch === "function" && typeof g.sqlDefaultLockGrain === "function";
+  } catch {
+    return false;
+  }
+}
+
+/** The sql lexicon's capability for a versioned environment (chant#4569). */
+export const SQL_MIGRATE = "sql-migrate";
+
+/**
+ * Whether the installed sql lexicon plans and applies through chant (#291):
+ * it exports `sqlCapabilityPlugin` (chant#4569), and the chant that ships
+ * with it runs an op wave's `step`. A lazy import, with the specifier in a
+ * variable, so a published lexicon without it keeps the callbacks.
+ */
+export async function hasSqlCapability(): Promise<boolean> {
+  const specifier = "@intentius/chant-lexicon-sql/capability-plugin";
+  try {
+    const m = (await import(specifier)) as { sqlCapabilityPlugin?: unknown };
+    return m.sqlCapabilityPlugin !== undefined && m.sqlCapabilityPlugin !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** A wave's stage hooks from its steps, when it has any; under a capability `step`, the `before.plan` checks only ({@link wavesSpec}). */
+function hooksOf(steps: ApplySteps | undefined, step = false): { hooks?: OpWaveHooks } {
   const hooks = stepHooks(steps);
-  return hooks ? { hooks } : {};
+  if (!hooks) return {};
+  if (!step) return { hooks };
+  const plan = hooks.before?.plan;
+  return plan && plan.length > 0 ? { hooks: { before: { plan } } } : {};
 }
 
 interface WavesPipelineResult {
@@ -907,21 +1046,31 @@ interface WavesPipelineResult {
   error?: string;
 }
 
-/** The waves spec file and the apply pipeline on each forge. */
-export async function applyPipelines(dir: string, envs: Environments): Promise<RenderedFile[]> {
+/**
+ * The waves spec file and the apply pipeline on each forge. With `product`
+ * (chant's product pipeline, #289), the spec comes from chant's
+ * productPipelineJobs under yodel's words, and each job runs `yodel chant`
+ * where chant's own runs `chant` ({@link productWaves}).
+ */
+export async function applyPipelines(dir: string, envs: Environments, product?: ChantProduct): Promise<RenderedFile[]> {
   const { dialect, waves } = envs;
   const tc = toolchainOf(envs);
   const { generateOpWavesPipeline } = (await import("@intentius/chant/op")) as unknown as {
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<WavesPipelineResult>;
   };
-  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(wavesSpec(waves), null, 2)}\n` }];
+  const named = (forge: Forge, spec: WavesSpec) => (product ? productWaves(product, forge, spec) : { spec, jobs: [] });
+  // Through chant's product pipeline, the sql capability plans and applies (#291) when the installed lexicon has it.
+  const capable = product !== undefined && (await hasSqlCapability());
+  // chant's lock grain and stand-down (#293), under the capability, when chant has them.
+  const step = { step: capable, chantLocks: capable && (await chantLocksWaves()) };
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves, undefined, undefined, step)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const variables = (forge: Forge) => (env: string) => {
     const wave = waves.find((w) => w.env === env);
     const required = wave?.requires;
     return {
       YODEL_CREDENTIALS: `writer:${env}`,
-      ...APPLY_LOCK,
+      ...(step.chantLocks ? {} : APPLY_LOCK),
       ...(forge === "gitlab"
         ? {}
         : {
@@ -968,8 +1117,9 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
+    const { spec, jobs } = named(forge, wavesSpec(waves, variables(forge), envs.resume, step));
     const result = await generateOpWavesPipeline(
-      wavesSpec(waves, variables(forge), envs.resume),
+      spec,
       forge,
       {
         specFile: WAVES_SPEC,
@@ -984,10 +1134,10 @@ export async function applyPipelines(dir: string, envs: Environments): Promise<R
       const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
       // The resume workflow (GitHub, Forgejo) has no wave job to report on.
-      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), yaml) });
+      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), withBin(product, yaml)) });
       // The pull request workflow that records the plans a review approves (#48).
-      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, withPlansReaders(forge, yaml, waves, dialect, envs)) });
-      else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveReports(forge, yaml, waves, tc, envs)) });
+      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, withBin(product, withPlansReaders(forge, yaml, waves, dialect, envs))) });
+      else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveLines(forge, withBin(product, withWaveReports(forge, yaml, waves, tc, envs)), jobs)) });
     }
   }
   return out;
@@ -1146,6 +1296,56 @@ export async function withTenants(dir: string, waves: readonly Wave[]): Promise<
   return out;
 }
 
+// ── chant's product pipeline (#289) ─────────────────────────────────────────
+//
+// With a chant that has @intentius/chant/ci-product (chant#4550), the apply
+// waves come from chant's productPipelineJobs with yodel's words: the spec
+// under yodel's op and gate names (`yodel-apply`, `yodel-apply-wave-<k>`,
+// the names on the ledger since the waves began, so approvals already
+// recorded keep counting), and each job running `yodel chant` where chant's
+// own runs `chant`, so the job writes yodel's statuses and approve lines.
+// The forge lexicons serialize the jobs as before, and yodel adds its
+// reports, logins and readers to them as before. A chant without the entry
+// leaves every file as yodel rendered it before, so main stays green on its
+// published chant.
+//
+// Still yodel's own until chant can run them: the plan jobs (`yodel plan
+// <env> --comment` with the write probe) wait for the sql lexicon's
+// capability (chant#4569) and the note through chant's renderer (#290); the
+// lint job for the check hook (#294); the watch for chant#4582
+// ({@link watchPipelines}).
+
+/** The spec under yodel's words, and the wave jobs chant's product pipeline names for `forge`. */
+export function productWaves(product: ChantProduct, forge: Forge, spec: WavesSpec): { spec: WavesSpec; jobs: ProductWaveJob[] } {
+  const out = product.productPipelineJobs(forge, spec.waves[0]?.name ?? MAIN, { words: YODEL_WORDS, waves: spec, wavesSpecFile: WAVES_SPEC });
+  if (!out.waves) throw new Error(`${forge}: chant's product pipeline gave no apply waves`);
+  if (out.waves.specFile !== WAVES_SPEC) throw new Error(`${forge}: chant's product pipeline reads the waves from ${out.waves.specFile}, not ${WAVES_SPEC}`);
+  const named = out.waves.spec as WavesSpec;
+  if (named.name !== APPLY_PIPELINE) throw new Error(`${forge}: chant's product pipeline names the waves ${named.name}, and the ledger has them as ${APPLY_PIPELINE}`);
+  return { spec: named, jobs: out.waves.jobs };
+}
+
+/** A `chant` command line in a rendered file: a step's `run:` or a GitLab script line, never a comment. */
+const CHANT_LINE = /^(\s*(?:- )?(?:run: )?)(chant [a-z].*)$/gm;
+
+/** `yaml` with yodel's bin in each chant command line (#289), through chant's own productCommand; unchanged without `product`. */
+export function withBin(product: ChantProduct | undefined, yaml: string): string {
+  if (!product) return yaml;
+  const words = product.assertProductWords(YODEL_WORDS);
+  return yaml.replace(CHANT_LINE, (_m, lead: string, line: string) => `${lead}${product.productCommand(words, line)}`);
+}
+
+/** Refuses an apply file whose wave jobs do not run the line chant's product pipeline gives each of them. */
+function withWaveLines(forge: Forge, yaml: string, jobs: readonly ProductWaveJob[]): string {
+  for (const job of jobs) {
+    const line = job.command.join(" ");
+    if (!new RegExp(`^\\s*(?:- )?(?:run: )?${line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m").test(yaml)) {
+      throw new Error(`${forge}: wave job ${job.jobName} does not run ${line}, the line chant's product pipeline gives it`);
+    }
+  }
+  return yaml;
+}
+
 // ── The drift watch, through chant's generateOpsPipeline ────────────────────
 
 interface OpsPipelineResult {
@@ -1219,7 +1419,19 @@ function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "cre
   return emit(doc);
 }
 
-export async function watchPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
+/**
+ * The drift watches. With `product` (#289) each job runs `yodel chant run
+ * watch-<env>` where chant's runs `chant run watch-<env>`, so the Op's
+ * statuses and notices say yodel.
+ *
+ * The job stays chant's generateOpsPipeline and its last line stays `yodel
+ * drift <env> --issue`, which plans the build for ClickHouse grant drift
+ * (../chant/drift.ts `withClickHouseGrants`), since `chant lifecycle diff
+ * --live` leaves ClickHouse::Grant out. Once chant#4582 puts grants in the
+ * sql lexicon's live diff, the watch moves onto chant's drift job with
+ * `stages.drift` and the workaround goes.
+ */
+export async function watchPipelines(dir: string, envs_: Environments, product?: ChantProduct): Promise<RenderedFile[]> {
   const { dialect, names: envs } = envs_;
   const tc = toolchainOf(envs_);
   const { generateOpsPipeline } = (await import("@intentius/chant/op")) as unknown as {
@@ -1244,7 +1456,7 @@ export async function watchPipelines(dir: string, envs_: Environments): Promise<
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
       // A GitHub or Forgejo file is one environment's watch: its name is watch-<env>.yml.
       const env = file.name.replace(/^watch-|\.yml$/g, "");
-      out.push({ path: at, content: `${HEADER.join("\n")}\n${forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : withWatchLogin(forge, yaml, env, envs_)}` });
+      out.push({ path: at, content: `${HEADER.join("\n")}\n${withBin(product, forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : withWatchLogin(forge, yaml, env, envs_))}` });
     }
   };
   // `chant run` exits 0 when a watch finds drift; the last line, yodel drift, fails the job then.
@@ -1315,6 +1527,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.login ? { login: ci.login } : {}),
     ...(ci?.apply === false ? { apply: false as const } : {}),
     ...(check ? { check: true as const } : {}),
+    ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
   };
 }
 
@@ -1391,6 +1604,24 @@ export function review(envs: Environments): RenderedFile[] {
   return [actionsReview("github", envs), actionsReview("forgejo", envs), gitlabPipeline(envs)];
 }
 
+/**
+ * The workspace declaration with yodel's check presets in `ci.hooks.check`
+ * (#294), or undefined when the installed chant has no check moment or the
+ * project has no declaration. The hooks are one list for every forge: the
+ * lint and check presets print with `--format forge`, so a GitHub or
+ * Forgejo job annotates the files and a GitLab job writes the code quality
+ * report its artifact keeps.
+ */
+export async function checkHooksDeclaration(dir: string, envs_: Environments, declaration?: RenderedFile): Promise<RenderedFile | undefined> {
+  const chant = await chantCheckHooks();
+  const file = declarationFile(dir);
+  if (!chant) return undefined;
+  if (file) return { path: file, content: declarationWithHooks(chant, dir, file, checkHooksOf(envs_)) };
+  // A declaration `yodel upgrade` adds, rendered before it is written (#298).
+  if (declaration) return { path: declaration.path, content: declarationWithHooks(chant, dir, declaration.path, checkHooksOf(envs_), declaration.content) };
+  return undefined;
+}
+
 /** The forge a rendered file is for; undefined for the waves spec, which every forge's apply reads. */
 export function forgeOf(path: string): Forge | undefined {
   if (path.startsWith(".github/")) return "github";
@@ -1399,12 +1630,26 @@ export function forgeOf(path: string): Forge | undefined {
   return undefined;
 }
 
-export async function render(dir: string): Promise<RenderedFile[]> {
+/**
+ * Every file `yodel ci` writes. Through chant's product pipeline when the
+ * installed chant has it (#289), unless `options.product` is false, which
+ * renders with yodel's own generator as a chant before chant#4550 does.
+ * `options.declaration` is a workspace declaration to render the check
+ * hooks into when the project has none on disk: the one `yodel upgrade`
+ * adds (#298).
+ */
+export async function render(dir: string, options: { product?: boolean; declaration?: RenderedFile } = {}): Promise<RenderedFile[]> {
   const envs = await environments(dir);
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
+  const product = options.product === false ? undefined : await chantProduct();
+  // The cloud login through chant's ci-identity (#296), with the product pipeline, when chant and the sql lexicon have it.
+  useChantTrade(product ? await chantTrade() : undefined);
+  // The check on chant's check moment (#294), with the product pipeline, when chant has the moment and the project a declaration.
+  const hooks = product ? await checkHooksDeclaration(dir, envs, options.declaration) : undefined;
+  const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
-  const files = [...review(envs), ...(rendersApply(envs) ? await applyPipelines(dir, envs) : []), ...(await watchPipelines(dir, envs))];
+  const files = [...review(reviewed), ...(hooks ? [hooks] : []), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
   return files.filter((f) => {
     const forge = forgeOf(f.path);
     return forge === undefined || forges.includes(forge);

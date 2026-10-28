@@ -35,7 +35,7 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  *   environment's name) approves the wave's gate, and it applies. BREAK: the
  *   pipeline is rendered with `gate: never`, so the drop applies unapproved.
  * - promotion (#43): prod requires staging (the wave before, by default).
- *   prod's wave run on its own, and `yodel apply` of prod, refuse (exit 4,
+ *   prod's wave run on its own, and `yodel apply` of prod, refuse (exit 3,
  *   nothing applied) a migration staging has not applied; `yodel plan` of
  *   prod shows it has not run on staging; once staging has applied it, prod
  *   applies it. BREAK: the requirement is removed (`requires: false`), so the
@@ -360,7 +360,7 @@ async function promotion(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   hold(!(await st.columnOn("prod", "promo")), "prod applied a migration staging has not applied");
   hold(alone.code !== 0 && /refused: \S+ applies only migrations \S+ applied first/.test(`${alone.out}${alone.err}`), `prod's wave did not refuse a migration staging has not applied (exit ${String(alone.code)})`);
   const local = await st.p.yodel(["apply", st.envs.prod, "--json"], { timeoutMs: 600_000 });
-  hold(local.code === 4, `yodel apply ${st.envs.prod} did not refuse (exit 4) a migration staging has not applied (exit ${String(local.code)})`);
+  hold(local.code === 3, `yodel apply ${st.envs.prod} did not refuse (exit 3) a migration staging has not applied (exit ${String(local.code)})`);
   const plan = await st.p.yodel(["plan", st.envs.prod, "--json"]);
   const wave = (JSON.parse(plan.out.slice(plan.out.indexOf("{"))) as { wave?: { blocked?: boolean; promotions?: Array<{ env: string; migrations: Array<{ ran: string }> }> } }).wave;
   hold(wave?.blocked === true && wave.promotions?.[0]?.env === st.envs.staging && wave.promotions[0].migrations.some((m) => m.ran === "not applied"), "yodel plan of prod does not show the migration has not run on staging");

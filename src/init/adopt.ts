@@ -27,12 +27,12 @@
  */
 
 import { join, relative } from "node:path";
-import { loadProject, YodelError, type Environment, type Project } from "../project.js";
+import { loadProject, YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, renderPlan, type Plan } from "../chant/plan.js";
 import { createMigration, MIGRATIONS_DIR, writeMigration, type Migration } from "../migrations/index.js";
 import { environmentSettings } from "../config/settings.js";
-import { closeVersioned, hasMigrations, openVersioned, REFUSED, type VersionedEnv } from "../versioned/index.js";
+import { closeVersioned, hasMigrations, openVersioned, type VersionedEnv } from "../versioned/index.js";
 import type { HistoryRow } from "../history/index.js";
 import { BASELINE_NAME, checkHistoryEmpty, recordBaseline } from "./baseline.js";
 import { declarationFiles, Journal } from "./files.js";
@@ -74,34 +74,30 @@ export const schemaDir = (project: Project): string => join(project.dir, project
 /** The refusals that need no server: a schema already declared, migrations already there, a ClickHouse scope that would take in the history. */
 export function preflight(project: Project, env: Environment, options: { force?: boolean; processEnv?: NodeJS.ProcessEnv } = {}): void {
   if (hasMigrations(project)) {
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: ${join(project.dir, MIGRATIONS_DIR)} already holds migrations; init writes the first one (the baseline), so it adopts a database only in a project with none. Nothing was written.`,
-      REFUSED,
     );
   }
   const dir = schemaDir(project);
   const existing = declarationFiles(dir);
   if (existing.length > 0 && !options.force) {
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: ${relative(project.dir, dir) || "."} already declares a schema (${existing.slice(0, 3).join(", ")}${existing.length > 3 ? ", ..." : ""}); ` +
         `init writes the declarations from the live database there. Pass --force to overwrite (files the import does not write are kept, and are built with it). Nothing was written.`,
-      REFUSED,
     );
   }
   const { historyDatabase } = environmentSettings(project, env.name, options.processEnv);
   const [key, what] = project.dialect === "postgres" ? (["schemas", "schema"] as const) : (["databases", "database"] as const);
   const scope = project.dialect === "postgres" ? env.profile.schemas : env.profile.databases;
   if (!scope || scope.length === 0) {
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: sql.profiles.${env.name} names no ${key}, so the import would read every ${what} on the server, the history's (${historyDatabase}) included. ` +
         `List the ${key} this project owns in sql.profiles.${env.name}.${key}. Nothing was written.`,
-      REFUSED,
     );
   }
   if (scope.includes(historyDatabase)) {
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: sql.profiles.${env.name}.${key} includes ${historyDatabase}, the history's ${what} (yodel.config.ts environments.${env.name}.history.database, else YODEL_HISTORY_DATABASE); the history is yodel's, never part of the declared schema. Nothing was written.`,
-      REFUSED,
     );
   }
 }
@@ -118,12 +114,11 @@ const planIsEmpty = (plan: Plan, leftOut: readonly string[] = []): boolean =>
 /** The refusal for objects of kinds the lexicon cannot declare (#251), or `undefined` when there are none or `skip` adopts the rest. */
 export function unsupportedRefusal(environment: string, unsupported: readonly string[], skip: boolean): YodelError | undefined {
   if (unsupported.length === 0 || skip) return undefined;
-  return new YodelError(
+  return yodelRefusal(
     `refused: ${environment} holds ${String(unsupported.length)} object${unsupported.length === 1 ? "" : "s"} of a kind chant's sql lexicon cannot declare:\n` +
       unsupported.map((u) => `  ${u}`).join("\n") +
       `\nAdopting without them would leave them out of the declared schema, and drift would never report them. ` +
       `Pass --skip-unsupported to adopt the rest and record these in the baseline's note. Nothing was written.`,
-    REFUSED,
   );
 }
 
@@ -157,7 +152,7 @@ async function adoptWith(project: Project, env: Environment, venv: VersionedEnv,
     live = await importLive(project, env, processEnv, true);
   }
   if (live.ir.resources.length === 0) {
-    throw new YodelError(`refused: ${env.name} holds no objects in its scope (sql.profiles.${env.name}); there is nothing to adopt. Declare a schema and run yodel new instead. Nothing was written.`, REFUSED);
+    throw yodelRefusal(`refused: ${env.name} holds no objects in its scope (sql.profiles.${env.name}); there is nothing to adopt. Declare a schema and run yodel new instead. Nothing was written.`);
   }
   const objects = [...describeImported(live.ir), ...(live.access ?? [])];
   log(`read ${String(objects.length)} object(s) from ${env.name}`);

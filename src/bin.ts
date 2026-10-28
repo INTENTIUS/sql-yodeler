@@ -27,3 +27,11 @@ const code = await main(process.argv.slice(2), {
     : {}),
 });
 process.exitCode = code;
+// `yodel chant <args>` runs chant in this process (#287), as a CI job's line
+// (#289). chant's own bin exits once its output is flushed, whatever handles
+// its command left open, so a job never waits on one; this does the same.
+if (process.argv.slice(2).find((a) => !a.startsWith("-")) === "chant") {
+  await new Promise<void>((done) => process.stdout.write("", () => { done(); }));
+  await new Promise<void>((done) => process.stderr.write("", () => { done(); }));
+  process.exit(code);
+}

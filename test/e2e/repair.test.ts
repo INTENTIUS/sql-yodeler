@@ -78,16 +78,16 @@ describe.skipIf(!clickhouseReachable)("yodel repair and rebase on clickhouse", (
     expect((await status(0)).applied.map((a) => a.id)).toEqual([one.id]);
 
     const notNeeded = await yodel(at("repair", one.id, "--reason", "nothing changed", "e2e"));
-    expect(notNeeded.code).toBe(4);
+    expect(notNeeded.code).toBe(1);
     expect(notNeeded.err).toContain("already hash to the checksum");
 
     // The intended edit: a comment in migration.sql, as a server upgrade's reformat would be.
     appendFileSync(join(one.dir, "migration.sql"), "-- reviewed after the 26.8 upgrade\n");
     const edited = computeChecksum({ sql: readFileSync(join(one.dir, "migration.sql"), "utf8"), json: readFileSync(join(one.dir, "migration.json"), "utf8") });
-    const mismatch = await status(4);
+    const mismatch = await status(1);
     expect(mismatch.mismatches).toMatchObject([{ kind: "applied", id: one.id, recorded: one.checksum, actual: edited }]);
     const refused = await yodel(at("apply", "e2e"));
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain("yodel repair");
 
     const noReason = await yodel(at("repair", one.id, "e2e"));
@@ -109,9 +109,9 @@ describe.skipIf(!clickhouseReachable)("yodel repair and rebase on clickhouse", (
     expect(row).toEqual({ checksum: edited, status: "succeeded", note: reason });
 
     const again = await yodel(at("repair", one.id, "--reason", reason, "e2e"));
-    expect(again.code).toBe(4);
+    expect(again.code).toBe(1);
     const pending = await yodel(at("repair", "20261009T1159-nope", "--reason", reason, "e2e"));
-    expect(pending.code).toBe(4);
+    expect(pending.code).toBe(1);
     expect(pending.err).toContain("not in the migrations directory");
   }, 300_000);
 
@@ -124,7 +124,7 @@ describe.skipIf(!clickhouseReachable)("yodel repair and rebase on clickhouse", (
         `SELECT max(seq) + 1, 'e2e', 'migration', '${newer.id}', '${one.id}', '${newer.checksum}', -1, 'succeeded', 'e2e', '' FROM ${HISTORY}.history`,
     );
     const refused = await yodel(at("rebase", "--env", "e2e"));
-    expect(refused.code).toBe(4);
+    expect(refused.code).toBe(1);
     expect(refused.err).toContain(`e2e's history records ${newer.id} (applied)`);
 
     const other = await yodel(at("rebase", older.id, "--env", "e2e", "--json"));

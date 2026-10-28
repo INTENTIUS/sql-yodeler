@@ -5,6 +5,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, YodelError } from "../project.js";
 import { YodelMcpServer } from "../mcp/server.js";
 import { yodelTools } from "../mcp/tools.js";
+import { serveOnChant } from "../mcp/chant-hook.js";
 
 const usage = "usage: yodel mcp [--dir <project>]";
 
@@ -20,6 +21,12 @@ person's to run: the approve command, and an override for a denied policy rule.
 
 Start it with the reader's credentials in the environment, the ones
 yodel plan uses; the tools read the servers chant.config.ts names.
+
+With a chant that has the product tool hook (chant#4555), the tools are
+served on chant's own read-only server, chant serve mcp --read-only, as
+yodel:status, yodel:plan, yodel:lint, yodel:drift, yodel:history and
+yodel:explain, beside chant's reads of the ledger and the workspace graph.
+YODEL_OWN_MCP=1 serves yodel's own server instead.
 
 Options:
   -C, --dir <dir>  the project directory (default: the working directory)
@@ -45,6 +52,12 @@ export const mcp: Command = {
       }
       // Refuse to start outside a project, rather than answer every call with the same error.
       dir = (await loadProject(dir)).dir;
+      // On chant's read-only server through the product tool hook (#297, chant#4555), when chant has it.
+      if (process.env.YODEL_OWN_MCP !== "1") {
+        io.err(`yodel mcp: serving yodel's tools on chant serve mcp --read-only for ${dir} on stdio\n`);
+        const served = await serveOnChant(dir);
+        if (served !== undefined) return served;
+      }
       const server = new YodelMcpServer(yodelTools(dir));
       io.err(`yodel mcp: serving ${server.list().map((t) => t.name).join(", ")} for ${dir} on stdio\n`);
       await server.serve();

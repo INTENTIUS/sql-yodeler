@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
-import { LOCKED, MIGRATION_ROW, type HistoryRow } from "../src/history/index.js";
+import { MIGRATION_ROW, type HistoryRow } from "../src/history/index.js";
 import { acquireAdvisoryLock, insertRows, LOCK_CLASS, lockKeys, pgHistoryDdl, PostgresHistoryStore } from "../src/history/postgres/index.js";
 import { concurrentIndex, DEFAULT_PG_TIMEOUTS, PgStatementError, pgCatalogFingerprint, pgSettings, runPgStatement, type PgStatementOptions } from "../src/versioned/postgres/index.js";
 import { classifySteps, closeVersioned, currentDigest, executeApply, inspect, openVersioned, selectToApply, statusReport, type VersionedEnv } from "../src/versioned/index.js";
@@ -16,6 +16,7 @@ import { renderPlanMarkdown, renderPlanText } from "../src/pr/render.js";
 import { pgMigrationOpConfig, planStep, runPgMigration, STEP_RETAIN } from "../src/steps/index.js";
 import { FakePgServer } from "./helpers/fake-postgres.js";
 import { migration } from "./helpers/fake-clickhouse.js";
+import { EXIT_HELD } from "../src/exit.js";
 
 const SCHEMA = "yodel_13_history";
 
@@ -81,7 +82,7 @@ describe("the advisory lock", () => {
 
     const conn = await server.connect();
     const refused = acquireAdvisoryLock(conn, { schema: SCHEMA, holder: "bob@laptop" });
-    await expect(refused).rejects.toMatchObject({ exitCode: LOCKED, name: "LockHeldError" });
+    await expect(refused).rejects.toMatchObject({ exitCode: EXIT_HELD, name: "LockHeldError" });
     await expect(refused).rejects.toThrow(/yodel apply alice@ci#.*pid 100.*pg_terminate_backend\(100\)/);
     expect(conn.ended).toBe(true);
 
@@ -103,7 +104,7 @@ describe("the advisory lock", () => {
     const conn = await server.connect();
     const lock = await acquireAdvisoryLock(conn, { schema: SCHEMA, holder: "x" });
     await conn.end();
-    await expect(lock.heartbeat()).rejects.toMatchObject({ exitCode: LOCKED, name: "LockLostError" });
+    await expect(lock.heartbeat()).rejects.toMatchObject({ exitCode: EXIT_HELD, name: "LockLostError" });
   });
 });
 
@@ -368,7 +369,7 @@ describe("executeApply on Postgres", () => {
   it("refuses with exit 5 while another session holds the lock", async () => {
     const { server, venv } = await setup();
     const other = await acquireAdvisoryLock(await server.connect(), { schema: SCHEMA, holder: "someone" });
-    await expect(apply(venv, [m1])).rejects.toMatchObject({ exitCode: LOCKED });
+    await expect(apply(venv, [m1])).rejects.toMatchObject({ exitCode: EXIT_HELD });
     expect(server.sent).toEqual([]);
     await other.release();
     await closeVersioned(venv);

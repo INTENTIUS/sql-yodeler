@@ -4,7 +4,7 @@ import { environmentSettings } from "../config/settings.js";
 import { CONFIG_FILE } from "../config/load.js";
 import { credentialsOf, describePassword, roleOf, roleSetting, ROLE_VAR, ROLES, type Credentials, type Role } from "../credentials.js";
 import { guarded } from "../env-args.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_FAILED } from "../exit.js";
 import { writeProbe, type ProbeResult } from "../probe.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
 import { serverAddress } from "../server.js";
@@ -21,13 +21,13 @@ the topology, and the lock's TTL and wait. Every environment, or the ones
 named. Never prints a password.
 
 A profile made with credentials() in chant.config.ts carries a reader and a
-writer. Every yodel command refuses the project, exit 4, when an
+writer. Every yodel command refuses the project, exit 1, when an
 environment's reader and writer read their user or password from the same
 variable, or their users are the same name.
 
 Options:
   --write-probe    try a write in each environment with the credentials this
-                   process holds, and exit 4 when the server lets one
+                   process holds, and exit 1 when the server lets one
                    through: run in a pull request job, it shows the job
                    holds no writer. The write is rolled back (Postgres) or
                    dropped at once (ClickHouse).
@@ -35,10 +35,10 @@ Options:
 
 Exit codes:
   0  printed; with --write-probe, no environment let the write through
-  4  refused: an environment's reader and writer are one identity, or with
-     --write-probe, a write went through
-  1  an error: a bad config, an unknown environment, a server that does not
-     answer, or a probe that could not tell
+  1  refused: an environment's reader and writer are one identity, or with
+     --write-probe, a write went through; or an error: a bad config, an
+     unknown environment, a server that does not answer, or a probe that
+     could not tell
 `;
 
 interface RoleView {
@@ -143,7 +143,7 @@ async function check(args: string[], io: Io): Promise<number> {
   for (const v of wrote) {
     io.err(`yodel config: refused: ${v.environment}: the credentials this process holds can write (${v.probe?.detail ?? ""}). A pull request job must hold the reader only: check which secrets it maps, and the reader's grants.\n`);
   }
-  return EXIT_REFUSED;
+  return EXIT_FAILED;
 }
 
 /** `yodel config check`; the exit codes are in `help`. */

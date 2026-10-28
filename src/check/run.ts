@@ -14,7 +14,7 @@
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
-import { YodelError, type Environment, type Project } from "../project.js";
+import { YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import { buildSchema, type BuildOutput } from "../chant/build.js";
 import { importLive } from "../init/live.js";
 import { createMigration, writeMigration, type Migration } from "../migrations/index.js";
@@ -162,7 +162,7 @@ export async function runCheck(project: Project, env: Environment, server: Check
   const processEnv = options.processEnv ?? process.env;
   const occupied = await server.occupied();
   if (occupied.length > 0 && !options.reset) {
-    throw new YodelError(`${server.where} already holds ${occupied.join(", ")}; yodel check replays into an empty scope (a throwaway server). Pass --reset to empty it first, never on a server whose data matters`, 4);
+    throw yodelRefusal(`${server.where} already holds ${occupied.join(", ")}; yodel check replays into an empty scope (a throwaway server). Pass --reset to empty it first, never on a server whose data matters`);
   }
   await server.clear();
   const work = mkdtempSync(join(project.dir, ".yodel-check-migrations-"));

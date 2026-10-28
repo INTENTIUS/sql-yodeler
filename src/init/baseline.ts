@@ -21,10 +21,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { YodelError } from "../project.js";
+import { YodelError, yodelRefusal } from "../project.js";
 import type { Migration } from "../migrations/index.js";
 import { appliedBy, MIGRATION_ROW, withLock, type HistoryRow } from "../history/index.js";
-import { REFUSED, type VersionedEnv } from "../versioned/index.js";
+import { type VersionedEnv } from "../versioned/index.js";
 
 /** The baseline migration's name: its id is `<YYYYMMDDTHHMM>-baseline`. */
 export const BASELINE_NAME = "baseline";
@@ -65,10 +65,9 @@ export function baselineRow(m: Pick<Migration, "id" | "parent" | "checksum">, in
 export function historyRefusal(state: { migrations: readonly { id: string }[] }, location: string): YodelError | undefined {
   if (state.migrations.length === 0) return undefined;
   const ids = state.migrations.map((m) => m.id);
-  return new YodelError(
+  return yodelRefusal(
     `refused: the history (${location}) already records ${ids.length === 1 ? "a migration" : `${String(ids.length)} migrations`} (${ids.slice(0, 3).join(", ")}${ids.length > 3 ? ", ..." : ""}); ` +
       `this environment is already under versioned migrations, so there is nothing to adopt. Nothing was written.`,
-    REFUSED,
   );
 }
 

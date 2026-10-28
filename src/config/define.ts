@@ -153,7 +153,7 @@ export interface ApplyStep {
   expect?: "empty" | "true" | { min?: number; max?: number };
   command?: string;
   /**
-   * A failing `before` step: `fail` (the default) refuses the apply, exit 4;
+   * A failing `before` step: `fail` (the default) refuses the apply, exit 1;
    * `approve` holds the environment's wave for a person instead, whatever
    * its gate, until someone approves the plan with the step failing. An
    * `after` step that fails fails the run (exit 1); the migrations stay
@@ -212,7 +212,7 @@ export interface WaveConfig {
   gate?: WaveGate;
   /**
    * The environment that must have applied a migration first: `yodel
-   * apply <env>` reads its history (with its reader) and refuses, exit 4,
+   * apply <env>` reads its history (with its reader) and refuses, exit 3,
    * any pending migration it does not record as applied with the same
    * checksum. Default: the wave before this one; `false` for none. Both
    * the working tree's and the base commit's requirement are enforced, so a
@@ -291,7 +291,22 @@ export interface CiConfig {
    * or with `resume`: both need the apply pipeline.
    */
   apply?: boolean;
+  /**
+   * The SQL tools the team already runs on migrations, run in the pull
+   * request's check beside yodel's own checks (#294), off unless named:
+   * `squawk` (Postgres only) lints each `migrations/<id>/migration.sql`,
+   * `sqlfluff` lints `migrations/` in the project's dialect. Each must be
+   * installed where the check job runs. They run as hooks on chant's check
+   * moment (`ci.hooks.check` in chant.workspace.json), which `yodel ci`
+   * writes when the installed chant has it; without it they do not run.
+   */
+  tools?: CheckTool[];
 }
+
+/** A SQL tool yodel ships a check preset for (#294). */
+export type CheckTool = "squawk" | "sqlfluff";
+
+export const CHECK_TOOLS: readonly CheckTool[] = ["squawk", "sqlfluff"];
 
 /**
  * How a CI job exchanges its OIDC token for a cloud login (#132). On GitHub
@@ -330,6 +345,12 @@ export interface AwsLogin {
   tokenFile?: string;
   /** `AWS_ROLE_SESSION_NAME`. Default: `yodel`. */
   sessionName?: string;
+  /**
+   * The region the role is assumed in, and `AWS_REGION` after a login
+   * through chant's ci-identity (#296), which an `rds-iam` token is signed
+   * for unless the token source names its own. Default `us-east-1`.
+   */
+  region?: string;
 }
 
 export interface GcpLogin {
@@ -395,7 +416,7 @@ export interface CheckConfig {
 
 /**
  * Rules over the versioned plan (#53). `yodel plan` shows each rule's
- * outcome, and `yodel apply` refuses (exit 4) a plan a rule denies, unless
+ * outcome, and `yodel apply` refuses (exit 7) a plan a rule denies, unless
  * someone {@link PolicyConfig.overriders} lists recorded an override of the
  * rules that deny it for exactly that plan digest (`yodel override <env>
  * --rule <id> --reason <text>`, through chant's override gate).

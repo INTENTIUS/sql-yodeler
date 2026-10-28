@@ -68,7 +68,7 @@ export async function forkPart(ctx: Ctx, s: Lint): Promise<void> {
   const ran = await p.yodel(["lint", "--json"], {
     env: { YODEL_CLAIMS_CLICKHOUSE_URL: "http://127.0.0.1:9", YODEL_CLAIMS_POSTGRES_URL: "postgres://127.0.0.1:9/postgres" },
   });
-  hold(ran.code === 3, `yodel lint exited ${String(ran.code)}, not 3, on a directory with a fork`);
+  hold(ran.code === 1, `yodel lint exited ${String(ran.code)}, not 1, on a directory with a fork`);
   const doc = JSON.stringify(parse<unknown>(ran));
   hold(doc.includes("fork") && doc.includes(a) && doc.includes(b), "yodel lint's findings do not name the fork and both its migrations");
   hold(!(await ctx.db.tableExists(ctx.dialect === "ch" ? "events" : "orders")), "lint changed the server");
@@ -155,7 +155,7 @@ export const op = Op({
  * the column is gone, yodel status shows the migration pending and
  * reverted, and yodel drift finds the environment at its parent's recorded
  * schema, the checkpoint's. Reverting the checkpoint itself, or a migration
- * before it (which this environment never ran), is refused (exit 4),
+ * before it (which this environment never ran), is refused (exit 1),
  * naming the checkpoint.
  * BREAK: the hand-written revert step is left out, so the data step cannot
  * be undone and the revert refuses.
@@ -196,7 +196,7 @@ export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
   // The checkpoint is now the newest migration applied here, and the one before it never ran: neither can be reverted.
   for (const target of [cp, before]) {
     const refused = await p.yodel(["revert", p.env, target, "--dry-run"]);
-    hold(refused.code === 4 && refused.err.includes(cp), `yodel revert ${target} exited ${String(refused.code)}, not 4 naming the checkpoint ${cp}: ${refused.err.slice(0, 300)}`);
+    hold(refused.code === 1 && refused.err.includes(cp), `yodel revert ${target} exited ${String(refused.code)}, not 1 naming the checkpoint ${cp}: ${refused.err.slice(0, 300)}`);
   }
 }
 
@@ -252,7 +252,7 @@ interface TestDoc {
  * newest schema); and a case that says label stays empty, which must fail.
  * yodel test exits 3 with exactly that case failed, writes the JUnit file
  * with one failure, and leaves no database behind. Then, with the
- * migrations applied to the environment, yodel test refuses it (exit 4),
+ * migrations applied to the environment, yodel test refuses it (exit 1),
  * since it has a history, and the table stays.
  *
  * On ClickHouse the chain ends with a sort-key change, a ClickHouseRebuildOp
@@ -328,14 +328,14 @@ export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
     hold(written === 0, `yodel test wrote ${String(written)} rebuild receipt(s) to the server's chant_receipts.receipts, where the cases share them`);
   }
   const wrong = by.get("label stays empty after the migration");
-  hold(ran.code === 3 && wrong?.status === "failed" && doc.summary?.failed === 1, `yodel test exited ${String(ran.code)} and the case that says label stays empty ${String(wrong?.status)}: an assertion that should fail held`);
+  hold(ran.code === 1 && wrong?.status === "failed" && doc.summary?.failed === 1, `yodel test exited ${String(ran.code)} and the case that says label stays empty ${String(wrong?.status)}: an assertion that should fail held`);
   hold(readFileSync(junit, "utf8").includes('failures="1"'), `${junit} does not record the one failure`);
   hold(!(await ctx.db.tableExists(mainTable(ctx))), `yodel test left ${db}.${mainTable(ctx)} on the server`);
 
   // An environment yodel applies to is never a test target.
   await p.setupApply();
   const refused = await p.yodel(["test", "--env", p.env, "--reset"]);
-  hold(refused.code === 4 && /has a migration history/.test(refused.err), `yodel test on an environment with a history exited ${String(refused.code)}, not 4: ${refused.err.slice(-300)}`);
+  hold(refused.code === 1 && /has a migration history/.test(refused.err), `yodel test on an environment with a history exited ${String(refused.code)}, not 1: ${refused.err.slice(-300)}`);
   hold(await ctx.db.tableExists(mainTable(ctx)), `yodel test emptied ${p.env}, an environment yodel applied to`);
 }
 
@@ -345,7 +345,7 @@ export async function testPart(ctx: Ctx, s: Lint): Promise<void> {
  * statuses, and the declaration gains a unique index on status. yodel new
  * writes the index's build with chant's pre-check (the count of status
  * values held by more than one row) on its step. yodel apply runs that
- * pre-check before the gate and refuses (exit 4), naming the statement and
+ * pre-check before the gate and refuses (exit 1), naming the statement and
  * the count, 2; the index is not built and the history has no row of the
  * migration. yodel lint flags the statement (data-dependent) with its
  * pre-check.
@@ -380,8 +380,8 @@ export async function dataDependentPart(ctx: Ctx, s: Lint): Promise<void> {
 
   const ran = await p.yodel(["apply", p.env], { timeoutMs: 600_000 });
   hold(
-    ran.code === 4 && ran.err.includes(`step ${String(at)}, CREATE UNIQUE INDEX`) && ran.err.includes("orders_status_key") && /would fail: 2 values of \(status\)/.test(ran.err),
-    `yodel apply exited ${String(ran.code)}, not 4 naming the unique index's statement and its 2 duplicated values: ${ran.err.split("\n").filter((l) => l.startsWith("yodel apply") || l.startsWith("  ")).join(" ").slice(0, 400)}`,
+    ran.code === 1 && ran.err.includes(`step ${String(at)}, CREATE UNIQUE INDEX`) && ran.err.includes("orders_status_key") && /would fail: 2 values of \(status\)/.test(ran.err),
+    `yodel apply exited ${String(ran.code)}, not 1 naming the unique index's statement and its 2 duplicated values: ${ran.err.split("\n").filter((l) => l.startsWith("yodel apply") || l.startsWith("  ")).join(" ").slice(0, 400)}`,
   );
   hold((await ctx.db.count(`SELECT count(*) FROM pg_indexes WHERE schemaname = '${db}' AND indexname = 'orders_status_key'`)) === 0, "the unique index was built, or left behind invalid");
   hold((await ctx.db.count(`SELECT count(*) FROM ${ctx.db.history}.history WHERE migration_id = '${id}'`)) === 0, `the history has a row of ${id}: something of it ran`);
@@ -408,7 +408,7 @@ async function body(ctx: Ctx): Promise<void> {
 
 export const lintClaim: Claim = {
   name: "lint",
-  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 3), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 4, naming the statement and the count), and yodel lint flags it as data-dependent",
+  says: "yodel lint --replay replays the migrations into a fresh database and each gives the schema it recorded; offline, yodel lint fails a migrations directory with a fork (exit 1), naming both migrations; a checkpoint replays alone to its recorded schema, and a fresh environment starts from it; yodel revert undoes the newest migration behind the gate, with a hand-written step for its data step, back to its parent's recorded schema, and refuses a checkpoint or a migration before one; yodel test runs a project's tests on databases replayed from the migrations, a seed meeting the backfill after it, fails a case whose assertion does not hold, and refuses an environment with a history; on Postgres, a unique index over rows with duplicates is refused before the gate by its generated pre-check (exit 1, naming the statement and the count), and yodel lint flags it as data-dependent",
   dialects: { ch: body, pg: body },
   parts: partNames(parts),
   partDialects: partDialects(parts),

@@ -14,6 +14,7 @@ import { opExportName } from "./export-name.js";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { approveCommand, type ApprovalMode } from "../approval-mode/index.js";
 import { runChant } from "./process.js";
+import { EXIT_WAITING } from "../exit.js";
 
 /** The ApplyOp yodel runs for an environment. */
 export interface ApplyOpRef {
@@ -122,8 +123,6 @@ export async function findApplyOp(project: Project, env: Environment, name?: str
   return selectApplyOp(found.ops, project, env, name);
 }
 
-/** `chant run`'s exit code for a run that stopped at its gate. */
-export const GATED = 3;
 
 export type ApplyRunStatus = "applied" | "gated" | "failed";
 
@@ -143,7 +142,7 @@ export interface ApplyRun {
 
 /** What a `chant run` of an ApplyOp says about its outcome. */
 export function readApplyRun(code: number, output: string): ApplyRun {
-  const status: ApplyRunStatus = code === 0 ? "applied" : code === GATED ? "gated" : "failed";
+  const status: ApplyRunStatus = code === 0 ? "applied" : code === EXIT_WAITING ? "gated" : "failed";
   const chantApprove = /^\s*approve\s*:\s*(chant approve .+?)\s*$/m.exec(output)?.[1];
   const planDigest = /^\s*plan\s*:\s*(\S+)\s*$/m.exec(output)?.[1];
   // chant's renderHuman (op/local-output.ts:33 in 0.124.46) opens a resumed run with this line.
@@ -171,7 +170,7 @@ export function gatedCommands(run: Pick<ApplyRun, "chantApprove" | "planDigest">
 
 /** Runs the ApplyOp with `chant run <op>`, its output passed to `onOutput` as it arrives. */
 export async function runApplyOp(project: Project, op: ApplyOpRef, options: { env?: NodeJS.ProcessEnv; onOutput?: (text: string) => void } = {}): Promise<ApplyRun> {
-  const result = await runChant(["run", op.name, "--gated-exit", String(GATED)], {
+  const result = await runChant(["run", op.name, "--gated-exit", String(EXIT_WAITING)], {
     cwd: project.dir,
     ...(options.env ? { env: options.env } : {}),
     ...(options.onOutput ? { onStdout: options.onOutput, onStderr: options.onOutput } : {}),

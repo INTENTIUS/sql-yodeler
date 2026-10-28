@@ -109,7 +109,7 @@ The main difference in day-to-day work: yodel writes the schema's SQL. You chang
 | `flyway validate` | `yodel status` and `yodel apply` check every applied migration's files against the checksum recorded when it ran, and refuse on a mismatch; `yodel lint` checks each migration's own `checksum` field. |
 | `flyway repair` | `yodel repair <env> <id> --reason "<text>"` records a new checksum for an applied migration whose files were edited on purpose, with the reason. Nothing runs on the server. It does not clear failures: a failed migration resumes instead. |
 | `baseline`, `baselineOnMigrate` | `yodel init --from <env>`: reads the live database into declarations, writes a baseline migration whose statements create all of it, and records it applied without running it. See [Adopting it](#adopting-the-database). |
-| `outOfOrder=true`, goose's `--allow-missing` | `yodel apply <env> --allow-out-of-order`, for one run. Without it, a pending migration the chain puts before an applied one is refused (exit 4), never skipped. See [Out-of-order migrations](migrations.md#out-of-order-migrations). |
+| `outOfOrder=true`, goose's `--allow-missing` | `yodel apply <env> --allow-out-of-order`, for one run. Without it, a pending migration the chain puts before an applied one is refused (exit 1), never skipped. See [Out-of-order migrations](migrations.md#out-of-order-migrations). |
 | Flyway's repeatable migrations (`R__`) for views and functions | Views, functions, procedures and triggers are declared in `src/` like tables. A changed body becomes a `CREATE OR REPLACE` in the next migration ([Postgres objects](workflows.md#postgres-objects)). |
 | goose's Go migrations, Flyway's Java migrations: code that moves data | Steps inside a migration: a backfill (`yodel new <name> --backfill <file>`), a ClickHouse rebuild, a Postgres expand-and-contract change. They resume from their receipts. See [Data migrations](steps.md). |
 | Flyway callbacks (`beforeMigrate`, `afterMigrate`) | `environments.<env>.steps` in `yodel.config.ts`: read-only checks and commands before and after each apply ([Steps around apply](approval.md#steps-around-apply-checks-before-and-after)). |
@@ -194,8 +194,8 @@ A revert carries the schema back, not the data. A dropped column comes back empt
 
 ### When a hand-written step is needed
 
-- The migration has a data step (a backfill). The revert is refused (exit 2) until `--step <file>` names SQL that undoes the data step; it runs before the reverse statements and is part of the digest.
-- The reverse would need an Op or a manual step (a ClickHouse sort key changed back, a Postgres column renamed back). The revert is refused (exit 2). Write the change back as a new migration: edit `src/`, then `yodel new <name>`.
+- The migration has a data step (a backfill). The revert is refused (exit 3) until `--step <file>` names SQL that undoes the data step; it runs before the reverse statements and is part of the digest.
+- The reverse would need an Op or a manual step (a ClickHouse sort key changed back, a Postgres column renamed back). The revert is refused (exit 3). Write the change back as a new migration: edit `src/`, then `yodel new <name>`.
 - The migration is not the newest applied one, or other environments have moved on from it. Roll forward the same way: a new migration that undoes it.
 
 ### A migration that failed part way

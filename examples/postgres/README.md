@@ -387,7 +387,7 @@ $ npx yodel apply dev
 yodel apply: refused: a pre-migration check of 20261010T1723-coupons failed before the gate. Nothing of 20261010T1723-coupons was applied:
   step 1, ALTER TABLE shop.orders ADD CONSTRAINT orders_amount_positive CHECK (amount > 0) NOT VALID, would fail: 1 rows that fail the check orders_amount_positive (amount > 0) (pre-check precheck-1: SELECT count(*) AS n FROM shop.orders WHERE NOT (amount > 0))
 Fix the data, then run yodel apply again; if the check is wrong, edit it in migration.json and run yodel lint --update-checksum 20261010T1723-coupons (the plan digest moves, so the plan is approved again). A statement's pre-check is chant's count of the rows the statement fails on: fix those rows, or change the declaration.
-[exit 4]
+[exit 1]
 ```
 
 Fix the data, and apply:
@@ -987,7 +987,7 @@ A statement rule can be silenced for one statement, with a reason the history re
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
 5 migrations: 1 error, 3 warnings, 0 silenced.
-[exit 3]
+[exit 1]
 ```
 
 Nothing ever wrote a coupon. Say so above the statement:
@@ -1208,7 +1208,7 @@ A statement rule can be silenced for one statement, with a reason the history re
   a line `-- yodel:allow <rule> <reason>` above the statement in migration.sql
 
 6 migrations: 1 error, 3 warnings, 1 silenced.
-[exit 3]
+[exit 1]
 ```
 
 ```console
@@ -1397,7 +1397,7 @@ migrations/
   warning  SQLPG112: step 0: orders.email looks like a secret or personal data and neither it nor shop.orders has a COMMENT; say what it holds and how it is protected
 
 7 migrations: 1 error, 3 warnings, 1 silenced.
-[exit 3]
+[exit 1]
 ```
 
 `yodel rebase` moves one migration onto the other and writes its statements and recorded schema again. With `--env dev` it reads dev's history first, and refuses to move a migration that ran there:
@@ -1406,7 +1406,7 @@ migrations/
 ```console
 $ npx yodel rebase 20261010T1725-index-placed-at --onto 20261010T1725-add-gift --env dev
 yodel rebase: refused: dev's history records 20261010T1725-index-placed-at (applied). Nothing was written. A migration that ran is never rebased: its statements already ran in that order. Rebase the other branch onto it instead (yodel rebase <the other> --onto <the end of this one>).
-[exit 4]
+[exit 1]
 ```
 
 The clean fix is the one it names: move `add-gift` after `index-placed-at`. To show what yodel does when a migration that ran is moved anyway (a rebase run without `--env`), this walkthrough moves `index-placed-at`:
@@ -1440,7 +1440,7 @@ Out of order (1): 20261010T1725-add-gift; apply with --allow-out-of-order
 
 Checksum mismatches (1):
   20261010T1725-index-placed-at was applied with checksum sha256:8b0a50449f82a2bc1c63fb8c868eb6968dba13b9ab5b02ccc43c8fd231659117, but its files now hash to sha256:6be6d45f55c4fa14ed67b2b22471f217f92ba3115bcc5c10fa154c99ef1a281f; if the edit is intended, record it with yodel repair 20261010T1725-index-placed-at --reason ... <env>
-[exit 4]
+[exit 1]
 ```
 
 <!-- quote: postgres#checksum-refused -->
@@ -1448,7 +1448,7 @@ Checksum mismatches (1):
 $ npx yodel apply dev
 yodel apply: refused: the history does not match the migrations directory; nothing was applied:
   20261010T1725-index-placed-at was applied with checksum sha256:8b0a50449f82a2bc1c63fb8c868eb6968dba13b9ab5b02ccc43c8fd231659117, but its files now hash to sha256:6be6d45f55c4fa14ed67b2b22471f217f92ba3115bcc5c10fa154c99ef1a281f; if the edit is intended, record it with yodel repair 20261010T1725-index-placed-at --reason ... <env>
-[exit 4]
+[exit 1]
 ```
 
 The edit is intended: its statements are the same, only its parent changed. `yodel repair` records the new checksum, with the reason, in dev's history. Nothing runs on the server:
@@ -1481,14 +1481,14 @@ Pending (1):
   20261010T1725-add-gift  (out of order)
 
 Out of order (1): 20261010T1725-add-gift; apply with --allow-out-of-order
-[exit 4]
+[exit 1]
 ```
 
 <!-- quote: postgres#out-of-order -->
 ```console
 $ npx yodel apply dev
 yodel apply: refused: 20261010T1725-add-gift is out of order: the chain puts it before 20261010T1725-index-placed-at, which is already applied. Nothing was applied. Pass --allow-out-of-order to apply it now (in chain order); it is never skipped.
-[exit 4]
+[exit 1]
 ```
 
 Adding a column after the index changes nothing the index needs, so apply it out of order:

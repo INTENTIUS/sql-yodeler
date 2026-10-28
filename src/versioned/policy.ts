@@ -3,7 +3,7 @@
  * (`../config/define.ts`), evaluated over the plan `yodel apply` would run,
  * and the overrides recorded against them.
  *
- * `yodel plan` reports each rule's outcome; `yodel apply` refuses (exit 4)
+ * `yodel plan` reports each rule's outcome; `yodel apply` refuses (exit 7)
  * before the gate, and its Apply step again under the lock, a plan a rule
  * denies. An override is a person's decision to run that plan anyway, and
  * chant's override gate (`@intentius/chant/override-gate`) records and
@@ -21,8 +21,8 @@ import type { GateSigners, OverrideDecision, StandingOverride } from "@intentius
 import type { OverrideLedger } from "@intentius/chant/lifecycle/override-ledger";
 import type { EnvironmentApprovalMode, PolicyConfig, PolicyPlan, PolicyRule, PolicyStep } from "../config/define.js";
 import type { SqlDialect } from "../project.js";
-import { YodelError } from "../project.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { YodelError, yodelRefusal } from "../project.js";
+import { EXIT_DENIED } from "../exit.js";
 import { silencesOf } from "../lint/index.js";
 import type { PendingMigration } from "./state.js";
 import type { RevertPlan } from "./revert.js";
@@ -229,10 +229,10 @@ export function policyRefusal(results: readonly RuleResult[], environment: strin
   const ids = denied.map((r) => r.id).join(", ");
   const what = revert ? `the revert of ${revert.id}` : "this plan";
   const target = revert ? ` --revert ${revert.id}${revert.step !== undefined ? ` --step ${revert.step}` : ""}` : "";
-  return new YodelError(
+  return yodelRefusal(
     `refused by policy ${when}: ${denied.length === 1 ? "rule" : "rules"} ${ids} ${denied.length === 1 ? "denies" : "deny"} ${what}${digest ? ` (${digest})` : ""}. Nothing was ${revert ? "reverted" : "applied"}:\n${lines.join("\n")}\n` +
       `To run it anyway, someone policy.overriders lists records why, for exactly this plan: ${overrideCommand(environment, denied.map((r) => r.id), target)}`,
-    EXIT_REFUSED,
+    EXIT_DENIED,
   );
 }
 

@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
-import { GATED, gatedCommands } from "../chant/apply.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
+import { gatedCommands } from "../chant/apply.js";
 import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
@@ -11,7 +11,7 @@ import { LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
 import { MIGRATION_ID } from "../migrations/index.js";
 import { describeServer } from "../server.js";
 import { policyAtBase } from "../config/base.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_DENIED, EXIT_WAITING } from "../exit.js";
 import type { WaveGate } from "../config/define.js";
 import { destructiveSteps, gateAtBase, type DestructiveStep } from "../waves/index.js";
 import {
@@ -57,7 +57,7 @@ again.
 The policy in yodel.config.ts (policy.rules), as the base commit has it, is
 judged over the revert's statements before the gate, and again under the
 lock: a rule that refuses drops refuses a revert that drops what the
-migration added (exit 4), unless an override is recorded for the revert's
+migration added (exit 7), unless an override is recorded for the revert's
 digest (yodel override <env> --revert <id> --rule <rule> --reason <why>).
 In an environment yodel.config.ts waves names, the revert waits at the
 migrations Op's gate whatever the wave's gate policy: under on-destructive,
@@ -80,17 +80,19 @@ Options:
 
 Exit codes:
   0  reverted, or (--dry-run) planned
-  2  refused, nothing reverted: the migration has a data step and no --step,
-     or the reverse needs an Op or a manual step
-  3  stopped at the gate, waiting for approval of this revert
-  4  refused, nothing reverted: <id> is not applied in <env>, a migration
-     after it is, the history does not match the migrations directory, or
-     a policy rule denies the revert and no override is recorded for its
-     digest, the run holds <env>'s reader (YODEL_ROLE is not writer
-     or writer:<env>), or the server refused the user a privilege
+  3  stopped at the gate, waiting for approval of this revert; or nothing
+     reverted because a person acts first: the migration has a data step and
+     no --step, or the reverse needs an Op or a manual step
+  4  the revert's plan moved since it was approved; nothing reverted
   5  another apply holds the lock
+  7  a policy rule denies the revert and no override is recorded for its
+     digest; nothing reverted
   1  anything else failed: a statement (the history records where; rerun to
-     resume), a revert whose plan moved since approval, a bad config
+     resume), a bad config. Refused with nothing reverted, also 1: <id> is
+     not applied in <env>, a migration after it is, the history does not
+     match the migrations directory, the run holds <env>'s reader
+     (YODEL_ROLE is not writer or writer:<env>), or the server refused the
+     user a privilege
 `;
 
 interface RevertArgs {
@@ -210,12 +212,12 @@ async function run(a: RevertArgs, io: Io): Promise<number> {
   // The reader cannot write (#159): a revert refuses before the gate, naming the variable that picks the writer.
   const command = runnable(`yodel revert ${a.env} ${a.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir);
   const asReader = a.dryRun ? undefined : readerRefusal(env.profile, command);
-  if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+  if (asReader) throw yodelRefusal(asReader);
   try {
     return await revertIn(project, env, a, io);
   } catch (e) {
     const denied = permissionRefusal(e, env.profile, command);
-    if (denied) throw new YodelError(denied, EXIT_REFUSED);
+    if (denied) throw yodelRefusal(denied);
     throw e;
   }
 }
@@ -260,7 +262,7 @@ async function revertIn(project: Project, env: Environment, a: RevertArgs, io: I
     const denied = policyRefusal(policy, env.name, digest, "before the gate", { id: plan.migration.id, step: a.step });
     if (denied) {
       if (!a.json) io.err(`yodel revert: ${denied.message}\n`);
-      return emit({ status: "denied" }, EXIT_REFUSED);
+      return emit({ status: "denied" }, EXIT_DENIED);
     }
 
     if (!a.json) io.out(`\nRunning ${op.name} (${op.filePath}) to revert ${plan.migration.id}\n`);
@@ -277,7 +279,7 @@ async function revertIn(project: Project, env: Environment, a: RevertArgs, io: I
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this revert${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
         if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel revert ${env.name} ${plan.migration.id}${a.step !== undefined ? ` --step ${a.step}` : ""}`, project.dir, env.profile)} again.\n`);
       }
-      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, EXIT_WAITING);
     }
     if (ran.status === "failed") {
       const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;

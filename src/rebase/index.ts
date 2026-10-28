@@ -46,7 +46,7 @@
 import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { diffStatements, type MigrationStep, type SchemaStatements } from "@intentius/chant-lexicon-sql/migration-statements";
-import { YodelError } from "../project.js";
+import { YodelError, yodelRefusal } from "../project.js";
 import type { BuildOutput, BuiltObject } from "../chant/build.js";
 import {
   computeChecksum,
@@ -66,9 +66,8 @@ import {
 } from "../migrations/index.js";
 import { asBackfill } from "../steps/kinds.js";
 import { silencesOf, type Silence } from "../lint/index.js";
+import { EXIT_FAILED } from "../exit.js";
 
-/** Exit code: the rebase is refused (a conflict, hand edits, a silence it cannot carry over, or a migration a history records). Nothing was written. */
-export const REBASE_REFUSED = 4;
 
 export interface RebaseOptions {
   /** The migration to move. Default: the newer child of the directory's one fork. */
@@ -115,7 +114,7 @@ export class RebaseConflict extends YodelError {
     readonly objects: string[],
     message: string,
   ) {
-    super(message, REBASE_REFUSED);
+    super(message, EXIT_FAILED, true);
     this.name = "RebaseConflict";
   }
 }
@@ -263,10 +262,9 @@ function carrySilences(m: Migration, steps: readonly MigrationStep[], sql: strin
         `    it silences step ${String(s.step)} (${stepLabel(was)}), which ${now ? `the rebase changes to ${stepLabel(now)}` : "the rebased migration no longer has"}`
       );
     });
-    throw new YodelError(
+    throw yodelRefusal(
       `refused: ${m.id} has ${lost.length === 1 ? "a yodel:allow line" : "yodel:allow lines"} for a statement the rebase does not keep as it was, so ${lost.length === 1 ? "its reason" : "their reasons"} would no longer be about the statement that runs:\n${why.join("\n")}\n` +
         `Nothing was written. Remove ${lost.length === 1 ? "the line" : "the lines"} from ${m.id}'s migration.sql, record its checksum (yodel lint --update-checksum ${m.id}), rebase, then silence what the rebased statements need again.`,
-      REBASE_REFUSED,
     );
   }
 
@@ -283,7 +281,7 @@ function carrySilences(m: Migration, steps: readonly MigrationStep[], sql: strin
     const at = sql.indexOf(anchor, cursor);
     const lines = wanted.get(j);
     if (at === -1) {
-      if (lines) throw new YodelError(`${m.id}: the rebased migration.sql has no place for step ${String(j)} (${stepLabel(step)}), so ${lines.join(", ")} cannot be carried over; nothing was written`, REBASE_REFUSED);
+      if (lines) throw yodelRefusal(`${m.id}: the rebased migration.sql has no place for step ${String(j)} (${stepLabel(step)}), so ${lines.join(", ")} cannot be carried over; nothing was written`);
       return;
     }
     if (lines) {
@@ -301,7 +299,7 @@ function carrySilences(m: Migration, steps: readonly MigrationStep[], sql: strin
   const key = (s: Pick<Silence, "step" | "rule" | "reason">) => `${String(s.step)} ${s.rule} ${s.reason}`;
   const expected = old.map((s) => key({ ...s, step: to.get(s.step) as number }));
   if (JSON.stringify(carried.map(key)) !== JSON.stringify(expected)) {
-    throw new YodelError(`${m.id}: its yodel:allow lines did not read back on the same steps after the rebase; nothing was written. Rebase it by hand.`, REBASE_REFUSED);
+    throw yodelRefusal(`${m.id}: its yodel:allow lines did not read back on the same steps after the rebase; nothing was written. Rebase it by hand.`);
   }
   return { sql: out, silences: carried };
 }
@@ -326,7 +324,7 @@ function rebaseOne(m: Migration, base0: BuildOutput, newParent: string, base1: B
   const kept = m.document.steps.filter((s) => asBackfill(s) !== undefined);
   if (kept.length > 0) statements = { ...statements, refused: true, steps: [...statements.steps, ...kept] };
   if (statements.steps.length === 0) {
-    throw new YodelError(`${m.id} makes no change on top of ${newParent}: ${theirs} already makes it. Nothing was written; delete ${m.id}'s directory instead.`, REBASE_REFUSED);
+    throw yodelRefusal(`${m.id} makes no change on top of ${newParent}: ${theirs} already makes it. Nothing was written; delete ${m.id}'s directory instead.`);
   }
   const dropped = new Set(["defaultDatabase", "defaultSchema", "major", "topology"]);
   const rest = Object.fromEntries(Object.entries(m.document).filter(([k]) => !dropped.has(k)));

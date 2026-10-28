@@ -12,9 +12,8 @@
  * server here, and the replay cannot reach its data through it.
  */
 
-import { YodelError, type Environment, type Project } from "../project.js";
+import { type Environment, type Project, yodelRefusal } from "../project.js";
 import { environmentSettings } from "../config/settings.js";
-import { NOT_FRESH } from "./replay.js";
 
 /** Another profile the replay would empty part of. */
 export interface SharedProfile {
@@ -85,9 +84,8 @@ export function refuseShared(env: Environment, shared: readonly SharedProfile[],
   const lines = blocking.map(
     (s) => `${env.name} and ${s.profile} are the same server (${s.server}) and both name ${s.names.join(", ")}; the replay would drop ${s.profile}'s ${what}${s.names.length === 1 ? "" : "s"}, with or without --reset`,
   );
-  throw new YodelError(
+  throw yodelRefusal(
     `refused: ${lines.join("; ")}. Point ${env.name} at a throwaway server of its own (a second emulator on another port), ` +
       `or, to empty ${blocking.map((s) => s.profile).join(" and ")} too, add ${blocking.map((s) => `--reset-shared ${s.profile}`).join(" ")}. Nothing was run.`,
-    NOT_FRESH,
   );
 }

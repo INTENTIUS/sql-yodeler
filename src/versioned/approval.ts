@@ -33,11 +33,9 @@ import type { GateResolutionRecord } from "@intentius/chant/lifecycle/gate-ledge
 import type { ReleaseAdmission } from "@intentius/chant/lifecycle/release-ledger";
 import { YodelError } from "../project.js";
 import type { MigrateOpRef } from "./op.js";
+import { EXIT_MOVED, EXIT_WAITING } from "../exit.js";
 
 const EPOCH = new Date(0).toISOString();
-
-/** Exit code of a refusal for want of an approval: the same as a run stopped at the gate. */
-export const NOT_APPROVED = 3;
 
 /** What {@link verifyApproval} found: the approval that counted, and what the release record says of it (#277). */
 export interface VerifiedApproval {
@@ -62,7 +60,7 @@ export interface VerifiedApproval {
  */
 export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, digest: string): Promise<VerifiedApproval> {
   if (op.policy) {
-    throw new YodelError(`--execute cannot check gate "${op.gate}" of ${op.name}: it declares an approval policy, which only the gate step evaluates; run yodel apply without --execute`, NOT_APPROVED);
+    throw new YodelError(`--execute cannot check gate "${op.gate}" of ${op.name}: it declares an approval policy, which only the gate step evaluates; run yodel apply without --execute`, EXIT_WAITING);
   }
   const { latestPendingGate, latestResolutionForPlan } = await import("@intentius/chant/lifecycle/gate-ledger");
   const ledger = await port.read(op.name);
@@ -73,7 +71,7 @@ export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, dig
     throw new YodelError(
       `--execute cannot check gate "${op.gate}" of ${op.name}: its approval quorum is declared only in the Op, which this change can edit, and the workspace declaration at the base commit sets none; ` +
         `declare it as identity.gates.${op.gate}.quorum in chant.workspace.json on the base branch, or run yodel apply without --execute`,
-      NOT_APPROVED,
+      EXIT_WAITING,
     );
   }
   const declared = (from: { op: string; gate: string }) => (op.aliases ?? []).some((a) => a.op === from.op && a.gate === from.gate);
@@ -121,10 +119,12 @@ export async function verifyApproval(port: GateLedgerPort, op: MigrateOpRef, dig
     : found.mismatched
       ? ` (the newest approval of that gate is for ${found.mismatched.planDigest ?? "no plan"}, by ${found.mismatched.resolvedBy} at ${found.mismatched.timestamp})`
       : "";
+  // The newest approval is for another plan, and nothing else holds this one back: the plan moved since it was approved.
+  const moved = found.mismatched?.planDigest !== undefined && waiting === "" && !why;
   throw new YodelError(
     `refused: chant's gate ledger holds no approval of ${op.name} / ${op.gate} for plan ${digest}${other}. Nothing was applied. ` +
       `Run yodel apply without --execute; it stops at the gate and prints the command that approves its plan.`,
-    NOT_APPROVED,
+    moved ? EXIT_MOVED : EXIT_WAITING,
   );
 }
 

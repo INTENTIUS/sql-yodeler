@@ -5,7 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Project, yodelRefusal } from "../project.js";
 import { closeVersioned, inspect, openVersioned } from "../versioned/index.js";
 import type { Migration } from "../migrations/index.js";
 import { buildSchema } from "../chant/build.js";
@@ -93,7 +93,7 @@ to a migration you just wrote, run yodel new <name> --replace --retain 7d.
 --check <sql> adds a pre-migration check to migration.json: a read-only
 query that must return no rows. yodel apply runs it against the environment
 before the gate and again under the lock just before the migration's first
-statement; a check that fails refuses the run (exit 4) and names it.
+statement; a check that fails refuses the run (exit 1) and names it.
 Written "<name>: <sql>" it is named <name>, else check-1, check-2 and so on.
 For "returns true" or a count within bounds, edit its "expect" in
 migration.json (docs/migrations.md); the checks count in the checksum and
@@ -125,9 +125,9 @@ Exit codes:
      newest recorded schema (then nothing is written)
   1  no migration could be made: a bad config, a declaration chant cannot
      build, a migrations directory that is not one chain (a fork, a missing
-     parent), a migration of that id already there
-  4  --replace refused, nothing written: the newest migration is not named
-     <name>, or it is applied in an environment --env names
+     parent), a migration of that id already there; or --replace refused,
+     nothing written: the newest migration is not named <name>, or it is
+     applied in an environment --env names
 `;
 
 interface NewArgs {
@@ -409,15 +409,13 @@ function writeHandWritten(io: Io, project: Project, name: string, json: boolean)
   return 0;
 }
 
-/** Exit code: --replace refused; nothing written. */
-export const REPLACE_REFUSED = 4;
 
 /** The newest migration, when --replace may redo it: named `name`, and applied in none of `envs`. */
 async function replaceable(project: Project, ordered: readonly Migration[], name: string, envs: readonly string[], io: Io): Promise<Migration> {
   const newest = newestMigration(ordered);
-  if (!newest) throw new YodelError(`--replace redoes the newest migration, and there is none yet; run yodel new ${name}`, REPLACE_REFUSED);
+  if (!newest) throw yodelRefusal(`--replace redoes the newest migration, and there is none yet; run yodel new ${name}`);
   if (newest.id.slice(newest.id.indexOf("-") + 1) !== name) {
-    throw new YodelError(`--replace redoes the newest migration, ${newest.id}, which is not named ${name}; nothing written`, REPLACE_REFUSED);
+    throw yodelRefusal(`--replace redoes the newest migration, ${newest.id}, which is not named ${name}; nothing written`);
   }
   for (const envName of envs) {
     const env = resolveEnvironment(project, envName);
@@ -425,7 +423,7 @@ async function replaceable(project: Project, ordered: readonly Migration[], name
     try {
       const { status } = await inspect(venv, ordered, { sync: false });
       if (status.applied.some((a) => a.id === newest.id)) {
-        throw new YodelError(`refused: ${newest.id} is applied in ${env.name}, so it is not redone; write the change as a new migration (yodel new <name>). Nothing written.`, REPLACE_REFUSED);
+        throw yodelRefusal(`refused: ${newest.id} is applied in ${env.name}, so it is not redone; write the change as a new migration (yodel new <name>). Nothing written.`);
       }
     } finally {
       await closeVersioned(venv);

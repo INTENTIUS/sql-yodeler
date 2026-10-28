@@ -152,7 +152,7 @@ describe("promotion", () => {
     expect(requiredIn(undefined, "prod")).toBeUndefined();
   });
 
-  it("refuses, exit 4, naming the environment and each migration it has not applied with the same checksum", () => {
+  it("refuses, exit 3, naming the environment and each migration it has not applied with the same checksum", () => {
     const ok = { env: "staging", from: "yodel.config.ts", migrations: [{ id: "m1", checksum: "c1", ran: "applied" as const }] };
     expect(promotionRefusal("prod", [ok])).toBeUndefined();
     const refusal = promotionRefusal("prod", [
@@ -166,7 +166,7 @@ describe("promotion", () => {
         ],
       },
     ]);
-    expect(refusal?.exitCode).toBe(4);
+    expect(refusal?.exitCode).toBe(3);
     expect(refusal?.message).toBe(
       "refused: prod applies only migrations staging applied first, and 2 pending ones have not run there:\n" +
         "  m2: staging's history does not record it applied (required by yodel.config.ts)\n" +

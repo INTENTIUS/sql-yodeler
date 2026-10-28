@@ -3,10 +3,15 @@ import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Environment, type Project } from "../project.js";
 import { appliedBy, withLock } from "../history/index.js";
-import { closeVersioned, findMigrateOp, gitLedger, NOT_APPROVED, openVersioned, verifyApproval, type VersionedEnv } from "../versioned/index.js";
+import { closeVersioned, findMigrateOp, gitLedger, openVersioned, verifyApproval, type VersionedEnv } from "../versioned/index.js";
 import { approveCommand, migrationsApprovalAtBase, portFor, signFlag } from "../approval-mode/index.js";
 import { runnable } from "../chant/runnable.js";
 import { cleanupDigest, cleanupGate, describeRetained, dropRetained, findRetained, retainedServer, type Retained } from "../cleanup/index.js";
+import { EXIT_MOVED, EXIT_WAITING } from "../exit.js";
+import { askGatedRequest, gatedRequests, spendAndAct, type GatedRequestApi } from "../chant/gated-request.js";
+
+/** The kind of gated request (chant#4551) a drop is asked for under. */
+export const CLEANUP_REQUEST = "sql-cleanup";
 
 const usage = "usage: yodel cleanup <env> [--list] [--op <name>] [--json] [--dir <project>]";
 
@@ -37,6 +42,13 @@ differs and the approval does not count. The environment's approval mode
 counts as it does for yodel apply: under sealed (environments.<env>.approval,
 read at the base commit), only an approval sealed with yodel approve --sign
 by a key .chant/allowed_signers lists for its approver.
+
+With a chant that has gated requests (chant#4551), the drop is asked for as
+one, on the same gate: chant records the request (the environment and the
+cleanup digest), prints the request's digest, and the approval binds that.
+The requester's own approval does not count; someone else approves it. The
+drop spends the approval, and chant records how it ended, so chant ledger
+gates lists the request, its approval, the apply and its end.
 
 Options:
   --list           list only; never drop, even with an approval
@@ -130,12 +142,15 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
   const mode = await migrationsApprovalAtBase(project, env.name);
   if (mode.note && !a.json) io.err(`${mode.note}\n`);
   const ledger = await portFor(await gitLedger(project.dir), mode.mode, project.dir, mode.base);
+  // chant's gated request (#292, chant#4551), when the installed chant has it.
+  const gated = await gatedRequests();
+  if (gated) return cleanupRequested(gated, { project, env, venv, a, io, server, retained, digest, dueCount, op, mode, ledger, report });
   const approve = approveCommand(env.name, digest, mode.mode);
   const chantApprove = `chant approve ${op.name} ${op.gate} --plan ${digest}${signFlag(mode.mode)}`;
   try {
     await verifyApproval(ledger, op, digest);
   } catch (e) {
-    if (!(e instanceof YodelError) || e.exitCode !== NOT_APPROVED) throw e;
+    if (!(e instanceof YodelError) || (e.exitCode !== EXIT_WAITING && e.exitCode !== EXIT_MOVED)) throw e;
     // An approval of this digest the mode does not count (an unsigned one under sealed), and why.
     const uncounted = /\((the approval by .* does not count: .*)\)\. Nothing was applied\./s.exec(e.message)?.[1];
     report({ planDigest: digest, approve, chantApprove }, [
@@ -146,7 +161,7 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
       `  ${runnable(approve, project.dir)}`,
       `then run yodel cleanup ${env.name} again.`,
     ]);
-    return NOT_APPROVED;
+    return EXIT_WAITING;
   }
 
   const lock = await venv.driver.acquireLock(appliedBy());
@@ -162,5 +177,87 @@ async function cleanupWith(project: Project, env: Environment, venv: VersionedEn
     });
   });
   report({ planDigest: digest, dropped }, ["", `Dropped ${String(dropped.length)}: ${dropped.join(", ")}`]);
+  return 0;
+}
+
+type Report = (extra: { planDigest?: string; approve?: string; chantApprove?: string; dropped?: string[] }, tail?: string[]) => void;
+
+/**
+ * The drop as chant's gated request (#292, chant#4551): the request, under
+ * the migrations Op with its cleanup gate as the subject, binds the
+ * environment and the cleanup digest, and chant digests it. A first run
+ * records the pending fact and waits (exit 3); `yodel approve <env> --plan
+ * <digest>` approves it, and the requester's own approval does not count.
+ * Once approved, under the lock: what is due is read again and must still
+ * be the cleanup digest the request names, the engine checks the approval
+ * on chant's ledger itself (ruling A on #300), the approval is spent
+ * (pushed before anything is dropped), and the finished line records what
+ * was dropped.
+ */
+async function cleanupRequested(
+  gated: GatedRequestApi,
+  c: {
+    project: Project;
+    env: Environment;
+    venv: VersionedEnv;
+    a: CleanupArgs;
+    io: Io;
+    server: ReturnType<typeof retainedServer>;
+    retained: readonly Retained[];
+    digest: string;
+    dueCount: number;
+    op: { name: string; filePath: string; gate: string; quorum: boolean };
+    mode: { mode: "ledger" | "sealed"; base?: string | undefined };
+    ledger: Awaited<ReturnType<typeof portFor>>;
+    report: Report;
+  },
+): Promise<number> {
+  const { project, env, venv, a, io, server, digest, dueCount, op, mode, ledger, report } = c;
+  const asked = await askGatedRequest(gated, {
+    op: op.name,
+    kind: CLEANUP_REQUEST,
+    subject: op.gate,
+    fields: { environment: env.name, plan: digest },
+    description: `yodel cleanup ${env.name}: drop ${String(dueCount)} kept object${dueCount === 1 ? "" : "s"} past ${dueCount === 1 ? "its" : "their"} date (${digest})`,
+    rules: { mode: mode.mode },
+    base: mode.base,
+    cwd: project.dir,
+  });
+  if (asked.status !== "approved") {
+    const approve = approveCommand(env.name, asked.digest, mode.mode);
+    const command = asked.status === "spent" ? undefined : asked.command;
+    report({ planDigest: asked.digest, approve, ...(command ? { chantApprove: command } : {}) }, [
+      "",
+      `Request digest: ${asked.digest} (chant's gated request on ${op.name} / ${op.gate}, for cleanup digest ${digest})`,
+      ...(asked.status === "refused" ? [`The approval by ${asked.by} does not count: ${asked.reason}.`] : []),
+      ...(asked.status === "spent" ? [`That request was spent by an earlier drop; run yodel cleanup ${env.name} again to ask anew.`] : []),
+      `${String(dueCount)} due; nothing dropped without an approval${mode.mode === "sealed" ? " sealed by a signer (approval sealed)" : ""}, by someone other than the requester. Approve it with:`,
+      `  ${runnable(approve, project.dir)}`,
+      `then run yodel cleanup ${env.name} again.`,
+    ]);
+    return EXIT_WAITING;
+  }
+
+  const lock = await venv.driver.acquireLock(appliedBy());
+  if (lock.notice && !a.json) io.err(`lock: ${lock.notice}\n`);
+  const dropped = await withLock(lock, venv.lockTtlMs, async () => {
+    // Read again under the lock: the approval counts only for what is due now.
+    const again = await findRetained(server);
+    const now = await cleanupDigest(env.name, again.retained);
+    if (now !== digest) {
+      throw new YodelError(`refused: what is due in ${env.name} moved since the request was approved (approved ${digest}, now ${now}); nothing was dropped. Run yodel cleanup ${env.name} again.`, EXIT_MOVED);
+    }
+    // The engine's own check (ruling A on #300): chant's ledger approves the request's digest.
+    const by = await verifyApproval(ledger, op, asked.digest);
+    if (!a.json) io.err(`approval: ${op.name} / ${op.gate} for ${asked.digest}, by ${by.resolvedBy} at ${by.timestamp}${by.signer ? `, sealed by ${by.signer}` : ""}\n`);
+    const { result } = await spendAndAct(gated, asked, { op: op.name, cwd: project.dir }, async () => {
+      const names = await dropRetained(server, again.retained, (l) => {
+        if (!a.json) io.err(`${l}\n`);
+      });
+      return { result: names, detail: { environment: env.name, cleanup: digest, dropped: names.length } };
+    });
+    return result;
+  });
+  report({ planDigest: asked.digest, dropped }, ["", `Dropped ${String(dropped.length)}: ${dropped.join(", ")}`]);
   return 0;
 }

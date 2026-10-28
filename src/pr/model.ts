@@ -19,7 +19,7 @@ import { migrationChecks, scanMigrations, type Migration, type MigrationCheck } 
 import { describeTopology } from "../history/index.js";
 import { asBackfill } from "../steps/kinds.js";
 import { retainedNote } from "../cleanup/index.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_FAILED } from "../exit.js";
 import {
   BROKEN_CHAIN,
   findMigrateOp,
@@ -152,7 +152,7 @@ export async function collectVersionedPlan(project: Project, env: Environment, o
     if (!scan.ordered) {
       // Nothing can be planned, but the history still says what is applied.
       const { status } = await inspect(venv, [], { sync: false });
-      return { ...base, appliedCount: status.applied.length, pending: [], refusal: { exitCode: EXIT_REFUSED, message: BROKEN_CHAIN } };
+      return { ...base, appliedCount: status.applied.length, pending: [], refusal: { exitCode: EXIT_FAILED, message: BROKEN_CHAIN } };
     }
     return await collectWith(project, env, options, venv, scan.ordered, base, problems);
   } finally {

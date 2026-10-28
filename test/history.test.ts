@@ -10,7 +10,6 @@ import {
   historyTableDdl,
   isApplied,
   LockHeldError,
-  LOCKED,
   type ClickHousePort,
   type Lock,
   localLockPath,
@@ -21,6 +20,7 @@ import {
   type HistoryTopology,
 } from "../src/history/index.js";
 import { FakeClickHouse } from "./helpers/fake-clickhouse.js";
+import { EXIT_HELD } from "../src/exit.js";
 
 const at = (topology: HistoryTopology) => ({ database: "yodeler", topology });
 
@@ -164,7 +164,7 @@ describe("the apply lock without Keeper", () => {
 
     const second = acquireLock(ch, options(dir, "b@host"));
     await expect(second).rejects.toBeInstanceOf(LockHeldError);
-    await expect(second).rejects.toMatchObject({ exitCode: LOCKED, message: expect.stringContaining(`rm ${file}`) as unknown });
+    await expect(second).rejects.toMatchObject({ exitCode: EXIT_HELD, message: expect.stringContaining(`rm ${file}`) as unknown });
 
     await lock.release();
     const third = await acquireLock(ch, options(dir, "b@host"));

@@ -29,22 +29,26 @@
  *
  * The profile carries both roles under a symbol chant does not read, so
  * yodel sees the reader and the writer from one evaluation of the config:
- * it refuses (exit 4) an environment whose two roles are the same user or
+ * it refuses (exit 1) an environment whose two roles are the same user or
  * read the same variable, and `yodel ci` gives each job the variables, and
  * the cloud identity, of the role it runs as.
  */
+
+import type { TokenSourceConfig } from "@intentius/chant-lexicon-sql/token-source";
 
 /** A value read from an environment variable, as chant's profiles name one. */
 export interface EnvRef {
   env: string;
 }
 
-/** A short-lived password, minted by chant's sql lexicon when a connection needs one. */
-export type TokenSource =
-  | { token: "rds-iam"; region?: string; ttlSeconds?: number }
-  | { token: "cloud-sql-iam"; ttlSeconds?: number }
-  | { token: "entra"; ttlSeconds?: number }
-  | { token: "command"; command: string[]; ttlSeconds?: number };
+/**
+ * A short-lived password, minted by chant's sql lexicon when a connection
+ * needs one (#296): the lexicon's own token source type, so a profile names
+ * exactly what the lexicon mints. In a CI job that logged in through
+ * chant's ci-identity, the lexicon mints from what the trade left
+ * (chant#4572); elsewhere it runs the cloud's command line.
+ */
+export type TokenSource = TokenSourceConfig;
 
 /** The token sources that mint from a cloud identity, which a CI job gets over OIDC. */
 export type CloudToken = Exclude<TokenSource["token"], "command">;

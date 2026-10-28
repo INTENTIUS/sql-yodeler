@@ -37,15 +37,11 @@
 
 import type { ClassifiedChange } from "@intentius/chant-lexicon-sql/core/classifier";
 import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { YodelError, type SqlDialect } from "../project.js";
+import { type SqlDialect, yodelRefusal } from "../project.js";
 import { isCheckpoint, isHandWritten, type Migration } from "../migrations/index.js";
 import { asBackfill, describeStep, planStep, type BackfillStep } from "../steps/kinds.js";
 import type { RebuildReceiptStore } from "../steps/rebuild.js";
 
-/** Exit code: the target is not fresh and `reset` was not given; nothing was run. */
-export const NOT_FRESH = 4;
-/** Exit code: a step the replay cannot run (a manual step, an Op it does not run). */
-export const UNREPLAYABLE = 2;
 
 /** One difference between the replayed database and a recorded schema: `before` is the replay's, `after` the record's. */
 export type ReplayChange = ClassifiedChange;
@@ -107,7 +103,7 @@ export type ReplayResult = {
 );
 
 export interface ReplayOptions {
-  /** Empty the target first when it is not fresh. Without it, a target that is not fresh is refused ({@link NOT_FRESH}). */
+  /** Empty the target first when it is not fresh. Without it, a target that is not fresh is refused (exit 1). */
   reset?: boolean;
   /** Leave the replayed database in place at the end, to look at. Default: emptied. */
   keep?: boolean;
@@ -127,10 +123,9 @@ export async function replayMigrations(ordered: readonly Migration[], driver: Re
   const occupied = await driver.occupied();
   if (occupied.length > 0) {
     if (options.reset !== true) {
-      throw new YodelError(
+      throw yodelRefusal(
         `refused: the replay needs a fresh database, and ${driver.where} already holds ${occupied.join(", ")}. ` +
           `Point the replay at a throwaway emulator (chant emulator up --lexicon sql), or pass --reset to drop ${occupied.length === 1 ? "it" : "them"} first. Nothing was run.`,
-        NOT_FRESH,
       );
     }
     log(`emptying ${occupied.join(", ")} on ${driver.where}`);

@@ -7,8 +7,9 @@
 import { describe, expect, it } from "vitest";
 import type { BuildOutput } from "../src/chant/build.js";
 import { createMigration, type Migration, type MigrationStep } from "../src/migrations/index.js";
-import { NOT_FRESH, renderReplay, replayExitCode, replayFailure, replayJson, replayMigrations, type OpStepOutcome, type ReplayChange, type ReplayDriver } from "../src/replay/index.js";
+import { renderReplay, replayExitCode, replayFailure, replayJson, replayMigrations, type OpStepOutcome, type ReplayChange, type ReplayDriver } from "../src/replay/index.js";
 import { YodelError } from "../src/project.js";
+import { EXIT_FAILED } from "../src/exit.js";
 
 const build = (columns: string, orderBy = "id"): BuildOutput => ({
   dialect: "clickhouse",
@@ -108,11 +109,11 @@ describe("replayMigrations", () => {
     expect(replayFailure(result)?.message).toContain(`${two.id}: statement 0 failed in the replay`);
   });
 
-  it("stops at a manual step, which it cannot replay, with exit 2", async () => {
+  it("stops at a manual step, which it cannot replay, with exit 3", async () => {
     const manual: MigrationStep = { kind: "manual", object: "a", type: "ClickHouse::Table", name: "yodel_11.a", changes: [], detail: "do it by hand" };
     const result = await replayMigrations([one, withSteps(two, [manual])], fake());
     expect(result).toMatchObject({ outcome: "unreplayable", migration: two.id, step: 0 });
-    expect(replayExitCode(result)).toBe(2);
+    expect(replayExitCode(result)).toBe(3);
     expect(replayFailure(result)?.message).toContain("a manual step for a (yodel_11.a): no statement and no Op makes it; do it by hand");
   });
 
@@ -159,7 +160,7 @@ describe("replayMigrations", () => {
     const d = fake({ occupied: ["yodel_11"] });
     const refused = await replayMigrations(history, d).catch((e: unknown) => e);
     expect(refused).toBeInstanceOf(YodelError);
-    expect((refused as YodelError).exitCode).toBe(NOT_FRESH);
+    expect((refused as YodelError).exitCode).toBe(EXIT_FAILED);
     expect((refused as YodelError).message).toContain("already holds yodel_11");
     expect(d.sent).toEqual([]);
     expect(d.calls).toEqual([]);

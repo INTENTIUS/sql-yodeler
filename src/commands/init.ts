@@ -1,16 +1,19 @@
 import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
-import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
+import { loadProject, resolveEnvironment, YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import { migrationId } from "../migrations/index.js";
-import { adopt, BASELINE_NAME, planBaseline, projectBaseline, type Adopted } from "../init/index.js";
-import { GATED, gatedCommands } from "../chant/apply.js";
-import { migrationsApprovalAtBase } from "../approval-mode/index.js";
+import { adopt, BASELINE_NAME, BASELINE_REQUEST, baselineGate, executeBaseline, planBaseline, projectBaseline, type Adopted } from "../init/index.js";
+import { gatedCommands } from "../chant/apply.js";
+import { approveCommand, migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
+import { askGatedRequest, gatedRequests, spendAndAct, type GatedRequestApi } from "../chant/gated-request.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
-import { EXIT_REFUSED } from "../exit.js";
+import { EXIT_WAITING } from "../exit.js";
 import { isApplied } from "../history/index.js";
-import { closeVersioned, findMigrateOp, inspect, openVersioned, readChain, runMigrateOp } from "../versioned/index.js";
+import { closeVersioned, findMigrateOp, gitLedger, inspect, openVersioned, readChain, runMigrateOp, verifyApproval, type MigrateOpRef, type VersionedEnv } from "../versioned/index.js";
+import type { Migration } from "../migrations/index.js";
+
 
 const usage = "usage: yodel init --from <env> [--json] [--dir <project>] [--force] [--skip-unsupported] [--name <name>]\n       yodel init --baseline <env> [--json] [--dir <project>] [--op <name>]";
 
@@ -56,7 +59,7 @@ restamps their comments.
 baseline (the project's first migration) records against <env>'s live
 database, offline from migration.json: every object must be there as the
 baseline declares it, and nothing else in the profile's databases or
-schemas. A difference refuses (exit 4), naming each object and what
+schemas. A difference refuses (exit 1), naming each object and what
 differs, and nothing is recorded. When they match, records the baseline
 applied in <env>'s history, without running it, through <env>'s migrations
 Op, as yodel apply does: its Plan step compares again and prints the
@@ -83,18 +86,18 @@ Exit codes:
   0  adopted: declarations and the baseline written, the baseline recorded
      applied (--baseline: the baseline recorded applied in <env>)
   3  (--baseline) stopped at the gate, waiting for approval of the record
-  4  refused, nothing written: the source directory already declares a
-     schema (without --force), the project already has migrations, the
-     history already records migrations, the environment holds nothing or
-     an object of a kind yodel cannot declare (without --skip-unsupported), or
-     a ClickHouse profile with no databases or with the history's database;
-     --baseline: the project has no migrations, <env>'s history records
-     any, or <env>'s live schema is not the baseline's; or the run holds
-     <env>'s reader (YODEL_ROLE is not writer or writer:<env>), or
-     the server refused the user a privilege
   5  another apply holds the lock; nothing recorded, nothing kept
   1  anything else failed, and nothing was kept: a bad config, a server it
-     cannot read, a build or a plan that is not clean after the import
+     cannot read, a build or a plan that is not clean after the import.
+     Refused with nothing written, also 1: the source directory already
+     declares a schema (without --force), the project already has
+     migrations, the history already records migrations, the environment
+     holds nothing or an object of a kind yodel cannot declare (without
+     --skip-unsupported), or a ClickHouse profile with no databases or with
+     the history's database; --baseline: the project has no migrations,
+     <env>'s history records any, or <env>'s live schema is not the
+     baseline's; or the run holds <env>'s reader (YODEL_ROLE is not writer
+     or writer:<env>), or the server refused the user a privilege
 `;
 
 interface InitArgs {
@@ -203,6 +206,9 @@ async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Pr
       return code;
     };
     const op = await findMigrateOp(project, env, a.op);
+    // chant's gated request (#292, chant#4551), when the installed chant has it; else through the Op, as before.
+    const gated = await gatedRequests();
+    if (gated) return await recordRequested(gated, { project, env, venv, baseline, planDigest, op, a, io, emit });
     if (!a.json) io.out(`${env.name}'s live schema is the schema ${baseline.id} records, and its history records nothing.\nPlan digest: ${planDigest}\n\nRunning ${op.name} (${op.filePath}) to record ${baseline.id} applied in ${env.name}\n`);
     const ran = await runMigrateOp(project, op, { allowOutOfOrder: false, baseline: baseline.id, onOutput: (t) => { io.err(t); } });
     if (ran.status === "gated") {
@@ -211,7 +217,7 @@ async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Pr
         io.out(`\n${op.name} is waiting at gate "${op.gate}" for approval of this record${ran.planDigest ? ` (${ran.planDigest})` : ""}.\n`);
         if (commands.approve) io.out(`Approve it at a terminal with:\n  ${runnable(commands.approve, project.dir)}\nthen run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again.\n`);
       }
-      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, GATED);
+      return emit({ status: "gated", op: op.name, gate: op.gate, ...commands, ...(ran.planDigest ? { gatePlanDigest: ran.planDigest } : {}) }, EXIT_WAITING);
     }
     if (ran.status === "failed") {
       const code = ran.stepExit !== undefined && ran.stepExit !== 0 ? ran.stepExit : 1;
@@ -230,6 +236,74 @@ async function recordIn(project: Project, name: string, a: InitArgs, io: Io): Pr
   }
 }
 
+/**
+ * `yodel init --baseline <env>` as chant's gated request (#292,
+ * chant#4551): under the migrations Op, at its gate with -baseline, binding
+ * the environment, the baseline's id and checksum and the baseline digest
+ * (the baseline, the empty history and the live schema). A first run
+ * records the pending fact and waits (exit 3); another person approves it
+ * with yodel approve <env> --plan <digest>. Once approved, the approval is
+ * spent, and the record is made here, under the lock, as the Op's Apply
+ * step made it: the history must still be empty and the comparison must
+ * still give the approved digest, and the engine checks the approval on
+ * chant's ledger itself (ruling A on #300). The finished line records the
+ * row's seq.
+ */
+async function recordRequested(
+  gated: GatedRequestApi,
+  c: {
+    project: Project;
+    env: Environment;
+    venv: VersionedEnv;
+    baseline: Migration;
+    planDigest: string;
+    op: MigrateOpRef;
+    a: InitArgs;
+    io: Io;
+    emit: (outcome: Record<string, unknown>, code: number) => number;
+  },
+): Promise<number> {
+  const { project, env, venv, baseline, planDigest, op, a, io, emit } = c;
+  const gate = baselineGate(op.gate);
+  const mode = await migrationsApprovalAtBase(project, env.name);
+  if (mode.note && !a.json) io.err(`${mode.note}\n`);
+  if (!a.json) io.out(`${env.name}'s live schema is the schema ${baseline.id} records, and its history records nothing.\nPlan digest: ${planDigest}\n`);
+  const asked = await askGatedRequest(gated, {
+    op: op.name,
+    kind: BASELINE_REQUEST,
+    subject: gate,
+    fields: { environment: env.name, migration: baseline.id, checksum: baseline.checksum, plan: planDigest },
+    description: `yodel init --baseline ${env.name}: record ${baseline.id} applied without running it (${planDigest})`,
+    rules: { mode: mode.mode },
+    base: mode.base,
+    cwd: project.dir,
+  });
+  if (asked.status !== "approved") {
+    const approve = approveCommand(env.name, asked.digest, mode.mode);
+    if (!a.json) {
+      io.out(`\n${op.name} waits at gate "${gate}" for approval of this record (chant's gated request ${asked.digest}).\n`);
+      if (asked.status === "refused") io.out(`The approval by ${asked.by} does not count: ${asked.reason}.\n`);
+      if (asked.status === "spent") io.out(`That request was spent by an earlier record; run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again to ask anew.\n`);
+      io.out(`Someone other than the requester approves it at a terminal with:\n  ${runnable(approve, project.dir)}\nthen run ${runnableAsWriter(`yodel init --baseline ${env.name}`, project.dir, env.profile)} again.\n`);
+    }
+    return emit({ status: "gated", op: op.name, gate, approve, ...(asked.status === "spent" ? {} : { chantApprove: asked.command }), gatePlanDigest: asked.digest }, EXIT_WAITING);
+  }
+  const ledger = await portFor(await gitLedger(project.dir), mode.mode, project.dir, mode.base);
+  const { result: row } = await spendAndAct(gated, asked, { op: op.name, cwd: project.dir }, async () => {
+    const recorded = await executeBaseline(project, env, venv, baseline, {
+      approvedDigest: planDigest,
+      // The engine's own check (ruling A on #300): chant's ledger approves the request's digest.
+      approve: (digest) => (digest === planDigest ? verifyApproval(ledger, { ...op, gate }, asked.digest) : Promise.reject(new YodelError(`the baseline's plan moved since it was approved (approved ${planDigest}, now ${digest}); nothing was recorded`))),
+      log: (l) => {
+        if (!a.json) io.err(`${l}\n`);
+      },
+    });
+    return { result: recorded, detail: { environment: env.name, migration: baseline.id, seq: recorded.seq } };
+  });
+  if (!a.json) io.out(`\nRecorded ${baseline.id} applied in ${env.name} (${venv.location.database}.history, seq ${String(row.seq)}) as a baseline; none of its statements was run.\nyodel status ${env.name} lists it applied, and yodel plan ${env.name} the migrations after it.\n`);
+  return emit({ status: "recorded", op: op.name, gate, history: venv.location.database }, 0);
+}
+
 /** `yodel init --from <env>`; the exit codes are in `help`. */
 export const init: Command = {
   name: "init",
@@ -243,7 +317,7 @@ export const init: Command = {
       // init writes the history (#159): the reader refuses before anything is read, naming the variable that picks the writer.
       const command = runnable(a.baseline !== undefined ? `yodel init --baseline ${env.name}` : `yodel init --from ${env.name}${a.force ? " --force" : ""}`, project.dir);
       const asReader = readerRefusal(env.profile, command);
-      if (asReader) throw new YodelError(asReader, EXIT_REFUSED);
+      if (asReader) throw yodelRefusal(asReader);
       try {
         if (a.baseline !== undefined) return await recordIn(project, a.baseline, a, io);
         const adopted = await adopt(project, env, { force: a.force, skipUnsupported: a.skipUnsupported, name: a.name, log: (l) => { io.err(`${l}\n`); } });
@@ -251,7 +325,7 @@ export const init: Command = {
         return 0;
       } catch (e) {
         const denied = permissionRefusal(e, env.profile, command);
-        if (denied) throw new YodelError(denied, EXIT_REFUSED);
+        if (denied) throw yodelRefusal(denied);
         throw e;
       }
     }),

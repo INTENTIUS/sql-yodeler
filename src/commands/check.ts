@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project } from "../project.js";
-import { CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintSettings, renderLint, workflowCommands, type LintFormat } from "../lint/index.js";
+import { CODE_QUALITY_FILE, codeQuality, FORGE_FORMAT, forgeFormat, LINT_FORMATS, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintSettings, renderLint, workflowCommands, type LintFormat } from "../lint/index.js";
 import { loadPolicies, policyRules } from "../lint/policies.js";
 import { detectTool, readForeignDir, TOOLS, type Tool } from "../check/readers.js";
 import { openCheckServer, runCheck } from "../check/run.js";
@@ -58,19 +58,20 @@ Options:
                         server whose data matters
   --keep                leave the replayed schema in place
   --json                the findings as JSON (--format json)
-  --format <format>     text, json, github or gitlab, as yodel lint prints
-                        them; github and gitlab put each finding on its line
-                        of the migration file
+  --format <format>     text, json, github, gitlab or forge, as yodel lint
+                        prints them; github and gitlab put each finding on
+                        its line of the migration file, and forge picks the
+                        one of the forge the job runs on
   --output <file>       with --format gitlab: where the code quality report
                         goes (default ${CODE_QUALITY_FILE})
   -C, --dir <dir>       the project directory (default: the working directory)
 
 Exit codes:
   0  no errors
-  3  at least one error, or a migration the server refused
-  4  the throwaway server's scope holds something and --reset was not given
-  1  the check could not run: no directory, an unknown tool, a server that
-     does not answer
+  1  at least one error, or a migration the server refused; the throwaway
+     server's scope holds something and --reset was not given; or the check
+     could not run: no directory, an unknown tool, a server that does not
+     answer
 `;
 
 interface CheckArgs {
@@ -114,10 +115,12 @@ function parseCheckArgs(args: string[]): CheckArgs {
   if (parsed.positionals.length > 1) throw new YodelError(`one directory, not ${String(parsed.positionals.length)}\n${usage}`);
   const tool = typeof v.tool === "string" ? v.tool : undefined;
   if (tool !== undefined && !(TOOLS as readonly string[]).includes(tool)) throw new YodelError(`--tool ${tool}: it is ${TOOLS.join(", ")}\n${usage}`);
-  const format = typeof v.format === "string" ? v.format : v.json === true ? "json" : "text";
+  const asked = typeof v.format === "string" ? v.format : v.json === true ? "json" : "text";
+  // --format forge (#294): the job's own forge, so one check hook serves every forge.
+  const format = asked === FORGE_FORMAT ? forgeFormat() : asked;
   if (!(LINT_FORMATS as readonly string[]).includes(format)) throw new YodelError(`--format ${format}: it is ${LINT_FORMATS.join(", ")}\n${usage}`);
   if (v.json === true && format !== "json") throw new YodelError(`--json is --format json; give one of them\n${usage}`);
-  if (typeof v.output === "string" && format !== "gitlab") throw new YodelError(`--output goes with --format gitlab\n${usage}`);
+  if (typeof v.output === "string" && format !== "gitlab" && asked !== FORGE_FORMAT) throw new YodelError(`--output goes with --format gitlab\n${usage}`);
   if (v.all === true && typeof v.base === "string") throw new YodelError(`--all lints every migration; --base picks the new ones. Give one\n${usage}`);
   return {
     dir: parsed.positionals[0],

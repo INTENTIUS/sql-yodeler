@@ -96,7 +96,7 @@ describe("yodel approve", () => {
   it("approves nothing without a terminal to ask, before reading the server, and has no flag that skips the question", async () => {
     const c = capture();
     const code = await main(["approve", "e2e", "--dir", fixture("lint-clickhouse")], c.io);
-    expect(code).toBe(4);
+    expect(code).toBe(1);
     expect(c.text().err).toContain("there is no terminal to ask, so nothing was approved");
     const forced = capture();
     expect(await main(["approve", "e2e", "--yes", "--dir", fixture("lint-clickhouse")], forced.io)).toBe(1);
@@ -105,7 +105,7 @@ describe("yodel approve", () => {
 
   it("approves nothing in a declarative project without a terminal either", async () => {
     const c = capture();
-    expect(await main(["approve", "e2e", "--dir", fixture("clickhouse")], c.io)).toBe(4);
+    expect(await main(["approve", "e2e", "--dir", fixture("clickhouse")], c.io)).toBe(1);
     expect(c.text().err).toContain("there is no terminal to ask, so nothing was approved");
   });
 });
@@ -205,7 +205,7 @@ describe("yodel approve in a declarative project (#202)", () => {
   it("approves nothing on a wrong answer", async () => {
     const w = await waiting(digest);
     const t = context(w, "prod");
-    expect(await approveDeclarative(t.c, undefined, shown)).toBe(4);
+    expect(await approveDeclarative(t.c, undefined, shown)).toBe(8);
     expect(t.text().err).toContain("Not approved: the answer was not e2e.");
     expect(t.ran).toEqual([]);
   });
@@ -216,7 +216,7 @@ describe("yodel approve in a declarative project (#202)", () => {
     expect(await approveDeclarative(t.c, undefined, shown)).toBe(0);
     expect(t.text().out).toMatch(/Nothing waits at apply-e2e \/ .*: there is nothing to approve/);
     const meant = context(w, "e2e", digest);
-    expect(await approveDeclarative(meant.c, undefined, shown)).toBe(4);
+    expect(await approveDeclarative(meant.c, undefined, shown)).toBe(1);
     expect(t.ran).toEqual([]);
   });
 });

@@ -65,7 +65,7 @@ async function routines(ctx: Ctx, { p, offline }: New): Promise<void> {
   hold(bad !== undefined, "yodel new wrote no migration dropping the function");
   const linted = await p.yodel(["lint", "--json"]);
   const found = parse<{ findings: Array<{ rule: string; migration?: string }> }>(linted).findings.filter((f) => f.migration === bad).map((f) => f.rule);
-  hold(linted.code === 3 && found.includes("pg-signature") && found.includes("pg-routine-in-use"), `yodel lint on a changed signature and a function a trigger uses: exit ${String(linted.code)}, ${found.join(", ") || "no findings"}`);
+  hold(linted.code === 1 && found.includes("pg-signature") && found.includes("pg-routine-in-use"), `yodel lint on a changed signature and a function a trigger uses: exit ${String(linted.code)}, ${found.join(", ") || "no findings"}`);
   p.removeMigration(bad);
   declareRoutines(p);
 }

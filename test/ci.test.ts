@@ -12,6 +12,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { checkYodelConfig } from "../src/config/load.js";
 import { repoRoot, yodel } from "./helpers/run.js";
+import { CHANT, PRODUCT } from "./helpers/chant-bin.js";
+import { WAVES_SPEC } from "../src/ci/render.js";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -115,8 +117,10 @@ describe("yodel ci", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
     const rendered = wrote.out.trim().split("\n").map((l) => l.replace(/^wrote /, ""));
-    expect(rendered).toHaveLength(11);
-    for (const f of rendered) {
+    // Through chant's product pipeline yodel ci also writes the waves spec (#289), which names no image.
+    expect(rendered).toHaveLength(PRODUCT ? 12 : 11);
+    expect(rendered.includes(WAVES_SPEC)).toBe(PRODUCT);
+    for (const f of rendered.filter((f) => f !== WAVES_SPEC)) {
       const text = readFileSync(join(dir, f), "utf8");
       expect(text, f).not.toContain("npm ci");
       expect(text, f).not.toContain("node_modules/.bin");
@@ -138,7 +142,7 @@ describe("yodel ci", () => {
     expect(wrote.code, wrote.err).toBe(0);
     type ResumeDoc = { on: { schedule: Array<{ cron: string }> }; permissions?: Record<string, string>; jobs: { resume: { steps: Array<{ run?: string; env?: Record<string, string> }> } } };
     const read = (f: string) => parseYAMLDocument(readFileSync(join(dir, f), "utf8")) as ResumeDoc;
-    const step = (doc: ResumeDoc) => doc.jobs.resume.steps.find((s) => s.run === "chant run resume --op yodel-apply");
+    const step = (doc: ResumeDoc) => doc.jobs.resume.steps.find((s) => s.run === `${CHANT} run resume --op yodel-apply`);
 
     // GitHub: the job's own token, allowed to re-run a run and nothing more.
     const github = read(".github/workflows/yodel-apply-resume.yml");
@@ -156,7 +160,7 @@ describe("yodel ci", () => {
     // GitLab: a schedule-only job in the apply file, its stage in the main file, and a Developer token named.
     const apply = parseYAMLDocument(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { stage?: string; rules?: unknown; script?: string[] }>;
     expect(apply["yodel-apply-resume"]).toMatchObject({ stage: "resume", rules: [{ if: '$CI_PIPELINE_SOURCE == "schedule"' }] });
-    expect(apply["yodel-apply-resume"]?.script?.at(-1)).toBe("chant run resume --op yodel-apply");
+    expect(apply["yodel-apply-resume"]?.script?.at(-1)).toBe(`${CHANT} run resume --op yodel-apply`);
     const main = readFileSync(join(dir, ".gitlab-ci.yml"), "utf8");
     expect((parseYAMLDocument(main) as { stages: string[] }).stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "resume", "ops"]);
     expect(main).toContain("GITLAB_TOKEN: a project access token with the api scope (Developer)");

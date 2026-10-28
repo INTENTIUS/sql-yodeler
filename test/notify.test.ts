@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readSchema } from "../src/schemas.js";
 import { checkYodelConfig } from "../src/config/load.js";
 import { waveFailure } from "../src/commands/apply.js";
-import { YodelError } from "../src/project.js";
+import { YodelError, yodelRefusal } from "../src/project.js";
 import { repoRoot } from "./helpers/run.js";
 import {
   eventFromDrift,
@@ -174,7 +174,7 @@ describe("delivery", () => {
 describe("which outcomes send an event", () => {
   it("apply: gated waits, refused and denied are refused, failed fails; applied and unchanged send none", () => {
     expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }, { id: "b" }], planDigest: "d1" })).toMatchObject({ event: "waiting", digest: "d1", targets: ["a", "b"], summary: "prod is waiting for approval of d1 (2 migrations)" });
-    expect(eventFromRun("apply", { environment: "prod", status: "refused", refusal: { exitCode: 4, message: "a checksum mismatch\nmore" } })).toMatchObject({ event: "refused", reason: "a checksum mismatch\nmore", summary: "apply in prod was refused: a checksum mismatch" });
+    expect(eventFromRun("apply", { environment: "prod", status: "refused", refusal: { exitCode: 1, message: "a checksum mismatch\nmore" } })).toMatchObject({ event: "refused", reason: "a checksum mismatch\nmore", summary: "apply in prod was refused: a checksum mismatch" });
     expect(eventFromRun("apply", { environment: "prod", status: "denied", policy: [{ id: "no-drops", outcome: "denied" }] })).toMatchObject({ event: "refused", status: "denied", reason: "policy rule no-drops denies the plan" });
     expect(eventFromRun("apply", { environment: "prod", status: "failed", exitCode: 5 })).toMatchObject({ event: "failed", reason: "apply failed (exit 5)", exitCode: 5 });
     expect(eventFromRun("apply", { environment: "prod", status: "applied" })).toBeUndefined();
@@ -184,13 +184,13 @@ describe("which outcomes send an event", () => {
   it("apply's wave modes (#87): a wave that will wait, a refusal, a failure", () => {
     const approve = "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:w";
     expect(eventFromRun("apply", { environment: "prod", status: "gated", pending: [{ id: "a" }], gatePlanDigest: "jcs1-sha256:w", approve })).toMatchObject({ event: "waiting", digest: "jcs1-sha256:w", approve: { command: approve }, targets: ["a"] });
-    expect(eventFromRun("apply", waveFailure("prod", new YodelError("refused: prod applies only migrations staging applied first", 4)))).toMatchObject({ event: "refused", reason: "refused: prod applies only migrations staging applied first" });
+    expect(eventFromRun("apply", waveFailure("prod", yodelRefusal("refused: prod applies only migrations staging applied first", 3)))).toMatchObject({ event: "refused", reason: "refused: prod applies only migrations staging applied first" });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("refused: wave 2 (prod) needs an approval", 3)))).toMatchObject({ event: "refused" });
     expect(eventFromRun("apply", waveFailure("prod", new YodelError("a statement failed", 1)))).toMatchObject({ event: "failed", reason: "apply failed (exit 1)" });
   });
 
   it("plan: a refusal or a denying rule is refused; a plan that would run sends none", () => {
-    expect(eventFromRun("plan", { environment: "dev", refusal: { exitCode: 4, message: "out of order" } })).toMatchObject({ event: "refused", detail: { command: "plan" }, status: "refused" });
+    expect(eventFromRun("plan", { environment: "dev", refusal: { exitCode: 1, message: "out of order" } })).toMatchObject({ event: "refused", detail: { command: "plan" }, status: "refused" });
     expect(eventFromRun("plan", { environment: "dev", policy: [{ id: "r", outcome: "denied" }] })).toMatchObject({ event: "refused", status: "denied" });
     expect(eventFromRun("plan", { environment: "dev", pending: [{ id: "a" }], policy: [{ id: "r", outcome: "allowed" }] })).toBeUndefined();
   });
@@ -234,7 +234,7 @@ describe("the event schema", () => {
     const events = [
       waiting(),
       makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "gated", pending: [{ id: "a" }], planDigest: "d", approve: "yodel approve p --plan d", chantApprove: "chant approve o g --plan d" }) ?? fail(), { env: {} }),
-      makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "refused", refusal: { exitCode: 4, message: "m" } }) ?? fail(), { env: {} }),
+      makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "refused", refusal: { exitCode: 1, message: "m" } }) ?? fail(), { env: {} }),
       makeNotifyEvent(eventFromRun("apply", { environment: "p", status: "failed", exitCode: 1 }) ?? fail(), { env: {} }),
       makeNotifyEvent(eventFromDrift({ environment: "p", drifted: true, changed: [{ name: "t" }], missing: [], fingerprint: "f" }) ?? fail(), { env: {} }),
     ];

@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
-import { EXIT_CODES, PLAN_PENDING_NOTE } from "../src/exit.js";
+import { EXIT_CODES, FALLBACK_EXIT, PLAN_PENDING_NOTE, useChantExitTable } from "../src/exit.js";
 import { help } from "../src/cli.js";
+import { commands } from "../src/commands/index.js";
 import { projectFromConfig } from "../src/project.js";
 import { createMigration, newestMigration, readMigrations, writeMigration, type CreatedMigration } from "../src/migrations/index.js";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
@@ -19,6 +20,30 @@ import { projectFrom, repoRoot, yodel } from "./helpers/run.js";
 const dirs: Array<() => void> = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) d();
+});
+
+/** yodel exits by chant's one table (#288, chant#4553). */
+describe("chant's exit-code table (#288)", () => {
+  it("the fallback has chant's numbers, and chant's table, when the installed chant exports it, is the same", async () => {
+    expect(FALLBACK_EXIT).toEqual({ done: 0, failed: 1, drift: 2, waiting: 3, moved: 4, held: 5, superseded: 6, denied: 7, declined: 8 });
+    const specifier = "@intentius/chant/exit-codes";
+    const chant = await import(specifier).then((m: { CHANT_EXIT?: unknown }) => m.CHANT_EXIT, () => undefined);
+    const from = await useChantExitTable();
+    expect(from).toBe(chant === undefined ? "fallback" : "chant");
+    if (chant !== undefined) expect(chant).toEqual(FALLBACK_EXIT);
+  });
+
+  it("every command's --help lists only codes on chant's table, each once", async () => {
+    const table = new Set<number>(Object.values(FALLBACK_EXIT));
+    for (const c of commands.filter((x) => x.implemented)) {
+      const ran = await yodel([c.name, "--help"]);
+      expect(ran.code, `${c.name}: ${ran.err}`).toBe(0);
+      const section = ran.out.slice(ran.out.indexOf("\nExit codes:"));
+      const codes = [...section.matchAll(/^ {2}(\d+) {2}/gm)].map((m) => Number(m[1]));
+      for (const code of codes) expect(table.has(code), `yodel ${c.name} --help lists ${String(code)}`).toBe(true);
+      expect(new Set(codes).size, `yodel ${c.name} --help lists a code twice`).toBe(codes.length);
+    }
+  });
 });
 
 /** docs/cli.md's exit-code table and `yodel --help` say the same as src/exit.ts. */
@@ -62,7 +87,7 @@ function add(dir: string, name: string, build: BuildOutput, minute: number, pare
 }
 
 describe("a fork in the migrations directory (#13)", () => {
-  it("apply and status refuse it with exit 4, before reading the server", async () => {
+  it("apply and status refuse it with exit 1, before reading the server", async () => {
     const { dir, dispose } = projectFrom("lint-clickhouse");
     dirs.push(dispose);
     const migrations = join(dir, "migrations");
@@ -71,13 +96,13 @@ describe("a fork in the migrations directory (#13)", () => {
     add(migrations, "add-b", ch("id UInt64, b String DEFAULT ''"), 2, first);
     for (const verb of ["apply", "status"]) {
       const ran = await yodel([verb, "e2e", "--dir", dir]);
-      expect(ran.code, ran.err).toBe(4);
+      expect(ran.code, ran.err).toBe(1);
       expect(ran.err).toContain("refused: the migrations directory is not one unbroken chain; nothing can be applied until it is:");
       expect(ran.err).toMatch(/fork: .* both follow /);
     }
   });
 
-  it("plan says apply would refuse with exit 4, and counts the migrations the history has applied", async () => {
+  it("plan says apply would refuse with exit 1, and counts the migrations the history has applied", async () => {
     const OP: MigrateOpRef = { name: "migrate-e2e", filePath: "/p/ops/migrate-e2e.op.ts", gate: "approve-migrate-e2e", quorum: false };
     const m1 = migration("20261009T1000-one", null, ["CREATE DATABASE yodel_8"]);
     const a = migration("20261009T1100-a", m1.id, ["CREATE TABLE yodel_8.a (x UInt8) ENGINE = MergeTree ORDER BY x"]);
@@ -98,10 +123,10 @@ describe("a fork in the migrations directory (#13)", () => {
     for (const m of [m1, a, b]) writeMigration(join(dir, "migrations"), m);
 
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: null });
-    expect(plan.refusal?.exitCode).toBe(4);
+    expect(plan.refusal?.exitCode).toBe(1);
     expect(plan.appliedCount).toBe(2);
     const text = renderPlanText(plan);
     expect(text.split("\n")[0]).toMatch(/: 2 applied, 0 pending$/);
-    expect(text).toContain("yodel apply would refuse (exit 4): the migrations directory is not one unbroken chain");
+    expect(text).toContain("yodel apply would refuse (exit 1): the migrations directory is not one unbroken chain");
   });
 });

@@ -8,7 +8,7 @@ import { addColumn, addTable } from "../../lib/schema.js";
  * resolved the way a team might without --env: `yodel rebase B --onto A`
  * rewrites B, which already ran, so `yodel repair B` records the edit. A
  * is now before B in the chain but not applied: out of order. yodel apply
- * refuses it with exit 4 and the table it makes is not created; with
+ * refuses it with exit 1 and the table it makes is not created; with
  * --allow-out-of-order it applies (never skipped).
  * BREAK: the files are ordered the other way, A rebased onto B, so A is in
  * order and the plain apply runs it.
@@ -45,7 +45,7 @@ async function body(ctx: Ctx): Promise<void> {
   const status = await p.status();
   hold((status.doc.outOfOrder ?? []).includes(a), `yodel status does not list ${a} out of order (${JSON.stringify(status.doc.outOfOrder)})`);
   const refused = await p.approvedApply();
-  hold(refused.ran.code === 4, `yodel apply exited ${String(refused.ran.code)}, not 4, with ${a} out of order`);
+  hold(refused.ran.code === 1, `yodel apply exited ${String(refused.ran.code)}, not 1, with ${a} out of order`);
   hold(!(await ctx.db.tableExists("late")), `${a} was applied out of order without --allow-out-of-order`);
 
   // What yodel apply --allow-out-of-order hands the Op's steps.

@@ -11,7 +11,7 @@ import { declarativeRefusal } from "../config/settings.js";
 import { declaredChanges, planEnvironment } from "../chant/plan.js";
 import { changeFindings, declarativeLint, declaredSchemaFindings } from "../declarative/review.js";
 import type { LintReport, LintSettings } from "../lint/index.js";
-import { chantLevel, CODE_QUALITY_FILE, codeQuality, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
+import { chantLevel, CODE_QUALITY_FILE, codeQuality, FORGE_FORMAT, forgeFormat, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
 import { loadPolicies, policyRules } from "../lint/policies.js";
 import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
@@ -128,8 +128,11 @@ Options:
                           gitlab   the text, and GitLab's code quality
                                    report written to --output, for the
                                    job's artifacts:reports:codequality
+                          forge    github or gitlab, by the forge the job runs
+                                   on (GITLAB_CI, GITHUB_ACTIONS), else text:
+                                   the check hook yodel ci writes (#294)
                           yodel ci renders each forge's lint job with its own
-  --output <file>         with --format gitlab: where the report goes
+  --output <file>         with --format gitlab (or forge on GitLab): where the report goes
                           (default ${CODE_QUALITY_FILE}, from the working
                           directory); it is written
                           whatever the findings, so the artifact is always there
@@ -137,12 +140,12 @@ Options:
 
 Exit codes:
   0  no errors (warnings and silenced findings do not fail)
-  3  at least one error (a replay that differs counts)
-  4  --replay: the target already holds what the history names, and --reset
-     was not given, or another profile binds the same server and names one
-     of them and --reset-shared does not name it; nothing was run
-  1  lint could not run: a bad config, an unknown migration for
-     --update-checksum, a server that does not answer (--env)
+  1  at least one error (a replay that differs counts); --replay: the target
+     already holds what the history names, and --reset was not given, or
+     another profile binds the same server and names one of them and
+     --reset-shared does not name it (nothing was run); or lint could not
+     run: a bad config, an unknown migration for --update-checksum, a server
+     that does not answer (--env)
 `;
 
 interface LintArgs {
@@ -187,10 +190,12 @@ function parseLintArgs(args: string[]): LintArgs {
   const update = v["update-checksum"];
   const replay = typeof v.replay === "string" ? v.replay : undefined;
   const resetShared = Array.isArray(v["reset-shared"]) ? v["reset-shared"].filter((r): r is string => typeof r === "string") : [];
-  const format = typeof v.format === "string" ? v.format : v.json === true ? "json" : "text";
+  const asked = typeof v.format === "string" ? v.format : v.json === true ? "json" : "text";
+  // --format forge (#294): the job's own forge, so one check hook serves every forge.
+  const format = asked === FORGE_FORMAT ? forgeFormat() : asked;
   if (!(LINT_FORMATS as readonly string[]).includes(format)) throw new YodelError(`--format ${format}: it is ${LINT_FORMATS.join(", ")}\n${usage}`);
   if (v.json === true && format !== "json") throw new YodelError(`--json is --format json; give one of them\n${usage}`);
-  if (typeof v.output === "string" && format !== "gitlab") throw new YodelError(`--output goes with --format gitlab\n${usage}`);
+  if (typeof v.output === "string" && format !== "gitlab" && asked !== FORGE_FORMAT) throw new YodelError(`--output goes with --format gitlab\n${usage}`);
   if (replay === undefined && (v.reset === true || v.keep === true || resetShared.length > 0)) throw new YodelError(`--reset, --reset-shared and --keep go with --replay <env>\n${usage}`);
   return {
     env: typeof v.env === "string" ? v.env : undefined,
@@ -300,7 +305,7 @@ export const lint: Command = {
       if (a.replay !== undefined) {
         const env = resolveEnvironment(project, a.replay);
         if (scanMigrations(dir).ordered) {
-          // A target that is not fresh throws here, exit 4, before anything is linted or run.
+          // A target that is not fresh throws here, exit 1, before anything is linted or run.
           replay = await replayHistory(project, env, { reset: a.reset, resetShared: a.resetShared, keep: a.keep, log: (l) => { io.err(`replay: ${l}\n`); } });
           options.rules = [...projectRules, replayRule(replay)];
         } else {

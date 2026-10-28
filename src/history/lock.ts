@@ -58,9 +58,8 @@ import { YodelError } from "../project.js";
 import { serverMessage, type ClickHousePort } from "./client.js";
 import { databaseDdl, ident, literal, LOCK_TABLE, lockTableDdl } from "./ddl.js";
 import { describeTopology, type HistoryTopology } from "./topology.js";
+import { EXIT_HELD } from "../exit.js";
 
-/** Exit code: another apply holds the lock. */
-export const LOCKED = 5;
 
 /** The lock row's key: one apply lock per history database. */
 export const LOCK_NAME = "apply";
@@ -95,7 +94,7 @@ export class LockHeldError extends YodelError {
       `another apply holds the lock (${where}): owner ${holder}, ${where.startsWith("Postgres advisory lock") ? "since" : "until"} ${expiresAt} UTC. ` +
         (waited ? `This run ${waited}. ` : "") +
         `Wait for it, or once you know it is not running, clear it with: ${clear}`,
-      LOCKED,
+      EXIT_HELD,
     );
     this.name = "LockHeldError";
   }
@@ -103,7 +102,7 @@ export class LockHeldError extends YodelError {
 
 export class LockLostError extends YodelError {
   constructor(where: string) {
-    super(`the apply lock (${where}) is no longer held by this run (it expired and another run took it); stopped before the next statement`, LOCKED);
+    super(`the apply lock (${where}) is no longer held by this run (it expired and another run took it); stopped before the next statement`, EXIT_HELD);
     this.name = "LockLostError";
   }
 }

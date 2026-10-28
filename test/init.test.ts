@@ -7,7 +7,7 @@ import { main } from "../src/cli.js";
 import type { Io } from "../src/command.js";
 import { projectFromConfig, YodelError, type Environment, type Project } from "../src/project.js";
 import { deriveState, isApplied, type HistoryRow } from "../src/history/index.js";
-import { compareHistory, currentDigest, executeApply, inspect, openVersioned, REFUSED, selectToApply, statusReport, type VersionedEnv } from "../src/versioned/index.js";
+import { compareHistory, currentDigest, executeApply, inspect, openVersioned, selectToApply, statusReport, type VersionedEnv } from "../src/versioned/index.js";
 import {
   BASELINE_NOTE,
   baselineNote,
@@ -22,6 +22,7 @@ import {
   schemaDir,
 } from "../src/init/index.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
+import { EXIT_FAILED } from "../src/exit.js";
 
 const baseline = migration("20261009T1000-baseline", null, ["CREATE DATABASE yodel_8", "CREATE TABLE yodel_8.a (x UInt8) ENGINE = MergeTree ORDER BY x"]);
 const next = migration("20261009T1100-add-y", baseline.id, ["ALTER TABLE yodel_8.a ADD COLUMN y UInt8"]);
@@ -97,7 +98,7 @@ describe("historyRefusal", () => {
     expect(historyRefusal(deriveState([]), "h.history")).toBeUndefined();
     const refusal = historyRefusal(deriveState([row()]), "h.history");
     expect(refusal).toBeInstanceOf(YodelError);
-    expect(refusal?.exitCode).toBe(REFUSED);
+    expect(refusal?.exitCode).toBe(EXIT_FAILED);
     expect(refusal?.message).toContain(baseline.id);
     expect(refusal?.message).toContain("Nothing was written");
   });
@@ -125,7 +126,7 @@ describe("recordBaseline", () => {
   it("refuses when the history already records a migration, and appends nothing", async () => {
     const { ch, venv } = await setup();
     await recordBaseline(venv, baseline, { USER: "tester" });
-    await expect(recordBaseline(venv, baseline, { USER: "tester" })).rejects.toMatchObject({ exitCode: REFUSED });
+    await expect(recordBaseline(venv, baseline, { USER: "tester" })).rejects.toMatchObject({ exitCode: EXIT_FAILED });
     expect(ch.rows).toHaveLength(1);
   });
 
@@ -221,7 +222,7 @@ describe("preflight", () => {
         preflight(p, e, { force, processEnv: env });
         expect.unreachable();
       } catch (err) {
-        expect(err).toMatchObject({ exitCode: REFUSED });
+        expect(err).toMatchObject({ exitCode: EXIT_FAILED });
         expect((err as Error).message).toContain("already holds migrations");
       }
     }

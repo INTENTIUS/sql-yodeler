@@ -33,16 +33,15 @@
  * (`./postgres/executor.ts`).
  *
  * A migration's pre-migration checks (#52, `./checks.ts`) run under the
- * lock just before its first statement; one that fails refuses (exit 4)
+ * lock just before its first statement; one that fails refuses (exit 1)
  * with a `failed` migration row naming it, and nothing of it is sent.
  *
  * Manual steps, and Op steps apply does not run (a rebuild in app mode, a
- * step of the other dialect), are refused before anything runs (exit 2).
+ * step of the other dialect), are refused before anything runs (exit 3).
  */
 
 import type { ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
-import { YodelError, type Environment, type Project } from "../project.js";
-import { PLAN_NEEDS_OP } from "../chant/plan.js";
+import { YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import type { Migration } from "../migrations/index.js";
 import { environmentSettings } from "../config/settings.js";
 import type { Topology } from "../topology/render.js";
@@ -76,9 +75,8 @@ import { compareHistory, outOfOrder, type PendingMigration, type VersionedStatus
 import { digestSubject, planDigest, sameDigest, type LiveScope } from "./digest.js";
 import { checksDue, checksRefusal, failedChecks, runChecks } from "./checks.js";
 import type { PolicyOverride } from "./policy.js";
+import { EXIT_WAITING, EXIT_MOVED } from "../exit.js";
 
-/** Exit code: a checksum mismatch, an applied migration gone from the directory, or an out-of-order migration without `--allow-out-of-order`. */
-export const REFUSED = 4;
 
 /** Everything a versioned verb needs about one environment. */
 export interface VersionedEnv {
@@ -183,15 +181,14 @@ export async function inspect(venv: VersionedEnv, ordered: readonly Migration[],
 /** The refusal for an integrity problem, or `undefined`. */
 export function integrityRefusal(status: VersionedStatus, allowOutOfOrder: boolean): YodelError | undefined {
   if (status.mismatches.length > 0) {
-    return new YodelError(`refused: the history does not match the migrations directory; nothing was applied:\n${status.mismatches.map((m) => `  ${m.message}`).join("\n")}`, REFUSED);
+    return yodelRefusal(`refused: the history does not match the migrations directory; nothing was applied:\n${status.mismatches.map((m) => `  ${m.message}`).join("\n")}`);
   }
   const late = outOfOrder(status);
   if (late.length > 0 && !allowOutOfOrder) {
     const newest = status.applied.filter((a) => a.index !== undefined).at(-1)?.id ?? "";
-    return new YodelError(
+    return yodelRefusal(
       `refused: ${late.map((p) => p.id).join(", ")} ${late.length === 1 ? "is" : "are"} out of order: the chain puts ${late.length === 1 ? "it" : "them"} before ${newest}, which is already applied. ` +
         `Nothing was applied. Pass --allow-out-of-order to apply ${late.length === 1 ? "it" : "them"} now (in chain order); ${late.length === 1 ? "it is" : "they are"} never skipped.`,
-      REFUSED,
     );
   }
   return undefined;
@@ -203,7 +200,7 @@ export function stepRefusal(toApply: readonly PendingMigration[]): YodelError | 
   if (lines.length === 0) return undefined;
   return new YodelError(
     `refused: a pending migration has a step yodel apply does not run: a person acts on a manual step, and yodel apply runs only ClickHouseRebuildOp (materialized-view mode) and backfill steps on ClickHouse, PostgresMigrationOp on Postgres. Nothing was applied:\n${lines.join("\n")}`,
-    PLAN_NEEDS_OP,
+    EXIT_WAITING,
   );
 }
 
@@ -402,7 +399,7 @@ export async function executeApply(venv: VersionedEnv, ordered: readonly Migrati
       throw new YodelError(
         `refused: the plan moved since it was approved (approved ${options.approvedDigest}, now ${digest}): ${describeMove(moved)}. ` +
           `Nothing was applied; run yodel apply ${venv.environment} again and approve the new plan.`,
-        1,
+        EXIT_MOVED,
       );
     }
     await options.approve(digest);
@@ -498,7 +495,7 @@ async function runOpStep(venv: VersionedEnv, p: PendingMigration, i: number, rec
   if (!step) throw new YodelError(`${m.id} has no step ${String(i)}`);
   const plan = planStep(step);
   if (plan.run === "statement" || plan.run === "refused" || p.refusedSteps.some((r) => r.index === i)) {
-    throw stepRefusal([p]) ?? new YodelError(`${m.id} step ${String(i)}: ${plan.run === "refused" ? plan.reason : "not a step yodel apply runs"}`, PLAN_NEEDS_OP);
+    throw stepRefusal([p]) ?? new YodelError(`${m.id} step ${String(i)}: ${plan.run === "refused" ? plan.reason : "not a step yodel apply runs"}`, EXIT_WAITING);
   }
   const row = { ...base, kind: "step" as const, statement_index: i, statement_sha: stepSha(step, m.files) };
   const resumed = p.partWay !== undefined && p.partWay.resumeAt === i;

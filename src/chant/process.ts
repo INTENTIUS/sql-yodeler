@@ -8,6 +8,11 @@
  * not whatever `chant` is first on PATH. That chant's `bin/` goes first on the
  * child's PATH, because chant's Op activities shell out to `chant` themselves
  * (`lifecycleDiff` runs `chant lifecycle diff`).
+ *
+ * A child runs in chant's own words, not yodel's (#287): ../chant/apply.ts
+ * reads chant's `approve: chant approve ...` line from its output for the
+ * `chantApprove` field scripts use. `yodel chant <args>` is the line that
+ * runs chant in yodel's words (../commands/chant.ts).
  */
 
 import { spawn } from "node:child_process";
