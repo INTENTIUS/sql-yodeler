@@ -291,7 +291,22 @@ export interface CiConfig {
    * or with `resume`: both need the apply pipeline.
    */
   apply?: boolean;
+  /**
+   * The SQL tools the team already runs on migrations, run in the pull
+   * request's check beside yodel's own checks (#294), off unless named:
+   * `squawk` (Postgres only) lints each `migrations/<id>/migration.sql`,
+   * `sqlfluff` lints `migrations/` in the project's dialect. Each must be
+   * installed where the check job runs. They run as hooks on chant's check
+   * moment (`ci.hooks.check` in chant.workspace.json), which `yodel ci`
+   * writes when the installed chant has it; without it they do not run.
+   */
+  tools?: CheckTool[];
 }
+
+/** A SQL tool yodel ships a check preset for (#294). */
+export type CheckTool = "squawk" | "sqlfluff";
+
+export const CHECK_TOOLS: readonly CheckTool[] = ["squawk", "sqlfluff"];
 
 /**
  * How a CI job exchanges its OIDC token for a cloud login (#132). On GitHub

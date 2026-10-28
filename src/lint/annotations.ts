@@ -23,6 +23,20 @@ import type { Finding, LintReport } from "./check.js";
 
 /** The formats `yodel lint --format` prints. */
 export const LINT_FORMATS = ["text", "json", "github", "gitlab"] as const;
+
+/**
+ * `--format forge` (#294): the format of the forge the job runs on, read
+ * from its variables, so one check hook serves every forge. `gitlab` under
+ * GitLab CI, `github` under GitHub or Forgejo Actions (both set
+ * `GITHUB_ACTIONS`), else `text`.
+ */
+export const FORGE_FORMAT = "forge";
+
+export function forgeFormat(env: NodeJS.ProcessEnv = process.env): "text" | "github" | "gitlab" {
+  if (env.GITLAB_CI === "true") return "gitlab";
+  if (env.GITHUB_ACTIONS === "true" || env.FORGEJO_ACTIONS === "true") return "github";
+  return "text";
+}
 export type LintFormat = (typeof LINT_FORMATS)[number];
 
 /** Where `yodel lint --format gitlab` writes the code quality report, unless --output says otherwise. */
