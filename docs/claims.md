@@ -32,7 +32,7 @@ Each docs page names the claims that prove it, and `npm run check` fails when a 
 
 ## Product scenario rows
 
-A claim can also cite one row of a product's scenario on the shared e2e harness (`scenarios/product-proofs.json`). A row names the repo, the scenario, the claim, the product commit, the date and the yodel version it ran, and counts only when that version is the one the claims are about, 0.11.0 here. A row at another version is listed and marked not counted. A cited row never replaces the claim's own run above.
+A claim can also cite one row of a product's scenario on the shared e2e harness (`scenarios/product-proofs.json`). A row names the repo, the scenario, the claim, the product commit, the date and the yodel version it ran, and counts only when that version is the one the claims are about, 0.11.1 here. A row at another version is listed and marked not counted. A cited row never replaces the claim's own run above.
 
 No product scenario row is cited yet.
 
