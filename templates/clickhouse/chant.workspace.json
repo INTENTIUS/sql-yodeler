@@ -1,7 +1,7 @@
 {
   "name": "{{chant:name}}",
   "schema": 1,
-  "minReader": "0.124.56",
+  "minReader": "0.124.57",
   "members": [],
   "ci": {
     "hooks": {

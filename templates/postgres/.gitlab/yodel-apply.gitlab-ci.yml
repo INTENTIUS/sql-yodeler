@@ -25,11 +25,12 @@ stages:
 wave-1-dev:
   stage: wave-1-dev
   image: node:22-bookworm
-  resource_group: yodel-apply-dev
+  timeout: '180 minutes'
   environment:
     name: dev
   variables:
     GIT_DEPTH: '0'
+    CHANT_LOCK_WAIT: '10500'
     YODEL_CREDENTIALS: writer:dev
     CHANT_JOB_GUARD: '{"forge":"gitlab","job":"wave 1 (dev) of yodel-apply","forgeEnvironment":"dev","branches":["main"]}'
   rules:
@@ -54,11 +55,12 @@ wave-1-dev:
 wave-2-prod:
   stage: wave-2-prod
   image: node:22-bookworm
-  resource_group: yodel-apply-prod
+  timeout: '180 minutes'
   environment:
     name: prod
   variables:
     GIT_DEPTH: '0'
+    CHANT_LOCK_WAIT: '10500'
     YODEL_CREDENTIALS: writer:prod
     CHANT_JOB_GUARD: '{"forge":"gitlab","job":"wave 2 (prod) of yodel-apply","forgeEnvironment":"prod","branches":["main"]}'
   rules:
