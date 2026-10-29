@@ -1,6 +1,6 @@
 {
   "name": "@intentius/sql-yodeler",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Schema changes for ClickHouse and Postgres, and the ops they imply, on chant's sql lexicon",
   "keywords": [
     "clickhouse",
