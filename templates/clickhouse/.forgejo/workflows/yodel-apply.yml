@@ -24,15 +24,13 @@ on:
       - main
   workflow_dispatch: {}
 
-concurrency:
-  group: yodel-apply
-  cancel-in-progress: false
-
 jobs:
   wave-1-dev:
     runs-on: docker
     container: node:22-bookworm
+    timeout-minutes: 180
     env:
+      CHANT_LOCK_WAIT: '10500'
       YODEL_CREDENTIALS: writer:dev
       DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
       DEV_CLICKHOUSE_WRITER_USER: '${{ secrets.DEV_CLICKHOUSE_WRITER_USER }}'
@@ -75,7 +73,9 @@ jobs:
       - wave-1-dev
     if: '!cancelled()'
     container: node:22-bookworm
+    timeout-minutes: 180
     env:
+      CHANT_LOCK_WAIT: '10500'
       YODEL_CREDENTIALS: writer:prod
       PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
       PROD_CLICKHOUSE_WRITER_USER: '${{ secrets.PROD_CLICKHOUSE_WRITER_USER }}'
