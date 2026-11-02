@@ -6,11 +6,11 @@
 
 import { renderPlanNote, renderTenantSetNote } from "../../src/pr/note.js";
 import type { VersionedPlan } from "../../src/pr/model.js";
-import type { TenantSetPlan } from "../../src/pr/tenants.js";
+import { renderTenantSetMarkdown, type TenantSetPlan } from "../../src/pr/tenants.js";
 import { repoRoot } from "./run.js";
 
 /** One environment's note. */
 export const planNote = (plan: VersionedPlan): Promise<string> => renderPlanNote(plan, { dir: repoRoot });
 
 /** A tenant set's note. */
-export const setNote = (plan: TenantSetPlan): Promise<string> => renderTenantSetNote(plan, { dir: repoRoot });
+export const setNote = async (plan: TenantSetPlan): Promise<string> => (await renderTenantSetNote(plan, { dir: repoRoot })) ?? renderTenantSetMarkdown(plan);

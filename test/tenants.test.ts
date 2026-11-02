@@ -188,7 +188,7 @@ describe("a tenant set's plan comment", () => {
     notes: [],
   });
 
-  it("is one comment for the set, through chant's note: a row and a section per tenant, the set's digest", async () => {
+  it("is one comment for the set, in yodel's own note while chant's would ask for an approval per tenant (#56): tenants with the same migrations once, then one approval for every tenant", async () => {
     const plan: TenantSetPlan = {
       environment: "prod",
       dialect: "postgres",
@@ -199,13 +199,12 @@ describe("a tenant set's plan comment", () => {
     };
     const md = await setNote(plan);
     expect(md.startsWith("<!-- yodel:plan env=prod -->\n")).toBe(true);
-    // A row per tenant, a section per tenant (#290).
-    expect(md).toContain("| `prod/acme` | 1 pending | planned |");
-    expect(md).toContain("| `prod/globex` | 1 pending | planned |");
-    expect(md).toContain("| `prod/initech` | 0 pending | planned |");
-    expect(md).toContain("<details><summary>Environment `prod/acme`</summary>");
-    expect(md).toContain("#### `m2`");
-    expect(md).toContain("Plan digest: `jcs1-sha256:set`");
+    expect(md).toContain("#### 2 tenants: **1 pending**\n\n`acme`, `globex`");
+    expect(md).toContain("##### `m2`");
+    expect(md).toContain("#### 1 tenant: up to date\n\n`initech`");
+    expect(md).toContain("one approval of `jcs1-sha256:set`, for all 3 tenants");
+    expect(md).toContain("```sh\nnpx yodel approve prod --plan jcs1-sha256:set\n```");
+    expect(md).not.toMatch(/yodel approve prod\/\S+ --plan/);
     expect(md).not.toContain("chant approve");
   });
 });

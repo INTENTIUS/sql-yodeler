@@ -14,7 +14,7 @@ import { scanMigrations } from "../migrations/index.js";
 import { migrationsDir } from "../versioned/index.js";
 import { viewWavePlan } from "../waves/index.js";
 import { collectVersionedPlan, type VersionedPlan } from "./model.js";
-import { planJsonVersioned } from "./render.js";
+import { COMMENT_LIMIT, commentMarker, fence, pendingMarkdown, planJsonVersioned, redact } from "./render.js";
 
 export interface TenantSetPlan {
   environment: string;
@@ -88,6 +88,66 @@ export function renderTenantSetText(plan: TenantSetPlan, options: { runnable?: (
     if (plan.wave.waits && plan.wave.approve) lines.push("Approve it for the pipeline, at a terminal, with:", `  ${run(plan.wave.approve)}`, "which shows every tenant's plan and asks you first.");
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * The set's own lines in chant's note (#56, #290): every tenant by its bare
+ * name, grouped by what is pending on it, then the wave's one approval of
+ * the set digest and the `yodel approve <set>` that gives it. chant's table
+ * names each tenant as `<set>/<tenant>`; these name the set as one.
+ */
+export function tenantSetDetailLines(plan: TenantSetPlan, max = 30): string[] {
+  const code = (s: string) => `\`${s}\``;
+  const out = [`${plan.dialect === "clickhouse" ? "ClickHouse" : "Postgres"}, ${summary(plan)}.`];
+  for (const n of plan.notes) out.push("", `> ${n}`);
+  for (const g of groups(plan)) {
+    const first = g.members[0];
+    if (!first) continue;
+    const what = first.refusal ? "yodel apply would refuse" : first.pending.length === 0 ? "up to date" : `${String(first.pending.length)} pending`;
+    out.push("", `- ${what}: ${someNames(g.members.map((m) => tenantName(m.environment)), code, max)}`);
+  }
+  if (plan.wave) {
+    out.push("", describeTenantSetWave(plan.wave, plan.tenants.length, code));
+    if (plan.wave.waits && plan.wave.approve) out.push("", "Approve it once, for every tenant, at a terminal (it shows every tenant's plan and asks first):", "", fence(`npx ${plan.wave.approve}`, "sh"));
+  }
+  return out;
+}
+
+/** The pull request comment for the whole set: one per tenant set, updated on the next push. */
+export function renderTenantSetMarkdown(plan: TenantSetPlan, options: { sql?: boolean; max?: number } = {}): string {
+  const withSql = options.sql !== false;
+  const max = options.max ?? 30;
+  const code = (s: string) => `\`${s}\``;
+  const out = [
+    commentMarker(plan.environment),
+    `### yodel plan: \`${plan.environment}\`, a tenant set`,
+    "",
+    `${plan.dialect === "clickhouse" ? "ClickHouse" : "Postgres"}, ${summary(plan)}.`,
+  ];
+  for (const n of plan.notes) out.push("", `> ${n}`);
+  for (const g of groups(plan)) {
+    const first = g.members[0];
+    if (!first) continue;
+    const names = someNames(g.members.map((m) => tenantName(m.environment)), code, max);
+    const count = g.members.length;
+    const what = first.refusal ? "**yodel apply would refuse**" : first.pending.length === 0 ? "up to date" : `**${String(first.pending.length)} pending**`;
+    out.push("", `#### ${String(count)} tenant${count === 1 ? "" : "s"}: ${what}`, "", names);
+    if (first.refusal) out.push("", fence(redact(first.refusal.message), "text"));
+    for (const p of first.pending) out.push("", ...pendingMarkdown(p, withSql, 5));
+  }
+  if (plan.wave) {
+    out.push("", "#### The apply pipeline", "", describeTenantSetWave(plan.wave, plan.tenants.length, code));
+    if (plan.wave.waits && plan.wave.approve) {
+      out.push("", "Approve it before merging, once for every tenant, at a terminal (it shows every tenant's plan and asks first):", "", fence(`npx ${plan.wave.approve}`, "sh"));
+    }
+  }
+  if (!withSql) out.push("", "_The statements are left out: the comment would be too long. `yodel plan` prints them._");
+  const body = `${out.join("\n")}\n`;
+  if (body.length > COMMENT_LIMIT) {
+    if (withSql) return renderTenantSetMarkdown(plan, { sql: false, max });
+    if (max > 5) return renderTenantSetMarkdown(plan, { sql: false, max: 5 });
+  }
+  return body;
 }
 
 /** `yodel plan <set> --json`. */

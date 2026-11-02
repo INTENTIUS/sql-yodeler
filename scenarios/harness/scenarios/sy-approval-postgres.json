@@ -22,7 +22,7 @@
           "comment": "<!-- yodel:plan env=dev -->"
         },
         {
-          "comment": "Plan digest the apply gate binds:"
+          "comment": "Plan digest: `jcs1-sha256:"
         }
       ]
     },

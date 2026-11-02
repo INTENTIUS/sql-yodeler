@@ -12,7 +12,7 @@ Removed:
 - `yodel-waves.json` names the sql lexicon's `sql-migrate` step and `standDown: true`. The `plan` and `apply` callbacks a 0.10.1 spec has are no longer rendered. `yodel apply <env> --wave-plan` and `--wave-apply` stay, since they are the commands the capability runs.
 - `YODEL_LOCK_WAIT` and `YODEL_STAND_DOWN`, which 0.10.1's wave jobs set, are no longer settings. `yodel apply` and `yodel revert` refuse either one by name (exit 1), pointing at `yodel upgrade`; they remain only as the hand-off of `--lock-wait` and `--stand-down` to the migrations Op's steps. `environments.<env>.lockWait` and `--lock-wait` set the lock wait.
 - yodel's own newer-commit check for `--stand-down` (`src/versioned/stand-down.ts`). `yodel apply --stand-down` asks chant's `newerCommitOnBranch`, the question chant's waves ask.
-- yodel's own pull request note. `yodel plan --comment` and `--format markdown` give chant's note in yodel's words, as 0.11 did on chant 0.124.57.
+- yodel's own pull request note. `yodel plan --comment` and `--format markdown` give chant's note in yodel's words, as 0.11 did on chant 0.124.57. A tenant set keeps yodel's own note, which names the set in one approval; chant's would ask for an approval per tenant.
 - yodel's own cloud login steps on GitHub and GitLab, which ran `aws`, `gcloud` and `az` from a token file. Those forges log in through chant's ci-identity trade. Forgejo, which gives a job no OIDC token, keeps yodel's login from the runner's `tokenFile`.
 - yodel's own MCP server. `yodel mcp` serves on `chant serve mcp --read-only`, the tools named `yodel:status` and so on, and refuses `YODEL_OWN_MCP`.
 

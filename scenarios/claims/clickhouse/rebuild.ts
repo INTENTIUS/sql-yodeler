@@ -1,4 +1,5 @@
 import { hold, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { REVIEWER, ownApprovalRefused } from "../../lib/gates.js";
 import { Project } from "../../lib/project.js";
 import { insertEvents } from "../../lib/schema.js";
 
@@ -58,7 +59,9 @@ const cleanupApproved = new WeakMap<Project, string>();
  * the date, yodel plan names it, and yodel cleanup lists it and drops
  * nothing. Once the date has passed (moved back in its comment, as a week
  * would), yodel cleanup stops at the gate with the drop's digest and drops
- * nothing; approved, it drops the table.
+ * nothing. The drop is chant's gated request (#292): approved by the one
+ * who asked for it, it still waits, says that approval does not count, and
+ * drops nothing; approved by someone else, it drops the table.
  * BREAK: the date is left where it is, so nothing is due and the table is
  * not dropped.
  */
@@ -86,7 +89,11 @@ export async function cleanupPart(ctx: Ctx, p: Project): Promise<void> {
   const gated = await cleanup();
   if (gated.doc.approve) {
     hold(gated.code === 3 && (await ctx.db.tableExists("events__chant_old")), `yodel cleanup dropped ${name} without an approval (exit ${String(gated.code)})`);
+    // The requester's own approval never counts for a gated request (#292, chant#4551).
     await p.approve(gated.doc.chantApprove);
+    const own = await p.yodel(["cleanup", p.env]);
+    hold(ownApprovalRefused(own) && (await ctx.db.tableExists("events__chant_old")), `yodel cleanup did not refuse the requester's own approval of the drop of ${name} (exit ${String(own.code)}): ${own.out.trim().split("\n").slice(-4).join(" ")}`);
+    await p.approve(gated.doc.chantApprove, { approver: REVIEWER });
     if (gated.doc.planDigest) cleanupApproved.set(p, gated.doc.planDigest);
   }
   const done = await cleanup();

@@ -1,6 +1,7 @@
 import { copyFileSync, cpSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hold, partDialects, partNames, runParts, type Claim, type Ctx } from "../../lib/claim.js";
+import { atGate } from "../../lib/gates.js";
 import { parse, Project } from "../../lib/project.js";
 import { addColumn, addTable, mainTable } from "../../lib/schema.js";
 
@@ -158,7 +159,8 @@ export const op = Op({
  * before it (which this environment never ran), is refused (exit 1),
  * naming the checkpoint.
  * BREAK: the hand-written revert step is left out, so the data step cannot
- * be undone and the revert refuses.
+ * be undone and the revert refuses: exit 3 like the gate (a person acts
+ * first), but with no gated document and nothing to approve.
  */
 export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
   const { p } = s;
@@ -181,9 +183,10 @@ export async function revertPart(ctx: Ctx, s: Lint): Promise<void> {
   const step = ctx.broken ? [] : ["--step", "revert-label.sql"];
   if (!ctx.broken) p.write("revert-label.sql", undo);
   await p.commit("its revert step");
-  const gated = await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 });
-  hold(gated.code === 3, `yodel revert ${p.env} ${id} exited ${String(gated.code)}, not 3 at the gate: ${gated.err.split("\n").filter((l) => l.startsWith("yodel revert")).join(" ").slice(0, 300)}`);
-  await p.approve(parse<{ chantApprove?: string }>(gated).chantApprove);
+  // Exit 3 alone is not the gate: a revert refused for want of --step exits 3 too (#288), with no JSON.
+  const gated = atGate(await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 }), "revert");
+  hold("doc" in gated, `yodel revert ${p.env} ${id} did not stop at the gate (${"why" in gated ? gated.why : ""})`);
+  await p.approve(gated.doc.chantApprove);
   const ran = await p.yodel(["revert", p.env, id, "--json", ...step], { timeoutMs: 600_000 });
   hold(ran.code === 0, `yodel revert after approval exited ${String(ran.code)}`);
 

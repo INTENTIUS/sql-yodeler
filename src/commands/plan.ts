@@ -19,7 +19,7 @@ import { planPart } from "../pr/part.js";
 import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
 import { renderPlanNote, renderTenantSetNote } from "../pr/note.js";
 import { baseRef } from "../config/base.js";
-import { collectTenantSetPlan, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
+import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
 
 const usage =
@@ -188,7 +188,8 @@ async function declarativePlan(project: Project, env: Environment, a: PlanArgs, 
   try {
     const result = await collectDeclarativePlan(project, env, build, await planEnvironment(project, env, build), { opName: a.op });
     if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-    if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result), io);
+    // #56: chant's note would ask for an approval per tenant, so the set keeps yodel's own note until chant can name the set once.
+  if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result), io);
     const doc = declarativePlanJson(result);
     if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
     else if (a.format === "markdown") io.out(renderDeclarativeMarkdown(result));
@@ -237,9 +238,9 @@ async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io
   const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
   const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
   if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  if (forge) await postComment(forge, commentMarker(env.name), await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref }), io);
+  if (forge) await postComment(forge, commentMarker(env.name), ((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result)), io);
   if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
-  else if (a.format === "markdown") io.out(await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref }));
+  else if (a.format === "markdown") io.out(((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result)));
   else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
   return tenantSetExitCode(result);
 }

@@ -1,5 +1,6 @@
 import { hold, type Claim, type Ctx } from "../../lib/claim.js";
 import { Project } from "../../lib/project.js";
+import { commentDigest } from "../../lib/note.js";
 import { addColumn, addTable, mainTable } from "../../lib/schema.js";
 
 /**
@@ -36,7 +37,7 @@ async function body(ctx: Ctx): Promise<void> {
     if (s.kind !== "statement") return;
     hold(body.includes(`| ${String(i)} | statement | ${String(s.rule)} | ${String(s.class)} |`), `the comment has no row for statement ${String(i)} (${String(s.rule)}, ${String(s.class)})`);
   });
-  const digest = /Plan digest the apply gate binds: `(jcs1-sha256:[0-9a-f]{64})`/.exec(body)?.[1];
+  const digest = commentDigest(body);
   hold(digest !== undefined, "the comment gives no plan digest");
   hold(body.includes(`yodel approve ${p.env} --plan ${digest}`), "the comment gives no yodel approve command for its digest");
   const gate = await p.apply();
