@@ -53,7 +53,7 @@ export interface GatedRequestRead {
   gate: string;
   digest: string;
   request: GatedRequest;
-  applied?: unknown;
+  applied?: { approvedBy?: string; approvedAt?: string; timestamp?: string };
 }
 
 /** The parts of chant's `lifecycle/gated-request` yodel calls. */
@@ -145,7 +145,14 @@ export async function spendAndAct<T>(
   act: () => Promise<{ result: T; detail: Record<string, string | number | boolean> }>,
 ): Promise<{ result: T; pushWarning?: string }> {
   const gate = approved.request.subject;
-  const applied = await gated.spendGatedRequest({ op: at.op, gate, digest: approved.digest, approval: approved.approval, cwd: at.cwd });
+  let applied: { timestamp: string };
+  try {
+    applied = await gated.spendGatedRequest({ op: at.op, gate, digest: approved.digest, approval: approved.approval, cwd: at.cwd });
+  } catch (e) {
+    const local = await spentWithoutRemote(gated, approved, at);
+    if (!local) throw e;
+    applied = local;
+  }
   let done: { result: T; detail: Record<string, string | number | boolean> };
   try {
     done = await act();
@@ -156,4 +163,55 @@ export async function spendAndAct<T>(
   }
   const finished = await gated.finishGatedRequest({ op: at.op, gate, digest: approved.digest, applied: applied.timestamp, result: "applied", detail: done.detail, cwd: at.cwd });
   return { result: done.result, ...(finished.pushWarning ? { pushWarning: finished.pushWarning } : {}) };
+}
+
+/** The ledger's remote, as chant chooses it: a name, none at all, or unknown (git failed, or the setting names a remote the repository lacks). */
+export type LedgerRemote = { remote: string } | null | "unknown";
+
+/** {@link LedgerRemote} for the repository at `cwd`, without fetching or pushing. */
+export async function ledgerRemoteOf(cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<LedgerRemote> {
+  const { execFile } = await import("node:child_process");
+  const names = await new Promise<string[] | undefined>((resolve) => {
+    execFile("git", ["remote"], { cwd, env: { ...env, LC_ALL: "C", LANGUAGE: "" } }, (err, stdout) => {
+      resolve(err ? undefined : stdout.split("\n").map((n) => n.trim()).filter(Boolean));
+    });
+  });
+  if (names === undefined) return "unknown";
+  const specifier = "@intentius/chant/lifecycle/ledger-remote";
+  let choose: ((names: readonly string[], env?: NodeJS.ProcessEnv) => { remote: string } | { failed: true } | null) | undefined;
+  try {
+    choose = ((await import(specifier)) as { chooseLedgerRemote?: typeof choose }).chooseLedgerRemote;
+  } catch {
+    choose = undefined;
+  }
+  if (!choose) return "unknown";
+  const found = choose(names, env);
+  if (found === null) return null;
+  return "failed" in found ? "unknown" : found;
+}
+
+/**
+ * The applied line chant wrote for `approved` when its spend threw only
+ * because the ledger has no remote, else undefined.
+ *
+ * chant's `spendGatedRequest` (lifecycle/gated-request.ts, 0.124.67) throws
+ * whenever the push did not land, and a checkout with no remote never
+ * pushes, so a single-machine project could not apply under any gated
+ * request. With no remote the local chant/lifecycle branch is the whole
+ * ledger, and the spend recorded on it is complete. A push that failed or
+ * that another writer beat still refuses: the remote is there, so this
+ * answers undefined and the caller throws chant's error.
+ */
+export async function spentWithoutRemote(
+  gated: GatedRequestApi,
+  approved: Extract<RequestGateResult, { status: "approved" }>,
+  at: { op: string; cwd: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ timestamp: string } | undefined> {
+  if ((await ledgerRemoteOf(at.cwd, env)) !== null) return undefined;
+  const gate = approved.request.subject;
+  const read = await gated.readGatedRequests(at.op, { cwd: at.cwd }).catch(() => []);
+  const line = read.find((r) => r.gate === gate && r.digest === approved.digest)?.applied;
+  if (!line?.timestamp || line.approvedBy !== approved.approval.resolvedBy || line.approvedAt !== approved.approval.timestamp) return undefined;
+  return { timestamp: line.timestamp };
 }
