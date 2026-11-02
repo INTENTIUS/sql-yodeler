@@ -598,7 +598,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (forecast?.waits) {
       // A tenant set's wave (#56) is approved once for every tenant.
       const approve = approveCommand(baseEnvironment(env.name), forecast.digest, forecast.approval);
-      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with ` : `. Approve it with `;
+      const how = env.tenant ? ` for every tenant of ${env.tenant.env}. Approve it with ` : `. Approve it with `;
       const mode = forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`;
       io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${mode})${how}${approve}\n`);
       if (forecast.approval === "pr-review") io.err(`${env.name}: under pr-review, an approving review of the merged pull request's head by a writer other than its author approves it too, when that head's pipeline recorded this plan (chant run wave --record-plans).\n`);

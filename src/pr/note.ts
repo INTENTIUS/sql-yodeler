@@ -33,7 +33,7 @@ import { WAVES_PIPELINE } from "../waves/record.js";
 import type { VersionedPlan } from "./model.js";
 import { cell, commentMarker, COMMENT_LIMIT, fence, pendingMarkdown, policyMarkdown, ranOn } from "./render.js";
 import { planPart } from "./part.js";
-import type { TenantSetPlan } from "./tenants.js";
+import { tenantSetDetailLines, type TenantSetPlan } from "./tenants.js";
 
 /** What the note needs of chant beyond yodel's words: the renderer and the change-set composer. */
 export interface ChantNote {
@@ -84,6 +84,35 @@ export function chantNote(): Promise<ChantNote | undefined> {
   return loaded;
 }
 
+const tenantSetFit = new WeakMap<ChantNote, boolean>();
+
+/**
+ * Whether chant's note can carry a tenant set (#56): its approve line names
+ * the set once, not each tenant. The set's gate is the wave's, approved once
+ * with `yodel approve <set>` for the set digest; `yodel approve <set>/<tenant>`
+ * approves that tenant as an environment of its own and does not open the
+ * wave. chant 0.124.67 prints a line per member (prApproveTargets in
+ * pr-loop.ts), so the set keeps yodel's own note until chant reads the
+ * report's approveTargets.
+ */
+export function tenantSetNoteFits(note: ChantNote): boolean {
+  const known = tenantSetFit.get(note);
+  if (known !== undefined) return known;
+  let fits: boolean;
+  try {
+    const members = ["a", "b"].map((t) => ({ environment: `${PROBE_ENV}/${t}`, digest: PROBE_DIGEST, pending: 1, refused: false }));
+    const probe = note.renderPrNote(
+      report(note, members, { env: PROBE_ENV, op: WAVES_PIPELINE, gate: `${WAVES_PIPELINE}-wave-1`, digest: PROBE_DIGEST, head: "0".repeat(40), base: "0".repeat(40), approval: { status: "pending" }, details: [], approveTargets: [PROBE_ENV] }),
+      { words: note.words },
+    );
+    fits = probe.includes(`yodel approve ${PROBE_ENV} --plan ${PROBE_DIGEST}`) && !probe.includes(`yodel approve ${PROBE_ENV}/`);
+  } catch {
+    fits = false;
+  }
+  tenantSetFit.set(note, fits);
+  return fits;
+}
+
 /** One environment of the note: its name, its digest, how many migrations are pending and whether apply would refuse. */
 interface NoteMember {
   environment: string;
@@ -104,6 +133,12 @@ interface NoteFrame {
   approval: { status: "approved" | "changed" | "pending"; approvedBy?: string[]; approved?: string };
   details: Array<{ member: string; title?: string; lines: string[] }>;
   message?: string;
+  /**
+   * The targets the note's approve line names, when they are not the members:
+   * a tenant set's one target, the set (#56). A chant that reads it prints
+   * one `yodel approve <set>` line; see {@link tenantSetNoteFits}.
+   */
+  approveTargets?: string[];
 }
 
 /** chant's pull request report for the note: one member per environment (or tenant), at the plan stage. */
@@ -216,10 +251,15 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
   return body.length > COMMENT_LIMIT ? render(false) : body;
 }
 
-/** A tenant set's note through chant (#56): a member per tenant, a detail section per group of tenants with one plan. */
+/**
+ * A tenant set's note through chant (#56): a member per tenant, the set's
+ * own section (every tenant by name, the wave's one approval of the set
+ * digest), a detail section per tenant. Undefined, so yodel posts its own
+ * note, while chant's would ask for an approval per tenant.
+ */
 export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: string; base?: string; note?: ChantNote }): Promise<string | undefined> {
   const note = options.note ?? (await chantNote());
-  if (!note) return undefined;
+  if (!note || !tenantSetNoteFits(note)) return undefined;
   const members = plan.tenants.map((t) => ({ environment: t.environment, digest: t.digest, pending: t.pending.length, refused: t.refusal !== undefined, part: planPart(t, t.environment) }));
   const wave = plan.wave;
   const render = (withSql: boolean) =>
@@ -233,7 +273,11 @@ export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: s
           digest: wave?.digest ?? "",
           ...commits(options.dir, options.base),
           approval: { status: "pending" },
-          details: plan.tenants.map((t) => ({ member: t.environment, lines: planDetailLines(t, withSql) })),
+          approveTargets: [plan.environment],
+          details: [
+            { member: plan.environment, title: `The tenant set \`${plan.environment}\``, lines: tenantSetDetailLines(plan) },
+            ...plan.tenants.map((t) => ({ member: t.environment, lines: planDetailLines(t, withSql) })),
+          ],
         }),
         { words: note.words, limit: COMMENT_LIMIT },
       ),
