@@ -132,10 +132,10 @@ A token is reused until 80% of its lifetime has passed (`ttlSeconds`; 900 for `r
 | Forge | What `yodel ci` renders |
 |---|---|
 | GitHub | `permissions: id-token: write` on the workflow (the pull request, apply or watch workflow whose jobs hold such a role) |
-| GitLab | `id_tokens` on each job holding such a role: `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`, or the provider's own audience with `ci.login.gcp`) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
+| GitLab | `id_tokens` on each job holding such a role: chant's `CHANT_ID_TOKEN_AWS`, `_GCP` or `_AZURE` for a cloud `ci.login` names, else `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
 | Forgejo | nothing: Forgejo gives a job no OIDC token, so the runner's own cloud identity (an instance profile, a workload or managed identity) mints. The rendered files say so. |
 
-The cloud's command line then has to reach that identity in the job. A runner that carries the identity itself needs nothing more. Otherwise `ci.login` in yodel.config.ts tells `yodel ci` how to exchange the token, and each job holding such a role logs in before yodel runs:
+The token source then has to reach that identity in the job. A runner that carries the identity itself needs nothing more. Otherwise `ci.login` in yodel.config.ts tells `yodel ci` how to exchange the token, and each job holding such a role logs in before yodel runs:
 
 ```ts
 ci: {
@@ -149,13 +149,17 @@ ci: {
 },
 ```
 
-| Cloud (token source) | The login step |
-|---|---|
-| `aws` (`rds-iam`) | the token in a file, and `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_SESSION_NAME` (`sessionName`, default `yodel`), which the aws command line assumes the role with |
-| `gcp` (`cloud-sql-iam`) | the token in a file, a workload identity credential configuration over it that impersonates `serviceAccount`, `gcloud auth login --cred-file` with it, and `GOOGLE_APPLICATION_CREDENTIALS` |
-| `azure` (`entra`) | the token in a file, `az login --service-principal --federated-token`, and `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` |
+On GitHub and GitLab the login is chant's ci-identity trade: one step, `Cloud identity (chant ci-identity: <clouds>)`, with `ci.login` mapped to chant's trade spec, which exchanges the job's OIDC token for each cloud the job holds a role in and leaves the cloud's variables for the later steps (the report too). The sql lexicon mints the database token from what the trade leaves, so the job's image needs no `aws`, `gcloud` or `az` ([Cloud login](chant-ci.md#cloud-login) has the detail, `ci.login.aws.region` among it). yodel's own login steps there, which ran the cloud's command line from a token file, are gone from 0.12, and `tokenFile` is read on Forgejo only.
 
-On GitHub the step requests the job's OIDC token for the cloud's audience and writes the variables to `$GITHUB_ENV`, so the later steps (the report too) have them. On GitLab the job writes its `id_tokens` variable to the file, and the variables are the job's own, so `after_script` has them. Forgejo gives a job no token, so there a login is rendered only when `tokenFile` names a token the runner provides; without one, the runner's identity mints. `tokenFile` also moves the file on GitHub (default `$RUNNER_TEMP/yodel-<cloud>-token`) and GitLab (`/tmp/yodel-<cloud>-token`). `environments.<env>` gives one environment's roles a login of their own; a job that holds two environments' roles with different logins for one cloud is refused, since it logs in once per cloud. The job's image needs the cloud's command line (`aws`, `gcloud`, `az`). `yodel ci` only renders these steps; nothing calls a cloud until the job runs. Trust the writer's cloud role from the apply job only: on GitHub by the subject `repo:<owner>/<repo>:environment:<env>`, on GitLab by `ref:main` and the environment.
+Forgejo gives a job no token, so there a login is rendered only when `tokenFile` names a token the runner provides; without one, the runner's identity mints. That login is yodel's, from the file, and the job's image needs the cloud's command line:
+
+| Cloud (token source) | The Forgejo login step |
+|---|---|
+| `aws` (`rds-iam`) | `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_SESSION_NAME` (`sessionName`, default `yodel`), which the aws command line assumes the role with |
+| `gcp` (`cloud-sql-iam`) | a workload identity credential configuration over the file that impersonates `serviceAccount`, `gcloud auth login --cred-file` with it, and `GOOGLE_APPLICATION_CREDENTIALS` |
+| `azure` (`entra`) | `az login --service-principal --federated-token`, and `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` |
+
+The variables go to `$GITHUB_ENV`, so the later steps have them. `environments.<env>` gives one environment's roles a login of their own; a job that holds two environments' roles with different logins for one cloud is refused, since it logs in once per cloud. `yodel ci` only renders these steps; nothing calls a cloud until the job runs. Trust the writer's cloud role from the apply job only: on GitHub by the subject `repo:<owner>/<repo>:environment:<env>`, on GitLab by `ref:main` and the environment.
 
 ### yodel config check
 
@@ -200,7 +204,7 @@ export default defineConfig({
 | which role a process connects as | | `credentials()` in chant.config.ts | `YODEL_ROLE`: `writer` or `writer:<env>` connects as the writer. Only an environment's wave job sets it | the reader |
 | the history's database (ClickHouse) or schema (Postgres) | `environments.<env>.history.database` | | `YODEL_HISTORY_DATABASE` | `yodeler` |
 | the ClickHouse apply lock's TTL, in seconds | `environments.<env>.lockTtl` | | `YODEL_LOCK_TTL` | 900 |
-| how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds) | | `YODEL_LOCK_WAIT` (a duration: `90`, `30s`, `10m`, `1h`) | 0: exit 5 at once |
+| how long an apply waits for a lock another apply holds | `environments.<env>.lockWait` (seconds), or `--lock-wait` for one run | | | 0: exit 5 at once |
 | access control: Postgres row-level security, policies, roles, grants; ClickHouse users, roles, row policies, grants ([Access control](access.md)) | `environments.<env>.access` | `sql.profiles.<env>.access` | | off |
 | lint rule levels | `lint.rules` | | | each rule's own |
 | another tool's migrations directory, for `yodel check` ([Try it without switching](from-other-tools.md#try-it-without-switching)) | `check: { dir, tool, env }` | | | none |
@@ -235,8 +239,7 @@ yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but 
 | `YODEL_TOPOLOGY` | the versioned commands on ClickHouse (`apply`, `plan`, `status`, `init`, `repair`, `lint --replay`) | the topology, when neither config sets one; the declarative path does not read it |
 | `YODEL_HISTORY_DATABASE` | the versioned commands | the history's database or schema, when `yodel.config.ts` sets none |
 | `YODEL_LOCK_TTL` | `yodel apply`, `yodel init`, `yodel repair` on ClickHouse | the lock's TTL in seconds |
-| `YODEL_LOCK_WAIT` | `yodel apply` | how long to wait for a lock another apply holds, as `--lock-wait` (`10m`); `yodel apply` hands its `--lock-wait` to the Op's Apply step this way |
-| `YODEL_STAND_DOWN` | `yodel apply` | `1`: as `--stand-down`, apply nothing and exit 0 when the run's branch has a newer commit on `origin` |
+| `YODEL_LOCK_WAIT`, `YODEL_STAND_DOWN` | the migrations Op's steps (`yodel apply --digest`, `--execute`) | how `yodel apply` and `yodel revert` hand `--lock-wait` and `--stand-down` to the Op they run. Set on any other run they are refused (exit 1), since a pipeline rendered by yodel 0.10 sets them on its wave jobs: run `yodel upgrade` ([Upgrading the pipelines](workflows.md#upgrading-the-pipelines-to-chant-012467)) |
 | `YODEL_RELEASE` | `yodel apply` | a chant release's digest or label: as `--release`, the apply is made from that release, and its release record names it (`releaseDigest`) |
 | `YODEL_LOCK_RETRIES` | `yodel apply` on Postgres | how many more times a statement that hit `lock_timeout` is tried (default 5, the pause doubling from 250 ms) |
 | `GITHUB_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN` (each after `CHANT_<FORGE>_TOKEN`; `GH_TOKEN` on GitHub and Forgejo) | `yodel plan --comment`, `yodel drift --issue` | the forge token; see [Approval](approval.md) and [Drift](drift.md#the-tracking-issue) |

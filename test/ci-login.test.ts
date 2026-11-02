@@ -1,9 +1,11 @@
 /**
  * #132: yodel ci renders the cloud login a job runs before yodel, when a
- * role it holds has a cloud-minted password: AWS web identity, gcloud
- * workload identity federation and az's federated token, from
- * yodel.config.ts `ci.login`, on each forge. Rendering only: nothing here
- * runs a login or calls a cloud.
+ * role it holds has a cloud-minted password, from yodel.config.ts
+ * `ci.login`, on each forge: chant's ci-identity trade on GitHub and GitLab
+ * (#296), and on Forgejo, which gives a job no OIDC token, AWS web
+ * identity, gcloud workload identity federation and az's federated token
+ * from the runner's token file. Rendering only: nothing here runs a login
+ * or calls a cloud.
  */
 
 import { execFileSync } from "node:child_process";
@@ -12,9 +14,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { chantTrade, jobLogins, loginProblem, loginSteps, useChantTrade, type Login } from "../src/ci/login.js";
+import { gitlabTradeLines, TRADE_SPEC_ENV } from "@intentius/chant/ci-identity";
+import { jobLogins, loginProblem, loginSteps, type Login } from "../src/ci/login.js";
 import { repoRoot, yodel } from "./helpers/run.js";
-import { CHANT, PRODUCT } from "./helpers/chant-bin.js";
+import { CHANT } from "./helpers/chant-bin.js";
 
 const ROLE = "arn:aws:iam::123456789012:role/yodel";
 const PROD_ROLE = "arn:aws:iam::123456789012:role/yodel-prod";
@@ -61,24 +64,17 @@ const actionsJob = (dir: string, f: string, job: string): ActionsJob => (yaml(di
 const names = (job: ActionsJob) => job.steps.map((s) => s.name ?? s.run ?? "");
 const step = (job: ActionsJob, name: string): string => job.steps.find((s) => s.name === name)?.run ?? "";
 
-/**
- * chant's trade (#296), when the installed chant has it: then yodel ci logs
- * GitHub and GitLab jobs in through chant's one step, and Forgejo keeps
- * yodel's own. test/ci-identity.test.ts covers the trade's steps with a fake.
- */
-const TRADE = PRODUCT ? await chantTrade() : undefined;
+/** chant's trade step (#296), naming the clouds of the roles a job holds. test/ci-identity.test.ts covers its lines. */
 const TRADED = (clouds: string) => `Cloud identity (chant ci-identity: ${clouds})`;
 
-const AWS = "Log in to AWS (web identity)";
-const GCP = "Log in to Google Cloud (workload identity)";
 const AZURE = "Log in to Azure (federated token)";
 
 describe("yodel ci: the cloud login of a job holding a cloud-minted role", () => {
-  it.runIf(TRADE)("GitHub and GitLab through chant's trade: one step per job, naming only the clouds of the roles it holds (#296)", async () => {
+  it("GitHub and GitLab through chant's trade: one step per job, naming only the clouds of the roles it holds (#296)", async () => {
     const dir = project();
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
-    const env = TRADE?.TRADE_SPEC_ENV ?? "";
+    const env = TRADE_SPEC_ENV;
     const traded = (job: ActionsJob) => names(job).filter((n) => n.startsWith("Cloud identity") || n.startsWith("Log in"));
 
     const prod = actionsJob(dir, ".github/workflows/yodel-pr.yml", "plan-prod");
@@ -92,6 +88,11 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     expect(names(wave).indexOf(TRADED("aws, gcp"))).toBeLessThan(names(wave).findIndex((n) => n.startsWith("Plan, gate and apply")));
     expect(step(wave, TRADED("aws, gcp"))).toContain(PROD_ROLE);
     expect(traded(actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-1-dev"))).toEqual([]);
+    // The watch: each environment's reader, before chant run.
+    const watch = actionsJob(dir, ".github/workflows/watch-prod.yml", "watch-prod");
+    expect(traded(watch)).toEqual([TRADED("azure")]);
+    expect(names(watch).indexOf(TRADED("azure"))).toBeLessThan(names(watch).indexOf(`${CHANT} run watch-prod`));
+    expect(traded(actionsJob(dir, ".github/workflows/watch-dev.yml", "watch-dev"))).toEqual([TRADED("gcp")]);
 
     const main = yaml(dir, ".gitlab-ci.yml") as Record<string, GitLabJob>;
     expect(main["plan-prod"]?.id_tokens).toEqual({ CHANT_ID_TOKEN_GCP: { aud: `https://iam.googleapis.com/${PROVIDER}` }, CHANT_ID_TOKEN_AZURE: { aud: "api://AzureADTokenExchange" } });
@@ -101,90 +102,6 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     expect(apply["wave-2-prod"]?.id_tokens?.CHANT_ID_TOKEN_AWS).toEqual({ aud: "sts.amazonaws.com" });
     expect(JSON.parse(apply["wave-2-prod"]?.variables?.[env] ?? "{}")).toMatchObject({ aws: { role: PROD_ROLE } });
     expect(apply["wave-1-dev"]?.variables ?? {}).not.toHaveProperty(env);
-
-    expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
-  });
-
-  it.skipIf(TRADE)("GitHub: the OIDC token for the cloud's audience, the login, and its variables for the later steps", async () => {
-    const dir = project();
-    const wrote = await yodel(["ci", "--dir", dir]);
-    expect(wrote.code, wrote.err).toBe(0);
-
-    // The pull request: prod's reader is entra, dev's cloud-sql-iam; each logs in before the write probe.
-    const prod = actionsJob(dir, ".github/workflows/yodel-pr.yml", "plan-prod");
-    expect(names(prod).indexOf(AZURE)).toBeLessThan(names(prod).indexOf("This job cannot write"));
-    // plan-prod also reads dev (prod's wave requires it): dev's reader is cloud-sql-iam.
-    expect(names(prod).filter((n) => n.startsWith("Log in"))).toEqual([GCP, AZURE]);
-    const az = step(prod, AZURE);
-    expect(az).toContain(`'api://AzureADTokenExchange' "$RUNNER_TEMP/yodel-azure-token"`);
-    expect(az).toContain(`az login --service-principal --username '${CLIENT}' --tenant '${TENANT}' --federated-token "$(cat "$RUNNER_TEMP/yodel-azure-token")" --allow-no-subscriptions --output none`);
-    expect(az).toContain(`echo "AZURE_CLIENT_ID=${CLIENT}" >> "$GITHUB_ENV"`);
-    expect(az).toContain('echo "AZURE_FEDERATED_TOKEN_FILE=$RUNNER_TEMP/yodel-azure-token" >> "$GITHUB_ENV"');
-    expect(az).toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
-
-    const dev = actionsJob(dir, ".github/workflows/yodel-pr.yml", "plan-dev");
-    expect(names(dev).filter((n) => n.startsWith("Log in"))).toEqual([GCP]);
-    const gcp = step(dev, GCP);
-    expect(gcp).toContain(`'https://iam.googleapis.com/${PROVIDER}' "$RUNNER_TEMP/yodel-gcp-token"`);
-    expect(gcp).toContain(`'${PROVIDER}' '${SA}' "$RUNNER_TEMP/yodel-gcp-token" "$RUNNER_TEMP/yodel-gcp-token.json"`);
-    expect(gcp).toContain('gcloud auth login --cred-file="$RUNNER_TEMP/yodel-gcp-token.json" --quiet');
-    expect(gcp).toContain('echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/yodel-gcp-token.json" >> "$GITHUB_ENV"');
-
-    // The apply: prod's writer is rds-iam, with prod's own role, before the wave's chant run; dev's wave holds no cloud role.
-    const wave = actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-2-prod");
-    const run = names(wave).findIndex((n) => n.startsWith("Plan, gate and apply"));
-    expect(names(wave).indexOf(AWS)).toBeGreaterThan(-1);
-    expect(names(wave).indexOf(AWS)).toBeLessThan(run);
-    const aws = step(wave, AWS);
-    expect(aws).toContain(`'sts.amazonaws.com' "$RUNNER_TEMP/yodel-aws-token"`);
-    expect(aws).toContain(`echo "AWS_ROLE_ARN=${PROD_ROLE}" >> "$GITHUB_ENV"`);
-    expect(aws).toContain('echo "AWS_WEB_IDENTITY_TOKEN_FILE=$RUNNER_TEMP/yodel-aws-token" >> "$GITHUB_ENV"');
-    expect(aws).toContain('echo "AWS_ROLE_SESSION_NAME=yodel" >> "$GITHUB_ENV"');
-    expect(names(actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-1-dev")).some((n) => n.startsWith("Log in"))).toBe(false);
-
-    // The watch: each environment's reader, before chant run.
-    const watch = actionsJob(dir, ".github/workflows/watch-prod.yml", "watch-prod");
-    expect(names(watch).indexOf(AZURE)).toBeGreaterThan(-1);
-    expect(names(watch).indexOf(AZURE)).toBeLessThan(names(watch).indexOf(`${CHANT} run watch-prod`));
-    expect(names(actionsJob(dir, ".github/workflows/watch-dev.yml", "watch-dev"))).toContain(GCP);
-
-    // Rendered again, nothing moves.
-    const check = await yodel(["ci", "--check", "--dir", dir]);
-    expect(check.code, check.err).toBe(0);
-  });
-
-  it.skipIf(TRADE)("GitLab: the ID token for the login's audience, written to the token file, and the variables on the job", async () => {
-    const dir = project();
-    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
-    const main = yaml(dir, ".gitlab-ci.yml") as Record<string, GitLabJob>;
-    const prod = main["plan-prod"] ?? {};
-    expect(prod.id_tokens).toEqual({ GCP_ID_TOKEN: { aud: `https://iam.googleapis.com/${PROVIDER}` }, AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });
-    expect(prod.script).toEqual([
-      `(umask 077 && printf '%s' "$GCP_ID_TOKEN" > "/tmp/yodel-gcp-token")`,
-      expect.stringContaining(`'${PROVIDER}' '${SA}' "/tmp/yodel-gcp-token" "/tmp/yodel-gcp-token.json"`),
-      'gcloud auth login --cred-file="/tmp/yodel-gcp-token.json" --quiet',
-      `(umask 077 && printf '%s' "$AZURE_ID_TOKEN" > "/tmp/yodel-azure-token")`,
-      `az login --service-principal --username '${CLIENT}' --tenant '${TENANT}' --federated-token "$(cat "/tmp/yodel-azure-token")" --allow-no-subscriptions --output none`,
-      "yodel config check prod dev --write-probe",
-      "yodel plan prod --comment",
-    ]);
-    expect(prod.variables).toEqual({ GOOGLE_APPLICATION_CREDENTIALS: "/tmp/yodel-gcp-token.json", AZURE_CLIENT_ID: CLIENT, AZURE_TENANT_ID: TENANT, AZURE_FEDERATED_TOKEN_FILE: "/tmp/yodel-azure-token" });
-
-    const apply = yaml(dir, ".gitlab/yodel-apply.gitlab-ci.yml") as Record<string, GitLabJob>;
-    const wave = apply["wave-2-prod"] ?? {};
-    expect(wave.id_tokens?.AWS_ID_TOKEN).toEqual({ aud: "sts.amazonaws.com" });
-    expect(wave.variables).toMatchObject({ YODEL_CREDENTIALS: "writer:prod", AWS_ROLE_ARN: PROD_ROLE, AWS_WEB_IDENTITY_TOKEN_FILE: "/tmp/yodel-aws-token", AWS_ROLE_SESSION_NAME: "yodel" });
-    const script = wave.script ?? [];
-    const awsAt = script.indexOf(`(umask 077 && printf '%s' "$AWS_ID_TOKEN" > "/tmp/yodel-aws-token")`);
-    expect(awsAt).toBeGreaterThan(-1);
-    expect(awsAt).toBeLessThan(script.findIndex((l) => l.startsWith(`${CHANT} run wave`)));
-    expect(apply["wave-1-dev"]?.variables).not.toHaveProperty("AWS_ROLE_ARN");
-
-    const watch = yaml(dir, ".gitlab/yodel-watch.gitlab-ci.yml") as Record<string, GitLabJob>;
-    const ws = watch["watch-prod"]?.script ?? [];
-    expect(ws.findIndex((l) => l.startsWith("az login"))).toBeLessThan(ws.indexOf(`${CHANT} run watch-prod`));
-    expect(watch["watch-prod"]?.variables).toMatchObject({ AZURE_CLIENT_ID: CLIENT });
-    expect(watch["watch-dev"]?.id_tokens).toEqual({ GCP_ID_TOKEN: { aud: `https://iam.googleapis.com/${PROVIDER}` } });
 
     expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
   });
@@ -205,9 +122,7 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     expect(az).toContain('echo "AZURE_FEDERATED_TOKEN_FILE=/var/run/forge/azure-token" >> "$GITHUB_ENV"');
     // No gcp login configured: dev's cloud-sql-iam reader gets none, here or on GitHub.
     expect(names(prod).filter((n) => n.startsWith("Log in"))).toEqual([AZURE]);
-    expect(names(actionsJob(given, ".github/workflows/yodel-pr.yml", "plan-dev")).some((n) => n.startsWith("Log in"))).toBe(false);
-    // GitHub writes the token where the config says (yodel's own login; chant's trade requests its own).
-    if (!TRADE) expect(step(actionsJob(given, ".github/workflows/yodel-pr.yml", "plan-prod"), AZURE)).toContain(`'api://AzureADTokenExchange' "/var/run/forge/azure-token"`);
+    expect(names(actionsJob(given, ".github/workflows/yodel-pr.yml", "plan-dev")).some((n) => n.startsWith("Log in") || n.startsWith("Cloud identity"))).toBe(false);
   });
 
   it("renders nothing for a job whose roles are not cloud-minted, and the templates do not change", async () => {
@@ -216,9 +131,8 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     cpSync(join(repoRoot, "templates", "postgres"), dir, { recursive: true });
     symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
     execFileSync("git", ["init", "-q"], { cwd: dir });
-    // The templates' files are what a published chant renders. Through chant's product pipeline (#289)
-    // the jobs run `yodel chant`, so render the template once without the login first.
-    if (PRODUCT) expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    // Render the template once without the login first: its committed files have chant's check hooks, and this copy keeps the declaration.
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
     const config = join(dir, "yodel.config.ts");
     writeFileSync(config, readFileSync(config, "utf8").replace(/^( {2}ci: \{ forges: \[[^\]]*\])( \},)$/m, `$1, login: { aws: { roleArn: "${ROLE}" } }$2`));
     // The template's roles read variables: with a login configured, the files are the template's own.
@@ -251,23 +165,19 @@ describe("the login steps, per cloud and forge", () => {
   const gcp: Login = { cloud: "gcp", config: { workloadIdentityProvider: PROVIDER, serviceAccount: SA } };
   const azure: Login = { cloud: "azure", config: { clientId: CLIENT, tenantId: TENANT } };
 
-  it("GitHub requests the token, GitLab writes its ID token, Forgejo needs a token file", () => {
-    // yodel's own login, as a published chant renders it: a yodel ci above may have set chant's trade.
-    useChantTrade(undefined);
+  it("GitHub and GitLab trade through chant, Forgejo needs a token file", () => {
     for (const l of [aws, gcp, azure]) {
       const gh = loginSteps("github", [l]);
       expect(gh.steps).toHaveLength(1);
-      expect(gh.steps[0]?.lines[0]).toMatch(/^node -e '.*ACTIONS_ID_TOKEN_REQUEST_URL.*' '[^']+' "\$RUNNER_TEMP\/yodel-(aws|gcp|azure)-token"$/);
+      expect(gh.steps[0]?.name).toBe(TRADED(l.cloud));
+      expect(gh.steps[0]?.lines[0]).toMatch(new RegExp(`^export ${TRADE_SPEC_ENV}='\\{"${l.cloud}":`));
       expect(gh.variables).toEqual({});
       const gl = loginSteps("gitlab", [l]);
-      expect(gl.steps[0]?.lines[0]).toMatch(/^\(umask 077 && printf '%s' "\$(AWS|GCP|AZURE)_ID_TOKEN" > "\/tmp\/yodel-(aws|gcp|azure)-token"\)$/);
-      expect(gl.steps[0]?.lines.join("\n")).not.toContain("GITHUB_ENV");
-      expect(Object.keys(gl.variables).length).toBeGreaterThan(0);
+      expect(gl.steps[0]?.lines).toEqual(gitlabTradeLines());
+      expect(Object.keys(gl.variables)).toEqual([TRADE_SPEC_ENV]);
       expect(loginSteps("forgejo", [l]).steps).toEqual([]);
     }
-    expect(loginSteps("gitlab", [aws]).variables).toEqual({ AWS_ROLE_ARN: ROLE, AWS_WEB_IDENTITY_TOKEN_FILE: "/tmp/yodel-aws-token", AWS_ROLE_SESSION_NAME: "yodel" });
-    // AWS needs no command: the aws command line reads the variables.
-    expect(loginSteps("gitlab", [aws]).steps[0]?.lines).toHaveLength(1);
+    expect(loginSteps("forgejo", [{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/t" } }]).steps[0]?.lines).toEqual(['echo "AWS_ROLE_ARN=arn:aws:iam::123456789012:role/yodel" >> "$GITHUB_ENV"', 'echo "AWS_WEB_IDENTITY_TOKEN_FILE=/run/t" >> "$GITHUB_ENV"', 'echo "AWS_ROLE_SESSION_NAME=yodel" >> "$GITHUB_ENV"']);
   });
 
   it("logs a job in once per cloud, and refuses two environments with different logins for one", () => {

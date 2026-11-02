@@ -15,7 +15,8 @@ import type { ForgeFetch, PrForge } from "@intentius/chant/pr-forge";
 import { GITLAB_WATCH_FILE } from "../src/ci/render.js";
 import { resolveForge } from "../src/pr/forge.js";
 import { GITLAB_WATCH, overdueNotes, watchPipelineFile } from "../src/pr/overdue.js";
-import { commentMarker, renderPlanMarkdown } from "../src/pr/render.js";
+import { commentMarker } from "../src/pr/render.js";
+import { planNote } from "./helpers/note.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const TEMPLATE = join(ROOT, "templates/postgres");
@@ -106,9 +107,9 @@ describe("the overdue drift watch in the plan comment (chant#4289)", () => {
     expect(await overdueNotes(dir, "staging", client, () => undefined, NOW)).toEqual([]);
   });
 
-  it("is a note in the comment's markdown", () => {
+  it("is a note in the comment's markdown", async () => {
     const note = "Warning: Op `watch-dev` is overdue: its schedule `17 * * * *` has fired at least twice and its last run was on 2026-10-01.";
-    const md = renderPlanMarkdown({ environment: "dev", dialect: "postgres", appliedCount: 0, pending: [], problems: [], notes: [note] } as never);
+    const md = await planNote({ environment: "dev", dialect: "postgres", appliedCount: 0, pending: [], problems: [], notes: [note] } as never);
     expect(md.startsWith(commentMarker("dev"))).toBe(true);
     expect(md).toContain(`> ${note}`);
   });

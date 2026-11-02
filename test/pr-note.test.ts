@@ -1,22 +1,16 @@
 /**
  * The plan note through chant's note renderer (#290): chant's layout in
- * yodel's words, the SQL rows in the member detail section, yodel's marker
- * on the first line so an open pull request keeps one note, and yodel's own
- * note while the installed chant's does not fit (no renderer, or an approve
- * line without the environment).
- *
- * The cases that read chant's layout skip on a chant without
- * `@intentius/chant/ci-product`.
+ * yodel's words, the SQL rows in the member detail section, and yodel's
+ * marker on the first line so an open pull request keeps one note. yodel's
+ * own note, for a chant whose note did not fit, left in 0.12 (#303).
  */
 
 import { describe, expect, it } from "vitest";
-import { chantNote, chantRenderer, planDetailLines, renderPlanNote, renderTenantSetNote } from "../src/pr/note.js";
-import { commentMarker, renderPlanMarkdown } from "../src/pr/render.js";
+import { planDetailLines, renderPlanNote, renderTenantSetNote } from "../src/pr/note.js";
+import { commentMarker } from "../src/pr/render.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import type { TenantSetPlan } from "../src/pr/tenants.js";
 import { repoRoot } from "./helpers/run.js";
-
-const renderer = await chantRenderer();
 
 function plan(env = "prod", over: Partial<VersionedPlan> = {}): VersionedPlan {
   return {
@@ -58,9 +52,9 @@ describe("the SQL detail section (#290)", () => {
   });
 });
 
-describe.skipIf(!renderer)("the note through chant (#290)", () => {
+describe("the note through chant (#290)", () => {
   it("is chant's layout in yodel's words, yodel's marker first, the SQL rows in a detail section", async () => {
-    const body = (await renderPlanNote(plan(), { dir: repoRoot, ...(renderer ? { note: renderer } : {}) })) ?? "";
+    const body = await renderPlanNote(plan(), { dir: repoRoot });
     expect(body.split("\n")[0]).toBe(commentMarker("prod"));
     expect(body).toContain("### yodel plan for `prod`");
     expect(body).toContain("| `prod` |");
@@ -71,33 +65,21 @@ describe.skipIf(!renderer)("the note through chant (#290)", () => {
   });
 
   it("keeps the digest's subject at the end, hidden, so the next note can say what moved", async () => {
-    const body = (await renderPlanNote(plan("prod", { subject: { migrations: [] } as never }), { dir: repoRoot, ...(renderer ? { note: renderer } : {}) })) ?? "";
+    const body = await renderPlanNote(plan("prod", { subject: { migrations: [] } as never }), { dir: repoRoot });
     expect(body.trimEnd().split("\n").at(-1)).toMatch(/^<!-- yodel:subject [A-Za-z0-9_-]+ -->$/);
   });
 
   it("renders a tenant set on the same path: a row per tenant, a section per tenant", async () => {
     const set: TenantSetPlan = { environment: "prod", dialect: "postgres", tenants: [plan("prod/acme"), plan("prod/globex")], notes: [] };
-    const body = (await renderTenantSetNote(set, { dir: repoRoot, ...(renderer ? { note: renderer } : {}) })) ?? "";
+    const body = await renderTenantSetNote(set, { dir: repoRoot });
     expect(body.split("\n")[0]).toBe(commentMarker("prod"));
     expect(body).toContain("| `prod/acme` |");
     expect(body).toContain("| `prod/globex` |");
   });
 
-  it("is used for --comment only when chant's approve line names the environment and does not send a per-wave merge to a release", async () => {
-    const fits = await chantNote();
-    const body = (await renderPlanNote(plan(), { dir: repoRoot })) ?? renderPlanMarkdown(plan());
-    if (fits) {
-      expect(body).toContain("yodel approve prod --plan");
-      expect(body).not.toContain("a release deploys it");
-    } else {
-      expect(body).toBe(renderPlanMarkdown(plan()));
-    }
-  });
-});
-
-describe("the note on a chant without a renderer that fits (#290)", () => {
-  it("is yodel's own note", async () => {
-    if (await chantNote()) return;
-    expect(await renderPlanNote(plan(), { dir: repoRoot })).toBeUndefined();
+  it("names the environment in its approve line and does not send a per-wave merge to a release (chant#4601)", async () => {
+    const body = await renderPlanNote(plan(), { dir: repoRoot });
+    expect(body).toContain("yodel approve prod --plan");
+    expect(body).not.toContain("a release deploys it");
   });
 });

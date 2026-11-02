@@ -10,7 +10,8 @@ import { writeMigration, type Migration } from "../src/migrations/index.js";
 import { currentDigest, executeApply, inspect, openVersioned, verifyApproval, type MigrateOpRef, type VersionedEnv } from "../src/versioned/index.js";
 import { currentSubject, decodeSubject, diffSubjects, explainMove } from "../src/versioned/explain.js";
 import { collectVersionedPlan } from "../src/pr/model.js";
-import { renderPlanMarkdown, subjectIn } from "../src/pr/render.js";
+import { renderPlanText, subjectIn } from "../src/pr/render.js";
+import { planNote } from "./helpers/note.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
 import { computeChecksum, serializeDocument } from "../src/migrations/index.js";
 import { backfillStep } from "../src/steps/backfill.js";
@@ -60,7 +61,7 @@ describe("the versioned plan", () => {
     expect(plan.approval).toEqual({ kind: "op", op: OP.name, gate: OP.gate, command: `yodel approve e2e --plan ${gate}`, chantCommand: `chant approve migrate-e2e approve-migrate-e2e --plan ${gate}` });
     expect(plan.pending.map((p) => p.id)).toEqual([m1.id, m2.id]);
     expect(plan.pending[0]?.steps.map((s) => s.step.kind)).toEqual(["statement", "statement"]);
-    const carried = subjectIn(renderPlanMarkdown(plan));
+    const carried = subjectIn(await planNote(plan));
     expect(carried).toBeDefined();
     const { planDigest } = await import("../src/versioned/digest.js");
     expect(await planDigest(decodeSubject(carried ?? "") as never)).toBe(gate);
@@ -72,7 +73,7 @@ describe("the versioned plan", () => {
     const { venv, project } = await setup([m]);
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort() });
     expect(plan.pending[0]?.steps[2]).toMatchObject({ index: 2, refused: undefined, source: { file: "country.ts", text: source } });
-    const md = renderPlanMarkdown(plan);
+    const md = await planNote(plan);
     expect(md).toContain("Op steps:\n- step 2, `fill-country`: made by Op `backfill` (country.ts). yodel apply runs it as this step.");
     expect(md).toContain("<summary>backfill: country.ts</summary>");
     expect(md).toContain('  ```ts\n  export const op = Op({ name: "backfill-fill-country", phases: [] });\n  ```');
@@ -86,7 +87,8 @@ describe("the versioned plan", () => {
     const gate = await digestOf(venv, [m1]);
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: ledgerWith(gate, "2026-10-09T12:00:00.000Z") });
     expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: true, sameDigest: true, by: "alice", digest: gate } });
-    expect(renderPlanMarkdown(plan)).toContain("Approved by alice at 2026-10-09T12:00:00.000Z: the apply after merge runs this plan.");
+    expect(await planNote(plan)).toContain("Approved by `alice` for this digest.");
+    expect(renderPlanText(plan)).toContain("Approved by alice at 2026-10-09T12:00:00.000Z: the apply after merge runs this plan.");
   });
 
   it("says an approval of this digest was asked for again after it, without a move to explain", async () => {
@@ -100,10 +102,11 @@ describe("the versioned plan", () => {
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger });
     expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: false, sameDigest: true, digest: gate, askedAgain: { at: "2026-10-09T13:00:00.000Z", digest: "jcs1-sha256:other" } } });
     expect(plan.approval?.kind === "op" && plan.approval.latest?.moved).toBeFalsy();
-    const md = renderPlanMarkdown(plan);
-    expect(md).toContain("is for this plan's digest, but approval was asked for again after it at 2026-10-09T13:00:00.000Z (a run holding `jcs1-sha256:other`), so it does not hold; approve this plan again.");
-    expect(md).not.toContain("not this plan");
-    expect(md).not.toContain("nothing moved");
+    const text = renderPlanText(plan);
+    expect(text).toContain("is for this plan's digest, but approval was asked for again after it at 2026-10-09T13:00:00.000Z (a run holding jcs1-sha256:other), so it does not hold; approve this plan again.");
+    expect(text).not.toContain("not this plan");
+    expect(text).not.toContain("nothing moved");
+    expect(await planNote(plan)).toContain("Not approved yet.");
   });
 
   it("names the migration added after approval", async () => {
@@ -112,7 +115,8 @@ describe("the versioned plan", () => {
     writeMigration(join(project.dir, "migrations"), m2);
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: ledgerWith(approved, "2026-10-09T11:00:00.000Z") });
     expect(plan.approval).toMatchObject({ kind: "op", latest: { holds: false, sameDigest: false, digest: approved, moved: { confirmed: true, changes: [{ part: "pending", message: `new pending migration: ${m2.id}` }] } } });
-    expect(renderPlanMarkdown(plan)).toContain(`What moved: pending migrations changed: new pending migration: ${m2.id}.`);
+    expect(renderPlanText(plan)).toContain(`What moved: pending migrations changed: new pending migration: ${m2.id}.`);
+    expect(await planNote(plan)).toContain("not for this digest: the plan changed since it was approved");
   });
 
   it("names the migration another run applied since approval, from the history as it stood then", async () => {
@@ -146,7 +150,7 @@ describe("the versioned plan", () => {
     const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort(), previous });
     expect(plan.sinceLast?.confirmed).toBe(true);
     expect(plan.sinceLast?.changes.map((c) => c.part)).toEqual(["pending", "live"]);
-    expect(renderPlanMarkdown(plan)).toContain("Since the previous version of this comment");
+    expect(await planNote(plan)).toContain("Since the previous version of this note");
   });
 
   it("lists checksum mismatches as integrity problems and shows apply's refusal, with no digest", async () => {

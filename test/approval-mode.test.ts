@@ -17,7 +17,7 @@ import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { checkYodelConfig } from "../src/config/load.js";
 import { describeApprovalMode, migrationsApproval, migrationsApprovalAtBase, portFor, RECORD_PLANS_ENV, waveApproval } from "../src/approval-mode/index.js";
 import { verifyApproval } from "../src/versioned/approval.js";
-import { applyPipelines, gitlabPipeline, readWaves, wavesSpec, type Wave } from "../src/ci/render.js";
+import { applyPipelines, gitlabPipeline, readWaves, requireProduct, wavesSpec, type Wave } from "../src/ci/render.js";
 import { chantApproveArgs } from "../src/commands/approve.js";
 import { describeWave } from "../src/waves/index.js";
 
@@ -160,7 +160,7 @@ describe("yodel ci, for approval modes", () => {
   });
 
   it("renders the plans workflow on GitHub and Forgejo, with every environment's reader and no writer", async () => {
-    const files = await applyPipelines(project(), envs);
+    const files = await applyPipelines(project(), envs, await requireProduct());
     for (const forge of ["github", "forgejo"] as const) {
       const path = `.${forge}/workflows/yodel-apply-plans.yml`;
       const file = files.find((f) => f.path === path);
@@ -168,11 +168,11 @@ describe("yodel ci, for approval modes", () => {
       const doc = parseYAMLDocument(file?.content ?? "") as { on: Record<string, unknown>; permissions?: Record<string, string>; jobs: Record<string, { env: Record<string, string>; steps: Array<{ run?: string }> }> };
       expect(Object.keys(doc.on)).toEqual(["pull_request", "pull_request_review"]);
       const job = doc.jobs["record-plans"];
-      expect(job?.steps.some((s) => s.run === "chant run wave --spec yodel-waves.json --record-plans")).toBe(true);
+      expect(job?.steps.some((s) => s.run === "yodel chant run wave --spec yodel-waves.json --record-plans")).toBe(true);
       // It shows it holds no writer before it plans (#130).
       const runs = job?.steps.map((s) => s.run) ?? [];
       expect(runs.indexOf("yodel config check dev prod --write-probe")).toBeGreaterThanOrEqual(0);
-      expect(runs.indexOf("yodel config check dev prod --write-probe")).toBeLessThan(runs.indexOf("chant run wave --spec yodel-waves.json --record-plans"));
+      expect(runs.indexOf("yodel config check dev prod --write-probe")).toBeLessThan(runs.indexOf("yodel chant run wave --spec yodel-waves.json --record-plans"));
       expect(job?.env[RECORD_PLANS_ENV]).toBe("1");
       expect(Object.keys(job?.env ?? {})).toEqual(expect.arrayContaining(["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "PROD_POSTGRES_READER_PASSWORD"]));
       expect(Object.keys(job?.env ?? {}).filter((k) => k.includes("WRITER"))).toEqual([]);
@@ -188,19 +188,19 @@ describe("yodel ci, for approval modes", () => {
   });
 
   it("renders GitLab's merge request job that records the plans, in a stage of its own", async () => {
-    const files = await applyPipelines(project(), envs);
+    const files = await applyPipelines(project(), envs, await requireProduct());
     const apply = parseYAMLDocument(files.find((f) => f.path === ".gitlab/yodel-apply.gitlab-ci.yml")?.content ?? "") as Record<string, { stage?: string; variables?: Record<string, string>; rules?: Array<{ if: string }>; script?: string[] }>;
     const job = apply["yodel-apply-record-plans"];
     expect(job?.stage).toBe("plans");
     expect(job?.variables?.[RECORD_PLANS_ENV]).toBe("1");
     expect(job?.rules?.[0]?.if).toBe('$CI_PIPELINE_SOURCE == "merge_request_event"');
-    expect(job?.script?.slice(-2)).toEqual(["yodel config check dev prod --write-probe", "chant run wave --spec yodel-waves.json --record-plans"]);
+    expect(job?.script?.slice(-2)).toEqual(["yodel config check dev prod --write-probe", "yodel chant run wave --spec yodel-waves.json --record-plans"]);
     const main = parseYAMLDocument(gitlabPipeline(envs).content) as { stages: string[] };
     expect(main.stages.slice(0, 3)).toEqual(["review", "plans", "wave-1-dev"]);
   });
 
   it("renders no plans job when no wave is pr-review", async () => {
-    const files = await applyPipelines(project(), { ...envs, waves: WAVES.map((w) => ({ ...w, approval: "sealed" as const })) });
+    const files = await applyPipelines(project(), { ...envs, waves: WAVES.map((w) => ({ ...w, approval: "sealed" as const })) }, await requireProduct());
     expect(files.some((f) => f.path.endsWith("yodel-apply-plans.yml"))).toBe(false);
     expect(files.find((f) => f.path === ".gitlab/yodel-apply.gitlab-ci.yml")?.content).not.toContain("record-plans");
     expect((parseYAMLDocument(gitlabPipeline({ ...envs, waves: [] }).content) as { stages: string[] }).stages).not.toContain("plans");

@@ -7,7 +7,7 @@ import { gatedCommands } from "../chant/apply.js";
 import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import { runnable, runnableAsWriter } from "../chant/runnable.js";
 import { permissionRefusal, readerRefusal } from "../credentials.js";
-import { LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
+import { LOCK_WAIT_ENV, parseDuration, retiredVariableRefusal } from "../config/settings.js";
 import { MIGRATION_ID } from "../migrations/index.js";
 import { describeServer } from "../server.js";
 import { policyAtBase } from "../config/base.js";
@@ -131,6 +131,9 @@ function parseRevertArgs(args: string[]): RevertArgs {
   // The migration is the one named like an id; the other is the environment.
   const [id, env] = MIGRATION_ID.test(first) && !MIGRATION_ID.test(second) ? [first, second] : [second, first];
   const str = (k: string) => (typeof values[k] === "string" ? values[k] : undefined);
+  // The Op's Apply step takes --lock-wait from here; set by hand, the variables are refused by name (#303).
+  const retired = retiredVariableRefusal(process.env, "yodel revert");
+  if (retired) throw retired;
   return {
     env,
     id,

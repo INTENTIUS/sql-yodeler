@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { commentMarker, COMMENT_LIMIT, planJsonVersioned, redact, renderPlanMarkdown, renderPlanText, subjectIn } from "../src/pr/render.js";
+import { commentMarker, COMMENT_LIMIT, planJsonVersioned, redact, renderPlanText, subjectIn } from "../src/pr/render.js";
+import { planNote } from "./helpers/note.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { decodeSubject } from "../src/versioned/explain.js";
 import { backfillFormStep } from "../src/steps/backfill.js";
@@ -59,11 +60,11 @@ const clickhousePlan = (over: Partial<VersionedPlan> = {}): VersionedPlan => ({
   ...over,
 });
 
-describe("the plan comment's markdown", () => {
-  it("shows a backfill written as a form: its table and batches, its SQL, and the form itself", () => {
+describe("the plan comment's markdown, through chant's note (#290)", () => {
+  it("shows a backfill written as a form: its table and batches, its SQL, and the form itself", async () => {
     const step = backfillFormStep("fill", { table: "yodel_16.events", key: "id", batchSize: 1000, sql: "ALTER TABLE yodel_16.events UPDATE note = 'x' WHERE id >= {from} AND id < {to}" }) as unknown as MigrationStep;
     const plan = clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step, done: false }] }] });
-    const md = renderPlanMarkdown(plan);
+    const md = await planNote(plan);
     expect(md).toContain("step 0, `fill`: made by Op `backfill` (a backfill of yodel_16.events by id, 1000 a batch). yodel apply runs it as this step.");
     expect(md).toContain('  ```json\n  {\n    "table": "yodel_16.events",');
     const text = renderPlanText(plan);
@@ -71,18 +72,18 @@ describe("the plan comment's markdown", () => {
     expect(text).toContain("       ALTER TABLE yodel_16.events UPDATE note = 'x' WHERE id >= {from} AND id < {to};");
   });
 
-  it("starts with the environment's marker and lists each statement with its rule and class", () => {
-    const md = renderPlanMarkdown(clickhousePlan());
+  it("starts with the environment's marker and lists each statement with its rule and class", async () => {
+    const md = await planNote(clickhousePlan());
     expect(md.startsWith(`${commentMarker("prod")}\n`)).toBe(true);
     expect(commentMarker("prod")).toBe("<!-- yodel:plan env=prod -->");
     expect(md).toContain("| 0 | statement | SQLCH201 | metadata | `yodel_16.events` |");
     expect(md).toContain("| 1 | statement | SQLCH210 | drop, destructive | `yodel_16.events` |");
     expect(md).toContain("ALTER TABLE yodel_16.events ADD COLUMN note String DEFAULT '';");
-    expect(md).toContain("**1 pending**");
+    expect(md).toContain("| `prod` | 1 pending | planned |");
   });
 
-  it("names the Op that makes a refused change, with its detail and declaration, and a manual step's detail", () => {
-    const md = renderPlanMarkdown(clickhousePlan());
+  it("names the Op that makes a refused change, with its detail and declaration, and a manual step's detail", async () => {
+    const md = await planNote(clickhousePlan());
     expect(md).toContain("| 2 | **Op ClickHouseRebuildOp** | SQLCH220 | rebuild | `yodel_16.events` |");
     expect(md).toContain("step 2, `yodel_16.events`: made by Op `ClickHouseRebuildOp` (SQLCH220 rebuild orderBy)");
     expect(md).toContain("SQLCH220 orderBy: a rebuild; make it with ClickHouseRebuildOp");
@@ -92,8 +93,8 @@ describe("the plan comment's markdown", () => {
     expect(md).toContain("a view's query changes; drop and create it by hand");
   });
 
-  it("lists the Op steps apply runs under Op steps, and only the steps it refuses under Refused changes", () => {
-    const md = renderPlanMarkdown(clickhousePlan());
+  it("lists the Op steps apply runs under Op steps, and only the steps it refuses under Refused changes", async () => {
+    const md = await planNote(clickhousePlan());
     const ops = md.indexOf("\nOp steps:\n");
     const refused = md.indexOf("\nRefused changes:\n");
     expect(ops).toBeGreaterThan(-1);
@@ -102,33 +103,33 @@ describe("the plan comment's markdown", () => {
     expect(md.indexOf("step 2, `yodel_16.events`: made by Op `ClickHouseRebuildOp`")).toBeLessThan(refused);
     expect(md.indexOf("step 3, `yodel_16.v`: manual")).toBeGreaterThan(refused);
 
-    const onlyRefused = renderPlanMarkdown(
+    const onlyRefused = await planNote(
       clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step: rebuild, done: false, refused: "a ClickHouseRebuildOp step in app mode" }] }] }),
     );
     expect(onlyRefused).not.toContain("Op steps:");
     expect(onlyRefused).toContain("Refused changes:\n- step 0, `yodel_16.events`: made by Op `ClickHouseRebuildOp` (SQLCH220 rebuild orderBy). **yodel apply refuses it:** a ClickHouseRebuildOp step in app mode");
   });
 
-  it("lists integrity problems and apply's refusal", () => {
-    const md = renderPlanMarkdown(clickhousePlan({ digest: undefined, refusal: { exitCode: 1, message: "refused: the history does not match" } }));
+  it("lists integrity problems and apply's refusal", async () => {
+    const md = await planNote(clickhousePlan({ digest: undefined, refusal: { exitCode: 1, message: "refused: the history does not match" } }));
     expect(md).toContain("#### Integrity problems (1)");
     expect(md).toContain("- 20261009T0900-zero was applied with checksum sha256:a");
     expect(md).toContain("would refuse (exit 1)");
     expect(md).not.toContain("yodel approve");
   });
 
-  it("prints the digest the gate binds and the yodel approve command (#202), never chant's, and carries the subject hidden", () => {
-    const md = renderPlanMarkdown(clickhousePlan());
-    expect(md).toContain(`Plan digest the apply gate binds: \`${DIGEST}\``);
-    expect(md).toContain(`Approve it at a terminal (it shows the plan and asks you first):\n\n\`\`\`sh\nnpx yodel approve prod --plan ${DIGEST}\n\`\`\``);
+  it("prints the digest the gate binds and the yodel approve command (#202), never chant's, and carries the subject hidden", async () => {
+    const md = await planNote(clickhousePlan());
+    expect(md).toContain(`Plan digest: \`${DIGEST}\``);
+    expect(md).toContain(`yodel approve prod --plan ${DIGEST}`);
     expect(md).not.toContain("chant approve");
     expect(md).toContain("Not approved yet.");
     const carried = subjectIn(md);
     expect(carried && decodeSubject(carried)).toEqual(subject);
   });
 
-  it("says when the newest approval is for another digest, and what moved", () => {
-    const md = renderPlanMarkdown(
+  it("says when the newest approval is for another digest, and what moved", async () => {
+    const md = await planNote(
       clickhousePlan({
         approval: {
           kind: "op",
@@ -139,23 +140,20 @@ describe("the plan comment's markdown", () => {
         },
       }),
     );
-    expect(md).toContain(`is for \`${OLD}\`, not this plan; it does not hold.`);
-    expect(md).toContain("What moved: pending migrations changed: new pending migration: 20261009T1000-one.");
+    expect(md).toContain(`An approval stands for \`${OLD}\`, not for this digest: the plan changed since it was approved.`);
   });
 
-  it("says an approval for this digest holds", () => {
-    const md = renderPlanMarkdown(clickhousePlan({ approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: "x", latest: { digest: DIGEST, by: "bob", at: "t", holds: true, sameDigest: true } } }));
-    expect(md).toContain("Approved by bob at t: the apply after merge runs this plan.");
-    expect(md).not.toContain("does not hold");
+  it("says an approval for this digest holds", async () => {
+    const md = await planNote(clickhousePlan({ approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: "x", latest: { digest: DIGEST, by: "bob", at: "t", holds: true, sameDigest: true } } }));
+    expect(md).toContain("Approved by `bob` for this digest.");
+    expect(md).not.toContain("not for this digest");
   });
 
-  it("says an approval for this digest was asked for again after it, not that the plan moved", () => {
+  it("says an approval for this digest was asked for again after it, not that the plan moved", async () => {
     const latest = { digest: DIGEST, by: "alice", at: "2026-10-09T12:00:00.000Z", holds: false, sameDigest: true, askedAgain: { at: "2026-10-09T13:00:00.000Z", digest: OLD } };
     const plan = clickhousePlan({ approval: { kind: "op", op: "migrate-prod", gate: "approve-migrate-prod", command: "x", latest } });
-    const md = renderPlanMarkdown(plan);
-    expect(md).toContain(
-      `The newest approval of \`approve-migrate-prod\`, by alice at 2026-10-09T12:00:00.000Z, is for this plan's digest, but approval was asked for again after it at 2026-10-09T13:00:00.000Z (a run holding \`${OLD}\`), so it does not hold; approve this plan again.`,
-    );
+    const md = await planNote(plan);
+    expect(md).toContain("Not approved yet.");
     const text = renderPlanText(plan);
     expect(text).toContain("but approval was asked for again after it at 2026-10-09T13:00:00.000Z");
     for (const out of [md, text]) {
@@ -165,7 +163,7 @@ describe("the plan comment's markdown", () => {
     }
   });
 
-  it("renders a Postgres plan: statements with their classes, an expand-and-contract Op, no digest", () => {
+  it("renders a Postgres plan: statements with their classes, an expand-and-contract Op, no digest", async () => {
     const pgOp: MigrationStep = { ...rebuild, type: "Postgres::Table", name: "app.orders", object: "orders", op: "PostgresMigrationOp", importPath: "@intentius/chant-lexicon-sql/postgres", changes: [{ rule: "SQLPG240", class: "rewrite", field: "columns.total" }], detail: "SQLPG240: a column type change rewrites the table; PostgresMigrationOp" };
     const plan: VersionedPlan = {
       environment: "staging",
@@ -184,28 +182,27 @@ describe("the plan comment's markdown", () => {
       problems: [],
       notes: ["Postgres has no history table yet (#13): every migration is listed, and there is no digest to approve."],
     };
-    const md = renderPlanMarkdown(plan);
+    const md = await planNote(plan);
     expect(md).toContain("<!-- yodel:plan env=staging -->");
-    expect(md).toContain("Postgres: 0 applied");
+    expect(md).toContain("| `staging` | 1 pending | planned |");
     expect(md).toContain("| 0 | statement | SQLPG110 | concurrently | `app.orders_idx` |");
     expect(md).toContain("made by Op `PostgresMigrationOp` (SQLPG240 rewrite columns.total)");
     expect(md).toContain("> Postgres has no history table yet (#13)");
-    expect(md).not.toContain("Plan digest");
     expect(subjectIn(md)).toBeUndefined();
   });
 
-  it("drops the statements' SQL rather than go over the forge's limit", () => {
+  it("drops the statements' SQL rather than go over the forge's limit", async () => {
     const big = "x".repeat(COMMENT_LIMIT);
-    const md = renderPlanMarkdown(clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step: chStatement(`SELECT '${big}'`), done: false }] }] }));
+    const md = await planNote(clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step: chStatement(`SELECT '${big}'`), done: false }] }] }));
     expect(md.length).toBeLessThan(COMMENT_LIMIT);
-    expect(md).toContain("The statements are left out");
+    expect(md).toContain("Left out to keep this note within the comment limit");
     expect(md).toContain(DIGEST);
   });
 
-  it("redacts quoted passwords and keys in statements", () => {
+  it("redacts quoted passwords and keys in statements", async () => {
     expect(redact("SOURCE(CLICKHOUSE(USER 'u' PASSWORD 'hunter2'))")).toBe("SOURCE(CLICKHOUSE(USER 'u' PASSWORD '[redacted]'))");
     expect(redact("s3('b', access_key_id = 'AKIA', secret_access_key = 's')")).toBe("s3('b', access_key_id = '[redacted]', secret_access_key = '[redacted]')");
-    expect(renderPlanMarkdown(clickhousePlan({ pending: [{ id: "a", outOfOrder: false, steps: [{ index: 0, step: chStatement("CREATE DICTIONARY d SOURCE(CLICKHOUSE(PASSWORD 'hunter2'))"), done: false }] }] }))).not.toContain("hunter2");
+    expect(await planNote(clickhousePlan({ pending: [{ id: "a", outOfOrder: false, steps: [{ index: 0, step: chStatement("CREATE DICTIONARY d SOURCE(CLICKHOUSE(PASSWORD 'hunter2'))"), done: false }] }] }))).not.toContain("hunter2");
   });
 });
 

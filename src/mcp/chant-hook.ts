@@ -2,28 +2,34 @@
  * yodel's MCP tools on chant's server, and its traces through chant's OTLP
  * exporter (#297, chant#4555, chant#4543).
  *
- * With a chant that has the product tool hook, `yodel mcp` runs `chant
- * serve mcp --read-only` in this process through `runChantInProcess` with
+ * `yodel mcp` runs `chant serve mcp --read-only` in this process through
+ * `runChantInProcess` with
  * yodel's words and {@link yodelMcpHook}: chant serves its own read-only
  * tools over the ledger and graph, and yodel's tools beside them as
  * `yodel:status`, `yodel:plan`, `yodel:lint`, `yodel:drift`,
  * `yodel:history` and `yodel:explain`. Each declares `readOnly: true`; chant
  * refuses to start a read-only server with a product tool named as a write,
- * and yodel's own {@link assertReadOnly} refuses the list first, as its own
- * server did. Without the hook `yodel mcp` serves its own stdio server, as
- * before.
+ * and yodel's own {@link assertReadOnly} refuses the list first. yodel's
+ * own stdio server, for a chant without the hook, left in 0.12 (#303).
  *
  * Traces: with `OTEL_EXPORTER_OTLP_ENDPOINT` set, {@link useChantTraces}
  * configures chant's exporter with the `yodel` prefix once, so a wave job
  * that `yodel chant run wave` runs sends its trace with `yodel.*`
  * attributes. Without the exporter nothing is sent, as before.
  *
- * Both are imported lazily, with the specifiers in variables, so this
- * compiles and runs on a published chant without them.
+ * Both are imported lazily, with the specifier in a variable, so a yodel
+ * command that serves nothing does not load chant's server.
  */
 import { YODEL_WORDS } from "../ci-words.js";
+import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
+import { YodelError } from "../project.js";
 import { assertReadOnly, yodelTools, type YodelTool } from "./tools.js";
-import { INSTRUCTIONS } from "./server.js";
+
+/** What the server tells an agent it serves, and what is a person's to do. */
+export const INSTRUCTIONS =
+  "Read-only tools over a SQL Yodeler project: status, plan, lint, drift, history and explain. Each result is an envelope whose results follow the JSON Schema named in resultsSchema. " +
+  "Nothing here applies, approves, overrides a policy rule, repairs, rebases or writes a migration. A plan carries the commands that are a person's (approve, override) in forPerson: show them to the person, and never run them. " +
+  "Never run `yodel apply` against a shared environment, never run `chant approve`, `yodel approve` or `yodel override`, never edit the `chant/lifecycle` branch or `.chant/allowed_signers`, never merge; approvals and applies belong to people.";
 
 /** chant's `McpToolContribution`, the parts yodel fills. */
 export interface ChantMcpTool {
@@ -49,18 +55,15 @@ export interface ChantHooks {
   PRODUCT_MCP_HOOK_FLOOR: string;
 }
 
-let hooks: Promise<ChantHooks | undefined> | undefined;
+let hooks: Promise<ChantHooks> | undefined;
 
-/** chant's product tool hook and OTLP exporter, once, or undefined when the installed chant has neither (a release before chant#4555). */
-export function chantHooks(): Promise<ChantHooks | undefined> {
+/** chant's product tool hook and OTLP exporter (chant#4555), once; refused, naming the install line, on a chant without them. */
+export function chantHooks(): Promise<ChantHooks> {
   hooks ??= (async () => {
     const specifier = "@intentius/chant/ci-product";
-    try {
-      const m = (await import(specifier)) as Partial<ChantHooks>;
-      return typeof m.runChantInProcess === "function" && typeof m.configureOtlp === "function" && typeof m.PRODUCT_MCP_HOOK_FLOOR === "string" ? (m as ChantHooks) : undefined;
-    } catch {
-      return undefined;
-    }
+    const m = (await import(specifier).catch(() => ({}))) as Partial<ChantHooks>;
+    if (typeof m.runChantInProcess === "function" && typeof m.configureOtlp === "function" && typeof m.PRODUCT_MCP_HOOK_FLOOR === "string") return m as ChantHooks;
+    throw new YodelError(`the installed chant has no product tool hook (chant serve mcp with yodel's tools), which yodel mcp serves on from chant ${CHANT_CI_FLOOR}. Install it:\n  ${installLine()}`);
   })();
   return hooks;
 }
@@ -77,10 +80,9 @@ export function yodelMcpHook(dir: string, tools: readonly YodelTool[] = yodelToo
   return { product: YODEL_WORDS.product, tools: () => tools.map(asChantTool), readOnly: true, instructions: INSTRUCTIONS };
 }
 
-/** Serve yodel's tools on chant's read-only server, from `dir`. Undefined when chant has no hook. */
-export async function serveOnChant(dir: string, chant?: ChantHooks): Promise<number | undefined> {
+/** Serve yodel's tools on chant's read-only server, from `dir`. */
+export async function serveOnChant(dir: string, chant?: ChantHooks): Promise<number> {
   const c = chant ?? (await chantHooks());
-  if (!c) return undefined;
   const hook = yodelMcpHook(dir);
   process.chdir(dir);
   return c.runChantInProcess(["serve", "mcp", "--read-only"], YODEL_WORDS, { mcp: hook });
@@ -88,12 +90,11 @@ export async function serveOnChant(dir: string, chant?: ChantHooks): Promise<num
 
 let traced = false;
 
-/** Configure chant's OTLP exporter with yodel's prefix, once, when an endpoint is set and chant has the exporter. */
+/** Configure chant's OTLP exporter with yodel's prefix, once, when an endpoint is set. */
 export async function useChantTraces(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
   if (traced) return true;
   if (!env.OTEL_EXPORTER_OTLP_ENDPOINT && !env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) return false;
   const c = await chantHooks();
-  if (!c) return false;
   c.configureOtlp({ prefix: YODEL_WORDS.product });
   traced = true;
   return true;

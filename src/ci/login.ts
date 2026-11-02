@@ -1,22 +1,23 @@
 /**
  * The cloud login a CI job runs before yodel (#132), when a role it holds
- * has a password minted by a cloud token source: the job's OIDC token,
- * exchanged by the cloud's own command line, which then mints the database
- * token (`aws rds generate-db-auth-token`, `gcloud sql generate-login-token`,
- * `az account get-access-token`). yodel.config.ts `ci.login` says what to
- * log in as ({@link CiLogin}); this renders the steps per forge. Nothing
- * here calls a cloud: the rendered job does, when it runs.
+ * has a password minted by a cloud token source. yodel.config.ts `ci.login`
+ * says what to log in as ({@link CiLogin}); this renders the steps per
+ * forge. Nothing here calls a cloud: the rendered job does, when it runs.
  *
- * The token, per forge:
- * - GitHub: the job requests it for the cloud's audience
- *   (ACTIONS_ID_TOKEN_REQUEST_URL, granted by `id-token: write`) and writes
- *   it to the token file.
- * - GitLab: the job's `id_tokens` variable (AWS_ID_TOKEN, GCP_ID_TOKEN,
- *   AZURE_ID_TOKEN) is written to the token file.
- * - Forgejo gives a job no OIDC token: a login is rendered only when the
- *   config's `tokenFile` names a token the runner provides.
+ * On GitHub and GitLab the login is chant's ci-identity trade (#296,
+ * chant#4554): one step trades the job's OIDC token for every cloud the job
+ * holds a role in, from `/` with no file of the checkout in reach, and
+ * writes the cloud's variables for the job's later steps. The sql lexicon's
+ * token sources mint the database token from what the trade left
+ * (chant#4572): `rds-iam` with the traded AWS keys, `cloud-sql-iam` from the
+ * traded Google token, `entra` from the Azure Database token, so the image
+ * needs no `aws`, `gcloud` or `az`. yodel keeps only the mapping from
+ * `ci.login` to chant's trade spec ({@link tradeSpec}). The trade's GitLab
+ * `id_tokens` are chant's (`CHANT_ID_TOKEN_<CLOUD>`).
  *
- * The login, per cloud, from the token file:
+ * Forgejo gives a job no OIDC token, so there is nothing to trade: a login
+ * is rendered only when the config's `tokenFile` names a token the runner
+ * provides, and it is yodel's own, from that file:
  * - aws: AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_SESSION_NAME,
  *   which the aws command line assumes the role with.
  * - gcp: an external_account credential configuration over the token file
@@ -24,69 +25,20 @@
  *   `gcloud auth login --cred-file` with it, and GOOGLE_APPLICATION_CREDENTIALS.
  * - azure: `az login --service-principal --federated-token`, and
  *   AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_FEDERATED_TOKEN_FILE.
- *
- * On GitHub and Forgejo the variables go to $GITHUB_ENV, so every later step
- * has them (the report too); on GitLab they are the job's `variables`, so
- * after_script has them too.
+ * The variables go to $GITHUB_ENV, so every later step has them (the
+ * report too). Yodel's own login on GitHub and GitLab, from before the
+ * trade, left in 0.12 (#303).
  */
 
+import { gitlabTradeIdTokens, gitlabTradeLines, TRADE_SPEC_ENV, tradeLine } from "@intentius/chant/ci-identity";
 import type { AwsLogin, AzureLogin, CiLogin, CloudLogins, GcpLogin } from "../config/define.js";
 import type { CloudToken, Role } from "../credentials.js";
-
-// ── Through chant's ci-identity (#296) ──────────────────────────────────────
-//
-// With a chant whose ci-identity trades a job's OIDC token for every cloud
-// (chant#4554) and a sql lexicon whose token sources mint from what the
-// trade left (chant#4572), the login is chant's: one trade step, which runs
-// from `/` with no file of the checkout in reach, writes the cloud's
-// variables for the job's later steps, and the database token is minted by
-// the lexicon with no cloud command line in the image. yodel keeps only the
-// mapping from yodel.config.ts `ci.login` to chant's trade spec. Forgejo,
-// which gives a job no OIDC token, keeps yodel's own login from the
-// runner's token file.
 
 /** One job's trade, in chant's `CloudTradeSpec` shape, the parts yodel fills. */
 export interface TradeSpec {
   aws?: { role: string; region: string; audience: string };
   gcp?: { serviceAccount: string; provider: string; audience: string };
   azure?: { clientId: string; tenantId: string; audience: string; database: true };
-}
-
-/** The parts of chant's `ci-identity` yodel calls. */
-export interface ChantTrade {
-  tradeLine(out: string, format: "github-env" | "sh"): string;
-  gitlabTradeLines(extraUnset?: readonly string[]): string[];
-  gitlabTradeIdTokens(spec: TradeSpec): Record<string, { aud: string }>;
-  TRADE_SPEC_ENV: string;
-}
-
-let trade: ChantTrade | undefined;
-
-/** The trade the next render uses, or none for yodel's own login. {@link chantTrade} finds it; tests set their own. */
-export function useChantTrade(t: ChantTrade | undefined): void {
-  trade = t;
-}
-
-/** Whether logins render through chant's trade. */
-export const tradesThroughChant = (): boolean => trade !== undefined;
-
-/**
- * chant's trade, when the installed chant has it with the database token
- * (`AZURE_DATABASE_TOKEN_ENV`, chant#4572) and the sql lexicon mints from a
- * traded identity (`tradedToken`); else undefined. Both are imported lazily,
- * with the specifiers in variables, so a published chant keeps yodel's login.
- */
-export async function chantTrade(): Promise<ChantTrade | undefined> {
-  const identity = "@intentius/chant/ci-identity";
-  const tokens = "@intentius/chant-lexicon-sql/token-source";
-  try {
-    const m = (await import(identity)) as Partial<ChantTrade> & { AZURE_DATABASE_TOKEN_ENV?: unknown };
-    const t = (await import(tokens)) as { tradedToken?: unknown };
-    const ok = typeof m.tradeLine === "function" && typeof m.gitlabTradeLines === "function" && typeof m.gitlabTradeIdTokens === "function" && typeof m.TRADE_SPEC_ENV === "string" && typeof m.AZURE_DATABASE_TOKEN_ENV === "string" && typeof t.tradedToken === "function";
-    return ok ? (m as ChantTrade) : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** yodel.config.ts `ci.login` for a job's logins, as chant's trade spec. */
@@ -101,17 +53,17 @@ export function tradeSpec(logins: readonly Login[]): TradeSpec {
   return spec;
 }
 
-/** A GitLab job's `id_tokens` for its logins through chant's trade, or undefined for yodel's own. */
+/** A GitLab job's `id_tokens` for its logins through chant's trade, or undefined when it has none. */
 export function tradeIdTokens(logins: readonly Login[]): Record<string, { aud: string }> | undefined {
-  return trade && logins.length > 0 ? trade.gitlabTradeIdTokens(tradeSpec(logins)) : undefined;
+  return logins.length > 0 ? gitlabTradeIdTokens(tradeSpec(logins)) : undefined;
 }
 
 /** The trade's steps for a job on GitHub or GitLab. */
-function tradeSteps(t: ChantTrade, forge: "github" | "gitlab", logins: readonly Login[]): LoginSteps {
+function tradeSteps(forge: "github" | "gitlab", logins: readonly Login[]): LoginSteps {
   const spec = JSON.stringify(tradeSpec(logins));
   const name = `Cloud identity (chant ci-identity: ${logins.map((l) => l.cloud).join(", ")})`;
-  if (forge === "gitlab") return { steps: [{ name, lines: t.gitlabTradeLines() }], variables: { [t.TRADE_SPEC_ENV]: spec } };
-  return { steps: [{ name, lines: [`export ${t.TRADE_SPEC_ENV}=${quote(spec)}`, t.tradeLine("$GITHUB_ENV", "github-env")] }], variables: {} };
+  if (forge === "gitlab") return { steps: [{ name, lines: gitlabTradeLines() }], variables: { [TRADE_SPEC_ENV]: spec } };
+  return { steps: [{ name, lines: [`export ${TRADE_SPEC_ENV}=${quote(spec)}`, tradeLine("$GITHUB_ENV", "github-env")] }], variables: {} };
 }
 
 export type Cloud = keyof CloudLogins;
@@ -127,7 +79,7 @@ export type Login = { cloud: "aws"; config: AwsLogin } | { cloud: "gcp"; config:
 
 /** What a job adds for its logins: variables every later command has, and the lines to run before yodel. */
 export interface LoginSteps {
-  /** One per cloud: its name and its lines, in order. */
+  /** Its name and its lines, in order: one step for chant's trade, or one per cloud on Forgejo. */
   steps: Array<{ name: string; lines: string[] }>;
   /** GitLab: the job's variables. On GitHub and Forgejo the lines write them to $GITHUB_ENV instead. */
   variables: Record<string, string>;
@@ -139,9 +91,6 @@ export function audience(login: Login): string {
   if (login.cloud === "gcp") return `https://iam.googleapis.com/${login.config.workloadIdentityProvider}`;
   return "api://AzureADTokenExchange";
 }
-
-/** The GitLab ID token variable per cloud, as #50 named them. */
-export const GITLAB_ID_TOKEN: Record<Cloud, string> = { aws: "AWS_ID_TOKEN", gcp: "GCP_ID_TOKEN", azure: "AZURE_ID_TOKEN" };
 
 /** The login config for `env`'s roles minted by `token`: the environment's own, else the project's. */
 export function loginFor(login: CiLogin | undefined, env: string, token: CloudToken): Login | undefined {
@@ -174,20 +123,6 @@ export function jobLogins(login: CiLogin | undefined, held: ReadonlyArray<readon
   });
 }
 
-/** Where a job keeps a cloud's token by default. */
-const defaultTokenFile = (forge: LoginForge, cloud: Cloud): string | undefined => {
-  if (forge === "github") return `$RUNNER_TEMP/yodel-${cloud}-token`;
-  if (forge === "gitlab") return `/tmp/yodel-${cloud}-token`;
-  return undefined;
-};
-
-/**
- * Requests the job's OIDC token for an audience and writes it to a file:
- * `node -e '<this>' <audience> <file>`, so every image with node runs it.
- */
-const GITHUB_OIDC =
-  'const [aud, file] = process.argv.slice(1); const url = process.env.ACTIONS_ID_TOKEN_REQUEST_URL, auth = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN; if (!url || !auth) { console.error("no OIDC token for this job: the workflow needs permissions id-token: write"); process.exit(1); } fetch(url + "&audience=" + encodeURIComponent(aud), { headers: { Authorization: "bearer " + auth } }).then(async (r) => { if (!r.ok) throw new Error("the OIDC token request answered " + r.status); require("fs").writeFileSync(file, (await r.json()).value, { mode: 0o600 }); }).catch((e) => { console.error(e.message); process.exit(1); })';
-
 /** Writes the gcloud credential configuration: `node -e '<this>' <provider> <service account> <token file> <config file>`. */
 const GCP_CREDENTIALS =
   'const [provider, sa, token, file] = process.argv.slice(1); require("fs").writeFileSync(file, JSON.stringify({ type: "external_account", audience: "//iam.googleapis.com/" + provider, subject_token_type: "urn:ietf:params:oauth:token-type:jwt", token_url: "https://sts.googleapis.com/v1/token", service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/" + sa + ":generateAccessToken", credential_source: { file: token } }, null, 2))';
@@ -205,19 +140,13 @@ function loginVariables(l: Login, tokenFile: string): Record<string, string> {
 
 const STEP_NAME: Record<Cloud, string> = { aws: "Log in to AWS (web identity)", gcp: "Log in to Google Cloud (workload identity)", azure: "Log in to Azure (federated token)" };
 
-/**
- * The login steps of a job on `forge`, for `logins`. On Forgejo a cloud
- * without a `tokenFile` is left out: the runner's own identity mints there.
- */
-export function loginSteps(forge: LoginForge, logins: readonly Login[]): LoginSteps {
-  if (trade && forge !== "forgejo" && logins.length > 0) return tradeSteps(trade, forge, logins);
+/** A Forgejo job's login from the runner's token file; a cloud without a `tokenFile` is left out, since the runner's own identity mints there. */
+function forgejoSteps(logins: readonly Login[]): LoginSteps {
   const out: LoginSteps = { steps: [], variables: {} };
   for (const l of logins) {
-    const file = l.config.tokenFile ?? defaultTokenFile(forge, l.cloud);
+    const file = l.config.tokenFile;
     if (file === undefined) continue;
     const lines: string[] = [];
-    if (forge === "github") lines.push(`node -e ${quote(GITHUB_OIDC)} ${quote(audience(l))} ${path(file)}`);
-    if (forge === "gitlab") lines.push(`(umask 077 && printf '%s' "$${GITLAB_ID_TOKEN[l.cloud]}" > ${path(file)})`);
     if (l.cloud === "gcp") {
       lines.push(`node -e ${quote(GCP_CREDENTIALS)} ${quote(l.config.workloadIdentityProvider)} ${quote(l.config.serviceAccount)} ${path(file)} ${path(`${file}.json`)}`);
       lines.push(`gcloud auth login --cred-file=${path(`${file}.json`)} --quiet`);
@@ -225,12 +154,16 @@ export function loginSteps(forge: LoginForge, logins: readonly Login[]): LoginSt
     if (l.cloud === "azure") {
       lines.push(`az login --service-principal --username ${quote(l.config.clientId)} --tenant ${quote(l.config.tenantId)} --federated-token "$(cat ${path(file)})" --allow-no-subscriptions --output none`);
     }
-    const vars = loginVariables(l, file);
-    if (forge === "gitlab") Object.assign(out.variables, vars);
-    else lines.push(...Object.entries(vars).map(([k, v]) => `echo "${k}=${v}" >> "$GITHUB_ENV"`));
+    lines.push(...Object.entries(loginVariables(l, file)).map(([k, v]) => `echo "${k}=${v}" >> "$GITHUB_ENV"`));
     out.steps.push({ name: STEP_NAME[l.cloud], lines });
   }
   return out;
+}
+
+/** The login steps of a job on `forge`, for `logins`: chant's trade on GitHub and GitLab, the runner's token file on Forgejo. */
+export function loginSteps(forge: LoginForge, logins: readonly Login[]): LoginSteps {
+  if (logins.length === 0) return { steps: [], variables: {} };
+  return forge === "forgejo" ? forgejoSteps(logins) : tradeSteps(forge, logins);
 }
 
 // ── yodel.config.ts ci.login, checked ───────────────────────────────────────

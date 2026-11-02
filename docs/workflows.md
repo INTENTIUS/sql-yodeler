@@ -185,7 +185,7 @@ By default every job runs in `node:22-bookworm` (GitHub's plan jobs on the runne
 
 ### Upgrading the pipelines to chant 0.124.67
 
-From chant 0.124.67 the pipelines run on chant's product pipeline, the one terragucci and plywood use ([SQL Yodeler on chant CI](chant-ci.md#from-chant-012457) has each part). A project made from a template before then, or one whose chant is older, moves in one commit:
+From chant 0.124.67 the pipelines run on chant's product pipeline, the one terragucci and plywood use ([SQL Yodeler on chant CI](chant-ci.md#from-chant-012467) has each part). A project made from a template before then, or one whose chant is older, moves in one commit:
 
 1. Install SQL Yodeler's latest release, then chant and the sql lexicon at the floor, pinned as the templates pin them:
 
@@ -197,6 +197,8 @@ From chant 0.124.67 the pipelines run on chant's product pipeline, the one terra
 2. Run `npx yodel upgrade`. It lists the parts of chant CI the installed chant has, adds `chant.workspace.json` when the project has no workspace declaration, and renders every file `yodel ci` renders. `yodel upgrade --check` writes nothing and names the files it would write. With a chant before 0.124.67 it writes nothing, exits 1 and prints the install line above.
 
 3. Commit what it wrote with `package.json` and `package-lock.json`, in one commit, and open a pull request.
+
+From SQL Yodeler 0.12 the upgrade is required: 0.12 renders the pipelines only on chant's product pipeline, and it no longer has the parts a pipeline yodel 0.10 rendered calls. Run `yodel upgrade` before moving to 0.12, on 0.11, or in the same commit that moves to it. A project that moves to 0.12 with the old pipelines still committed fails its pull request's `yodel ci --check`, and its wave jobs stop before they plan: `yodel apply` refuses `YODEL_LOCK_WAIT` and `YODEL_STAND_DOWN`, which those jobs set, by name (exit 1), pointing at `yodel upgrade`. [SQL Yodeler on chant CI](chant-ci.md#what-012-no-longer-has) lists what went.
 
 The files that change, for each forge the project renders:
 

@@ -1,15 +1,17 @@
 /**
  * #296: the cloud login through chant's ci-identity. yodel.config.ts
- * `ci.login` maps to chant's trade spec; with chant's trade the GitHub and
- * GitLab login is chant's one step and GitLab's id_tokens are chant's;
- * Forgejo keeps yodel's own; a plan job's trade names only its readers'
+ * `ci.login` maps to chant's trade spec; the GitHub and GitLab login is
+ * chant's one step and GitLab's id_tokens are chant's (yodel's own steps
+ * there left in 0.12, #303); Forgejo, which gives a job no OIDC token, keeps
+ * yodel's login from the runner's token file; a plan job's trade names only its readers'
  * identities and a wave job's the writer's. Rendering only: nothing here
  * trades a token or calls a cloud.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { chantTrade, loginSteps, tradeIdTokens, tradeSpec, useChantTrade, type ChantTrade, type Login, type TradeSpec } from "../src/ci/login.js";
+import { gitlabTradeLines, tradeLine } from "@intentius/chant/ci-identity";
+import { loginSteps, tradeIdTokens, tradeSpec, type Login, type TradeSpec } from "../src/ci/login.js";
 import { gitlabPipeline, type Environments } from "../src/ci/render.js";
 import { checkYodelConfig } from "../src/config/index.js";
 
@@ -18,18 +20,6 @@ const PROVIDER = "projects/123456789/locations/global/workloadIdentityPools/ci/p
 const SA = "yodel@shop-dev.iam.gserviceaccount.com";
 const CLIENT = "11111111-2222-3333-4444-555555555555";
 const TENANT = "66666666-7777-8888-9999-000000000000";
-
-/** chant's trade in miniature, with its variable names. */
-const fake: ChantTrade = {
-  TRADE_SPEC_ENV: "CHANT_CLOUD_TRADE",
-  tradeLine: (out, format) => `(cd / && node -e '<trade>' "${out}" ${format})`,
-  gitlabTradeLines: () => ['(cd / && node -e \'<trade>\' "${TMPDIR:-/tmp}/chant-cloud-$CI_JOB_ID.sh" sh)', "unset CHANT_CLOUD_TRADE", '. "${TMPDIR:-/tmp}/chant-cloud-$CI_JOB_ID.sh"'],
-  gitlabTradeIdTokens: (spec: TradeSpec) => Object.fromEntries((["aws", "gcp", "azure"] as const).flatMap((c) => { const s = spec[c]; return s ? [[`CHANT_ID_TOKEN_${c.toUpperCase()}`, { aud: s.audience }]] : []; })),
-};
-
-afterEach(() => {
-  useChantTrade(undefined);
-});
 
 const logins: Login[] = [
   { cloud: "aws", config: { roleArn: ROLE, region: "eu-west-1" } },
@@ -55,33 +45,30 @@ describe("ci.login as chant's trade spec (#296)", () => {
 
 describe("the login steps through chant's trade (#296)", () => {
   it("are chant's one step on GitHub, with the spec exported and the variables written to $GITHUB_ENV", () => {
-    useChantTrade(fake);
     const steps = loginSteps("github", logins);
     expect(steps.steps).toHaveLength(1);
     expect(steps.steps[0]?.lines[0]).toBe(`export CHANT_CLOUD_TRADE='${JSON.stringify(tradeSpec(logins))}'`);
-    expect(steps.steps[0]?.lines[1]).toBe(`(cd / && node -e '<trade>' "$GITHUB_ENV" github-env)`);
+    expect(steps.steps[0]?.lines[1]).toBe(tradeLine("$GITHUB_ENV", "github-env"));
     expect(steps.steps.flatMap((s) => s.lines).join("\n")).not.toMatch(/\baws sts|gcloud|az login/);
   });
 
   it("are chant's trade lines on GitLab, with the spec as the job's variable and chant's id_tokens", () => {
-    useChantTrade(fake);
     const steps = loginSteps("gitlab", logins);
     expect(steps.variables).toEqual({ CHANT_CLOUD_TRADE: JSON.stringify(tradeSpec(logins)) });
-    expect(steps.steps[0]?.lines).toEqual(fake.gitlabTradeLines());
+    expect(steps.steps[0]?.lines).toEqual(gitlabTradeLines());
     expect(Object.keys(tradeIdTokens(logins) ?? {})).toEqual(["CHANT_ID_TOKEN_AWS", "CHANT_ID_TOKEN_GCP", "CHANT_ID_TOKEN_AZURE"]);
   });
 
-  it("stay yodel's own on Forgejo, and everywhere without chant's trade", () => {
-    useChantTrade(fake);
+  it("stay yodel's own on Forgejo, from the runner's token file, and are none for a job with no login", () => {
     const forgejo = loginSteps("forgejo", [{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/token" } }]);
     expect(forgejo.steps[0]?.name).toBe("Log in to AWS (web identity)");
-    useChantTrade(undefined);
-    expect(loginSteps("github", logins).steps.map((s) => s.name)).toEqual(["Log in to AWS (web identity)", "Log in to Google Cloud (workload identity)", "Log in to Azure (federated token)"]);
-    expect(tradeIdTokens(logins)).toBeUndefined();
+    expect(forgejo.steps[0]?.lines).toEqual(['echo "AWS_ROLE_ARN=arn:aws:iam::123456789012:role/yodel" >> "$GITHUB_ENV"', 'echo "AWS_WEB_IDENTITY_TOKEN_FILE=/run/token" >> "$GITHUB_ENV"', 'echo "AWS_ROLE_SESSION_NAME=yodel" >> "$GITHUB_ENV"']);
+    expect(loginSteps("forgejo", logins).steps).toEqual([]);
+    expect(loginSteps("github", [])).toEqual({ steps: [], variables: {} });
+    expect(tradeIdTokens([])).toBeUndefined();
   });
 
   it("give a plan job only its readers' identities, and the wave job the writer's", () => {
-    useChantTrade(fake);
     const envs: Environments = {
       dialect: "postgres",
       names: ["prod"],
@@ -97,9 +84,4 @@ describe("the login steps through chant's trade (#296)", () => {
     expect(Object.keys(plan?.id_tokens ?? {})).toEqual(["CHANT_ID_TOKEN_AZURE"]);
   });
 
-  it("is found on a chant and sql lexicon that have it, and not on a published chant", async () => {
-    const t = await chantTrade();
-    if (t) expect(typeof t.tradeLine).toBe("function");
-    else expect(t).toBeUndefined();
-  });
 });

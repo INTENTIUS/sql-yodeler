@@ -19,9 +19,9 @@
  * chant <args>` runs chant in this process with them (../commands/chant.ts),
  * and the jobs chant generates for yodel run that line in place of `chant`.
  *
- * `@intentius/chant/ci-product` is newer than the chant sql-yodeler's main
- * pins. {@link chantProduct} imports it lazily, with the specifier in a
- * variable, so a published chant without it leaves yodel as it was. The
+ * {@link chantProduct} imports `@intentius/chant/ci-product` lazily, with
+ * the specifier in a variable, so a chant below the floor is told what to
+ * install (`yodel upgrade`, `yodel ci`) instead of failing to load. The
  * words themselves are plain data and need no import of chant.
  */
 

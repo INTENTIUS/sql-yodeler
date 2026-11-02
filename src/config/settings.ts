@@ -7,10 +7,14 @@
  * | topology         | `environments.<env>.topology`          | `sql.profiles.<env>.topology`     | `YODEL_TOPOLOGY`        | `single` |
  * | history database | `environments.<env>.history.database`  |                                   | `YODEL_HISTORY_DATABASE`| `yodeler`|
  * | lock TTL         | `environments.<env>.lockTtl` (seconds) |                                   | `YODEL_LOCK_TTL`        | 900      |
- * | lock wait        | `environments.<env>.lockWait` (seconds)|                                   | `YODEL_LOCK_WAIT`       | 0        |
+ * | lock wait        | `environments.<env>.lockWait` (seconds)|                                   |                         | 0        |
  * | access           | `environments.<env>.access`            | `sql.profiles.<env>.access`       |                         | off      |
  *
- * `yodel apply --lock-wait <duration>` sets the lock wait over all three.
+ * `yodel apply --lock-wait <duration>` sets the lock wait over the config.
+ * `YODEL_LOCK_WAIT` is no longer a setting (#303): it carries `--lock-wait`
+ * from `yodel apply` and `yodel revert` to their Op's Apply step only
+ * ({@link LOCK_WAIT_ENV}), and anywhere else it is refused by name
+ * ({@link retiredVariableRefusal}).
  *
  * A tenant (`<env>/<tenant>`, #56) has its environment's settings, its
  * history database suffixed with `_<tenant>`.
@@ -20,7 +24,7 @@ import { toTopology, topologyLabel, type Topology } from "@intentius/chant-lexic
 import { DEFAULT_HISTORY_DATABASE } from "../history/ddl.js";
 import { DEFAULT_LOCK_TTL_MS } from "../history/lock.js";
 import type { HistoryTopology } from "../history/topology.js";
-import { YodelError, type Project } from "../project.js";
+import { YodelError, yodelRefusal, type Project } from "../project.js";
 import { CONFIG_FILE } from "./load.js";
 import { splitTarget } from "../tenants/target.js";
 
@@ -41,8 +45,34 @@ export interface EnvironmentSettings {
   lockWaitMs: number;
 }
 
-/** The variable that sets the lock wait (a duration, as {@link parseDuration} reads it). */
+/**
+ * The hand-off of `--lock-wait` to the Op's Apply step (`yodel apply
+ * --execute`), a duration as {@link parseDuration} reads it. Only that step
+ * reads it.
+ */
 export const LOCK_WAIT_ENV = "YODEL_LOCK_WAIT";
+
+/** The hand-off of `--stand-down` to the Op's Apply step. Only that step reads it. */
+export const STAND_DOWN_ENV = "YODEL_STAND_DOWN";
+
+/**
+ * The refusal of a variable a pipeline rendered by yodel 0.10 sets on its
+ * apply jobs (`YODEL_LOCK_WAIT: '10m'`, `YODEL_STAND_DOWN: '1'`), which
+ * yodel no longer reads (#303): chant's waves hold a lease on the
+ * environment (exit 5) and stand down for a newer commit (exit 6) once the
+ * pipelines are upgraded. Named, so such a pipeline stops with the way
+ * forward instead of applying without what it asked for. Undefined when
+ * neither is set.
+ */
+export function retiredVariableRefusal(env: NodeJS.ProcessEnv, command: string): YodelError | undefined {
+  const set = [LOCK_WAIT_ENV, STAND_DOWN_ENV].filter((k) => env[k] !== undefined && env[k] !== "");
+  if (set.length === 0) return undefined;
+  return yodelRefusal(
+    `refused: ${set.join(" and ")} ${set.length > 1 ? "are" : "is"} set, as a pipeline rendered by yodel 0.10 sets ${set.length > 1 ? "them" : "it"} on its apply jobs, and ${command} no longer reads ${set.length > 1 ? "them" : "it"}; nothing ran. ` +
+      "Run npx yodel upgrade and commit what it writes: the upgraded wave jobs have chant hold a lease on the environment (exit 5 when it is held) and stand down for a newer commit (exit 6). " +
+      "At a terminal, pass --lock-wait <duration> (or set environments.<env>.lockWait in yodel.config.ts) and --stand-down instead.",
+  );
+}
 
 const UNITS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
 
@@ -104,9 +134,7 @@ export function environmentSettings(project: Pick<Project, "config" | "yodel">, 
     lockTtlMs = ttl * 1000;
   }
 
-  let lockWaitMs = 0;
-  if (own?.lockWait !== undefined) lockWaitMs = own.lockWait * 1000;
-  else if (env[LOCK_WAIT_ENV]) lockWaitMs = parseDuration(env[LOCK_WAIT_ENV], LOCK_WAIT_ENV);
+  const lockWaitMs = own?.lockWait !== undefined ? own.lockWait * 1000 : 0;
 
   return {
     topology,

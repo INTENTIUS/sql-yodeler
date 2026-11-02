@@ -47,10 +47,10 @@ describe("parseDuration", () => {
     expect(() => parseDuration("10 m", "x")).toThrow();
   });
 
-  it("takes the lock wait from yodel.config.ts, else YODEL_LOCK_WAIT, else 0", () => {
+  it("takes the lock wait from yodel.config.ts, else 0, and no longer from YODEL_LOCK_WAIT (#303)", () => {
     const project = (lockWait?: number) => ({ config: { lexicons: ["sql"] }, yodel: { path: "y", config: { environments: { dev: lockWait === undefined ? {} : { lockWait } } } } }) as never;
     expect(environmentSettings(project(), "dev", {}).lockWaitMs).toBe(0);
-    expect(environmentSettings(project(), "dev", { YODEL_LOCK_WAIT: "2m" }).lockWaitMs).toBe(120_000);
+    expect(environmentSettings(project(), "dev", { YODEL_LOCK_WAIT: "2m" }).lockWaitMs).toBe(0);
     expect(environmentSettings(project(45), "dev", { YODEL_LOCK_WAIT: "2m" }).lockWaitMs).toBe(45_000);
   });
 });
