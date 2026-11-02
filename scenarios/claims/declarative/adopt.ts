@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { hold, partDialects, partNames, runParts, type Claim, type Ctx, type PartEntry } from "../../lib/claim.js";
+import { REVIEWER, ownApprovalRefused } from "../../lib/gates.js";
 import { parse, Project } from "../../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../../lib/access.js";
 import { chAccessOnServer, chNames } from "../../lib/clickhouse-objects.js";
@@ -235,8 +236,11 @@ function secondProfile(ctx: Ctx, server: SecondServer, access: boolean): string 
  * `yodel init --baseline <env>` (#115): a second environment that already
  * holds the schema (made by hand the same way, with its data, on a server
  * of its own) takes the project's baseline as applied, through its
- * migrations Op and behind its gate: the run stops at the gate, and once
- * approved records the baseline without running a statement. Then its
+ * migrations Op and behind its gate: the run stops at the gate; approved
+ * by the one who asked (the record is chant's gated request, #292), it
+ * still waits, saying that approval does not count, and records nothing;
+ * approved by someone else, it records the baseline without running a
+ * statement. Then its
  * history holds the one baseline row, yodel status lists the baseline
  * applied, yodel plan shows only the migrations after it pending, and the
  * objects keep their data.
@@ -265,7 +269,13 @@ async function secondEnvPart(ctx: Ctx, s: Adoption): Promise<void> {
     hold(gated.status === "gated" && gated.approve !== undefined, `yodel init --baseline ${env} did not stop at the gate (${gated.status})`);
     const unrecorded = await server.scalar(`SELECT count(*) FROM ${ctx.db.history}.history`).catch(() => "0");
     hold(unrecorded === "0" || unrecorded === "", `the history recorded ${unrecorded} rows before the approval`);
+    // The requester's own approval never counts for a gated request (#292, chant#4551).
     await p.approve(gated.chantApprove);
+    const own = await p.yodel(["init", "--baseline", env], { timeoutMs: 600_000 });
+    hold(ownApprovalRefused(own), `yodel init --baseline ${env} did not refuse the requester's own approval (exit ${String(own.code)}): ${own.out.trim().split("\n").slice(-4).join(" ")}`);
+    const ownRecorded = await server.scalar(`SELECT count(*) FROM ${ctx.db.history}.history`).catch(() => "0");
+    hold(ownRecorded === "0" || ownRecorded === "", `the history recorded ${ownRecorded} rows on the requester's own approval`);
+    await p.approve(gated.chantApprove, { approver: REVIEWER });
     const second = await p.yodel(["init", "--baseline", env, "--json"], { timeoutMs: 600_000 });
     hold(second.code === 0 && parse<{ status: string }>(second).status === "recorded", `yodel init --baseline ${env} after the approval exited ${String(second.code)}`);
 

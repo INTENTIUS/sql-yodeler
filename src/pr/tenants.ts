@@ -90,6 +90,29 @@ export function renderTenantSetText(plan: TenantSetPlan, options: { runnable?: (
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * The set's own lines in chant's note (#56, #290): every tenant by its bare
+ * name, grouped by what is pending on it, then the wave's one approval of
+ * the set digest and the `yodel approve <set>` that gives it. chant's table
+ * names each tenant as `<set>/<tenant>`; these name the set as one.
+ */
+export function tenantSetDetailLines(plan: TenantSetPlan, max = 30): string[] {
+  const code = (s: string) => `\`${s}\``;
+  const out = [`${plan.dialect === "clickhouse" ? "ClickHouse" : "Postgres"}, ${summary(plan)}.`];
+  for (const n of plan.notes) out.push("", `> ${n}`);
+  for (const g of groups(plan)) {
+    const first = g.members[0];
+    if (!first) continue;
+    const what = first.refusal ? "yodel apply would refuse" : first.pending.length === 0 ? "up to date" : `${String(first.pending.length)} pending`;
+    out.push("", `- ${what}: ${someNames(g.members.map((m) => tenantName(m.environment)), code, max)}`);
+  }
+  if (plan.wave) {
+    out.push("", describeTenantSetWave(plan.wave, plan.tenants.length, code));
+    if (plan.wave.waits && plan.wave.approve) out.push("", "Approve it once, for every tenant, at a terminal (it shows every tenant's plan and asks first):", "", fence(`npx ${plan.wave.approve}`, "sh"));
+  }
+  return out;
+}
+
 /** The pull request comment for the whole set: one per tenant set, updated on the next push. */
 export function renderTenantSetMarkdown(plan: TenantSetPlan, options: { sql?: boolean; max?: number } = {}): string {
   const withSql = options.sql !== false;
