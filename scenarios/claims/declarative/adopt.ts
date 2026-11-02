@@ -5,6 +5,7 @@ import { parse, Project } from "../../lib/project.js";
 import { accessOnServer, manageAccess, reader } from "../../lib/access.js";
 import { chAccessOnServer, chNames } from "../../lib/clickhouse-objects.js";
 import { secondServer, type SecondServer } from "../../lib/second-server.js";
+import { unsupportedName, unsupportedSql } from "../../lib/undeclarable.js";
 import { yodelBuild } from "../../lib/yodel-build.js";
 
 /** The database a team already has, made by hand: no ownership markers, and data. `exec` runs SQL on the server it is made on (default the claim's). */
@@ -139,24 +140,28 @@ async function chAccessPart(ctx: Ctx, s: Adoption): Promise<void> {
 
 /**
  * An object of a kind yodel cannot declare (#251): the schema holds an
- * operator, which chant's sql lexicon has no declaration for (its import
- * refuses it, INTENTIUS/chant#3911). yodel init --from refuses (exit 1)
+ * encoding conversion, which chant's sql lexicon has no declaration for (its
+ * coverage table refuses the kind and its import names it,
+ * INTENTIUS/chant#3911; ../../lib/undeclarable.ts). An operator was the
+ * object here until chant declared operators; yodel then adopted it, as it
+ * should, and the part failed for want of a refusal. yodel init --from
+ * refuses (exit 1)
  * naming it, and writes nothing, so nothing is left out of an adopted schema
  * in silence. It runs before the shared adoption, on the claim's schema, and
  * drops what it made.
  * BREAK: yodel built to go on past the refusal, adopting the rest without
- * naming the operator.
+ * naming the conversion.
  */
 async function unsupportedPart(ctx: Ctx): Promise<void> {
   const n = ctx.db.name;
-  await ctx.db.exec(`CREATE SCHEMA ${n}; CREATE FUNCTION ${n}.same(integer, integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT $1 = $2'; CREATE OPERATOR ${n}.=== (LEFTARG = integer, RIGHTARG = integer, FUNCTION = ${n}.same)`);
+  await ctx.db.exec(`CREATE SCHEMA ${n}; ${unsupportedSql(n)}`);
   try {
     const p = await Project.create(ctx, { noSource: true, name: "unsupported" });
     const yodel = ctx.broken ? yodelBuild(ctx, p, "yodel-skips-the-refusal", { file: "init/adopt.js", from: "throw refusal;", to: "void refusal;" }) : undefined;
     if (ctx.broken) ctx.log("BREAK: yodel built to go on past the refusal of an object it cannot declare");
     const args = ["init", "--from", p.env];
     const ran = yodel ? await yodel.ask("", args) : await p.yodel(args);
-    hold(ran.code === 1 && ran.err.includes(`operator ${n}.===(integer,integer)`), `yodel init --from exited ${String(ran.code)} without naming the operator ${n}.=== it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
+    hold(ran.code === 1 && ran.err.includes(unsupportedName(n)), `yodel init --from exited ${String(ran.code)} without naming the ${unsupportedName(n)} it cannot declare: ${ran.err.trim().split("\n").slice(-4).join("\n")}`);
     hold(p.migrationIds().length === 0, "yodel init --from wrote a migration although it refused");
   } finally {
     // The history too: under BREAK=1 init goes on and records a baseline, which the adoption after this would refuse.

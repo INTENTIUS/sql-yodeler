@@ -16,7 +16,8 @@
  *   the pull request's jobs (lint, plan-dev, the project's own), each
  *   passed or failed, with status planned when all passed and failed
  *   otherwise. op, gate and digest come from the comment: the digest after
- *   "Plan digest the apply gate binds:", the gate from the approve command
+ *   "Plan digest:" (chant's note) or "Plan digest the apply gate binds:"
+ *   (yodel's own), the gate from the approve command
  *   it gives (wave 1 when it gives yodel's own line).
  * - pr-apply.json at merge commit C: the newest `yodel-apply` wave run of
  *   each wave on C, applied, gated or failed; a wave after a gated or failed
@@ -27,6 +28,7 @@
  * Each read is the forge's or the ledger's own record, never a job's log.
  */
 
+import { commentDigest } from "../lib/note.js";
 import type { ReportView, RunRecordView } from "./harness.js";
 
 /** A commit status on the forge: its context (`<workflow> / <job> (<event>)` on Forgejo) and state. */
@@ -60,7 +62,7 @@ export function jobOf(context: string): string {
 
 /** The digest and the gate a plan comment gives. */
 export function readPlanComment(body: string): { digest: string; op: string; gate: string } | undefined {
-  const digest = /Plan digest the apply gate binds: `(jcs1-sha256:[0-9a-f]{64})`/.exec(body)?.[1];
+  const digest = commentDigest(body);
   if (!digest) return undefined;
   const chantLine = /chant approve (\S+) (\S+) --plan jcs1-sha256:[0-9a-f]{64}/.exec(body);
   return { digest, op: chantLine?.[1] ?? WAVES_OP, gate: chantLine?.[2] ?? `${WAVES_OP}-wave-1` };
