@@ -18,6 +18,7 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dialectName, type Ctx } from "./claim.js";
 import { endpointEnv } from "./db.js";
+import { chantApproveArgs } from "./gates.js";
 import { run, type Ran } from "./exec.js";
 
 export const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -190,11 +191,14 @@ export class Project {
     return doc.written ? doc.id : undefined;
   }
 
-  /** Runs a `chant approve ...` command, as `--json` outputs give it in `chantApprove`. */
-  async approve(command: string | undefined): Promise<void> {
-    if (!command?.startsWith("chant approve ")) throw new Error(`no chant approve command to run: ${String(command)}`);
-    const ran = await this.chant(command.split(" ").slice(1));
-    if (ran.code !== 0) throw new Error(`${command} exited ${String(ran.code)}`);
+  /**
+   * Runs a `chant approve ...` command, as `--json` outputs give it in
+   * `chantApprove`. `approver` names who approves (`--approver`), for a
+   * gated request, which the requester (the shell's user) cannot approve.
+   */
+  async approve(command: string | undefined, options: { approver?: string } = {}): Promise<void> {
+    const ran = await this.chant(chantApproveArgs(command, options.approver));
+    if (ran.code !== 0) throw new Error(`${String(command)}${options.approver ? ` --approver ${options.approver}` : ""} exited ${String(ran.code)}`);
   }
 
   /** `yodel apply <env> --json`. */
