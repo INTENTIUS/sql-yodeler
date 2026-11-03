@@ -7,6 +7,12 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.12.1
+
+- Fixed: every apply wave on 0.12.0 failed before it planned, because the wave job held only the writer and chant's `sql-migrate` plans as the reader. Each wave job now holds its environment's reader too. Run `npx yodel ci` after you move to 0.12.1 and commit the pipelines.
+- The starter templates take `^0.12.1`.
+- Docs: [Computing the schema](schema.md#computing-the-schema), with `examples/computed`.
+
 ## 0.12.0
 
 - Breaking: run `npx yodel upgrade` on 0.11 before you move to 0.12, and commit what it writes ([Upgrading the pipelines](workflows.md#upgrading-the-pipelines-to-chant-012467)). A project still on 0.10.1's pipelines fails `yodel ci --check` on 0.12.
