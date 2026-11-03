@@ -2,6 +2,8 @@
 
 # SQL Yodeler
 
+**[Documentation](https://intentius.io/sql-yodeler/)** · [Release notes](https://intentius.io/sql-yodeler/release-notes/) · [npm](https://www.npmjs.com/package/@intentius/sql-yodeler)
+
 Schema changes for ClickHouse and Postgres, and the ops they imply. Declare your schema in TypeScript, and SQL Yodeler works out the change: it plans and applies it against the live database, or writes it as a versioned migration, behind an approval bound to the plan. Built on chant's `sql` lexicon.
 
 ```ts
