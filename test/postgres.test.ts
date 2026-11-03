@@ -12,7 +12,8 @@ import { projectFromConfig } from "../src/project.js";
 import { writeMigration, type Migration } from "../src/migrations/index.js";
 import { renderStatus, statusJson } from "../src/versioned/report.js";
 import { collectVersionedPlan } from "../src/pr/model.js";
-import { renderPlanMarkdown, renderPlanText } from "../src/pr/render.js";
+import { renderPlanText } from "../src/pr/render.js";
+import { planNote } from "./helpers/note.js";
 import { pgMigrationOpConfig, planStep, runPgMigration, STEP_RETAIN } from "../src/steps/index.js";
 import { FakePgServer } from "./helpers/fake-postgres.js";
 import { migration } from "./helpers/fake-clickhouse.js";
@@ -359,7 +360,7 @@ describe("executeApply on Postgres", () => {
       const plan = await collectVersionedPlan(project, { name: "e2e", profile: { url: "postgres://pg:5432/db" } }, { venv, op, ledger: null });
       expect(plan.history).toBe(`${SCHEMA}.history`);
       expect(renderPlanText(plan).split("\n")[0]).toBe(`Plan for e2e (postgres 18.6 at pg:5432/db, history ${SCHEMA}.history): 0 applied, 1 pending`);
-      expect(renderPlanMarkdown(plan)).toContain(`Postgres, history \`${SCHEMA}.history\`: 0 applied`);
+      expect(await planNote(plan)).toContain(`History \`${SCHEMA}.history\`: 0 applied, 1 pending.`);
       await closeVersioned(venv);
     } finally {
       rmSync(dir, { recursive: true, force: true });

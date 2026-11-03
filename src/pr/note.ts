@@ -1,9 +1,8 @@
 /**
- * The plan note through chant's note renderer (#290, chant#4550): with a
- * chant whose `@intentius/chant/ci-product` renders a note yodel can sign
- * its name to, `yodel plan <env> --comment` posts chant's `renderPrNote` in
- * yodel's words (../ci-words.ts) in place of yodel's own layout, so every
- * product's note reads the same.
+ * The plan note through chant's note renderer (#290, chant#4550): `yodel
+ * plan <env> --comment` and `--format markdown` give chant's `renderPrNote`
+ * in yodel's words (../ci-words.ts), so every product's note reads the
+ * same.
  *
  * chant gives the heading, the environment table with its counts, the
  * digest, the approval line and the change-set summary. The SQL rows chant's
@@ -19,21 +18,22 @@
  * and an open pull request keeps one note. The digest's subject stays at the
  * end, hidden, as before.
  *
- * chant's note is used only when it names the environment in its approve
- * line (`{target}`) and, under per-wave words, says the waves apply on
- * merge; {@link chantNote} renders a probe to tell. Until a chant does both,
- * yodel posts its own note (./render.ts), as it does on a published chant.
+ * chant's note names the environment in its approve line (`{target}`) and,
+ * under per-wave words, says the waves apply on merge (chant#4601). yodel's
+ * own layout, and the probe that chose between the two, left in 0.12 (#303).
  */
 
 import { execFileSync } from "node:child_process";
 import { chantProduct, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
+import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
+import { YodelError } from "../project.js";
 import { describeMove, encodeSubject } from "../versioned/explain.js";
 import { describeWave } from "../waves/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
 import type { VersionedPlan } from "./model.js";
 import { cell, commentMarker, COMMENT_LIMIT, fence, pendingMarkdown, policyMarkdown, ranOn } from "./render.js";
 import { planPart } from "./part.js";
-import type { TenantSetPlan } from "./tenants.js";
+import { tenantSetDetailLines, type TenantSetPlan } from "./tenants.js";
 
 /** What the note needs of chant beyond yodel's words: the renderer and the change-set composer. */
 export interface ChantNote {
@@ -43,45 +43,54 @@ export interface ChantNote {
   composeChangeSet: (parts: unknown[]) => { members: Array<{ member: string }>; summary: { byMember: Record<string, Record<string, number> | undefined> } };
 }
 
-let loaded: Promise<ChantNote | undefined> | undefined;
+let loaded: Promise<ChantNote> | undefined;
 
-/**
- * chant's renderer without the probe: undefined only when the installed
- * chant has none. For a test that reads chant's layout before chant's note
- * fits yodel.
- */
-export async function chantRenderer(): Promise<ChantNote | undefined> {
-  const product = await chantProduct();
-  if (!product) return undefined;
-  const specifier = "@intentius/chant/ci-product";
-  const m = (await import(specifier)) as { renderPrNote?: ChantNote["renderPrNote"] };
-  const cs = (await import("@intentius/chant/change-set")) as unknown as { composeChangeSet?: ChantNote["composeChangeSet"] };
-  if (typeof m.renderPrNote !== "function" || typeof cs.composeChangeSet !== "function") return undefined;
-  return { product, words: product.assertProductWords(YODEL_WORDS), renderPrNote: m.renderPrNote, composeChangeSet: cs.composeChangeSet };
+/** chant's note renderer and change-set composer, once; refused, naming the install line, on a chant without them. */
+export function chantNote(): Promise<ChantNote> {
+  loaded ??= (async () => {
+    const product = await chantProduct();
+    const specifier = "@intentius/chant/ci-product";
+    const m = (await import(specifier).catch(() => ({}))) as { renderPrNote?: ChantNote["renderPrNote"] };
+    const cs = (await import("@intentius/chant/change-set").catch(() => ({}))) as unknown as { composeChangeSet?: ChantNote["composeChangeSet"] };
+    if (!product || typeof m.renderPrNote !== "function" || typeof cs.composeChangeSet !== "function") {
+      throw new YodelError(`the installed chant has no pull request note renderer (renderPrNote), which yodel plan's note is rendered with from chant ${CHANT_CI_FLOOR}. Install it:\n  ${installLine()}`);
+    }
+    return { product, words: product.assertProductWords(YODEL_WORDS), renderPrNote: m.renderPrNote, composeChangeSet: cs.composeChangeSet };
+  })();
+  return loaded;
 }
+
+const tenantSetFit = new WeakMap<ChantNote, boolean>();
 
 /** The probe's environment and digest, which a note that names the target prints in its approve line. */
 const PROBE_ENV = "yodel-probe-env";
 const PROBE_DIGEST = "jcs1-sha256:probe";
 
 /**
- * chant's renderer, once, when the installed chant has one whose note fits
- * yodel: its approve line names the environment, and it does not tell a
- * per-wave product that a release deploys the merge. Undefined otherwise.
+ * Whether chant's note can carry a tenant set (#56): its approve line names
+ * the set once, not each tenant. The set's gate is the wave's, approved once
+ * with `yodel approve <set>` for the set digest; `yodel approve <set>/<tenant>`
+ * approves that tenant as an environment of its own and does not open the
+ * wave. chant 0.124.67 prints a line per member (prApproveTargets in
+ * pr-loop.ts), so the set keeps yodel's own note until chant reads the
+ * report's approveTargets.
  */
-export function chantNote(): Promise<ChantNote | undefined> {
-  loaded ??= (async () => {
-    const note = await chantRenderer();
-    if (!note) return undefined;
-    try {
-      const probe = note.renderPrNote(report(note, [{ environment: PROBE_ENV, digest: PROBE_DIGEST, pending: 1, refused: false }], { env: PROBE_ENV, op: WAVES_PIPELINE, gate: `${WAVES_PIPELINE}-wave-1`, digest: PROBE_DIGEST, head: "0".repeat(40), base: "0".repeat(40), approval: { status: "pending" }, details: [] }), { words: note.words });
-      if (!probe.includes(`yodel approve ${PROBE_ENV} --plan ${PROBE_DIGEST}`) || probe.includes("a release deploys it")) return undefined;
-    } catch {
-      return undefined;
-    }
-    return note;
-  })();
-  return loaded;
+export function tenantSetNoteFits(note: ChantNote): boolean {
+  const known = tenantSetFit.get(note);
+  if (known !== undefined) return known;
+  let fits: boolean;
+  try {
+    const members = ["a", "b"].map((t) => ({ environment: `${PROBE_ENV}/${t}`, digest: PROBE_DIGEST, pending: 1, refused: false }));
+    const probe = note.renderPrNote(
+      report(note, members, { env: PROBE_ENV, op: WAVES_PIPELINE, gate: `${WAVES_PIPELINE}-wave-1`, digest: PROBE_DIGEST, head: "0".repeat(40), base: "0".repeat(40), approval: { status: "pending" }, details: [], approveTargets: [PROBE_ENV] }),
+      { words: note.words },
+    );
+    fits = probe.includes(`yodel approve ${PROBE_ENV} --plan ${PROBE_DIGEST}`) && !probe.includes(`yodel approve ${PROBE_ENV}/`);
+  } catch {
+    fits = false;
+  }
+  tenantSetFit.set(note, fits);
+  return fits;
 }
 
 /** One environment of the note: its name, its digest, how many migrations are pending and whether apply would refuse. */
@@ -104,6 +113,12 @@ interface NoteFrame {
   approval: { status: "approved" | "changed" | "pending"; approvedBy?: string[]; approved?: string };
   details: Array<{ member: string; title?: string; lines: string[] }>;
   message?: string;
+  /**
+   * The targets the note's approve line names, when they are not the members:
+   * a tenant set's one target, the set (#56). A chant that reads it prints
+   * one `yodel approve <set>` line; see {@link tenantSetNoteFits}.
+   */
+  approveTargets?: string[];
 }
 
 /** chant's pull request report for the note: one member per environment (or tenant), at the plan stage. */
@@ -188,10 +203,9 @@ function framed(env: string, body: string, subject: string | undefined): string 
   return `${commentMarker(env)}\n${body.replace(/\n*$/, "\n")}${subject ? `\n<!-- yodel:subject ${subject} -->\n` : ""}`;
 }
 
-/** One environment's note through chant, or undefined when the installed chant's note does not fit yodel. */
-export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote }): Promise<string | undefined> {
+/** One environment's note through chant. */
+export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote }): Promise<string> {
   const note = options.note ?? (await chantNote());
-  if (!note) return undefined;
   const { op, gate, digest } = gateOf(plan);
   const subject = plan.subject ? encodeSubject(plan.subject) : undefined;
   const render = (withSql: boolean) =>
@@ -216,10 +230,15 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
   return body.length > COMMENT_LIMIT ? render(false) : body;
 }
 
-/** A tenant set's note through chant (#56): a member per tenant, a detail section per group of tenants with one plan. */
+/**
+ * A tenant set's note through chant (#56): a member per tenant, the set's
+ * own section (every tenant by name, the wave's one approval of the set
+ * digest), a detail section per tenant. Undefined, so yodel posts its own
+ * note, while chant's would ask for an approval per tenant.
+ */
 export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: string; base?: string; note?: ChantNote }): Promise<string | undefined> {
   const note = options.note ?? (await chantNote());
-  if (!note) return undefined;
+  if (!tenantSetNoteFits(note)) return undefined;
   const members = plan.tenants.map((t) => ({ environment: t.environment, digest: t.digest, pending: t.pending.length, refused: t.refusal !== undefined, part: planPart(t, t.environment) }));
   const wave = plan.wave;
   const render = (withSql: boolean) =>
@@ -233,7 +252,11 @@ export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: s
           digest: wave?.digest ?? "",
           ...commits(options.dir, options.base),
           approval: { status: "pending" },
-          details: plan.tenants.map((t) => ({ member: t.environment, lines: planDetailLines(t, withSql) })),
+          approveTargets: [plan.environment],
+          details: [
+            { member: plan.environment, title: `The tenant set \`${plan.environment}\``, lines: tenantSetDetailLines(plan) },
+            ...plan.tenants.map((t) => ({ member: t.environment, lines: planDetailLines(t, withSql) })),
+          ],
         }),
         { words: note.words, limit: COMMENT_LIMIT },
       ),

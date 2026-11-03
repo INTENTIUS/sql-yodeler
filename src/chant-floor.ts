@@ -2,13 +2,15 @@
  * The chant release yodel's pipelines move onto chant's product pipeline
  * with (#298, tracker #285).
  *
- * Every part of chant CI yodel uses is feature-detected (src/ci-words.ts,
- * src/ci/render.ts, src/ci/check-hooks.ts, src/ci/login.ts,
- * src/chant/gated-request.ts, src/chant/confirm.ts, src/mcp/chant-hook.ts,
- * src/exit.ts), so a project keeps the pipelines it has until its chant is
- * at least {@link CHANT_CI_FLOOR}. `yodel upgrade` (src/commands/upgrade.ts)
- * then moves it in one commit, and docs/chant-ci.md says so, keyed to the
- * same number.
+ * yodel 0.12 takes chant {@link CHANT_CI_FLOOR} as its floor (#303): the
+ * pipelines render only through chant's product pipeline, and yodel's own
+ * copies of what chant now does (its pipeline generator, plan note, cloud
+ * login on GitHub and GitLab, MCP server and stand-down) are gone. A
+ * project whose pipelines a yodel before 0.11 rendered runs `yodel
+ * upgrade` (src/commands/upgrade.ts) to move them in one commit, and
+ * docs/chant-ci.md says so, keyed to the same number. {@link chantParts}
+ * still lists each part, so `yodel upgrade` says what a chant below the
+ * floor lacks.
  *
  * chant names that release `NEXT_RELEASE` until the maintainer cuts it
  * (chant's packages/core/src/release-floors.ts, `CI_PRODUCT_FLOOR`). The
@@ -22,12 +24,9 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { chantProduct } from "./ci-words.js";
-import { chantLocksWaves, hasSqlCapability } from "./ci/render.js";
 import { chantCheckHooks } from "./ci/check-hooks.js";
-import { chantTrade } from "./ci/login.js";
 import { gatedRequests } from "./chant/gated-request.js";
 import { chantConfirm } from "./chant/confirm.js";
-import { chantHooks } from "./mcp/chant-hook.js";
 import { useChantExitTable } from "./exit.js";
 
 export { CHANT_CI_FLOOR, CHANT_PACKAGES, installLine } from "./chant-floor-version.js";
@@ -65,24 +64,39 @@ export interface ChantPart {
 }
 
 /**
- * The parts of chant CI yodel feature-detects, in the order docs/chant-ci.md
- * lists them. Each check is the one the command that uses it makes, so the
- * list says what `yodel ci` and the other commands will do with this chant.
- * Variables that keep yodel's own path (`YODEL_GATED_REQUESTS=0`,
- * `YODEL_OWN_CONFIRM=1`) are not read here: the list is about chant.
+ * Whether the installed `specifier` exports every one of `names`: what
+ * {@link chantParts} asks of a part yodel imports without a check of its
+ * own, since the floor has it. A lazy import, with the specifier in a
+ * variable, so a chant below the floor is told, not crashed on.
+ */
+async function exportsAll(specifier: string, names: readonly string[]): Promise<boolean> {
+  try {
+    const m = (await import(specifier)) as Record<string, unknown>;
+    return names.every((n) => m[n] !== undefined && m[n] !== null);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The parts of chant CI yodel uses, in the order docs/chant-ci.md lists
+ * them, and whether the installed chant has each, so `yodel upgrade` says
+ * what a chant below the floor lacks. Variables that keep yodel's own path
+ * (`YODEL_GATED_REQUESTS=0`, `YODEL_OWN_CONFIRM=1`) are not read here: the
+ * list is about chant.
  */
 export async function chantParts(): Promise<ChantPart[]> {
   const product = (await chantProduct()) !== undefined;
   const parts: Array<[string, string, Promise<boolean>]> = [
     ["product pipeline (words, jobs, yodel chant)", "the-pipelines", Promise.resolve(product)],
     ["exit-code table", "exit-codes", useChantExitTable().then((t) => t === "chant")],
-    ["sql capability (waves with no callback)", "the-apply-waves", hasSqlCapability()],
-    ["lock grain and stand-down", "locks", chantLocksWaves()],
+    ["sql capability (waves with no callback)", "the-apply-waves", exportsAll("@intentius/chant-lexicon-sql/capability-plugin", ["sqlCapabilityPlugin"])],
+    ["lock grain and stand-down", "locks", Promise.all([exportsAll("@intentius/chant/op", ["OP_WAVE_STAND_DOWN_FLOOR", "newerCommitOnBranch"]), exportsAll("@intentius/chant-lexicon-sql/lock-grain", ["sqlDefaultLockGrain"])]).then((both) => both.every(Boolean))],
     ["check hooks", "the-check-on-chants-check-hooks", chantCheckHooks().then((m) => m !== undefined)],
-    ["cloud identity trade", "cloud-login", chantTrade().then((m) => m !== undefined)],
+    ["cloud identity trade", "cloud-login", Promise.all([exportsAll("@intentius/chant/ci-identity", ["tradeLine", "gitlabTradeLines", "gitlabTradeIdTokens", "TRADE_SPEC_ENV", "AZURE_DATABASE_TOKEN_ENV"]), exportsAll("@intentius/chant-lexicon-sql/token-source", ["tradedToken"])]).then((both) => both.every(Boolean))],
     ["gated requests and run records", "records-on-the-ledger", gatedRequests({}).then((m) => m !== undefined)],
     ["confirmation at a terminal", "yodel-approve", chantConfirm({}).then((m) => m !== undefined)],
-    ["MCP tool hook and traces", "mcp-and-traces", chantHooks().then((m) => m !== undefined)],
+    ["MCP tool hook and traces", "mcp-and-traces", exportsAll("@intentius/chant/ci-product", ["runChantInProcess", "configureOtlp", "PRODUCT_MCP_HOOK_FLOOR"])],
   ];
   const out: ChantPart[] = [];
   for (const [name, section, has] of parts) out.push({ name, section, has: await has.catch(() => false) });

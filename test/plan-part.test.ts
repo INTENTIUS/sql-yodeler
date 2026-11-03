@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { composeChangeSet, readChangeSetPartFile } from "@intentius/chant/change-set";
 import type { VersionedPlan } from "../src/pr/model.js";
-import { planPart } from "../src/pr/part.js";
+import { planPart, slotPart } from "../src/pr/part.js";
 
 const DIGEST = `jcs1-sha256:${"c".repeat(64)}`;
 
@@ -70,5 +70,42 @@ describe("yodel plan --part (#237)", () => {
     const part = planPart(plan({ digest: undefined, refusal: { exitCode: 1, message: "20261012T0900-zero was applied with another checksum" } }), "db");
     expect(part.member.status).toBe("failed");
     expect(part.member.planDigest).toBeNull();
+  });
+});
+
+describe("yodel plan <env>/@<i>of<n> --part: a slot of a tenant set read by a query (#56)", () => {
+  const tenant = (name: string, over: Partial<VersionedPlan> = {}): VersionedPlan => plan({ environment: `prod/${name}`, digest: `jcs1-sha256:${name.padEnd(64, "0").slice(0, 64)}`, ...over });
+
+  it("is one part for the slot, every tenant's entries scoped to the tenant, which chant's sql-migrate reads back as the run's", () => {
+    const written = JSON.parse(JSON.stringify(slotPart("prod/@1of2", [tenant("acme"), tenant("globex")], "db"))) as unknown;
+    const part = readChangeSetPartFile(written, "sql", "prod/@1of2", "sql");
+    expect(part.member).toMatchObject({ member: "prod/@1of2", planner: "sql", status: "planned", scope: "prod/@1of2" });
+    expect(part.member.planDigest).toMatch(/^jcs1-sha256:[0-9a-f]{64}$/);
+    expect(part.entries.map((e) => `${e.scope ?? ""} ${e.address}`).sort()).toEqual(["prod/acme app.events", "prod/acme app.loader", "prod/globex app.events", "prod/globex app.loader"]);
+  });
+
+  it("digests over the tenants' plan digests, the same in any order, and moves when a tenant's plan does", () => {
+    const a = tenant("acme");
+    const b = tenant("globex");
+    const digest = (ts: VersionedPlan[], slot = "prod/@1of2") => slotPart(slot, ts, "db").member.planDigest;
+    expect(digest([a, b])).toBe(digest([b, a]));
+    expect(digest([a, b])).not.toBe(digest([a, { ...b, digest: DIGEST }]));
+    expect(digest([a, b])).not.toBe(digest([a, b], "prod/@2of2"));
+    expect(digest([a])).not.toBe(digest([a, b]));
+  });
+
+  it("fails the slot, naming the tenant apply would refuse, with no digest", () => {
+    const part = slotPart("prod/@1of2", [tenant("acme"), tenant("globex", { digest: undefined, refusal: { exitCode: 1, message: "20261012T0900-zero was applied with another checksum" } })], "db");
+    expect(part.member.status).toBe("failed");
+    expect(part.member.planDigest).toBeNull();
+    expect(part.member.error).toContain("prod/globex: 20261012T0900-zero was applied with another checksum");
+    expect(part.member.error).not.toContain("prod/acme");
+  });
+
+  it("plans a slot no tenant hashes to now as a planned member with nothing in it", () => {
+    const part = readChangeSetPartFile(JSON.parse(JSON.stringify(slotPart("prod/@2of2", [], "db"))) as unknown, "sql", "prod/@2of2", "sql");
+    expect(part.member.status).toBe("planned");
+    expect(part.member.planDigest).toMatch(/^jcs1-sha256:/);
+    expect(part.entries).toEqual([]);
   });
 });

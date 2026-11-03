@@ -11,14 +11,13 @@ import { permissionRefusal, readerRefusal } from "../credentials.js";
 import type { CheckOutcome, Migration } from "../migrations/index.js";
 import { migrationSilences } from "../lint/index.js";
 import { askedAgainLine, describeMove, explainAgainst, latestApproval } from "../versioned/explain.js";
-import { declarativeRefusal, LOCK_WAIT_ENV, parseDuration } from "../config/settings.js";
+import { declarativeRefusal, LOCK_WAIT_ENV, parseDuration, retiredVariableRefusal, STAND_DOWN_ENV } from "../config/settings.js";
 import { policyAtBase } from "../config/base.js";
-import { newerCommit, STAND_DOWN_ENV, standDownFromEnv, standDownLine } from "../versioned/stand-down.js";
+import type { OpWaveHooksFile } from "@intentius/chant/op";
 import { describeServer, probeServer, type ServerInfo } from "../server.js";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import { EXIT_WAITING, EXIT_DENIED } from "../exit.js";
 import { describeStep, heldSteps, runSqlStep, runStepHooks, sqlStepOfArgv, STEP_SQL_FLAG, stepsAtBase, stepsHooksFile, stepsRefusal, type StepOutcome } from "../apply-steps/index.js";
-import type { OpWaveHooksFile } from "@intentius/chant/op";
 import { approveCommand, migrationsApprovalAtBase, portFor } from "../approval-mode/index.js";
 import type { ApprovalMode } from "../config/define.js";
 import { baseEnvironment, tenantTarget } from "../tenants/target.js";
@@ -215,13 +214,13 @@ Options:
   --lock-wait <d>       versioned: when another apply holds the lock, wait up
                         to <d> (90, 30s, 10m, 1h) for it, naming the holder,
                         before giving up with exit 5. Default: yodel.config.ts
-                        lockWait (seconds), else YODEL_LOCK_WAIT, else 0
+                        lockWait (seconds), else 0
   --stand-down          versioned: when the branch this run is for has a newer
                         commit on origin (GITHUB_REF_NAME, CI_COMMIT_BRANCH,
                         else the checked-out branch), apply nothing and exit 0:
                         that commit's own apply applies this environment.
-                        Asked before the lock and while waiting for it. Also
-                        YODEL_STAND_DOWN=1
+                        Asked before the lock and while waiting for it, the
+                        way chant's waves ask it
   --release <ref>       the apply is made from a chant release (chant release
                         cut), named by its digest or label: the checkout must
                         be at the commit the release was cut at, and the
@@ -233,9 +232,14 @@ The migrations Op runs two steps of its own, not for direct use:
   --digest   print the plan digest alone (the Op's Plan step)
   --execute  apply under the lock, if the digest is still the one in
              ${APPROVED_PLAN_ENV} and chant's gate ledger holds an approval
-             of the Op's gate for it (the Op's Apply step)
+             of the Op's gate for it (the Op's Apply step); it takes
+             --lock-wait and --stand-down from yodel apply as
+             ${LOCK_WAIT_ENV} and ${STAND_DOWN_ENV}, which no other run reads:
+             set on any other, they are refused (exit 1), as a pipeline
+             rendered by yodel 0.10 sets them; run yodel upgrade
 
-The apply pipeline's wave jobs (chant run wave, ${WAVES_SPEC_FILE}) run three more:
+The sql lexicon's sql-migrate capability runs three more for the apply
+pipeline's wave jobs (yodel chant run wave, ${WAVES_SPEC_FILE}):
   --wave-plan <file>   write the environment's wave plan to <file>: the
                        plan digest, the gate policy at the base commit, and
                        whether a pending step is destructive
@@ -339,6 +343,13 @@ function parseApplyArgs(args: string[]): ApplyArgs {
   const str = (k: string) => (typeof values[k] === "string" ? values[k] : undefined);
   const modes = [...["plan", "digest", "execute"].filter(flag), ...waveModes.filter((k) => str(k) !== undefined)];
   if (modes.length > 1) throw new YodelError(`--${modes.join(" and --")} cannot be combined\n${usage}`);
+  // The migrations Op's steps take --lock-wait and --stand-down from the yodel apply that runs the Op; any other run refuses the variables by name (#303).
+  const opStep = flag("digest") || flag("execute");
+  if (!opStep) {
+    const retired = retiredVariableRefusal(process.env, "yodel apply");
+    if (retired) throw retired;
+  }
+  const handedWait = opStep ? process.env[LOCK_WAIT_ENV] : undefined;
   return {
     env,
     json: flag("json"),
@@ -348,8 +359,8 @@ function parseApplyArgs(args: string[]): ApplyArgs {
     plan: flag("plan"),
     digest: flag("digest"),
     execute: flag("execute"),
-    lockWaitMs: typeof values["lock-wait"] === "string" ? parseDuration(values["lock-wait"], "--lock-wait") : undefined,
-    standDown: flag("stand-down") || standDownFromEnv(process.env),
+    lockWaitMs: typeof values["lock-wait"] === "string" ? parseDuration(values["lock-wait"], "--lock-wait") : handedWait ? parseDuration(handedWait, LOCK_WAIT_ENV) : undefined,
+    standDown: flag("stand-down") || (opStep && process.env[STAND_DOWN_ENV] === "1"),
     wavePlan: str("wave-plan"),
     waveApply: str("wave-apply"),
     stepArgv: str("step-sql") !== undefined ? ["yodel", "apply", ...args] : undefined,
@@ -598,7 +609,7 @@ async function versionedApplyWith(project: Project, env: Environment, a: ApplyAr
     if (forecast?.waits) {
       // A tenant set's wave (#56) is approved once for every tenant.
       const approve = approveCommand(baseEnvironment(env.name), forecast.digest, forecast.approval);
-      const how = env.tenant ? `for every tenant of ${env.tenant.env}. Approve it with ` : `. Approve it with `;
+      const how = env.tenant ? ` for every tenant of ${env.tenant.env}. Approve it with ` : `. Approve it with `;
       const mode = forecast.approval === "ledger" ? "" : `, approval ${forecast.approval}`;
       io.err(`${env.name}: wave ${String(forecast.wave)} waits for an approval of ${forecast.digest} (gate ${forecast.policy} at ${forecast.base.slice(0, 12)}${mode})${how}${approve}\n`);
       if (forecast.approval === "pr-review") io.err(`${env.name}: under pr-review, an approving review of the merged pull request's head by a writer other than its author approves it too, when that head's pipeline recorded this plan (chant run wave --record-plans).\n`);
@@ -991,13 +1002,25 @@ async function recordApplied(project: Project, env: Environment, venv: Versioned
   for (const line of lines) io.err(`${line}\n`);
 }
 
-/** `--stand-down`'s question: the line to stand down with, when a newer commit on the run's branch will apply `env`. */
+/**
+ * `--stand-down`'s question: the line to stand down with, when a newer
+ * commit on the run's branch will apply `env`. The answer is chant's
+ * `newerCommitOnBranch` (chant#4581), the one chant's waves stand down on
+ * (#293): the branch is `GITHUB_REF_NAME`, `CI_COMMIT_BRANCH`, else the
+ * checked-out one, and a tip on origin that contains this commit is newer.
+ * Anything that cannot be told is no newer commit, and the apply goes ahead.
+ */
 function standingDown(project: Project, env: Environment): () => Promise<string | undefined> {
   return async () => {
-    const n = await newerCommit(project.dir);
+    const { newerCommitOnBranch } = await import("@intentius/chant/op");
+    const n = await newerCommitOnBranch(project.dir, process.env);
     return n ? standDownLine(env.name, n) : undefined;
   };
 }
+
+/** What a run that stands down says. */
+export const standDownLine = (env: string, n: { branch: string; head: string; tip: string }): string =>
+  `standing down: ${n.branch} on origin is at ${n.tip.slice(0, 12)}, newer than this run's ${n.head.slice(0, 12)}, and its own apply applies ${env}. Nothing was applied by this run.`;
 
 /**
  * The steps around one apply (#64) as chant's apply-stage hooks (#206):

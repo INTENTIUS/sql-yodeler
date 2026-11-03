@@ -53,7 +53,7 @@ export interface EnvironmentConfig {
   /**
    * How long, in seconds, an apply waits for the lock another apply holds
    * before it gives up (exit 5). `yodel apply --lock-wait` overrides it.
-   * Default: `YODEL_LOCK_WAIT`, then 0 (give up at once).
+   * Default: 0 (give up at once).
    */
   lockWait?: number;
   /**

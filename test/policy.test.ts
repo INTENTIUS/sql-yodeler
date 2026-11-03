@@ -24,7 +24,8 @@ import {
 import { appliedOverride, overrideDigest, type StandingOverride } from "@intentius/chant/override-gate";
 import { OVERRIDDEN_AT, overrideSource } from "./helpers/overrides.js";
 import { deriveState } from "../src/history/index.js";
-import { renderPlanMarkdown, renderPlanText } from "../src/pr/render.js";
+import { renderPlanText } from "../src/pr/render.js";
+import { planNote } from "./helpers/note.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
 import { EXIT_DENIED } from "../src/exit.js";
@@ -160,7 +161,7 @@ describe("policy over the plan (#53)", () => {
     for (const r of started) expect(JSON.parse(String(r.note))).toEqual({ policy: { overrides: [{ rule: "no-drops", by: "alice", at: "2026-10-10T12:00:00.000Z", reason: "emptied in TICKET-1", digest }] } });
   });
 
-  it("shows in the plan text and the pull request comment", () => {
+  it("shows in the plan text and the pull request comment", async () => {
     const plan: VersionedPlan = {
       environment: "prod",
       dialect: "clickhouse",
@@ -176,7 +177,7 @@ describe("policy over the plan (#53)", () => {
     };
     const text = renderPlanText(plan);
     expect(text).toContain("Policy:\n  no-drops: denied: x step 0 (yodel_8.old) is drop\n  small-runs: denied, overridden by alice at 2026-10-10T12:00:00.000Z: one release");
-    const md = renderPlanMarkdown(plan);
+    const md = await planNote(plan);
     expect(md).toContain("#### Policy");
     expect(md).toContain("| `no-drops` no drops in prod | **denied** | x step 0 (yodel_8.old) is drop |");
     expect(md).toContain("| `small-runs` | overridden by alice | 2 migrations in one run; override: one release |");

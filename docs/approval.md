@@ -177,7 +177,7 @@ waves: [
 
 terragucci's `on-destroy` is the same rule; SQL Yodeler and chant spell it `on-destructive`, and SQL Yodeler refuses `on-destroy` ([terragucci's gate policies](https://intentius.io/terragucci/reference/stages/#gate-policy)).
 
-`npm run ci` renders the waves as `yodel-waves.json`, a chant Op waves spec, and the `yodel-apply` pipeline from it on GitHub, GitLab and Forgejo: one job per wave, each needing the one before. Every job runs `chant run wave`, which:
+`npm run ci` renders the waves as `yodel-waves.json`, a chant Op waves spec, and the `yodel-apply` pipeline from it on GitHub, GitLab and Forgejo: one job per wave, each needing the one before. Every job runs `yodel chant run wave`, and chant's sql lexicon plans and applies through its `sql-migrate` capability, which:
 
 1. plans the environment with `yodel apply <env> --wave-plan <file>`: the migrations' plan digest, the gate policy, and whether a pending step is destructive, all in one digest;
 2. reads the wave's gate policy from `yodel-waves.json` as the commit before the push has it, and decides. A wave that needs an approval applies nothing, prints the command that approves it, `npx yodel approve <env> --plan <digest>`, and exits 3, so the waves after it do not run;

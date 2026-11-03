@@ -12,7 +12,7 @@
 import { describeServer } from "../server.js";
 import { describeApprovalMode } from "../approval-mode/index.js";
 import type { MigrationStep, StatementChange } from "@intentius/chant-lexicon-sql/migration-statements";
-import { askedAgainLine, describeMove, encodeSubject } from "../versioned/explain.js";
+import { askedAgainLine, describeMove } from "../versioned/explain.js";
 import { asBackfill, asForm, describeForm } from "../steps/kinds.js";
 import { describeAccessSteps } from "../chant/access.js";
 import { describeExpect } from "../migrations/checks.js";
@@ -55,10 +55,10 @@ function pendingMarks(p: PendingView): string[] {
   return marks;
 }
 
-function approvalLines(a: ApprovalView | undefined, digest: string | undefined, md: boolean): string[] {
-  const code = (s: string) => (md ? `\`${s}\`` : s);
+function approvalLines(a: ApprovalView | undefined, digest: string | undefined): string[] {
+  const code = (s: string) => s;
   if (!a) return [];
-  if (a.kind === "no-op") return [md ? `No migrations Op: ${a.message.split("\n")[0] ?? ""}` : a.message];
+  if (a.kind === "no-op") return [a.message];
   const out: string[] = [];
   if (a.mode) out.push(describeApprovalMode(a.mode, code));
   if (a.latest) {
@@ -110,7 +110,7 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
     lines.push("", `Plan digest: ${plan.digest}`);
     if (plan.approval?.kind === "op" && plan.approval.command) lines.push(`Approve it at a terminal with:`, `  ${run(plan.approval.command)}`, `which shows the plan and asks you first.`);
   }
-  const a = approvalLines(plan.approval, plan.digest, false);
+  const a = approvalLines(plan.approval, plan.digest);
   if (a.length > 0) lines.push("", ...a);
   return `${lines.join("\n")}\n`;
 }
@@ -197,49 +197,6 @@ export function policyMarkdown(results: readonly RuleResult[], environment: stri
     out.push("", `\`yodel apply\` refuses this plan until someone \`policy.overriders\` lists records why, for exactly this digest:`, "", fence(overrideCommand(environment, denied.map((r) => r.id)), "sh"));
   }
   return out;
-}
-
-/** The pull request comment body. */
-export function renderPlanMarkdown(plan: VersionedPlan, options: { sql?: boolean } = {}): string {
-  const withSql = options.sql !== false;
-  const out = [
-    commentMarker(plan.environment),
-    `### yodel plan: \`${plan.environment}\``,
-    "",
-    `${plan.dialect === "clickhouse" ? "ClickHouse" : "Postgres"}${plan.history ? `, history \`${plan.history}\`` : ""}: ${String(plan.appliedCount)} applied, **${String(plan.pending.length)} pending**.`,
-  ];
-  for (const n of plan.notes) out.push("", `> ${n}`);
-  if (plan.pending.length > 0) {
-    for (const p of plan.pending) out.push("", ...pendingMarkdown(p, withSql));
-  } else if (!plan.refusal) out.push("", "Nothing pending: every migration is applied.");
-  if (plan.problems.length > 0) out.push("", `#### Integrity problems (${String(plan.problems.length)})`, "", ...plan.problems.map((p) => `- ${cell(p)}`));
-  if (plan.refusal) out.push("", `**\`yodel apply\` would refuse (exit ${String(plan.refusal.exitCode)})**, and applies nothing:`, "", fence(plan.refusal.message, "text"));
-  if (plan.policy && plan.policy.length > 0) out.push("", ...policyMarkdown(plan.policy, plan.environment));
-  if (plan.sinceLast) out.push("", `Since the previous version of this comment (\`${plan.sinceLast.approved}\`): ${describeMove(plan.sinceLast)}.`);
-  if (plan.wave) {
-    out.push("", "#### The apply pipeline");
-    const promotions = plan.wave.promotions;
-    if (promotions.length > 0) {
-      out.push("", `| Migration | ${promotions.map((p) => `\`${cell(p.env)}\``).join(" | ")} |`, `|---|${promotions.map(() => "---|").join("")}`);
-      for (const m of plan.pending) out.push(`| \`${m.id}\` | ${promotions.map((p) => ranOn(p, m.id)).join(" | ")} |`);
-    }
-    out.push("", describeWave(plan.wave, (c) => `\`${c}\``));
-    if (plan.wave.waits) out.push("", "Approve it before merging, at a terminal:", "", fence(`npx ${plan.wave.approve}`, "sh"));
-  }
-  if (plan.digest) {
-    out.push("", "#### Approval", "", plan.wave ? `Plan digest \`yodel apply ${plan.environment}\` binds, outside the pipeline: \`${plan.digest}\`` : `Plan digest the apply gate binds: \`${plan.digest}\``);
-    if (plan.approval?.kind === "op" && plan.approval.command) out.push("", "Approve it at a terminal (it shows the plan and asks you first):", "", fence(`npx ${plan.approval.command}`, "sh"));
-  }
-  const a = approvalLines(plan.approval, plan.digest, true);
-  if (a.length > 0) out.push("", ...a);
-  if (plan.approval?.kind === "no-op" && plan.digest) {
-    out.push("", "<details><summary>Declare one</summary>", "", fence(plan.approval.message.split("\n\n").slice(1).join("\n\n"), "ts"), "", "</details>");
-  }
-  if (!withSql) out.push("", "_The statements are left out: the comment would be too long. `yodel plan` prints them._");
-  if (plan.subject) out.push("", `<!-- yodel:subject ${encodeSubject(plan.subject)} -->`);
-  const body = `${out.join("\n")}\n`;
-  if (withSql && body.length > COMMENT_LIMIT) return renderPlanMarkdown(plan, { sql: false });
-  return body;
 }
 
 /** `yodel plan <env> --json` for a project with migrations. */

@@ -14,13 +14,16 @@ import { runnable } from "../chant/runnable.js";
 import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
 import { overdueNotes } from "../pr/overdue.js";
-import { commentMarker, planJsonVersioned, renderPlanMarkdown, renderPlanText, subjectIn } from "../pr/render.js";
-import { planPart } from "../pr/part.js";
+import { commentMarker, planJsonVersioned, renderPlanText, subjectIn } from "../pr/render.js";
+import { planPart, slotPart } from "../pr/part.js";
 import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
 import { renderPlanNote, renderTenantSetNote } from "../pr/note.js";
 import { baseRef } from "../config/base.js";
 import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
+import { tenantTarget } from "../tenants/target.js";
+import { readAtRunTime, slotTenants, splitSlot } from "../tenants/wave.js";
+import type { VersionedPlan } from "../pr/model.js";
 
 const usage =
   "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json]\n" +
@@ -52,7 +55,10 @@ An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
 is planned tenant by tenant, each against its own history, and shown as one
 plan: tenants with the same migrations pending once, as a group, then the
 wave's one approval of the set digest over every tenant. --comment posts it
-as one comment for the set. <env>/<tenant> plans one tenant.
+as one comment for the set. <env>/<tenant> plans one tenant. For a set
+read by a query, <env>/@<i>of<n> plans one slot of its wave as the apply
+pipeline runs it: every tenant the query lists now whose name hashes to
+the slot; with --part, one part for the slot.
 
 Options:
   --json                print the plan as JSON (the same as --format json)
@@ -172,6 +178,8 @@ export const plan: Command = {
     guarded("plan", io, args, help, async () => {
       const a = parsePlanArgs(args);
       const project = await loadProject(a.dir);
+      const slot = splitSlot(a.env);
+      if (slot) return slotPlan(project, slot, a, io);
       const env = resolveEnvironment(project, a.env);
       if (hasMigrations(project)) return versionedPlan(project, env, a, io);
       if (a.versionedOnly.length > 0) throw new YodelError(`${a.versionedOnly.join(", ")} ${a.versionedOnly.length === 1 ? "is" : "are"} for versioned migrations, and ${project.dir} has no migrations/ directory with a migration (see docs/workflows.md for what each path has)`);
@@ -188,7 +196,8 @@ async function declarativePlan(project: Project, env: Environment, a: PlanArgs, 
   try {
     const result = await collectDeclarativePlan(project, env, build, await planEnvironment(project, env, build), { opName: a.op });
     if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-    if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result), io);
+    // #56: chant's note would ask for an approval per tenant, so the set keeps yodel's own note until chant can name the set once.
+  if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result), io);
     const doc = declarativePlanJson(result);
     if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
     else if (a.format === "markdown") io.out(renderDeclarativeMarkdown(result));
@@ -216,8 +225,8 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   const code = result.refusal?.exitCode ?? 0;
 
   if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  // chant's note in yodel's words when the installed chant's fits (#290), else yodel's own.
-  if (forge) await postComment(forge, marker, (await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderPlanMarkdown(result), io);
+  // chant's note in yodel's words (#290).
+  if (forge) await postComment(forge, marker, await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref }), io);
   if (a.part !== undefined) {
     const file = resolve(a.part);
     writeFileSync(file, `${JSON.stringify(planPart(result, basename(project.dir)), null, 2)}\n`);
@@ -225,11 +234,43 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   }
   const doc = planJsonVersioned(result);
   if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
-  else if (a.format === "markdown") io.out((await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderPlanMarkdown(result));
+  else if (a.format === "markdown") io.out(await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref }));
   else io.out(renderPlanText(result, { runnable: (c) => runnable(c, project.dir) }));
   // A plan that is refused, or that the policy denies, is news before anyone merges it (#61).
   await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
   return code;
+}
+
+/**
+ * `yodel plan <env>/@<i>of<n>` (#56): a slot of the wave of a tenant set
+ * read by a query, as the apply pipeline runs it. chant's `sql-migrate`
+ * capability plans each run with `--part` before its `--wave-plan`, so the
+ * slot plans here the way `yodel apply <slot> --wave-plan` does: every
+ * tenant the query lists now whose name hashes to the slot, each against
+ * its own history. The exit code is the first refused tenant's, else 0.
+ */
+async function slotPlan(project: Project, slot: { env: string; index: number; count: number }, a: PlanArgs, io: Io): Promise<number> {
+  resolveEnvironment(project, slot.env);
+  if (!readAtRunTime(tenantSetOf(project, slot.env))) {
+    throw new YodelError(`${a.env} is a slot of a tenant set's wave, and ${slot.env}'s tenant set is not read by a query (yodel.config.ts environments.${slot.env}.tenants.query): plan a tenant with yodel plan ${slot.env}/<tenant>, or the set with yodel plan ${slot.env}`);
+  }
+  if (!hasMigrations(project)) throw new YodelError(`${a.env} is a slot of a tenant set's wave, for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
+  if (a.comment || a.format === "markdown") throw new YodelError(`${a.env} is a run of the apply pipeline, not something a pull request shows: plan the set with yodel plan ${slot.env}${a.comment ? " --comment" : " --format markdown"}`);
+  const tenants: VersionedPlan[] = [];
+  for (const t of await slotTenants(project, slot)) {
+    tenants.push(await collectVersionedPlan(project, resolveEnvironment(project, tenantTarget(slot.env, t)), { allowOutOfOrder: a.allowOutOfOrder, opName: a.op, ledger: null }));
+  }
+  if (a.part !== undefined) {
+    const file = resolve(a.part);
+    writeFileSync(file, `${JSON.stringify(slotPart(a.env, tenants, basename(project.dir)), null, 2)}\n`);
+    io.err(`yodel plan: wrote the change-set part of ${a.env} (${String(tenants.length)} tenant${tenants.length === 1 ? "" : "s"} of ${slot.env}, read now) to ${file}\n`);
+  }
+  if (a.format === "json") io.out(`${JSON.stringify({ environment: a.env, tenants: tenants.map(planJsonVersioned) }, null, 2)}\n`);
+  else {
+    io.out(`${a.env}: ${String(tenants.length)} tenant${tenants.length === 1 ? "" : "s"} of ${slot.env} (read now)\n`);
+    for (const t of tenants) io.out(`\n${renderPlanText(t, { runnable: (c) => runnable(c, project.dir) })}`);
+  }
+  return tenants.find((t) => t.refusal)?.refusal?.exitCode ?? 0;
 }
 
 /** `yodel plan <set>` (#56): every tenant, grouped, and one comment for the set. */
@@ -237,9 +278,9 @@ async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io
   const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
   const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
   if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  if (forge) await postComment(forge, commentMarker(env.name), (await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result), io);
+  if (forge) await postComment(forge, commentMarker(env.name), ((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result)), io);
   if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
-  else if (a.format === "markdown") io.out((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result));
+  else if (a.format === "markdown") io.out(((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result)));
   else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
   return tenantSetExitCode(result);
 }

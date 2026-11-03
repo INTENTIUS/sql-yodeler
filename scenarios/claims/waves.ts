@@ -4,7 +4,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clickhouseImage } from "@intentius/chant-lexicon-sql/spec/pin";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { applyPipelines, withTenants, type Wave } from "../../src/ci/render.js";
+import { applyPipelines, requireProduct, withTenants, type Wave } from "../../src/ci/render.js";
+import { stepHooks } from "../../src/apply-steps/index.js";
 import type { WaveGate } from "../../src/config/define.js";
 import { hold, partDialects, partNames, runParts, Violation, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { clickhouseAt, endpoints, postgresQuery } from "../lib/db.js";
@@ -64,7 +65,17 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  *   a file, and an after step. The wave applies, the command having run
  *   once (#107), and the history records the steps' outcomes, which `yodel
  *   report` lists. BREAK: the waves spec runs the command as a before-plan
- *   hook too, so it runs when the wave is planned as well.
+ *   hook too, so it runs when the wave is planned as well, and the file
+ *   gets two lines for one apply. chant runs that hook with CHANT_TARGET,
+ *   not YODEL_ENV, so each line starts with `ran` and every line counts:
+ *   an empty line from a run without yodel's variable is still a run.
+ *
+ * The pipeline is rendered through chant's product pipeline, as yodel ci
+ * renders it from 0.12 (#303): the sql lexicon's `sql-migrate` capability
+ * plans and applies each run, and `--wave-apply` runs the steps at base
+ * under the engine's lock. Each job's line is `yodel chant run wave`; it is
+ * run here as `chant run wave`, in chant's own words, which the approve
+ * commands below read.
  */
 
 interface Envs {
@@ -87,26 +98,26 @@ const ENV_KEYS = ["staging", "prod"] as const;
 // ── The pipeline, as a forge runs it ─────────────────────────────────────────
 
 /** Writes yodel.config.ts with these waves, and the pipelines and the waves spec rendered from it; the options break the rendering. */
-async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; dropBeforeCommand?: boolean } = {}): Promise<void> {
+async function render(st: State, waves: readonly Wave[], options: { allNever?: boolean; noRequires?: boolean; firstTenantOnly?: boolean; steps?: string; tenantQuery?: string; planBeforeCommand?: boolean } = {}): Promise<void> {
   const { p } = st;
   p.write("yodel.config.ts", yodelConfig(st, waves, options.noRequires === true, options.steps, options.tenantQuery));
   // A tenant set's wave has a run per tenant, as yodel ci renders it.
   let ws: readonly Wave[] = await withTenants(p.dir, options.allNever ? waves.map((w): Wave => ({ ...w, gate: "never" })) : waves);
   if (options.firstTenantOnly) ws = ws.map((w) => (w.targets ? { ...w, targets: w.targets.slice(0, 1), shares: 1 } : w));
-  const files = await applyPipelines(p.dir, { dialect: p.ctx.dialect === "ch" ? "clickhouse" : "postgres", names: ws.map((w) => w.env), replay: false, waves: ws });
+  const files = await applyPipelines(p.dir, { dialect: p.ctx.dialect === "ch" ? "clickhouse" : "postgres", names: ws.map((w) => w.env), replay: false, waves: ws }, await requireProduct());
   for (const f of files) {
     let content = f.content;
-    if (options.dropBeforeCommand && f.path === "yodel-waves.json") {
-      const spec = JSON.parse(content) as { waves: Array<{ hooks?: { before?: { apply?: Array<{ command: string[] }> } } }> };
-      let dropped = 0;
+    if (options.planBeforeCommand && f.path === "yodel-waves.json") {
+      // The break: each wave's before commands as before-plan hooks too, which chant runs when it plans the wave.
+      const spec = JSON.parse(content) as { waves: Array<{ name: string; hooks?: { before?: { plan?: unknown[] } } }> };
+      let added = 0;
       for (const w of spec.waves) {
-        const before = w.hooks?.before;
-        if (!before?.apply) continue;
-        const kept = before.apply.filter((h) => h.command[0] !== "sh");
-        dropped += before.apply.length - kept.length;
-        before.apply = kept;
+        const commands = (stepHooks(ws.find((x) => x.env === w.name)?.steps)?.before?.apply ?? []).filter((h) => "command" in h);
+        if (commands.length === 0) continue;
+        w.hooks = { ...w.hooks, before: { ...w.hooks?.before, plan: [...(w.hooks?.before?.plan ?? []), ...commands] } };
+        added += commands.length;
       }
-      if (dropped === 0) throw new Error("the rendered waves spec has no before command to drop");
+      if (added === 0) throw new Error("the rendered waves have no before command to plan with");
       content = `${JSON.stringify(spec, null, 2)}\n`;
     }
     p.write(f.path, content);
@@ -134,7 +145,8 @@ async function pipeline(st: State, done: Map<string, JobResult> = new Map(), env
       results.delete(name);
       continue;
     }
-    const command = job.steps.map((s) => s.run ?? "").find((r) => r.startsWith("chant run wave "));
+    // The job's line is yodel chant run wave (#289); run as chant run wave, in chant's own words.
+    const command = job.steps.map((s) => (s.run ?? "").replace(/^yodel chant /, "chant ")).find((r) => r.startsWith("chant run wave "));
     if (!command) throw new Error(`${name} runs no chant run wave`);
     const ran = await run("chant", [...command.split(" ").slice(1), ...extraArgs], { cwd: st.p.dir, env: st.p.envFor(env), timeoutMs: 600_000 });
     results.set(name, { ok: ran.code === 0, code: ran.code, out: `${ran.out}\n${ran.err}` });
@@ -512,17 +524,29 @@ export const op = Op({
   hold(status.upToDate === 4 && status.total === 4, `yodel status ${set} does not count 4 of 4 tenants up to date (${String(status.upToDate)} of ${String(status.total)})`);
 }
 
+/**
+ * The steps part's before command: one line per run, appended to `file`.
+ * The line names the run's environment by yodel's variable when yodel runs
+ * it under the lock (`YODEL_ENV`) and by chant's when chant runs it as a
+ * stage hook (`CHANT_TARGET`), and starts with `ran` either way, so a run
+ * neither variable reaches still writes a line that counts.
+ */
+export const notifyCommand = (file: string): string => `echo "ran \${YODEL_ENV:-\${CHANT_TARGET:-}}" >> ${file}`;
+
+/** How many times the before command ran: every line it appended, empty or not. */
+export const commandRuns = (text: string): number => (text.match(/\n/g) ?? []).length + (text === "" || text.endsWith("\n") ? 0 : 1);
+
 async function steps(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const db = ctx.db.name;
   const table = mainTable(ctx);
   // A command with a side effect (#107): a line in a file outside the project, each time it runs.
   const notified = join(ctx.work, "notify.log");
-  const notify = `echo "$YODEL_ENV" >> ${notified}`;
-  const runs = () => (existsSync(notified) ? readFileSync(notified, "utf8").split("\n").filter(Boolean).length : 0);
+  const notify = notifyCommand(notified);
+  const runs = () => (existsSync(notified) ? commandRuns(readFileSync(notified, "utf8")) : 0);
   const steps = `{ before: [{ name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
-  // Broken: the rendered spec loses the before command, so the apply runs without it.
-  if (broken) ctx.log("BREAK: the rendered waves spec drops the before command");
-  await render(st, waves(st, "never", "never"), { steps, dropBeforeCommand: broken });
+  // Broken: the rendered spec runs the before command when the wave is planned too, so it runs twice for one apply.
+  if (broken) ctx.log("BREAK: the rendered waves spec runs the before command as a before-plan hook too");
+  await render(st, waves(st, "never", "never"), { steps, planBeforeCommand: broken });
   await st.p.commit("the waves: both never, staging with steps around apply");
   addColumn(st.p, "checked");
   await migrate(st, "add-checked", "feat: a checked column");

@@ -10,7 +10,8 @@
  * redacted as in `--json`.
  */
 
-import { sqlVersionedPlanPart } from "@intentius/chant-lexicon-sql/change-set";
+import { SQL_CHANGE_SET_LEXICON, sqlVersionedPlanPart } from "@intentius/chant-lexicon-sql/change-set";
+import { computePlanDigest } from "@intentius/chant/lifecycle/plan-digest";
 import type { ChangeSetPart } from "@intentius/chant/change-set";
 import type { VersionedPlan } from "./model.js";
 import { redact } from "./render.js";
@@ -30,4 +31,39 @@ export function planPart(plan: VersionedPlan, member: string): ChangeSetPart {
       ...(plan.refusal ? { refusal: plan.refusal.message } : {}),
     },
   });
+}
+
+/**
+ * A slot of a tenant set's wave as one part (#56): `yodel plan
+ * <env>/@<i>of<n> --part <file>`, which chant's `sql-migrate` capability
+ * runs for each run of a set read by a query before `--wave-plan`. Every
+ * tenant of the slot is planned against its own history; the part has each
+ * tenant's entries, scoped to the tenant, and a digest over the tenants'
+ * plan digests. A tenant apply would refuse makes the slot a failed member,
+ * naming it, with no digest, as one environment's refusal does. A slot with
+ * no tenant now is a planned member with no entries.
+ */
+export function slotPart(slot: string, tenants: readonly VersionedPlan[], member: string): ChangeSetPart {
+  const parts = tenants.map((t) => ({ target: t.environment, part: planPart(t, member) }));
+  const failed = parts.filter((p) => p.part.member.status === "failed");
+  const planDigest =
+    failed.length > 0
+      ? null
+      : computePlanDigest("yodel-plan-slot", {
+          environment: slot,
+          tenants: parts.map((p) => ({ target: p.target, planDigest: p.part.member.planDigest })).sort((a, b) => (a.target < b.target ? -1 : a.target > b.target ? 1 : 0)),
+        });
+  return {
+    member: {
+      member,
+      lexicon: SQL_CHANGE_SET_LEXICON,
+      planner: "sql",
+      scope: slot,
+      status: failed.length > 0 ? "failed" : "planned",
+      ...(failed.length > 0 ? { error: failed.map((p) => `${p.target}: ${p.part.member.error ?? "yodel apply would refuse it"}`).join("; ") } : {}),
+      planDigest,
+      holes: parts.flatMap((p) => p.part.member.holes),
+    },
+    entries: parts.flatMap((p) => p.part.entries),
+  };
 }

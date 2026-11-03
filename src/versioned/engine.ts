@@ -279,7 +279,7 @@ export interface ExecuteOptions {
   lockWaitMs?: number;
   /**
    * `--stand-down`: asked before the lock is taken and between tries while
-   * it waits; a line (`./stand-down.ts`) when a newer commit will apply the
+   * it waits; a line (`standDownLine`, ../commands/apply.ts) when a newer commit will apply the
    * environment, and this run then applies nothing.
    */
   standDown?: () => Promise<string | undefined>;

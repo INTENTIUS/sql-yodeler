@@ -10,7 +10,8 @@ import { expandTargets, readTenantFile, renameIdentifier, splitTarget, tenantDri
 import { applySlot, slotDigest, slotIndex, splitSlot, waveTargets, type SlotPlanFile } from "../src/tenants/wave.js";
 import { renameDeep } from "../src/steps/index.js";
 import { WavePlanMoved, type WavePlanFile } from "../src/waves/index.js";
-import { renderTenantSetMarkdown, type TenantSetPlan } from "../src/pr/tenants.js";
+import type { TenantSetPlan } from "../src/pr/tenants.js";
+import { setNote } from "./helpers/note.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { requiredEnvironments } from "../src/waves/promotion.js";
 import { waveGate } from "../src/waves/index.js";
@@ -187,7 +188,7 @@ describe("a tenant set's plan comment", () => {
     notes: [],
   });
 
-  it("is one comment for the set: tenants with the same migrations once, then one approval for every tenant", () => {
+  it("is one comment for the set, in yodel's own note while chant's would ask for an approval per tenant (#56): tenants with the same migrations once, then one approval for every tenant", async () => {
     const plan: TenantSetPlan = {
       environment: "prod",
       dialect: "postgres",
@@ -196,13 +197,14 @@ describe("a tenant set's plan comment", () => {
       wave: { wave: 2, gate: "always", base: "0123456789abcdef", baseSource: "first-parent", runs: [], refused: [], blocked: [], waits: true, digest: "jcs1-sha256:set", approve: "yodel approve prod --plan jcs1-sha256:set", chantApprove: "chant approve yodel-apply yodel-apply-wave-2 --plan jcs1-sha256:set" },
       notes: [],
     };
-    const md = renderTenantSetMarkdown(plan);
+    const md = await setNote(plan);
     expect(md.startsWith("<!-- yodel:plan env=prod -->\n")).toBe(true);
     expect(md).toContain("#### 2 tenants: **1 pending**\n\n`acme`, `globex`");
     expect(md).toContain("##### `m2`");
     expect(md).toContain("#### 1 tenant: up to date\n\n`initech`");
     expect(md).toContain("one approval of `jcs1-sha256:set`, for all 3 tenants");
     expect(md).toContain("```sh\nnpx yodel approve prod --plan jcs1-sha256:set\n```");
+    expect(md).not.toMatch(/yodel approve prod\/\S+ --plan/);
     expect(md).not.toContain("chant approve");
   });
 });

@@ -2,21 +2,16 @@
  * `yodel upgrade` (#298): a project rendered by 0.10.1 moves onto chant's
  * product pipeline in one commit once its chant is at the floor, and the
  * docs name the same floor the command does.
- *
- * The cases that need chant's product pipeline skip on a chant without it;
- * the refusal skips on a chant with it.
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { CHANT_CI_FLOOR, chantParts, installedVersion, installLine } from "../src/chant-floor.js";
 import { declarationAbove, newDeclaration, TEMPLATE_DECLARATION_NAME, upgradeFiles, workspaceName } from "../src/commands/upgrade.js";
-import { PRODUCT } from "./helpers/chant-bin.js";
 import { copyTemplate, repoRoot, yodel } from "./helpers/run.js";
-import { render } from "../src/ci/render.js";
 
 const temps: string[] = [];
 afterAll(() => {
@@ -29,19 +24,34 @@ const scratch = (name: string): string => {
   return dir;
 };
 
+/** yodel-waves.json as 0.10.1 rendered it: yodel's plan and apply callbacks, no capability step, no gate pattern, no stand-down. */
+const WAVES_0_10_1 = {
+  name: "yodel-apply",
+  op: "migrate-dev",
+  plan: ["yodel", "apply", "{target}", "--wave-plan", "{plan}", "--spec", "yodel-waves.json"],
+  apply: ["yodel", "apply", "{target}", "--wave-apply", "{plan}", "--spec", "yodel-waves.json"],
+  branches: ["main"],
+  waves: [
+    { name: "dev", runs: [{ target: "dev", op: "migrate-dev" }], gate: "always" },
+    { name: "prod", runs: [{ target: "prod", op: "migrate-prod" }], gate: "always" },
+  ],
+};
+
 /**
- * A project as 0.10.1's template made it: the template's files with no
- * workspace declaration and the pipelines from yodel's own generator, chant
- * and the lexicons from this checkout, in a repository.
+ * A project as 0.10.1's template made it, as far as the upgrade reads it:
+ * the template's files with no workspace declaration, the waves spec on
+ * yodel's callbacks and the wave jobs running bare `chant run wave` with
+ * YODEL_LOCK_WAIT and YODEL_STAND_DOWN, chant and the lexicons from this
+ * checkout, in a repository. yodel's own generator, which rendered these,
+ * left in 0.12 (#303).
  */
-async function project(dialect: "clickhouse" | "postgres"): Promise<string> {
+function project(dialect: "clickhouse" | "postgres"): string {
   const dir = scratch(dialect);
   copyTemplate(dialect, dir);
   symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
-  for (const f of await render(dir, { product: false })) {
-    mkdirSync(dirname(join(dir, f.path)), { recursive: true });
-    writeFileSync(join(dir, f.path), f.content);
-  }
+  writeFileSync(join(dir, "yodel-waves.json"), `${JSON.stringify(WAVES_0_10_1, null, 2)}\n`);
+  const apply = join(dir, ".github/workflows/yodel-apply.yml");
+  writeFileSync(apply, readFileSync(apply, "utf8").replace(/yodel chant run wave/g, "chant run wave").replace(/^( +)YODEL_CREDENTIALS: (.*)$/gm, "$1YODEL_CREDENTIALS: $2\n$1YODEL_LOCK_WAIT: '10m'\n$1YODEL_STAND_DOWN: '1'"));
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
   return dir;
 }
@@ -87,7 +97,8 @@ describe("the chant floor", () => {
   it("lists every part of chant CI, the product pipeline first", async () => {
     const parts = await chantParts();
     expect(parts[0]?.name).toMatch(/^product pipeline/);
-    expect(parts[0]?.has).toBe(PRODUCT);
+    // The floor has every part (#303).
+    for (const p of parts) expect(p.has, p.name).toBe(true);
     expect(new Set(parts.map((p) => p.section)).size).toBe(parts.length);
     // Each part's section is a heading of docs/chant-ci.md.
     const anchors = new Set([...page("chant-ci.md").matchAll(/^#{2,4} (.+)$/gm)].map((m) => (m[1] ?? "").toLowerCase().replace(/[^a-z0-9 -]/g, "").replace(/ /g, "-")));
@@ -129,27 +140,14 @@ describe("the workspace declaration yodel upgrade adds", () => {
   });
 });
 
-describe.skipIf(PRODUCT)("yodel upgrade on a chant without the product pipeline", () => {
-  it("writes nothing, exits 1 and names the floor's install line", async () => {
-    const dir = await project("postgres");
-    const before = readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8");
-    const ran = await yodel(["upgrade", "--dir", dir]);
-    expect(ran.code).toBe(1);
-    expect(ran.out).toMatch(/^chant \d+\.\d+\.\d+/);
-    expect(ran.out).toContain("no   product pipeline");
-    expect(ran.err).toContain(installLine());
-    expect(existsSync(join(dir, "chant.workspace.json"))).toBe(false);
-    expect(readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8")).toBe(before);
-  });
-});
-
-describe.skipIf(!PRODUCT).each(["clickhouse", "postgres"] as const)("yodel upgrade of a project made from the %s template", (dialect) => {
+describe.each(["clickhouse", "postgres"] as const)("yodel upgrade of a project made from the %s template", (dialect) => {
   it("writes the declaration and the pipelines in one go, then yodel ci --check and yodel upgrade --check pass", async () => {
-    const dir = await project(dialect);
+    const dir = project(dialect);
     const check = await yodel(["upgrade", "--check", "--dir", dir]);
     expect(check.code).toBe(1);
     expect(check.err).toContain("chant.workspace.json");
     expect(check.err).toContain("yodel-waves.json");
+    expect(check.err).toContain(".github/workflows/yodel-apply.yml");
 
     const ran = await yodel(["upgrade", "--dir", dir]);
     expect(ran.code, ran.err).toBe(0);
@@ -160,6 +158,7 @@ describe.skipIf(!PRODUCT).each(["clickhouse", "postgres"] as const)("yodel upgra
     const spec = JSON.parse(readFileSync(join(dir, "yodel-waves.json"), "utf8")) as { gateName?: string };
     expect(spec.gateName).toBe("yodel-apply-wave-{k}");
     expect(readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8")).toContain("yodel chant run wave");
+    expect(readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8")).not.toMatch(/YODEL_LOCK_WAIT|YODEL_STAND_DOWN/);
 
     expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
     expect((await yodel(["upgrade", "--check", "--dir", dir])).code).toBe(0);
@@ -168,7 +167,7 @@ describe.skipIf(!PRODUCT).each(["clickhouse", "postgres"] as const)("yodel upgra
   });
 
   it("gives the templates' declaration the name parameter, for templates:render", async () => {
-    const dir = await project(dialect);
+    const dir = project(dialect);
     const { files } = await upgradeFiles(dir, { declarationName: TEMPLATE_DECLARATION_NAME });
     const declaration = files.find((f) => f.path === "chant.workspace.json");
     expect((JSON.parse(declaration?.content ?? "{}") as { name?: string }).name).toBe("{{chant:name}}");

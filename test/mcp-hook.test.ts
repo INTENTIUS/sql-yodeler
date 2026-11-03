@@ -63,10 +63,10 @@ describe("yodel's tools on chant's MCP server (#297)", () => {
     expect(calls[0]?.hook?.product).toBe("yodel");
   });
 
-  it("is found only on a chant that has the hook", async () => {
+  it("is the installed chant's", async () => {
     const c = await chantHooks();
-    if (c) expect(typeof c.configureOtlp).toBe("function");
-    else expect(await serveOnChant(process.cwd())).toBeUndefined();
+    expect(typeof c.runChantInProcess).toBe("function");
+    expect(typeof c.configureOtlp).toBe("function");
   });
 });
 

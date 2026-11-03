@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { fixture, yodel } from "./helpers/run.js";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fixture, projectFrom, yodel } from "./helpers/run.js";
 
 describe("yodel plan's versioned flags", () => {
   it("takes --comment on a declarative project (#249), and refuses --allow-out-of-order there", async () => {
@@ -28,5 +30,38 @@ describe("yodel plan's versioned flags", () => {
   it("documents --comment and the forges in --help", async () => {
     const ran = await yodel(["plan", "--help"]);
     expect(ran.out).toMatch(/--comment[\s\S]*GitHub Actions,[\s\S]*GitLab CI, Forgejo Actions/);
+  });
+});
+
+describe("yodel plan <env>/@<i>of<n>, the target chant's sql-migrate passes for a slot (#56)", () => {
+  const withTenants = (tenants: string) => {
+    const p = projectFrom("postgres-versioned");
+    writeFileSync(join(p.dir, "yodel.config.ts"), `export default { environments: { e2e: { tenants: ${tenants} } }, waves: [{ env: "e2e", gate: "always", shares: 2 }] };\n`);
+    return p;
+  };
+
+  it("takes the slot as a slot, not as a tenant named @1of2", async () => {
+    const p = withTenants(`{ query: "SELECT name FROM tenants" }`);
+    try {
+      const ran = await yodel(["plan", "e2e/@1of2", "--part", join(p.dir, "part.json"), "--dir", p.dir]);
+      expect(ran.err).not.toContain("is not a tenant name");
+      // The fixture has no migrations, so the slot stops there, before any server is read.
+      expect(ran.code).toBe(1);
+      expect(ran.err).toContain("e2e/@1of2 is a slot of a tenant set's wave, for versioned migrations");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("refuses a slot of a set that is not read by a query, which the pipeline runs a tenant at a time", async () => {
+    const p = withTenants(`["acme", "globex"]`);
+    try {
+      const ran = await yodel(["plan", "e2e/@1of2", "--part", join(p.dir, "part.json"), "--dir", p.dir]);
+      expect(ran.code).toBe(1);
+      expect(ran.err).toContain("e2e's tenant set is not read by a query");
+      expect(ran.err).toContain("yodel plan e2e/<tenant>");
+    } finally {
+      p.dispose();
+    }
   });
 });

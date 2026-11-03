@@ -22,9 +22,9 @@ SQL Yodeler's pipelines run on [chant](https://intentius.io/chant/)'s CI, as ter
 
 chant never applies a migration itself. It runs the engine through `yodel` commands, and the engine checks the approval on chant's ledger again under its own lock before it applies, so `yodel apply --execute` with the writer's credentials outside CI still needs the approval.
 
-## From chant 0.124.57
+## From chant 0.124.67
 
-chant 0.124.57 has the product pipeline terragucci and plywood use, and more of a SQL Yodeler project's pipeline moves onto chant there. `yodel upgrade` moves a project in one commit ([Upgrading the pipelines to chant 0.124.57](workflows.md#upgrading-the-pipelines-to-chant-012457)), and `yodel ci` keeps rendering the same files after it. The sections below say what each part does from then on. The gates, the approval modes, the tenant sets and the secrets each job holds stay as they are, and so do the op and gate names, `yodel-apply` and `yodel-apply-wave-<k>`, so approvals already on `chant/lifecycle` keep counting.
+chant 0.124.67 has the product pipeline terragucci and plywood use, and more of a SQL Yodeler project's pipeline moves onto chant there. `yodel upgrade` moves a project in one commit ([Upgrading the pipelines to chant 0.124.67](workflows.md#upgrading-the-pipelines-to-chant-012467)), and `yodel ci` keeps rendering the same files after it. From SQL Yodeler 0.12 this is the only way `yodel ci` renders, and a project runs `yodel upgrade` before it moves to 0.12 ([What 0.12 no longer has](#what-012-no-longer-has)). The sections below say what each part does from then on. The gates, the approval modes, the tenant sets and the secrets each job holds stay as they are, and so do the op and gate names, `yodel-apply` and `yodel-apply-wave-<k>`, so approvals already on `chant/lifecycle` keep counting.
 
 ### The pipelines
 
@@ -40,7 +40,7 @@ yodel reads its exit codes from chant's table, which terragucci and plywood use 
 
 ### Locks
 
-The waves take chant's lock grain. The sql lexicon gives a SQL member the `target` grain, its environment, and refuses `ci.lockGrain: resource`, since the engine applies a whole environment's migrations at once. chant holds a lease on the environment for the length of the wave's apply, and an apply that finds it held exits 5 (`held`). The engine's own lock ([Topology](topology.md)) still guards the history under it, with `lockTtl`, and catches an apply from a laptop. A wave that a newer commit on main will apply anyway stands down and exits 6 (`superseded`), through `standDown` in `yodel-waves.json` ([chant's op waves guide](https://intentius.io/chant/guide/op-waves/#stand-down-for-a-newer-commit)). The apply jobs carry no `YODEL_LOCK_WAIT` or `YODEL_STAND_DOWN`. [Target locks](https://intentius.io/chant/guide/target-locks/) has the grain.
+The waves take chant's lock grain. The sql lexicon gives a SQL member the `target` grain, its environment, and refuses `ci.lockGrain: resource`, since the engine applies a whole environment's migrations at once. chant holds a lease on the environment for the length of the wave's apply, and an apply that finds it held exits 5 (`held`). The engine's own lock ([Topology](topology.md)) still guards the history under it, with `lockTtl`, and catches an apply from a laptop. A wave that a newer commit on main will apply anyway stands down and exits 6 (`superseded`), through `standDown` in `yodel-waves.json` ([chant's op waves guide](https://intentius.io/chant/guide/op-waves/#stand-down-for-a-newer-commit)). The apply jobs carry no `YODEL_LOCK_WAIT` or `YODEL_STAND_DOWN`, and from 0.12 `yodel apply` refuses either one by name. `yodel apply --stand-down` at a terminal asks chant the same question chant's waves ask. [Target locks](https://intentius.io/chant/guide/target-locks/) has the grain.
 
 ### The check on chant's check hooks
 
@@ -67,7 +67,7 @@ chant reads the hooks from the declaration at the pull request's base, so a pull
 
 ### Cloud login
 
-chant's ci-identity trades the forge's OIDC token, and the sql lexicon mints the database token from what the trade leaves, so on GitHub and GitLab `yodel ci` renders chant's login in place of the steps in [Configuration](configuration.md#short-lived-tokens). Each job holding such a role runs one step, `Cloud identity (chant ci-identity: ...)`, with `ci.login` mapped to chant's trade spec. The step runs from `/`, so no file of the checkout is in reach, and leaves the cloud's variables for the later steps. GitLab's `id_tokens` are chant's (`CHANT_ID_TOKEN_AWS`, `_GCP`, `_AZURE`). `rds-iam` signs with the traded AWS keys, `cloud-sql-iam` takes the traded Google access token, and `entra` takes the database token the trade asks Entra for, so the job's image needs no `aws`, `gcloud` or `az`. `ci.login.aws.region` (default `us-east-1`) is where the role is assumed and the `AWS_REGION` the token is signed for, unless the token source names its own `region`. Each job trades only for the roles it holds: a plan job for readers, a wave job for its environment's writer. Forgejo, which gives a job no OIDC token, keeps the login from the runner's token file.
+chant's ci-identity trades the forge's OIDC token, and the sql lexicon mints the database token from what the trade leaves, so on GitHub and GitLab `yodel ci` renders chant's login in place of the steps in [Configuration](configuration.md#short-lived-tokens). Each job holding such a role runs one step, `Cloud identity (chant ci-identity: ...)`, with `ci.login` mapped to chant's trade spec. The step runs from `/`, so no file of the checkout is in reach, and leaves the cloud's variables for the later steps. GitLab's `id_tokens` are chant's (`CHANT_ID_TOKEN_AWS`, `_GCP`, `_AZURE`). `rds-iam` signs with the traded AWS keys, `cloud-sql-iam` takes the traded Google access token, and `entra` takes the database token the trade asks Entra for, so the job's image needs no `aws`, `gcloud` or `az`. `ci.login.aws.region` (default `us-east-1`) is where the role is assumed and the `AWS_REGION` the token is signed for, unless the token source names its own `region`. Each job trades only for the roles it holds: a plan job for readers, a wave job for its environment's writer. Forgejo, which gives a job no OIDC token, keeps yodel's login from the runner's token file: there is no token there to trade.
 
 ### Records on the ledger
 
@@ -81,6 +81,23 @@ The question at the terminal is chant's: chant shows the gate, its pending fact 
 
 ### MCP and traces
 
-`yodel mcp` serves its tools on chant's own read-only server, `chant serve mcp --read-only`, in the same process ([Set up with a coding agent](agents.md#read-only-tools-yodel-mcp)). They are named `yodel:status`, `yodel:plan`, `yodel:lint`, `yodel:drift`, `yodel:history` and `yodel:explain`, and chant's reads of the ledger, the runs, the gates and the workspace graph sit beside them. Each tool declares itself read-only, and chant refuses to start a read-only server with a tool named as a write, as yodel's own check does first. The agent's registration stays the same. `YODEL_OWN_MCP=1` serves yodel's own server with the unprefixed names.
+`yodel mcp` serves its tools on chant's own read-only server, `chant serve mcp --read-only`, in the same process ([Set up with a coding agent](agents.md#read-only-tools-yodel-mcp)). They are named `yodel:status`, `yodel:plan`, `yodel:lint`, `yodel:drift`, `yodel:history` and `yodel:explain`, and chant's reads of the ledger, the runs, the gates and the workspace graph sit beside them. Each tool declares itself read-only, and chant refuses to start a read-only server with a tool named as a write, as yodel's own check does first. The agent's registration stays the same. yodel's own server, with the unprefixed names, is gone from 0.12, and `YODEL_OWN_MCP=1`, which served it, is refused.
 
 With `OTEL_EXPORTER_OTLP_ENDPOINT` set in the apply jobs, each wave job sends one trace as OTLP/JSON over HTTP through chant's exporter. The job is the first span, each wave a span below it, and each environment a span in its wave. yodel configures the exporter with the `yodel` prefix, so the attributes read `yodel.<name>`. Without the endpoint nothing is sent.
+
+## What 0.12 no longer has
+
+SQL Yodeler 0.11 kept its own copy of each part above for an older chant, and for the pipelines yodel 0.10 rendered. 0.12 takes chant 0.124.67 as its floor and removes them, so a project runs `yodel upgrade` before it moves to 0.12 ([Upgrading the pipelines](workflows.md#upgrading-the-pipelines-to-chant-012467)):
+
+| Gone | In its place | A pipeline yodel 0.10 rendered, still committed |
+|---|---|---|
+| yodel's own pipeline generator (`render` without chant's product pipeline) | chant's product pipeline; a chant without it is refused, naming the install line | fails `yodel ci --check` on the pull request |
+| the `plan` and `apply` callbacks in `yodel-waves.json` | the `sql-migrate` step | the wave jobs are refused (below) |
+| `YODEL_LOCK_WAIT: '10m'` and `YODEL_STAND_DOWN: '1'` on the wave jobs, and yodel's own newer-commit check | chant's lease (exit 5) and `standDown` (exit 6); `--stand-down` at a terminal asks chant | refused by name, exit 1, pointing at `yodel upgrade` |
+| yodel's own pull request note, for one environment | chant's note in yodel's words | |
+| yodel's own login steps on GitHub and GitLab | chant's ci-identity trade | |
+| yodel's own MCP server and `YODEL_OWN_MCP` | chant's read-only server with yodel's tools | `YODEL_OWN_MCP` is refused by name |
+
+A tenant set keeps yodel's own note, one comment naming every tenant with the wave's one approval of the set, because chant's note would print an approve line per tenant, and approving a tenant on its own never opens the set's wave. It moves onto chant's note once chant can name the set in one approve line.
+
+`yodel apply <env> --wave-plan` and `--wave-apply` stay: they are the engine's entry points, the commands chant's `sql-migrate` capability runs. `YODEL_LOCK_WAIT` and `YODEL_STAND_DOWN` stay only as how `yodel apply` hands `--lock-wait` and `--stand-down` to its migrations Op's steps. A project with no workspace declaration (one not upgraded yet, or a member under a declaration above it) still gets the lint job's own steps, since there are no check hooks for chant to run there.
