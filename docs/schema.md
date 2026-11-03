@@ -67,12 +67,9 @@ Each object is written as the statement the server runs. That choice gives you:
 
 The build reads `src/` as data: it reduces each file to the objects it declares, without running it. So the same source gives the same schema on any machine and in every environment, the schema at two commits can be compared with no database, and nothing in it depends on where or when it was built.
 
-That makes `src/` a small part of TypeScript: exported objects, constants and strings, imports between files, `${}` references, and composites called with literal options. What a program would do is not schema:
+The part of TypeScript the build reads without running is small: exported objects, constants and strings, imports between files, `${}` references, and composites called with literal options. A file that goes further, with a loop, a function or a call into your own code, still builds the same way: chant runs it instead of reading it, and `chant build --verbose` names the file and the reason. Either way the output depends only on the source and the build's parameters. chant's [TypeScript as data](https://intentius.io/chant/concepts/typescript-as-data/) page has the whole subset.
 
-- Reading an environment variable or a file, or querying a database. The schema is the same in every environment; what differs between them, the server and the credentials, is in `chant.config.ts`'s profiles ([Installing and configuring](configuration.md)).
-- `if` or a loop around exports, `let`, and functions or callbacks in `src/`. Write each object as an export, or put the repetition in a composite ([Generating objects](#generating-objects)).
-
-A file outside that part still builds, but chant runs it instead of reading it, and `chant build --verbose` names the file and the reason. chant's [TypeScript as data](https://intentius.io/chant/concepts/typescript-as-data/) page has the whole subset.
+So a schema can be computed: objects made from a list, and values taken from a build parameter ([Computing the schema](#computing-the-schema)). What stays out is anything that reads the world while building: an environment variable read directly, a file, or a query against a database. The schema is the same in every environment; what differs between them, the server and the credentials, is in `chant.config.ts`'s profiles ([Installing and configuring](configuration.md)).
 
 ## References
 
@@ -130,6 +127,55 @@ export const { table: dailyApac } = DailyRollup({ db, region: "apac" });
 ```
 
 The build reads `src/daily.ts` as data and writes three `CREATE TABLE` statements. A fourth region is one more line, and `yodel new` writes its table into the next migration.
+
+## Computing the schema
+
+A composite can also take the list itself and loop over it, returning one set of objects per entry, as Atlas's `for_each` does for partitions, triggers, policies and grants. A value can come from a build parameter, as Atlas's input variables do. `examples/computed` has both, and builds with no server. The composite makes a partition and an index per region:
+
+```ts
+// examples/computed/lib/regional.ts
+import { Composite } from "@intentius/chant/composite";
+import { index, table, type PostgresIndex, type PostgresTable } from "@intentius/chant-lexicon-sql/postgres";
+
+// One partition, and one index on it, per region in the list.
+export const RegionalPartitions = Composite((props: { parent: PostgresTable; regions: string[] }) => {
+  const members: Record<string, PostgresTable | PostgresIndex> = {};
+  for (const r of props.regions) {
+    members[`part_${r}`] = table`CREATE TABLE shop.${`orders_${r}`} PARTITION OF ${props.parent} FOR VALUES IN (${`'${r}'`})`;
+    members[`idx_${r}`] = index`CREATE INDEX ${`orders_${r}_at_idx`} ON shop.${`orders_${r}`} (at)`;
+  }
+  return members;
+}, "RegionalPartitions");
+```
+
+The table takes its `fillfactor` from the `tier` parameter, which `chant.config.ts` declares as `buildParams: { tier: { type: "string", default: "small", enum: ["small", "large"] } }`:
+
+```ts
+// examples/computed/src/orders.ts
+import { table } from "@intentius/chant-lexicon-sql/postgres";
+import { params } from "@intentius/chant/params";
+import { RegionalPartitions } from "../lib/regional.js";
+import { shop } from "./schema.js";
+
+const fillfactor = params.tier === "large" ? "70" : "100";
+
+export const orders = table<"shop.orders">`
+  CREATE TABLE ${shop}.orders (
+    id     bigint NOT NULL,
+    region text NOT NULL,
+    at     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (id, region)
+  ) PARTITION BY LIST (region) WITH (fillfactor = ${fillfactor})`;
+
+export const regions = RegionalPartitions({ parent: orders, regions: ["eu", "us", "apac"] });
+```
+
+The build writes the parent, three `PARTITION OF` tables and three indexes. Each member is its own object, named after the call and the key the composite gave it: `regionsPart_eu`, `regionsIdx_eu`, and so on for `us` and `apac`. A fourth region is one more entry in the list. `fillfactor` is 100, or 70 with `chant build --param tier=large`.
+
+What computing costs:
+
+- `src/orders.ts` calls into `lib/`, so chant runs it instead of reading it, and `chant build --verbose` says so. The objects it builds are the same.
+- `yodel plan`, `yodel new`, `yodel lint` and the pipelines pass no `--param`, so under yodel a parameter takes its default. A parameter does not differ by environment: the schema is the same in each one. Use one to choose a variant of the schema for the whole project, and the profiles for what differs between environments.
 
 ## Composites
 
