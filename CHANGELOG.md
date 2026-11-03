@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.12.1
+
+### Fixed: a wave job's plan has its environment's reader
+
+On 0.12.0 every apply wave failed before it planned, with `yodel plan: sql.profiles.<env>.user names <ENV>_<DIALECT>_READER_USER, which is not set`. chant's `sql-migrate` runs a wave's `yodel plan --part` and `--wave-plan` with the writer taken out, so they connect as the environment's reader, and the rendered wave job held only the writer. `yodel ci` now gives each wave job its own environment's reader too (and, for a token-minted reader, the cloud login it mints from). Run `npx yodel ci` after moving to 0.12.1 and commit the pipelines it writes; `yodel ci --check` fails until you do. The starter templates take `^0.12.1`.
+
+Found by the forge claim on Forgejo; the claims that run the pipeline locally have every variable set, so they did not see it.
+
+### Docs
+
+- docs/schema.md, "Computing the schema": a composite that loops over a list, and a value from a build parameter, with `examples/computed` (#309).
+- docs/adoption.md takes the kinds `yodel init` refuses from chant's object coverage.
+
+## 0.12.0
 
 ### Breaking: run `yodel upgrade` before moving to 0.12
 
