@@ -156,11 +156,14 @@ describe("a project's reader and writer", () => {
     const waves = apply.jobs as Record<string, Job>;
     expect(Object.keys(waves["wave-2-prod"]?.env ?? {})).toContain("PROD_POSTGRES_WRITER_USER");
     expect(Object.keys(waves["wave-2-prod"]?.env ?? {})).not.toContain("PROD_POSTGRES_WRITER_PASSWORD");
-    expect(readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8")).toContain("# Cloud identity: a password here is a rds-iam token");
+    // chant's sql-migrate plans the wave without the writer, so the job holds prod's reader too (entra: no password variable).
+    expect(Object.keys(waves["wave-2-prod"]?.env ?? {})).toContain("PROD_POSTGRES_READER_USER");
+    expect(Object.keys(waves["wave-1-dev"]?.env ?? {})).toEqual(expect.arrayContaining(["DEV_POSTGRES_WRITER_USER", "DEV_POSTGRES_READER_USER"]));
+    expect(readFileSync(join(dir, ".github/workflows/yodel-apply.yml"), "utf8")).toContain("# Cloud identity: a password here is a rds-iam, entra token");
 
     // GitLab: an ID token for the cloud each job's roles mint from, and none for a job without one.
     const gitlabApply = yaml(".gitlab/yodel-apply.gitlab-ci.yml") as Record<string, Job>;
-    expect(gitlabApply["wave-2-prod"]?.id_tokens).toEqual({ AWS_ID_TOKEN: { aud: "sts.amazonaws.com" } });
+    expect(gitlabApply["wave-2-prod"]?.id_tokens).toEqual({ AWS_ID_TOKEN: { aud: "sts.amazonaws.com" }, AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });
     expect(gitlabApply["wave-1-dev"]?.id_tokens).toBeUndefined();
     const gitlab = yaml(".gitlab-ci.yml") as Record<string, Job>;
     expect(gitlab["plan-prod"]?.id_tokens).toEqual({ AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });

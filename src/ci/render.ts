@@ -321,7 +321,8 @@ const runsChant = (st: Record<string, unknown>): boolean => typeof st.run === "s
 const planRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> => [env, ...requiredOf(waves, env)].map((e) => [e, "reader"]);
 
 /** The roles a wave job for `env` holds: the writer, and the reader of the environment it requires. */
-const waveRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> => [[env, "writer"], ...requiredOf(waves, env).map((e): [string, Role] => [e, "reader"])];
+// chant's sql-migrate plans a wave with the writer taken out (readerEnv), so the job holds its environment's reader too.
+const waveRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> => [[env, "writer"], [env, "reader"], ...requiredOf(waves, env).map((e): [string, Role] => [e, "reader"])];
 
 /** The header lines saying what the cloud identity is for, when a job here holds a cloud-minted role. */
 function identityHeader(forge: Forge, clouds: readonly CloudToken[]): string[] {
@@ -1005,6 +1006,9 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
         ? {}
         : {
             ...secrets([...writerVariables(env, dialect, envs.credentials?.[env]), ...WEBHOOK_VARIABLES]),
+            // chant's sql-migrate runs the wave's yodel plan --part and --wave-plan with the writer taken out
+            // (readerEnv in the sql lexicon), so they connect as the environment's reader.
+            ...secrets(readerVariables(env, dialect, envs.credentials?.[env])),
             ...(required ? secrets(readerVariables(required, dialect, envs.credentials?.[required])) : {}),
             // A pr-review wave (#48) reads the merged pull request's reviews with the job's token.
             ...(wave?.approval === "pr-review" ? { GITHUB_TOKEN: "${{ github.token }}" } : {}),
@@ -1021,9 +1025,10 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     "# exits 3 with the yodel approve command, so the waves after it do not run.",
     "# yodel approve <env> records the approval and starts the waiting job again",
     "# (or approve, push chant/lifecycle, and run the failed job again). These are",
-    "# the only jobs that hold a writer's credentials, one environment's each, with",
-    "# the reader of the environment before (waves[].requires): yodel apply refuses",
-    "# a migration that environment's history does not record as applied.",
+    "# the only jobs that hold a writer's credentials, one environment's each. Each",
+    "# also holds its environment's reader, which the plan runs as, and the reader of",
+    "# the environment before (waves[].requires): yodel apply refuses a migration",
+    "# that environment's history does not record as applied.",
   ];
   const resumeHeader = (forge: Forge): string[] => [
     ...HEADER,

@@ -83,11 +83,13 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     expect(step(prod, TRADED("gcp, azure"))).toContain(`export ${env}=`);
     expect(traded(actionsJob(dir, ".github/workflows/yodel-pr.yml", "plan-dev"))).toEqual([TRADED("gcp")]);
     const wave = actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-2-prod");
-    // prod's writer is rds-iam, and the wave reads dev's history with dev's cloud-sql-iam reader.
-    expect(traded(wave)).toEqual([TRADED("aws, gcp")]);
-    expect(names(wave).indexOf(TRADED("aws, gcp"))).toBeLessThan(names(wave).findIndex((n) => n.startsWith("Plan, gate and apply")));
-    expect(step(wave, TRADED("aws, gcp"))).toContain(PROD_ROLE);
-    expect(traded(actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-1-dev"))).toEqual([]);
+    // prod's writer is rds-iam, its plan runs as prod's entra reader (chant's sql-migrate plans without the writer),
+    // and the wave reads dev's history with dev's cloud-sql-iam reader.
+    expect(traded(wave)).toEqual([TRADED("aws, gcp, azure")]);
+    expect(names(wave).indexOf(TRADED("aws, gcp, azure"))).toBeLessThan(names(wave).findIndex((n) => n.startsWith("Plan, gate and apply")));
+    expect(step(wave, TRADED("aws, gcp, azure"))).toContain(PROD_ROLE);
+    // dev's wave plans as dev's cloud-sql-iam reader.
+    expect(traded(actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-1-dev"))).toEqual([TRADED("gcp")]);
     // The watch: each environment's reader, before chant run.
     const watch = actionsJob(dir, ".github/workflows/watch-prod.yml", "watch-prod");
     expect(traded(watch)).toEqual([TRADED("azure")]);
@@ -101,7 +103,8 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     const apply = yaml(dir, ".gitlab/yodel-apply.gitlab-ci.yml") as Record<string, GitLabJob>;
     expect(apply["wave-2-prod"]?.id_tokens?.CHANT_ID_TOKEN_AWS).toEqual({ aud: "sts.amazonaws.com" });
     expect(JSON.parse(apply["wave-2-prod"]?.variables?.[env] ?? "{}")).toMatchObject({ aws: { role: PROD_ROLE } });
-    expect(apply["wave-1-dev"]?.variables ?? {}).not.toHaveProperty(env);
+    // dev's wave plans as dev's cloud-sql-iam reader, so it trades for gcp.
+    expect(JSON.parse(apply["wave-1-dev"]?.variables?.[env] ?? "{}")).toHaveProperty("gcp");
 
     expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
   });
