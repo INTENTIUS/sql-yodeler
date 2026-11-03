@@ -65,7 +65,10 @@ import { addColumn, addTable, mainTable } from "../lib/schema.js";
  *   a file, and an after step. The wave applies, the command having run
  *   once (#107), and the history records the steps' outcomes, which `yodel
  *   report` lists. BREAK: the waves spec runs the command as a before-plan
- *   hook too, so it runs when the wave is planned as well.
+ *   hook too, so it runs when the wave is planned as well, and the file
+ *   gets two lines for one apply. chant runs that hook with CHANT_TARGET,
+ *   not YODEL_ENV, so each line starts with `ran` and every line counts:
+ *   an empty line from a run without yodel's variable is still a run.
  *
  * The pipeline is rendered through chant's product pipeline, as yodel ci
  * renders it from 0.12 (#303): the sql lexicon's `sql-migrate` capability
@@ -521,13 +524,25 @@ export const op = Op({
   hold(status.upToDate === 4 && status.total === 4, `yodel status ${set} does not count 4 of 4 tenants up to date (${String(status.upToDate)} of ${String(status.total)})`);
 }
 
+/**
+ * The steps part's before command: one line per run, appended to `file`.
+ * The line names the run's environment by yodel's variable when yodel runs
+ * it under the lock (`YODEL_ENV`) and by chant's when chant runs it as a
+ * stage hook (`CHANT_TARGET`), and starts with `ran` either way, so a run
+ * neither variable reaches still writes a line that counts.
+ */
+export const notifyCommand = (file: string): string => `echo "ran \${YODEL_ENV:-\${CHANT_TARGET:-}}" >> ${file}`;
+
+/** How many times the before command ran: every line it appended, empty or not. */
+export const commandRuns = (text: string): number => (text.match(/\n/g) ?? []).length + (text === "" || text.endsWith("\n") ? 0 : 1);
+
 async function steps(ctx: Ctx, st: State, broken: boolean): Promise<void> {
   const db = ctx.db.name;
   const table = mainTable(ctx);
   // A command with a side effect (#107): a line in a file outside the project, each time it runs.
   const notified = join(ctx.work, "notify.log");
-  const notify = `echo "$YODEL_ENV" >> ${notified}`;
-  const runs = () => (existsSync(notified) ? readFileSync(notified, "utf8").split("\n").filter(Boolean).length : 0);
+  const notify = notifyCommand(notified);
+  const runs = () => (existsSync(notified) ? commandRuns(readFileSync(notified, "utf8")) : 0);
   const steps = `{ before: [{ name: "notify", command: ${JSON.stringify(notify)} }], after: [{ name: "smoke", sql: "SELECT ${ctx.dialect === "ch" ? "count()" : "count(*)"} FROM ${db}.${table}", expect: { min: 0 } }] }`;
   // Broken: the rendered spec runs the before command when the wave is planned too, so it runs twice for one apply.
   if (broken) ctx.log("BREAK: the rendered waves spec runs the before command as a before-plan hook too");
