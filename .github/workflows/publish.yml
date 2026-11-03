@@ -18,6 +18,10 @@
 # linux/amd64 and linux/arm64, pushes it to ghcr.io/intentius/sql-yodeler:<version>
 # with provenance and an SBOM, and runs `yodel --version` from the pushed
 # image.
+#
+# After the smoke job, the release job makes the GitHub release for the tag, with
+# CHANGELOG.md's `## <version>` section as its notes
+# (scripts/changelog-section.ts), and fails when the section is missing.
 
 name: publish
 
@@ -107,6 +111,31 @@ jobs:
             echo "::error::yodel --version printed $printed, not $VERSION"
             exit 1
           fi
+  release:
+    needs:
+      - publish
+      - smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: '${{ needs.publish.outputs.version }}'
+      GH_TOKEN: '${{ github.token }}'
+      GH_REPO: '${{ github.repository }}'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: GitHub release v${{ needs.publish.outputs.version }} from CHANGELOG.md
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "release v$VERSION already exists; nothing to make"
+            exit 0
+          fi
+          node scripts/changelog-section.ts "$VERSION" CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          gh release create "v$VERSION" --title "$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
   image:
     needs:
       - publish
