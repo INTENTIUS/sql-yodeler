@@ -281,7 +281,7 @@ export const gitlab = {
   await sh("git", ["push", "-q", "origin", "main"]);
   const first = await repo.pushed(await head());
   must(!first.ok, `the first push's apply on ${forge.name} ended ${first.status}, with nothing approved`);
-  const firstCmd = WAVE_CMD.exec(first.log)?.[0];
+  const firstCmd = waveApprove(first.log);
   must(firstCmd !== undefined, "the waiting wave does not give the chant approve command");
   must(!first.log.includes("SQL_YODELER_TOKEN"), "the apply job still has a step for SQL_YODELER_TOKEN; sql-yodeler installs from npm with no token");
   must(!(await ctx.db.tableExists(table)), `${ctx.db.name}.${table} exists with nothing approved`);
@@ -328,7 +328,17 @@ function breakRender(outer: Ctx, render: string): string | undefined {
   return text;
 }
 
-const WAVE_CMD = /chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64}/;
+/**
+ * The approve line wave 1 prints, in chant's words (`chant approve yodel-apply
+ * yodel-apply-wave-1 --plan <digest>`) or yodel's (`yodel approve [dev] --plan
+ * <digest>`, the line chant prints under yodel's words from 0.12), as the chant
+ * command the claim runs: the same approval, bound to the same digest.
+ */
+const WAVE_LINE = /(?:chant approve yodel-apply yodel-apply-wave-1|yodel approve(?: dev)?) --plan (jcs1-sha256:[0-9a-f]{64})/;
+export const waveApprove = (text: string): string | undefined => {
+  const digest = WAVE_LINE.exec(text)?.[1];
+  return digest === undefined ? undefined : `chant approve yodel-apply yodel-apply-wave-1 --plan ${digest}`;
+};
 
 /** A branch from main with `change` made in it, committed and pushed, and its pull request opened; the checkout goes back to main. */
 async function branchPr(s: State, branch: string, title: string, change: () => Promise<void> | void): Promise<{ id: number; checks: ForgeRun }> {
@@ -380,7 +390,7 @@ async function mergePart(ctx: Ctx, s: State): Promise<void> {
   hold(pr.checks.log.includes("Every migration replays to its recorded schema."), "the pull request's lint job did not replay the migrations into its own server");
   hold(pr.checks.log.includes("write probe   cannot write") && !pr.checks.log.includes("dev: the credentials this process holds can write"), "the pull request's plan job did not show that it cannot write (yodel config check dev --write-probe)");
   const comment = (await s.repo.comments(pr.id)).find((c) => c.startsWith("<!-- yodel:plan env=dev -->")) ?? "";
-  const cmd = /```sh\n(chant approve yodel-apply yodel-apply-wave-1 --plan jcs1-sha256:[0-9a-f]{64})\n/.exec(comment)?.[1];
+  const cmd = waveApprove(comment);
   hold(cmd !== undefined, "the pull request has no plan comment with an approve command");
   hold(!(await ctx.db.columnExists(s.table, "note")), "the pull request's jobs changed the server");
   if (ctx.broken) ctx.log("BREAK (merge): merged without approving the plan comment's digest");
@@ -388,7 +398,7 @@ async function mergePart(ctx: Ctx, s: State): Promise<void> {
   const { merged, ran } = await mergeAndApply(s, pr.id);
   const applied = ran.ok && (await ctx.db.columnExists(s.table, "note"));
   if (!applied && ctx.broken) {
-    const waiting = WAVE_CMD.exec(ran.log)?.[0];
+    const waiting = waveApprove(ran.log);
     if (!waiting) throw new Error("the apply after the unapproved merge printed no chant approve command");
     await s.approve(waiting);
     const levelled = await s.repo.applyAgain(merged);
