@@ -173,7 +173,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     expect(main.stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "ops"]);
   });
 
-  it("gives an environment's writer to its wave job only, with the reader of the wave before, and the reader to the rest", () => {
+  it("gives an environment's writer to its wave job only, with its own reader and the reader of the wave before, and the reader to the rest", () => {
     const writerOnly = (e: string) => writerVariables(e, dialect).slice(1);
     let applyJobs = 0;
     for (const f of files(dir).filter((f) => PIPELINES(f) && f.endsWith(".yml"))) {
@@ -187,7 +187,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
           applyJobs++;
           expect(text, `${f} ${name}`).toContain(`"YODEL_CREDENTIALS":"writer:${wave}"`);
           for (const other of ["dev", "prod"].filter((e) => e !== wave)) for (const v of writerOnly(other)) expect(text, `${f} ${name}`).not.toContain(v);
-          for (const v of readerVariables(wave, dialect).slice(1)) expect(text, `${f} ${name}`).not.toContain(v);
+          // chant's sql-migrate plans the wave with the writer taken out, so the job holds its own reader too.
+          if (!f.startsWith(".gitlab")) for (const v of readerVariables(wave, dialect)) expect(text, `${f} ${name}`).toContain(v);
           // prod's wave reads dev's history with dev's reader (GitLab's jobs have the unscoped readers already).
           if (wave === "prod" && !f.startsWith(".gitlab")) for (const v of readerVariables("dev", dialect)) expect(text, `${f} ${name}`).toContain(v);
         } else {

@@ -8,9 +8,10 @@
 # exits 3 with the yodel approve command, so the waves after it do not run.
 # yodel approve <env> records the approval and starts the waiting job again
 # (or approve, push chant/lifecycle, and run the failed job again). These are
-# the only jobs that hold a writer's credentials, one environment's each, with
-# the reader of the environment before (waves[].requires): yodel apply refuses
-# a migration that environment's history does not record as applied.
+# the only jobs that hold a writer's credentials, one environment's each. Each
+# also holds its environment's reader, which the plan runs as, and the reader of
+# the environment before (waves[].requires): yodel apply refuses a migration
+# that environment's history does not record as applied.
 # chant dropped the environment of each of these waves: dev -> dev, prod -> prod.
 # Forgejo Actions has no environments, so nothing on the forge holds these jobs.
 # Each wave's own chant gate does: it records a pending fact on chant/lifecycle
@@ -37,6 +38,8 @@ jobs:
       DEV_POSTGRES_WRITER_PASSWORD: '${{ secrets.DEV_POSTGRES_WRITER_PASSWORD }}'
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
+      DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
+      DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
     steps:
       - name: Check the job runs where the spec set it to run
         env:
@@ -82,6 +85,8 @@ jobs:
       PROD_POSTGRES_WRITER_PASSWORD: '${{ secrets.PROD_POSTGRES_WRITER_PASSWORD }}'
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
+      PROD_POSTGRES_READER_USER: '${{ secrets.PROD_POSTGRES_READER_USER }}'
+      PROD_POSTGRES_READER_PASSWORD: '${{ secrets.PROD_POSTGRES_READER_PASSWORD }}'
       DEV_POSTGRES_URL: '${{ secrets.DEV_POSTGRES_URL }}'
       DEV_POSTGRES_READER_USER: '${{ secrets.DEV_POSTGRES_READER_USER }}'
       DEV_POSTGRES_READER_PASSWORD: '${{ secrets.DEV_POSTGRES_READER_PASSWORD }}'
