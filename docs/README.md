@@ -42,6 +42,7 @@ Rebuilds, renames and backfills run once, inside the migration. No recurring job
 | [The commands](cli.md) | which command runs what (`yodel`, chant's CLI, the template's `just` targets), `yodel --help`, the exit codes, and the JSON Schemas of `--json` output |
 | [Set up with a coding agent](agents.md) | the prompt to hand a coding agent, the steps it follows to add SQL Yodeler to a repository, and what it leaves to people |
 | [Glossary](glossary.md) | the chant terms yodel's commands and output use, in yodel's terms |
+| [Release notes](release-notes.md) | what each release changed, newest first, with a link to the full notes on GitHub |
 | [Claims status](claims.md) | every scenario claim, what it says, and whether it passed plain and was caught broken on ClickHouse and on Postgres, with the pages each one proves |
 
 Two example projects, one per dialect, show each of these on a real server. They are finished projects, and their READMEs are transcripts of the runs that made them, against chant's emulator, with the output each command printed. To follow along step by step, start with [Your first migration](getting-started.md):

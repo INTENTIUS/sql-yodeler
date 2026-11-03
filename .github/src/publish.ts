@@ -24,7 +24,11 @@ Once npm serves the release, the image job builds the CI image
 (.github/image/Dockerfile, declared in .github/src/image.ts) from it for
 linux/amd64 and linux/arm64, pushes it to ${IMAGE_REPOSITORY}:<version>
 with provenance and an SBOM, and runs \`yodel --version\` from the pushed
-image.`;
+image.
+
+After the smoke job, the release job makes the GitHub release for the tag, with
+CHANGELOG.md's \`## <version>\` section as its notes
+(scripts/changelog-section.ts), and fails when the section is missing.`;
 
 const publish = new Job({
   "runs-on": "ubuntu-latest",
@@ -106,6 +110,34 @@ fi
   ],
 });
 
+// The GitHub release for the tag, once npm serves the package (the smoke job
+// installed it). Its notes are CHANGELOG.md's `## <version>` section, which
+// the release pull request adds; a tag with no such section fails here. A
+// rerun after the release was made makes nothing.
+const release = new Job({
+  needs: ["publish", "smoke"],
+  "runs-on": "ubuntu-latest",
+  "timeout-minutes": 10,
+  // The only job that writes to the repository: the release.
+  permissions: { contents: "write" },
+  env: { VERSION: "${{ needs.publish.outputs.version }}", GH_TOKEN: "${{ github.token }}", GH_REPO: "${{ github.repository }}" },
+  steps: [
+    checkout(),
+    // Node 24 runs scripts/changelog-section.ts with no install.
+    setupNode(24, false),
+    new Step({
+      name: "GitHub release v${{ needs.publish.outputs.version }} from CHANGELOG.md",
+      run: `if gh release view "v$VERSION" >/dev/null 2>&1; then
+  echo "release v$VERSION already exists; nothing to make"
+  exit 0
+fi
+node scripts/changelog-section.ts "$VERSION" CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+gh release create "v$VERSION" --title "$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+`,
+    }),
+  ],
+});
+
 // The CI image, from the release npm now serves (the smoke job waited for
 // it). Each platform's build fails unless \`yodel --version\` prints the
 // version, so nothing is pushed that does not hold it.
@@ -159,5 +191,5 @@ export const workflow = new Workflow({
   on: { push: { tags: ["v*"] } },
   permissions: { contents: "read" },
   concurrency: { group: "publish-${{ github.ref }}", "cancel-in-progress": false },
-  jobs: { publish, smoke, image },
+  jobs: { publish, smoke, release, image },
 });
