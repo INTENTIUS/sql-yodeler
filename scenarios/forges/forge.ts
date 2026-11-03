@@ -32,6 +32,8 @@ export interface ForgeRepo {
   applyAgain(sha: string): Promise<ForgeRun>;
   /** Opens a pull request from the pushed branch `head` (at `sha`) into main, and waits for its checks: every pull request workflow the project has. */
   openPr(head: string, sha: string, title: string): Promise<{ id: number; checks: ForgeRun }>;
+  /** Waits for the checks a push to an open pull request's branch at `sha` starts: every pull request workflow the project has. */
+  prPushed(sha: string): Promise<ForgeRun>;
   /** The bodies of the pull request's comments. */
   comments(id: number): Promise<string[]>;
   /** Merges the pull request; main's sha after the merge. */

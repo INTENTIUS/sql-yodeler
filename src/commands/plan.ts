@@ -1,5 +1,5 @@
-import { writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { eventFromRun, sendEvent } from "../notify/index.js";
 import type { Command, Io } from "../command.js";
@@ -16,6 +16,7 @@ import { collectVersionedPlan } from "../pr/model.js";
 import { overdueNotes } from "../pr/overdue.js";
 import { commentMarker, planJsonVersioned, renderPlanText, subjectIn } from "../pr/render.js";
 import { planPart, slotPart } from "../pr/part.js";
+import { addedMigrations, addedText, pullRequestChangeSet } from "../pr/added.js";
 import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
 import { renderPlanNote, renderTenantSetNote } from "../pr/note.js";
 import { baseRef } from "../config/base.js";
@@ -29,7 +30,8 @@ const usage =
   "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json]\n" +
   "                        [--allow-out-of-order] [--op <name>] [--part <file>]\n" +
   "                        [--comment [--forge github|gitlab|forgejo]\n" +
-  "                         [--repo <repo>] [--pr <n>] [--api-url <url>] [--token-env <VAR>]]";
+  "                         [--repo <repo>] [--pr <n>] [--api-url <url>] [--token-env <VAR>]]\n" +
+  "       yodel plan --pull-request [--change-set <file>] [--dir <project>]";
 
 const help = `${usage}
 
@@ -51,6 +53,16 @@ another digest, it says what moved since. --part writes the plan as a
 chant change-set part, for a chant Op that gates it together with another
 member's plan. Reads only.
 
+--pull-request (#304) reads no server: it lists the migrations the pull
+request adds, the ones in migrations/ that the base commit does not have,
+each step with its rule and class from its migration.json. The base is
+YODEL_BASE, else GitLab's CI_MERGE_REQUEST_DIFF_BASE_SHA, else the merge
+base with the target branch (GITHUB_BASE_REF,
+CI_MERGE_REQUEST_TARGET_BRANCH_NAME), else HEAD^1. --change-set writes
+them as one chant change-set document, member migrations, which the review
+agent's job (yodel.config.ts review) hands to chant's reviewAgent. It needs
+no credential, so that job holds none.
+
 An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
 is planned tenant by tenant, each against its own history, and shown as one
 plan: tenants with the same migrations pending once, as a group, then the
@@ -70,6 +82,10 @@ Options:
                         applies <env>
   --op <name>           declarative: the ApplyOp, when more than one applies
                         <env>
+  --pull-request        versioned, no <env>: the migrations the pull request
+                        adds, read from the files with no server
+  --change-set <file>   with --pull-request: also write them to <file> as a
+                        chant change-set document
   --part <file>         versioned: also write the plan to <file> as a chant
                         change-set part (planner sql), one entry per object,
                         with the plan digest yodel apply binds; a chant Op
@@ -110,6 +126,9 @@ Exit codes:
 
 interface PlanArgs {
   env: string;
+  /** `--pull-request` (#304): no environment, no server. */
+  pullRequest: boolean;
+  changeSet: string | undefined;
   dir: string;
   format: "text" | "markdown" | "json";
   comment: boolean;
@@ -136,6 +155,8 @@ function parsePlanArgs(args: string[]): PlanArgs {
         "allow-out-of-order": { type: "boolean" },
         op: { type: "string" },
         part: { type: "string" },
+        "pull-request": { type: "boolean" },
+        "change-set": { type: "string" },
         forge: { type: "string" },
         repo: { type: "string" },
         pr: { type: "string" },
@@ -147,9 +168,16 @@ function parsePlanArgs(args: string[]): PlanArgs {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
   }
   const { values: v, positionals } = parsed;
+  const str = (k: string) => (typeof v[k] === "string" ? v[k] : undefined);
+  if (v["pull-request"] === true) {
+    if (positionals.length > 0) throw new YodelError(`--pull-request plans the migrations the pull request adds, for no environment; leave out ${positionals.join(" ")}\n${usage}`);
+    const other = Object.keys(v).filter((k) => !["pull-request", "change-set", "dir"].includes(k));
+    if (other.length > 0) throw new YodelError(`--pull-request takes only --change-set and --dir, not --${other.join(", --")}\n${usage}`);
+    return { env: "", pullRequest: true, changeSet: str("change-set"), dir: str("dir") ?? process.cwd(), format: "text", comment: false, allowOutOfOrder: false, op: undefined, part: undefined, forge: {}, versionedOnly: ["--pull-request"] };
+  }
+  if (str("change-set") !== undefined) throw new YodelError(`--change-set goes with --pull-request\n${usage}`);
   const [env, ...rest] = positionals;
   if (env === undefined || rest.length > 0) throw new YodelError(usage);
-  const str = (k: string) => (typeof v[k] === "string" ? v[k] : undefined);
   const format = str("format") ?? (v.json === true ? "json" : "text");
   if (format !== "text" && format !== "markdown" && format !== "json") throw new YodelError(`--format must be text, markdown or json, got ${JSON.stringify(format)}\n${usage}`);
   if (v.json === true && format !== "json") throw new YodelError(`--json and --format ${format} cannot be combined\n${usage}`);
@@ -158,6 +186,8 @@ function parsePlanArgs(args: string[]): PlanArgs {
   const forge: ForgeFlags = { forge: str("forge"), repo: str("repo"), pr: str("pr"), apiUrl: str("api-url"), tokenEnv: str("token-env") };
   return {
     env,
+    pullRequest: false,
+    changeSet: undefined,
     dir: str("dir") ?? process.cwd(),
     format,
     comment: v.comment === true,
@@ -178,6 +208,7 @@ export const plan: Command = {
     guarded("plan", io, args, help, async () => {
       const a = parsePlanArgs(args);
       const project = await loadProject(a.dir);
+      if (a.pullRequest) return pullRequestPlan(project, a, io);
       const slot = splitSlot(a.env);
       if (slot) return slotPlan(project, slot, a, io);
       const env = resolveEnvironment(project, a.env);
@@ -186,6 +217,19 @@ export const plan: Command = {
       return declarativePlan(project, env, a, io);
     }),
 };
+
+/** `yodel plan --pull-request` (#304): the migrations the pull request adds, from the files alone, and with --change-set the change-set document the review agent reads. */
+function pullRequestPlan(project: Project, a: PlanArgs, io: Io): number {
+  const added = addedMigrations(project);
+  if (a.changeSet !== undefined) {
+    const file = resolve(a.changeSet);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(pullRequestChangeSet(project, added), null, 2)}\n`);
+    io.err(`yodel plan: wrote the change set of the pull request's migrations to ${file}\n`);
+  }
+  io.out(addedText(added));
+  return 0;
+}
 
 /** `yodel plan <env>` with no migrations (#249): chant's plan, with its lint findings, policy and approval, and the comment. */
 async function declarativePlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {

@@ -76,7 +76,7 @@
  * yodel's words (#289, ../ci-words.ts): {@link productWaves}.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
@@ -116,6 +116,7 @@ import {
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
 import { chantProduct, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
 import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
+import { GITLAB_REVIEW_FILE, REVIEW_INSTRUCTIONS, REVIEW_OP, REVIEW_OP_FILE, reviewInstructions, reviewOf, reviewOpFile, type ReviewSettings } from "./review.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
 export const FORGES: readonly Forge[] = ["github", "gitlab", "forgejo"];
@@ -208,6 +209,8 @@ export interface Environments {
    * the moment and the project has a declaration.
    */
   checkHooks?: true;
+  /** yodel.config.ts `review` (#304): the review agent's Op, its instructions and its jobs. */
+  review?: ReviewSettings;
 }
 
 /** The line the lint job runs chant's check moment with (#294): the hooks are read at the pull request's base. */
@@ -821,6 +824,16 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
           "# pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI.",
         ]),
     `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
+    ...(envs_.review
+      ? [
+          `# The review agent (yodel.config.ts review) is in ${GITLAB_REVIEW_FILE}: the`,
+          "# model reads the migrations a merge request adds in a job that holds no",
+          "# token and no database credential, and a pipeline of the default branch",
+          "# with CHANT_REVIEW_NOTES=1 (a pipeline schedule) posts its note with",
+          "# CHANT_FORGE_TOKEN, protected and masked. The model's key is",
+          `#   ${envs_.review.keyEnv}: masked; not protected (merge request pipelines run it).`,
+        ]
+      : []),
     "#",
     "# GitLab gives every job the project's CI/CD variables unless a variable is",
     "# protected or scoped to an environment, so the split between reader and",
@@ -855,7 +868,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const applyStages = apply ? [...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : [])] : [];
   const pipeline = new GitLabPipeline({
     comment: asComment(header),
-    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }],
+    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(envs_.review ? [{ local: GITLAB_REVIEW_FILE }] : [])],
     stages: [...new Set([...jobStages, ...applyStages, "ops"])],
     variables: { GIT_DEPTH: "0" },
   });
@@ -1395,6 +1408,79 @@ export async function watchPipelines(dir: string, envs_: Environments, product: 
   return out;
 }
 
+// ── The review agent, through chant's generateOpsPipeline (#304) ─────────────
+
+/** The variables of every environment's reader and writer: the review job unsets them on GitLab, where a merge request job has the project's unprotected variables. */
+const databaseVariables = (envs_: Pick<Environments, "names" | "dialect" | "credentials">): string[] => [
+  ...new Set(envs_.names.flatMap((env) => [...readerVariables(env, envs_.dialect, envs_.credentials?.[env]), ...writerVariables(env, envs_.dialect, envs_.credentials?.[env])])),
+];
+
+/** The review job's spec: a pull request Op whose review chant splits from its note, and on GitHub and Forgejo the model's key, the one secret it maps. */
+export function reviewSpec(forge: Forge, r: ReviewSettings): { name: string; trigger: { kind: "pull_request" }; reviewAgent: true; findingMode: "report"; variables?: Record<string, string> } {
+  return { name: REVIEW_OP, trigger: { kind: "pull_request" }, reviewAgent: true, findingMode: "report", ...(forge === "gitlab" ? {} : { variables: secrets([r.keyEnv]) }) };
+}
+
+/**
+ * The review agent's jobs on each forge (#304): chant's generateOpsPipeline
+ * with the Op's spec `reviewAgent: true`, so chant writes the review job,
+ * which holds no forge write token, and the note job that posts its one note.
+ * The review job maps no database secret on GitHub and Forgejo, and on
+ * GitLab, where a merge request job has the project's unprotected variables,
+ * it unsets every environment's before it runs. Each `chant` line runs
+ * through yodel's bin.
+ *
+ * chant finds the Op on disk, and the Op file is one of the files this
+ * renders, so the generator runs in a directory of its own, inside the
+ * project so the Op resolves the project's chant, that holds only the Op.
+ */
+export async function reviewPipelines(dir: string, envs_: Environments, product: ChantProduct): Promise<RenderedFile[]> {
+  const r = envs_.review;
+  if (!r) return [];
+  const tc = toolchainOf(envs_);
+  const { generateOpsPipeline } = (await import("@intentius/chant/op")) as unknown as {
+    generateOpsPipeline: (ops: unknown[], lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<OpsPipelineResult>;
+  };
+  const root = mkdtempSync(join(dir, ".yodel-review-"));
+  try {
+    writeFileSync(join(root, "chant.config.json"), "{}\n");
+    mkdirSync(join(root, "ops"));
+    writeFileSync(join(root, REVIEW_OP_FILE), reviewOpFile(r));
+    const unset = `unset ${databaseVariables(envs_).join(" ")}`;
+    const out: RenderedFile[] = [];
+    for (const forge of FORGES) {
+      const result = await generateOpsPipeline(
+        [reviewSpec(forge, r)],
+        forge,
+        {
+          image: tc.image,
+          beforeScript: [...(forge === "gitlab" ? [unset] : []), ...installLines(tc, forge)],
+          ...(forge === "gitlab" ? { opsStage: "review", opsFileName: GITLAB_REVIEW_FILE } : {}),
+        },
+        root,
+      );
+      if (!result.success || !result.files) throw new Error(`${forge}: ${result.error ?? "generateOpsPipeline rendered no review jobs"}`);
+      for (const file of result.files) {
+        const at = forge === "gitlab" ? GITLAB_REVIEW_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
+        const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
+        out.push({ path: at, content: `${HEADER.join("\n")}\n${withBin(product, yaml)}` });
+      }
+    }
+    return out;
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/** The Op and the instructions the review jobs run (#304), which every forge's jobs read. */
+export function reviewFiles(envs_: Environments): RenderedFile[] {
+  const r = envs_.review;
+  if (!r) return [];
+  return [
+    { path: REVIEW_OP_FILE, content: reviewOpFile(r) },
+    { path: REVIEW_INSTRUCTIONS, content: reviewInstructions(envs_.dialect, r) },
+  ];
+}
+
 // ── The project ─────────────────────────────────────────────────────────────
 
 /** Whether the project has a test file for yodel test (tests/*.test.ts). */
@@ -1412,11 +1498,13 @@ export async function environments(dir: string): Promise<Environments> {
   const envs = all.filter((name) => name !== REPLAY_PROFILE);
   const yodelConfig = await readConfig(dir);
   const check = yodelConfig?.check;
+  const review = reviewOf(yodelConfig);
   if (check) {
     if (!replay) throw new Error(`yodel.config.ts: check runs in CI against the ${REPLAY_PROFILE} profile's throwaway server, which chant.config.ts does not declare`);
     if (check.env !== undefined && check.env !== REPLAY_PROFILE) throw new Error(`yodel.config.ts: check.env is ${check.env}; in CI yodel check runs against the ${REPLAY_PROFILE} profile's throwaway server, so leave check.env out or set it to ${REPLAY_PROFILE}`);
   }
   if (envs.length === 0 && check) {
+    if (review) throw new Error("yodel.config.ts: review has a model read the migrations a pull request adds to migrations/, and this project declares no environment and keeps another tool's migrations (check); leave review out");
     const ci0 = yodelConfig.ci;
     return {
       dialect,
@@ -1455,6 +1543,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.apply === false ? { apply: false as const } : {}),
     ...(check ? { check: true as const } : {}),
     ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
+    ...(review ? { review } : {}),
   };
 }
 
@@ -1581,7 +1670,15 @@ export async function render(dir: string, options: { declaration?: RenderedFile 
   const hooks = await checkHooksDeclaration(dir, envs, options.declaration);
   const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
-  const files = [...review(reviewed), ...(hooks ? [hooks] : []), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
+  const files = [
+    ...review(reviewed),
+    ...(hooks ? [hooks] : []),
+    ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []),
+    ...(await watchPipelines(dir, envs, product)),
+    // The review agent (#304), with review set.
+    ...reviewFiles(envs),
+    ...(await reviewPipelines(dir, envs, product)),
+  ];
   return files.filter((f) => {
     const forge = forgeOf(f.path);
     return forge === undefined || forges.includes(forge);

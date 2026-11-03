@@ -23,6 +23,14 @@ Ops), each declared with chant's lexicons:
                 makes at the head, for the review to approve (on GitLab, the
                 merge request job yodel-apply-record-plans)
   watch-<env>   each environment's drift watch, on its schedule
+  yodel-review  with yodel.config.ts review, on a pull request: a model reads
+                the migrations it adds (yodel plan --pull-request) with
+                yodel's SQL rules (.chant/yodel-review.md, read at the base)
+                in a job that holds no forge write token and no database
+                credential, and yodel-review-note posts its one note. On
+                GitLab the note job runs in a pipeline of the default branch
+                started with CHANT_REVIEW_NOTES=1 (a pipeline schedule), with
+                a protected CHANT_FORGE_TOKEN
 
 The pipelines come from the installed yodel, so upgrading yodel and running
 yodel ci again brings its fixes to the project; yodel ci --check then fails
@@ -46,6 +54,14 @@ yodel.config.ts ci:
            checks and the watches remain, all with readers; --check does
            not expect the apply files. Refused with a pr-review wave or
            resume, which need the apply pipeline
+
+yodel.config.ts review: true, or { command, keyEnv, timeout, rules }: the
+  model command (default chant's, Claude Code with no tools), the variable
+  holding its key (default ANTHROPIC_API_KEY, a secret on GitHub and Forgejo,
+  a masked variable on GitLab), the minutes it may run (default 10) and the
+  team's own rules after yodel's. yodel ci writes ops/yodel-review.op.ts and
+  .chant/yodel-review.md with the pipelines. The note approves nothing and
+  gates nothing.
 
 Options:
   --check          write nothing; exit 1 naming each file that differs from

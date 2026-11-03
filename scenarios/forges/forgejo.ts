@@ -198,6 +198,7 @@ export function forgejoForge(): Forge {
           // Every pull request workflow.
           return { id: pr.json.number, checks: await waitAll(ctx, repo, sha, "pull_request") };
         },
+        prPushed: (sha) => waitAll(ctx, repo, sha, "pull_request"),
         async comments(id) {
           const { json } = await api<Array<{ body: string }>>("GET", `/repos/${repo}/issues/${String(id)}/comments`);
           return json.map((c) => c.body);

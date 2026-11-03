@@ -57,6 +57,11 @@
  *   made by hand on the server fails and opens one tracking issue naming the
  *   environment and the object. BREAK: the server is not changed by hand,
  *   so the watch opens no issue.
+ * - review (#304): with yodel.config.ts `review` on main and a fake model
+ *   command, a pull request adding a column gets the review job and the
+ *   note job, and one note keyed on the Op that names the pull request's
+ *   head; a second push to it edits that note, so there is still one, naming
+ *   the new head. BREAK: main has no `review`, so no note is posted.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -132,6 +137,7 @@ export function templateParts(): Array<PartEntry<State>> {
     ["apply-off", applyOffPart],
     ["image", imagePart],
     ["watch", watchPart],
+    ["review", reviewPart],
   ];
 }
 
@@ -208,8 +214,8 @@ async function setup(ctx: Ctx, forge: Forge): Promise<State> {
   const projectChant = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { dependencies: Record<string, string> }).dependencies["@intentius/chant"];
   const chantApart = minor(yodelChant) !== minor(projectChant);
   if (chantApart) ctx.log(`the installed yodel takes @intentius/chant ${yodelChant ?? "?"}, the template pins ${projectChant ?? "?"}`);
-  if (chantApart || !existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !renderJs().includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !renderJs().includes("code.forgejo.org/forgejo/upload-artifact") || !renderJs().includes("rendersApply")) {
-    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129), no Forgejo report upload that works on Forgejo or no ci.apply (#175) yet, or takes another chant minor than the template pins: this checkout's, packed and committed with the project.
+  if (chantApart || !existsSync(join(installed, "dist", "ci", "render.js")) || !existsSync(approveJs) || !readFileSync(approveJs, "utf8").includes('"--resume"') || !existsSync(join(installed, "dist", "credentials.js")) || !existsSync(join(installed, "dist", "approval-mode", "index.js")) || !renderJs().includes("the record-plans job has no chant run wave --record-plans") || !existsSync(join(installed, "dist", "lint", "annotations.js")) || !renderJs().includes("code.forgejo.org/forgejo/upload-artifact") || !renderJs().includes("rendersApply") || !existsSync(join(installed, "dist", "ci", "review.js"))) {
+    // The release in the template's range has no yodel ci (#65), no yodel approve that resumes (#47), no credentials() (#50), no approval modes (#48), no write probe in the plans job (#130), no lint annotations (#129), no Forgejo report upload that works on Forgejo, no ci.apply (#175) or no review (#304) yet, or takes another chant minor than the template pins: this checkout's, packed and committed with the project.
     const vendor = join(dir, "vendor");
     mkdirSync(vendor, { recursive: true });
     const packed = await run("npm", ["pack", "--ignore-scripts", "--pack-destination", vendor], { cwd: repoRoot, timeoutMs: 300_000 });
@@ -539,4 +545,57 @@ async function watchPart(ctx: Ctx, s: State): Promise<void> {
   hold(opened.length === 1 && opened[0]?.open === true, `the drift watch did not open one tracking issue: ${JSON.stringify(opened.map((i) => ({ n: i.number, open: i.open, title: i.title })))}`);
   const issue = opened[0];
   hold(/^Drift in dev: .*events/.test(issue.title) && issue.body.includes("`events`"), `the tracking issue does not name dev and events: ${issue.title}`);
+}
+
+// ── review (#304) ─────────────────────────────────────────────────────────────
+
+/** The fake model: it reads the prompt and prints a review, with no model and no key. */
+const FAKE_MODEL = "cat >/dev/null; printf 'The migration adds a column.\\n\\nrisk: low\\n'";
+const REVIEW_MARKER = "<!-- chant-review:yodel-review -->";
+
+/**
+ * The review agent: main gets yodel.config.ts `review` with a fake model
+ * command, rendered and pushed. A pull request adding a column then gets the
+ * review job and the note job, and one note keyed on the Op, naming the pull
+ * request's head; a second push to the pull request edits that note, so
+ * there is still one, naming the new head. BREAK: main has no `review`, so
+ * no note is posted. The pull request stays open.
+ */
+async function reviewPart(ctx: Ctx, s: State): Promise<void> {
+  if (ctx.broken) ctx.log("BREAK (review): main has no review in yodel.config.ts");
+  else {
+    await s.sh("git", ["checkout", "-q", "main"]);
+    const path = join(s.dir, "yodel.config.ts");
+    const text = readFileSync(path, "utf8");
+    const next = text.replace(/^( {2}ci: .*,)$/m, `$1\n  review: { command: ${JSON.stringify(FAKE_MODEL)} },`);
+    if (next === text) throw new Error("could not set review in yodel.config.ts");
+    writeFileSync(path, next);
+    await s.sh("npm", ["run", "ci"]);
+    must(existsSync(join(s.dir, ".forgejo", "workflows", "yodel-review.yml")), "yodel ci wrote no .forgejo/workflows/yodel-review.yml with review set");
+    await s.sh("git", ["add", "-A"]);
+    await s.sh("git", ["commit", "-qm", "ci: the review agent"]);
+    await s.sh("git", ["push", "-q", "origin", "main"]);
+    // The push's apply has nothing to apply; it is waited for so the pull request's runs do not race it.
+    await s.repo.pushed(await s.head());
+  }
+  const branch = "add-reviewed";
+  const pr = await columnPr(s, "reviewed");
+  const sha = (await s.sh("git", ["rev-parse", branch])).out.trim();
+  const notes = async () => (await s.repo.comments(pr.id)).filter((c) => c.includes(REVIEW_MARKER));
+  const first = await notes();
+  hold(first.length === 1, `the pull request has ${String(first.length)} review notes, not one`);
+  hold(first[0]?.includes(sha) === true && first[0].includes("Risk: **low**"), "the review note does not name the pull request's head and the fake model's risk");
+  hold(!pr.checks.log.includes("CLICKHOUSE_READER_PASSWORD=") && !pr.checks.log.includes("POSTGRES_READER_PASSWORD="), "a pull request job printed a reader's password");
+
+  // A second push to the pull request: the same note, edited.
+  await s.sh("git", ["checkout", "-q", branch]);
+  writeFileSync(join(s.dir, "README.md"), `${readFileSync(join(s.dir, "README.md"), "utf8")}\nReviewed again.\n`);
+  await s.sh("git", ["commit", "-qam", "docs: a second push"]);
+  await s.sh("git", ["push", "-q", "origin", branch]);
+  const again = (await s.sh("git", ["rev-parse", "HEAD"])).out.trim();
+  await s.sh("git", ["checkout", "-q", "main"]);
+  await s.repo.prPushed(again);
+  const second = await notes();
+  hold(second.length === 1, `after a second push the pull request has ${String(second.length)} review notes, not one`);
+  hold(second[0]?.includes(again) === true, "the review note was not edited for the pull request's new head");
 }

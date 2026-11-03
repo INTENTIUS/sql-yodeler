@@ -17,3 +17,7 @@ Removed:
 - yodel's own MCP server. `yodel mcp` serves on `chant serve mcp --read-only`, the tools named `yodel:status` and so on, and refuses `YODEL_OWN_MCP`.
 
 Kept: a project with no workspace declaration (one not upgraded yet, or a member under a declaration above it) still gets the lint job's own steps, since chant has no check hooks to run for it.
+
+### Added
+
+- The review agent (#304): `review` in `yodel.config.ts` has `yodel ci` render chant's `reviewAgent` for each pull request. A model reads the migrations the pull request adds, with yodel's SQL rules from `.chant/yodel-review.md`, in a job that holds no forge write token and no database credential, and a second job posts its review as one note, edited on each push. On GitLab the note is posted from a pipeline of the default branch. `yodel plan --pull-request --change-set <file>` writes the change set it reads, from the files alone ([The review agent](docs/chant-ci.md#the-review-agent)).

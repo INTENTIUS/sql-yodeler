@@ -219,6 +219,22 @@ function checkCi(value: unknown, where: string): void {
   if (value.jobs !== undefined && (typeof value.jobs !== "string" || value.jobs === "")) throw new YodelError(`${where}.jobs: the path of the module that declares the project's own jobs, such as "ci/jobs.ts"`);
 }
 
+/** An environment variable's name. */
+const VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** `review` (#304): the review agent, true or { command?, keyEnv?, timeout?, rules? }. */
+function checkReview(value: unknown, where: string): void {
+  if (typeof value === "boolean") return;
+  if (!isRecord(value)) throw new YodelError(`${where}: true, or { command?, keyEnv?, timeout?, rules? }`);
+  for (const k of Object.keys(value)) if (!["command", "keyEnv", "timeout", "rules"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected command, keyEnv, timeout, rules)`);
+  if (value.command !== undefined && (typeof value.command !== "string" || value.command.trim() === "")) throw new YodelError(`${where}.command: a command line that reads the prompt on stdin and prints the review`);
+  if (value.keyEnv !== undefined && (typeof value.keyEnv !== "string" || !VARIABLE.test(value.keyEnv))) {
+    throw new YodelError(`${where}.keyEnv: the name of the variable that holds the model's key, such as ANTHROPIC_API_KEY; the key itself never goes in yodel.config.ts`);
+  }
+  if (value.timeout !== undefined && !(typeof value.timeout === "number" && Number.isInteger(value.timeout) && value.timeout >= 1)) throw new YodelError(`${where}.timeout: a whole number of minutes, 1 or more`);
+  if (value.rules !== undefined && !(Array.isArray(value.rules) && value.rules.every((r) => typeof r === "string" && r.trim() !== ""))) throw new YodelError(`${where}.rules: a list of rules for the model, each a non-empty string`);
+}
+
 /** `check` (#1): another tool's migrations directory. */
 function checkCheck(value: unknown, where: string, profiles?: readonly string[]): void {
   const tools = ["golang-migrate", "goose", "flyway", "dbmate"];
@@ -238,8 +254,9 @@ function checkCheck(value: unknown, where: string, profiles?: readonly string[])
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
-    if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci", "check"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci, check)`);
+    if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci", "check", "review"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci, check, review)`);
   }
+  if (value.review !== undefined) checkReview(value.review, `${path}: review`);
   if (value.check !== undefined) checkCheck(value.check, `${path}: check`, profiles);
   if (value.ci !== undefined) checkCi(value.ci, `${path}: ci`);
   if (value.sources !== undefined) checkSources(value.sources, `${path}: sources`);

@@ -402,6 +402,33 @@ export interface YodelConfig {
    * pull request. `{ dir: "db/migrations" }`; see {@link CheckConfig}.
    */
   check?: CheckConfig;
+  /**
+   * The review agent (#304): `true`, or {@link ReviewConfig}. With it set,
+   * `yodel ci` renders a pull request job that has a model read the
+   * migrations the pull request adds and posts what it finds as one note.
+   * The note approves nothing and gates nothing. Off when absent.
+   */
+  review?: boolean | ReviewConfig;
+}
+
+/**
+ * The review agent (#304), chant's `reviewAgent` in handoff mode: the model
+ * runs in a job that holds no forge write token and no database credential,
+ * and a second job posts its review as one note on the pull request.
+ *
+ * ```ts
+ * review: { keyEnv: "ANTHROPIC_API_KEY", rules: ["Every new table in shop has an owner comment."] }
+ * ```
+ */
+export interface ReviewConfig {
+  /** The model command, run through the shell with the prompt on stdin; it prints the review on stdout. Default: chant's, Claude Code in print mode with no tools. */
+  command?: string;
+  /** The variable that holds the model's key, the one secret the command sees. Default `ANTHROPIC_API_KEY`. The key itself never goes in yodel.config.ts. */
+  keyEnv?: string;
+  /** Minutes the command may run. Default: chant's, 10. */
+  timeout?: number;
+  /** The team's own rules for the model, one per item, written after yodel's SQL rules in `.chant/yodel-review.md`. */
+  rules?: string[];
 }
 
 /** Another tool's migrations, as `yodel check` reads them (#1). */

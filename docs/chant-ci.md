@@ -65,6 +65,41 @@ export default defineConfig({ ci: { tools: ["squawk", "sqlfluff"] } });
 
 chant reads the hooks from the declaration at the pull request's base, so a pull request that removes one still runs it, and a hook a pull request adds runs once it is merged. Each hook runs with no forge token and no cloud credentials. The job's log shows each one's output, so `yodel lint`'s annotations still appear on GitHub and Forgejo, and on GitLab the job keeps the code quality report. `.chant/check/check-hooks.json` lists each hook with its result and exit code, and the job fails on the first hook that fails. `yodel ci --check` compares the declaration's hooks with the presets too. A hook removed from `ci.tools` stays in the declaration until you delete it there, since `yodel ci` adds and replaces hooks and never removes one.
 
+### The review agent
+
+`review` in `yodel.config.ts` has a model read the migrations each pull request adds and post what it finds as one note beside the plan note. It runs on chant's [reviewAgent](https://intentius.io/chant/guide/review-agent/), which terragucci and plywood use too. The note approves nothing and gates nothing: the approvals and the gates stay as they are.
+
+```ts
+export default defineConfig({ review: true });
+// or
+export default defineConfig({ review: { keyEnv: "ANTHROPIC_API_KEY", timeout: 5, rules: ["Every new table in shop has an owner comment."] } });
+```
+
+| Key | Default | What it is |
+|---|---|---|
+| `command` | chant's: Claude Code in print mode with no tools | the model command, run with the prompt on stdin; it prints the review |
+| `keyEnv` | `ANTHROPIC_API_KEY` | the variable holding the model's key, the one secret the command sees |
+| `timeout` | 10 | minutes the command may run |
+| `rules` | none | the team's own rules, after yodel's |
+
+With it set, `yodel ci` writes three more things, and `yodel ci --check` compares them like the rest:
+
+- `ops/yodel-review.op.ts`, a pull request Op. Its first step runs `yodel plan --pull-request --change-set .chant/pr/change-set.json`, which reads the migrations the pull request adds (the ones in `migrations/` the base commit does not have) from their `migration.json`, with no server, and writes them as one chant change set. Its second is chant's `reviewAgent` in handoff mode over that change set and the pull request's diff.
+- `.chant/yodel-review.md`, the instructions the model reads. chant reads them from the base branch, so a pull request that changes `rules` changes the review once it merges. They are yodel's SQL rules for the project's dialect, taken from the classes the plan note shows: a `drop` class or a destructive step loses data, and one the description does not mention is high risk; on Postgres a `rewrite` holds ACCESS EXCLUSIVE for the whole table while it runs, `validate` scans under SHARE UPDATE EXCLUSIVE, and a plain `CREATE INDEX` blocks writes for the build; on ClickHouse a `rewrite` is a mutation over every part, and a `rebuild` copies the table. Nothing in a migration says how many rows a table holds, so the model asks the author how large a rewritten or rebuilt table is. Your `rules` follow.
+- The review pipeline: `yodel-review.yml` on GitHub and Forgejo, `.gitlab/yodel-review.gitlab-ci.yml` on GitLab, which `.gitlab-ci.yml` includes.
+
+The pipeline has two jobs, both chant's:
+
+| Forge | `yodel-review` | `yodel-review-note` |
+|---|---|---|
+| GitHub | `contents: read`; the steps start without the token variables; maps the `keyEnv` secret and no database secret | `pull-requests: write`, checks nothing out, posts the review as one note |
+| Forgejo | the same steps; Forgejo ignores `permissions:`, and the steps still start without the token variables | the same, with the job's token |
+| GitLab | in the merge request pipeline; unsets every forge token and every environment's database variables before it runs, and keeps `.chant/review` as an artifact | in a pipeline of the default branch started with `CHANT_REVIEW_NOTES=1`, with no checkout, posting the review of each open merge request with `CHANT_FORGE_TOKEN` |
+
+The note is keyed on the Op, `<!-- chant-review:yodel-review -->`, so each push edits the same note. Set `keyEnv` from a secret on GitHub and Forgejo, and as a masked CI/CD variable on GitLab. On GitLab, also make `CHANT_FORGE_TOKEN` a protected, masked variable (a project access token with the `api` scope) and create a pipeline schedule on the default branch with `CHANT_REVIEW_NOTES` set to `1`; a review shows up on the merge request when the schedule next runs. [chant's review guide](https://intentius.io/chant/guide/review-agent/#on-gitlab) has the setup.
+
+The model gets the pull request's title, description and diff, so a secret committed in the change reaches it. A project with no migrations yet gets a review that says the pull request adds none, and so does a declarative project, which has no migrations to read.
+
 ### Cloud login
 
 chant's ci-identity trades the forge's OIDC token, and the sql lexicon mints the database token from what the trade leaves, so on GitHub and GitLab `yodel ci` renders chant's login in place of the steps in [Configuration](configuration.md#short-lived-tokens). Each job holding such a role runs one step, `Cloud identity (chant ci-identity: ...)`, with `ci.login` mapped to chant's trade spec. The step runs from `/`, so no file of the checkout is in reach, and leaves the cloud's variables for the later steps. GitLab's `id_tokens` are chant's (`CHANT_ID_TOKEN_AWS`, `_GCP`, `_AZURE`). `rds-iam` signs with the traded AWS keys, `cloud-sql-iam` takes the traded Google access token, and `entra` takes the database token the trade asks Entra for, so the job's image needs no `aws`, `gcloud` or `az`. `ci.login.aws.region` (default `us-east-1`) is where the role is assumed and the `AWS_REGION` the token is signed for, unless the token source names its own `region`. Each job trades only for the roles it holds: a plan job for readers, a wave job for its environment's writer. Forgejo, which gives a job no OIDC token, keeps yodel's login from the runner's token file: there is no token there to trade.
