@@ -45,6 +45,8 @@ export interface YodelWords {
   gateName: string;
   approval: "per-wave" | "pull-request";
   bin: string;
+  /** What chant's notify sends under the words (chant's notify-product): the event's `source` and the webhook's header prefix. */
+  notify: { source: string; headers: string };
 }
 
 /** The command the generated jobs run in place of `chant`: the yodel bin's pass-through to chant. */
@@ -65,6 +67,8 @@ export const YODEL_WORDS: YodelWords = {
   gateName: `${WAVES_PIPELINE}-wave-{k}`,
   approval: "per-wave",
   bin: YODEL_CHANT_BIN,
+  // Webhook events (#61, #319) say sql-yodeler and are signed under x-yodel, as before chant had the slots.
+  notify: { source: "sql-yodeler", headers: "x-yodel" },
 };
 
 /** The words without their comment commands, for a part of chant's product pipeline that renders none of their jobs (the waves). */

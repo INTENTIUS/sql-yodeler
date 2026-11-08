@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
-import { EXIT_CODES, EXIT_MISPLACED, FALLBACK_EXIT, PLAN_PENDING_NOTE, useChantExitTable } from "../src/exit.js";
+import { CHANT_EXIT } from "@intentius/chant/exit-codes";
+import { EXIT_CODES, EXIT_MISPLACED, PLAN_PENDING_NOTE } from "../src/exit.js";
 import { help } from "../src/cli.js";
 import { commands } from "../src/commands/index.js";
 import { projectFromConfig } from "../src/project.js";
@@ -24,20 +25,14 @@ afterEach(() => {
 
 /** yodel exits by chant's one table (#288, chant#4553). */
 describe("chant's exit-code table (#288)", () => {
-  it("the fallback has chant's numbers, and chant's table, when the installed chant exports it, is the same", async () => {
-    expect(FALLBACK_EXIT).toEqual({ done: 0, failed: 1, drift: 2, waiting: 3, moved: 4, held: 5, superseded: 6, denied: 7, declined: 8, misplaced: 9 });
-    const specifier = "@intentius/chant/exit-codes";
-    const chant = await import(specifier).then((m: { CHANT_EXIT?: unknown }) => m.CHANT_EXIT, () => undefined);
-    const from = await useChantExitTable();
-    expect(from).toBe(chant === undefined ? "fallback" : "chant");
-    if (chant !== undefined) {
-      expect(chant).toEqual(FALLBACK_EXIT);
-      expect(EXIT_MISPLACED).toBe(FALLBACK_EXIT.misplaced);
-    }
+  it("is chant's table: yodel keeps no copy (#319)", () => {
+    expect(readFileSync(join(repoRoot, "src", "exit.ts"), "utf8")).toContain('import { CHANT_EXIT } from "@intentius/chant/exit-codes";');
+    expect(EXIT_CODES.map(([code]) => code)).toEqual([CHANT_EXIT.done, CHANT_EXIT.failed, CHANT_EXIT.drift, CHANT_EXIT.waiting, CHANT_EXIT.moved, CHANT_EXIT.held, CHANT_EXIT.denied, CHANT_EXIT.declined]);
+    expect(EXIT_MISPLACED).toBe(CHANT_EXIT.misplaced);
   });
 
   it("every command's --help lists only codes on chant's table, each once", async () => {
-    const table = new Set<number>(Object.values(FALLBACK_EXIT));
+    const table = new Set<number>(Object.values(CHANT_EXIT));
     for (const c of commands.filter((x) => x.implemented)) {
       const ran = await yodel([c.name, "--help"]);
       expect(ran.code, `${c.name}: ${ran.err}`).toBe(0);

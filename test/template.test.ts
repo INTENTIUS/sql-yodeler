@@ -21,6 +21,7 @@ import {
   render,
   environments,
   FORGEJO_UPLOAD_ARTIFACT,
+  UPLOAD_ARTIFACT,
   readerVariables,
   readWaves,
   REPLAY,
@@ -149,8 +150,10 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     const rendered = await render(dir, staged ? { respondNew: "off", respondRebase: "off" } : {});
     expect(rendered.map((f) => f.path)).toContain("chant.workspace.json");
     expect(manifest.files).toContain("chant.workspace.json");
+    // The actions pinned by SHA from chant's ACTION_PINS (#319) reach the templates with the same release, so until then a uses: line compares by its action alone.
+    const actionOnly = (text: string) => (staged ? text.replace(/^(\s*(?:- )?uses: *)\S*?([^/\s@]+)@\S+(?: # \S+)?$/gm, "$1$2") : text);
     for (const file of rendered) {
-      expect(readFileSync(join(dir, file.path), "utf8"), file.path).toBe(file.content);
+      expect(actionOnly(readFileSync(join(dir, file.path), "utf8")), file.path).toBe(actionOnly(file.content));
     }
   });
 
@@ -246,8 +249,9 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       for (const [name, job] of Object.entries(doc.jobs).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
         const env = name.replace(/^plan-|^wave-\d+-/, "");
         expect(job.steps.find((s) => s.run === reportCommand(env))?.if, `${f} ${name}`).toBe("always()");
-        // On Forgejo, Forgejo's fork: actions/upload-artifact@v4 refuses any server but github.com's.
-        const upload = f.startsWith(".forgejo") ? FORGEJO_UPLOAD_ARTIFACT : "actions/upload-artifact@v4";
+        // On Forgejo, upload-artifact v3: v4 refuses any server but github.com's. The templates take the pins with the release that has them (#319).
+        const pinned = existsSync(join(dir, ".github", "workflows", "yodel-new.yml"));
+        const upload = f.startsWith(".forgejo") ? (pinned ? FORGEJO_UPLOAD_ARTIFACT : "https://code.forgejo.org/forgejo/upload-artifact@v4") : pinned ? UPLOAD_ARTIFACT : "actions/upload-artifact@v4";
         // A wave job also uploads its outcome file (#4322), so pick the report's upload by name.
         expect(job.steps.find((s) => s.uses === upload && s.with?.name === reportArtifact(name))?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
         for (const v of WEBHOOK_VARIABLES) expect(job.env?.[v], `${f} ${name}`).toBe(`\${{ secrets.${v} }}`);

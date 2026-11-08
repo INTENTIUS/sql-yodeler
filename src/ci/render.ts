@@ -94,6 +94,7 @@ import type { CheckTool } from "../config/define.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
 import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
+import { ACTION_PINS, tagComments, usesRef } from "@intentius/chant/action-pins";
 import {
   Concurrency,
   Job as ActionsJob,
@@ -153,9 +154,14 @@ const installLines = (tc: Toolchain, forge: Forge): string[] =>
   tc.yodelImage ? [] : ["npm ci", forge === "gitlab" ? 'export PATH="$PWD/node_modules/.bin:$PATH"' : 'echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"'];
 export const MAIN = "main";
 
-/** The forgejo lexicon rewrites it to https://code.forgejo.org/actions/checkout@v7 on Forgejo. */
-const CHECKOUT = "actions/checkout@v7";
-const SETUP_NODE = "actions/setup-node@v7";
+/**
+ * The actions yodel's own jobs use, pinned by commit SHA from chant's
+ * ACTION_PINS (#319), with the release beside each `uses:` line
+ * ({@link renderActions}). The forgejo lexicon takes them to
+ * code.forgejo.org on Forgejo, and upload-artifact to its v3 row there.
+ */
+const CHECKOUT = usesRef(ACTION_PINS.checkout7);
+const SETUP_NODE = usesRef(ACTION_PINS.setupNode7);
 
 /** DEV for dev: the prefix of an environment's variables. */
 export const prefixOf = (env: string): string => env.toUpperCase().replace(/[^A-Z0-9]/g, "_");
@@ -470,13 +476,9 @@ export const reportCommand = (env: string, tc: Toolchain = { image: IMAGE, yodel
 /** The artifact a job keeps its report in. */
 export const reportArtifact = (job: string): string => `yodel-report-${job}`;
 
-const UPLOAD_ARTIFACT = "actions/upload-artifact@v4";
-/**
- * Forgejo's fork of upload-artifact v4. actions/upload-artifact@v4 (as the
- * forgejo lexicon resolves it, from code.forgejo.org/actions) refuses any
- * server but github.com's and fails the step, so the job, on Forgejo.
- */
-export const FORGEJO_UPLOAD_ARTIFACT = "https://code.forgejo.org/forgejo/upload-artifact@v4";
+/** upload-artifact v4 on GitHub, and v3 from code.forgejo.org on Forgejo, where v4 refuses any server but github.com's (chant#4008), as chant's own Forgejo jobs have it. */
+export const UPLOAD_ARTIFACT = usesRef(ACTION_PINS.uploadArtifact4);
+export const FORGEJO_UPLOAD_ARTIFACT = `https://code.forgejo.org/${usesRef(ACTION_PINS.uploadArtifact3)}`;
 const uploadArtifact = (forge: Actions): string => (forge === "forgejo" ? FORGEJO_UPLOAD_ARTIFACT : UPLOAD_ARTIFACT);
 
 /**
@@ -1652,9 +1654,12 @@ export async function render(dir: string, options: { declaration?: RenderedFile;
     ...(await watchPipelines(dir, envs, product)),
     ...(await commitPipelines(dir, envs)),
   ];
-  return files.filter((f) => {
-    const forge = forgeOf(f.path);
-    return forge === undefined || forges.includes(forge);
-  });
+  // Each pinned `uses:` line with its release beside it, as chant writes them (#319).
+  return files
+    .filter((f) => {
+      const forge = forgeOf(f.path);
+      return forge === undefined || forges.includes(forge);
+    })
+    .map((f) => (f.path.endsWith(".yml") ? { ...f, content: tagComments(f.content) } : f));
 }
 
