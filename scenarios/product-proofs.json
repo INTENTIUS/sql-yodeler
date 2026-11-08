@@ -49,6 +49,18 @@
       "scenario": "sy-new-postgres",
       "claim": "forge",
       "note": "/yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (Postgres template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-rebase-clickhouse",
+      "claim": "forge",
+      "note": "/yodel rebase on a fork two merged branches make, refused on Forgejo when main moves while it runs (ClickHouse template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-rebase-postgres",
+      "claim": "forge",
+      "note": "/yodel rebase on a fork two merged branches make, refused on Forgejo when main moves while it runs (Postgres template)"
     }
   ]
 }

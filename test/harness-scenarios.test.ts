@@ -22,7 +22,7 @@ const all = [...scenarios.values()].map((v) => v.scenario);
 const harness = await loadHarness();
 
 describe("the harness scenarios", () => {
-  it("has sy-forge, sy-waves, sy-approval and sy-new on both starter templates", () => {
+  it("has sy-forge, sy-waves, sy-approval, sy-new and sy-rebase on both starter templates", () => {
     expect([...scenarios.keys()].sort()).toEqual(
       Object.keys(SETUPS)
         .flatMap((b) => [`${b}-clickhouse`, `${b}-postgres`])
@@ -126,5 +126,31 @@ describe("the commit scenarios' parts (#312)", () => {
     expect(templateNamespace("CREATE DATABASE shop\n  ENGINE = Atomic", "ch")).toBe("shop");
     expect(legacyDdl("shop", "ch")).toBe("CREATE TABLE shop.legacy (id UInt64) ENGINE = MergeTree ORDER BY id;\n");
     expect(withLegacySource('export default {\n  ci: { forges: ["forgejo"] },\n};\n')).toBe('export default {\n  sources: { legacy: { file: "db/legacy.sql" } },\n  ci: { forges: ["forgejo"] },\n};\n');
+  });
+});
+
+describe("the rebase scenario's parts (#313)", () => {
+  it("moves main once the push job's container is up, and not for the command's job", async () => {
+    const { jobRunning } = await import("../scenarios/harness/act.js");
+    const ps = ["yodel-harness-forgejo-1", "FORGEJO-ACTIONS-TASK-41_WORKFLOW-yodel-rebase_JOB-yodel-rebase"].join("\n");
+    expect(jobRunning(ps, "yodel-rebase-push")).toBe(false);
+    expect(jobRunning(`${ps}\nFORGEJO-ACTIONS-TASK-42_WORKFLOW-yodel-rebase_JOB-yodel-rebase-push`, "yodel-rebase-push")).toBe(true);
+    expect(jobRunning("yodel-rebase-push", "yodel-rebase-push")).toBe(false);
+  });
+
+  it("makes the memos table on the template's own schema or database", async () => {
+    const { memoModule } = await import("../scenarios/harness/overlays.js");
+    expect(memoModule("pg")).toContain("CREATE TABLE ${app}.memos (");
+    expect(memoModule("pg")).toContain('import { app } from "./schema.js";');
+    expect(memoModule("ch")).toContain("CREATE TABLE ${db}.memos (");
+    expect(memoModule("ch")).toContain("ENGINE = MergeTree");
+  });
+
+  it("keeps no sql-types.d.ts in the rebase scenario, so the two branches merge", () => {
+    expect(setupOf("sy-rebase-postgres").sqlTypes).toBe(false);
+    expect(setupOf("sy-new-postgres").sqlTypes).toBeUndefined();
+    const s = scenarios.get("sy-rebase-postgres")?.scenario;
+    expect(s?.break.env.CHANT_COMMIT_HARNESS_BREAK).toBe("moved-base");
+    expect(s?.steps.map((st) => st.do)).toEqual(["open", "open", "merge", "comment", "out-of-band", "out-of-band"]);
   });
 });

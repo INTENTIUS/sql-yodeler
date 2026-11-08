@@ -1,0 +1,85 @@
+{
+  "$schema": "https://intentius.io/chant/schemas/e2e-harness/e2e-scenario/v1/e2e-scenario.schema.json",
+  "contract": 1,
+  "id": "sy-rebase-clickhouse",
+  "product": "sql-yodeler",
+  "claim": "forge",
+  "title": "The ClickHouse starter template on Forgejo: /yodel rebase on a fork two merged branches make, refused when main moves while it runs",
+  "tree": {
+    "base": "../../../templates/clickhouse"
+  },
+  "reportUrl": "s3://yodel-harness/sy-rebase-clickhouse/reports",
+  "steps": [
+    {
+      "id": "note",
+      "do": "open",
+      "branch": "add-note",
+      "overlay": "add-note",
+      "title": "feat: a note column"
+    },
+    {
+      "id": "memo",
+      "do": "open",
+      "branch": "add-memo",
+      "overlay": "add-memo",
+      "title": "feat: a memos table",
+      "label": "its migration follows the same parent as the note's"
+    },
+    {
+      "id": "note-merge",
+      "do": "merge",
+      "pull": "note",
+      "label": "main now has the note's migration, so the memo's forks with it"
+    },
+    {
+      "id": "memo-rebase",
+      "do": "comment",
+      "pull": "memo",
+      "body": "/yodel rebase",
+      "as": "author",
+      "label": "the author asks for the rebase"
+    },
+    {
+      "id": "main-moves",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "move-main",
+        "yodel-rebase-push"
+      ],
+      "label": "main moves after the command ran on the base it merged, before the push lands",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "memo-refused",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "reply",
+        "add-memo",
+        "`main` moved while yodel-rebase ran"
+      ],
+      "label": "the base moved, so the merge of a stale base is not pushed",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    }
+  ],
+  "break": {
+    "env": {
+      "BREAK": "1",
+      "CHANT_COMMIT_HARNESS_BREAK": "moved-base"
+    },
+    "note": "The push jobs land without the moved-base check (CHANT_COMMIT_HARNESS_BREAK=moved-base, BREAK=1, on the Forgejo push jobs only), so the merge of the base the command ran on is pushed although main moved, and the memo-refused step's reply says pushed."
+  }
+}

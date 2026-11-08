@@ -183,6 +183,8 @@ export async function seedArm(i: SeedInput): Promise<Seeded> {
       if (String(f).includes("prod")) rmSync(join(dir, ".gitlab", String(f)), { force: true });
     }
   }
+  // Before yodel ci renders: without the file the lint job checks no sql-types.d.ts.
+  if (setup.sqlTypes === false) rmSync(join(dir, "src", "sql-types.d.ts"), { force: true });
   if (setup.projectJob) {
     mkdirSync(join(dir, "ci"), { recursive: true });
     writeFileSync(join(dir, "ci", "jobs.ts"), PROJECT_JOBS);
