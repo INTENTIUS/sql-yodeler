@@ -1,18 +1,19 @@
 # Rendered from .github/src/image.ts by `npm run workflows`. Edit that file, not this one.
 #
 # The CI image, ghcr.io/intentius/sql-yodeler:<version>: Node 22, yodel, chant
-# and the sql lexicon. publish.yml builds and pushes it after the npm release.
+# and the sql lexicon. A release's cut builds it from npm pack of the commit
+# (scripts/release-image.sh), and publish.yml pushes it with the npm release.
 #
 # Build arguments:
-#   YODEL_VERSION  the version to install from npm, and the version
-#                  `yodel --version` must print (required)
+#   YODEL_VERSION  the version `yodel --version` must print, and the one
+#                  installed from npm unless YODEL_PACKAGE names another (required)
 #   YODEL_PACKAGE  what `npm install` installs, by default
 #                  @intentius/sql-yodeler@$YODEL_VERSION. The build context is
 #                  mounted at /ctx, so a tarball from `npm pack` in the
 #                  context installs as /ctx/<file>.tgz.
 #   CHANT_PINS     @intentius/chant packages at exact versions, installed
 #                  beside yodel so its chant ranges resolve to them (ci.yml
-#                  and publish.yml pass package-lock.json's)
+#                  and scripts/release-image.sh pass package-lock.json's)
 #
 #   docker build -f .github/image/Dockerfile --build-arg YODEL_VERSION=0.1.0 .github/image
 

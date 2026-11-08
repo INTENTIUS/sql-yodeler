@@ -51,7 +51,7 @@
     "check": "npm run typecheck && npm run lint && npm run test",
     "claims": "npm run build && tsx scenarios/run.ts",
     "harness": "npm run build && tsx scenarios/harness/run.ts",
-    "release": "bash scripts/release.sh",
+    "release": "gh workflow run publish.yml -f label=$(node -p 'require(\"./package.json\").version')",
     "workflows": "tsx .github/src/render.ts",
     "templates:check": "tsx scripts/templates-check.ts",
     "templates:render": "tsx scripts/templates-render.ts",
