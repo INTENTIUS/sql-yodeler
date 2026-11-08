@@ -76,7 +76,7 @@
       "items": {
         "type": "string"
       },
-      "description": "The migrations concerned: the pending ones for apply and plan; empty for drift."
+      "description": "The migrations concerned: the pending ones for apply and plan; for drift, the environment that drifted."
     },
     "digest": {
       "type": "string",
@@ -136,7 +136,8 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The environments that drifted."
         },
         "missing": {
           "type": "array",
@@ -198,6 +199,20 @@
             "drift"
           ],
           "description": "The yodel command that sent it."
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "drift: the declared objects that changed out of band."
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "drift: the declared objects that are gone."
         }
       }
     }

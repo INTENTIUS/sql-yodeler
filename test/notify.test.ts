@@ -196,7 +196,16 @@ describe("which outcomes send an event", () => {
   });
 
   it("drift: what changed and what is missing; no drift sends none", () => {
-    expect(eventFromDrift({ environment: "prod", drifted: true, changed: [{ name: "events" }], missing: ["users"] })).toMatchObject({ event: "drift", drift: { changed: ["events"], missing: ["users"] }, summary: "prod drifted: events changed; users missing" });
+    // chant's drift event under yodel's words (#319): the environment drifted, and the objects in detail.
+    expect(eventFromDrift({ environment: "prod", drifted: true, changed: [{ name: "events" }], missing: ["users"] })).toMatchObject({
+      source: "sql-yodeler",
+      event: "drift",
+      environment: "prod",
+      targets: ["prod"],
+      drift: { changed: ["prod"] },
+      detail: { command: "drift", changed: ["events"], missing: ["users"] },
+      summary: "1 environment drifted: prod (events changed; users missing)",
+    });
     expect(eventFromDrift({ environment: "prod", drifted: false, changed: [], missing: [] })).toBeUndefined();
   });
 

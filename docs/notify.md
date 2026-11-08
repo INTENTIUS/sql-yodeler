@@ -66,7 +66,7 @@ The body is chant's notify event, `chant.notify/v1`, the same one chant's own wa
 }
 ```
 
-`targets` are the pending migrations. `refused` and `failed` add `reason`, and `failed` adds `exitCode` when the run had one. `drift` adds `drift: { changed: [...], missing: [...], fingerprint }` and has no targets; the fingerprint is the same for the same drift run after run, so a receiver can tell a repeat from new drift. The `id` is the same for every send about one digest (or one drift fingerprint), so a receiver can drop a repeat. `run` is there when yodel runs in GitHub Actions, Forgejo Actions or GitLab CI. Within `chant.notify/v1` fields are only added, so a receiver ignores fields it does not know.
+`targets` are the pending migrations. `refused` and `failed` add `reason`, and `failed` adds `exitCode` when the run had one. `drift` is chant's drift event under yodel's words, as every product on chant sends it: `targets` and `drift.changed` name the environment that drifted, `drift.fingerprint` is the same for the same drift run after run (so a receiver can tell a repeat from new drift), and yodel adds the objects in `detail.changed` and `detail.missing`. The summary reads `1 environment drifted: prod (events changed; users missing)`. In 0.12 and earlier, `drift.changed` and `drift.missing` held the objects and `targets` was empty. The `id` is the same for every send about one digest (or one drift fingerprint), so a receiver can drop a repeat. `run` is there when yodel runs in GitHub Actions, Forgejo Actions or GitLab CI. Within `chant.notify/v1` fields are only added, so a receiver ignores fields it does not know.
 
 Slack and Teams get chant's message instead: the summary, then the targets, the digest, the approve command and the run.
 

@@ -27,7 +27,6 @@ import { chantProduct } from "./ci-words.js";
 import { chantCheckHooks } from "./ci/check-hooks.js";
 import { gatedRequests } from "./chant/gated-request.js";
 import { chantConfirm } from "./chant/confirm.js";
-import { useChantExitTable } from "./exit.js";
 
 export { CHANT_CI_FLOOR, CHANT_PACKAGES, installLine } from "./chant-floor-version.js";
 
@@ -89,7 +88,7 @@ export async function chantParts(): Promise<ChantPart[]> {
   const product = (await chantProduct()) !== undefined;
   const parts: Array<[string, string, Promise<boolean>]> = [
     ["product pipeline (words, jobs, yodel chant)", "the-pipelines", Promise.resolve(product)],
-    ["exit-code table", "exit-codes", useChantExitTable().then((t) => t === "chant")],
+    ["exit-code table", "exit-codes", exportsAll("@intentius/chant/exit-codes", ["CHANT_EXIT"])],
     ["sql capability (waves with no callback)", "the-apply-waves", exportsAll("@intentius/chant-lexicon-sql/capability-plugin", ["sqlCapabilityPlugin"])],
     ["lock grain and stand-down", "locks", Promise.all([exportsAll("@intentius/chant/op", ["OP_WAVE_STAND_DOWN_FLOOR", "newerCommitOnBranch"]), exportsAll("@intentius/chant-lexicon-sql/lock-grain", ["sqlDefaultLockGrain"])]).then((both) => both.every(Boolean))],
     ["check hooks", "the-check-on-chants-check-hooks", chantCheckHooks().then((m) => m !== undefined)],
