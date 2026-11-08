@@ -21,6 +21,13 @@
  *   yodel override records an override for its digest; and yodel report
  *   finds no gap. BREAK: merged without the approval. The pre-checks half of
  *   approval stays at the engine (scenarios/claims/approval).
+ * - sy-new-<dialect> (claim forge, #312): `/yodel new` on a pull request
+ *   that changes the declared schema gets chant's commit job, which pushes
+ *   the migration to the branch and replies; `/yodel new legacy` on one
+ *   whose DDL source makes yodel new also write src/legacy.generated.ts is
+ *   refused, since the job may change migrations/ only. BREAK: the push
+ *   jobs land without the path check (CHANT_COMMIT_HARNESS_BREAK=paths), so
+ *   that change is pushed.
  *
  * The setup of each scenario (which environments the project keeps, its
  * policy, its project job) is {@link SETUPS}; the overlays its steps name
@@ -53,6 +60,7 @@ export const SETUPS: Readonly<Record<string, Setup>> = {
   "sy-forge": { claim: "forge", waves: ["dev"], projectJob: true, policy: false, overlays: ["add-note", "fork"] },
   "sy-waves": { claim: "waves", waves: ["dev", "prod"], projectJob: false, policy: false, overlays: ["add-note"] },
   "sy-approval": { claim: "approval", waves: ["dev"], projectJob: false, policy: true, overlays: ["add-note", "loosen-gate", "drop-note"] },
+  "sy-new": { claim: "forge", waves: ["dev"], projectJob: false, policy: false, overlays: ["unmigrated-note", "legacy-source"] },
 };
 
 export const dialectOf = (id: string): Dialect => (id.endsWith("-clickhouse") ? "ch" : "pg");

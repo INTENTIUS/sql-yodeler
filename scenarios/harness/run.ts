@@ -54,8 +54,15 @@ interface RunnerForge {
   comments(pull: number): Promise<string[]>;
 }
 
-/** The plain run's arm and its break mode: the scenario's break.env YODEL_HARNESS_BREAK (skip-approval or gate-never). */
-export const breakModeOf = (s: Scenario): string | undefined => s.break.env.YODEL_HARNESS_BREAK;
+/**
+ * The BREAK arm's mode: the scenario's break.env YODEL_HARNESS_BREAK
+ * (skip-approval or gate-never), or, for a commit scenario, the land checks
+ * its CHANT_COMMIT_HARNESS_BREAK turns off (`commit:paths`, `commit:moved-base`).
+ */
+export const breakModeOf = (s: Scenario): string | undefined => {
+  const commit = s.break.env.CHANT_COMMIT_HARNESS_BREAK;
+  return s.break.env.YODEL_HARNESS_BREAK ?? (commit === undefined ? undefined : `commit:${commit}`);
+};
 
 /** A postgres:// URL without its credentials, which scenarios/lib/db.ts takes on their own. */
 const withoutCredentials = (url: string): string => {
@@ -73,7 +80,7 @@ function list(scenarios: ReturnType<typeof readScenarios>): void {
 }
 
 async function runOne(h: Harness, s: Scenario, urls: Record<"forgejo" | "clickhouse" | "postgres", string>, root: string): Promise<{ ok: boolean; clean: boolean }> {
-  const { forgeAccess, seedArm, pullProject, pushLedger, ledgerRuns, forgejo, envOfGate } = await import("./seed.js");
+  const { forgeAccess, seedArm, pullProject, pushLedger, ledgerRuns, forgejo, envOfGate, COMMIT_HARNESS_BREAK } = await import("./seed.js");
   const setup = setupOf(s.id);
   const dialect = dialectOf(s.id);
   const work = join(root, s.id);
@@ -131,12 +138,15 @@ async function runOne(h: Harness, s: Scenario, urls: Record<"forgejo" | "clickho
     },
     async arm(arm: "plain" | "break", env: Record<string, string>): Promise<void> {
       armBreak = arm === "break" ? env.YODEL_HARNESS_BREAK : undefined;
-      log(`${s.id}: the ${arm} arm's project and repository, from nothing${armBreak ? ` (BREAK: ${armBreak})` : ""}`);
+      const commitBreak = arm === "break" ? env[COMMIT_HARNESS_BREAK] : undefined;
+      const said = armBreak ?? (commitBreak ? `${COMMIT_HARNESS_BREAK}=${commitBreak} on the push jobs` : undefined);
+      log(`${s.id}: the ${arm} arm's project and repository, from nothing${said ? ` (BREAK: ${said})` : ""}`);
       seeded = await seedArm({
         id: s.id,
         dialect,
         setup,
         breakMode: armBreak,
+        commitBreak,
         work: join(work, arm),
         access,
         servers: { host: { clickhouse: urls.clickhouse, postgres: urls.postgres }, network: { clickhouse: h.HARNESS_HOSTS.clickhouse, postgres: h.HARNESS_HOSTS.postgres } },

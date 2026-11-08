@@ -9,7 +9,7 @@
  */
 
 /** What a scenario step does (e2e-scenario/v1 `do`). */
-export type StepKind = "open" | "open-concurrent" | "plan" | "approve" | "merge" | "apply" | "out-of-band" | "kill-job";
+export type StepKind = "open" | "open-concurrent" | "plan" | "approve" | "merge" | "comment" | "apply" | "out-of-band" | "kill-job";
 
 /** One outcome a step must show: one key each. */
 export type Outcome =
@@ -28,6 +28,7 @@ interface StepBase {
 export type Step =
   | (StepBase & { do: "open" | "open-concurrent"; branch: string; overlay: string; title: string; body?: string })
   | (StepBase & { do: "plan" | "approve" | "merge"; pull: string })
+  | (StepBase & { do: "comment"; pull: string; body: string; as?: "author" | "reviewer" })
   | (StepBase & { do: "apply"; merge: string })
   | (StepBase & { do: "out-of-band"; command: string[] })
   | (StepBase & { do: "kill-job"; match?: string });
@@ -151,7 +152,7 @@ export function lintLocal(s: Scenario, claims: readonly string[]): Finding[] {
       const o = seen.get(id);
       return o?.do === "open" || o?.do === "open-concurrent";
     };
-    if ((step.do === "plan" || step.do === "approve" || step.do === "merge") && !opened(step.pull)) {
+    if ((step.do === "plan" || step.do === "approve" || step.do === "merge" || step.do === "comment") && !opened(step.pull)) {
       out.push({ at: `${at}/pull`, message: `${step.do} names ${step.pull}, which is not an earlier open step` });
     }
     if (step.do === "apply" && seen.get(step.merge)?.do !== "merge") out.push({ at: `${at}/merge`, message: `apply names ${step.merge}, which is not an earlier merge step` });

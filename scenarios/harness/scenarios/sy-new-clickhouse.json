@@ -1,0 +1,87 @@
+{
+  "$schema": "https://intentius.io/chant/schemas/e2e-harness/e2e-scenario/v1/e2e-scenario.schema.json",
+  "contract": 1,
+  "id": "sy-new-clickhouse",
+  "product": "sql-yodeler",
+  "claim": "forge",
+  "title": "The ClickHouse starter template on Forgejo: /yodel new commits the migration to the pull request, and only under migrations/",
+  "tree": {
+    "base": "../../../templates/clickhouse"
+  },
+  "reportUrl": "s3://yodel-harness/sy-new-clickhouse/reports",
+  "steps": [
+    {
+      "id": "note",
+      "do": "open",
+      "branch": "unmigrated-note",
+      "overlay": "unmigrated-note",
+      "title": "feat: a note column, not migrated yet"
+    },
+    {
+      "id": "note-new",
+      "do": "comment",
+      "pull": "note",
+      "body": "/yodel new",
+      "as": "author",
+      "label": "the author asks for the migration"
+    },
+    {
+      "id": "note-pushed",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "reply",
+        "unmigrated-note",
+        "to `unmigrated-note"
+      ],
+      "label": "chant's commit job pushed the migration to the branch, and replied",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": "legacy",
+      "do": "open",
+      "branch": "legacy-source",
+      "overlay": "legacy-source",
+      "title": "feat: the legacy table from a DDL source"
+    },
+    {
+      "id": "legacy-new",
+      "do": "comment",
+      "pull": "legacy",
+      "body": "/yodel new legacy",
+      "as": "author",
+      "label": "the author asks for a migration named legacy"
+    },
+    {
+      "id": "legacy-refused",
+      "do": "out-of-band",
+      "command": [
+        "npx",
+        "tsx",
+        "scenarios/harness/act.ts",
+        "reply",
+        "legacy-source",
+        "src/legacy.generated.ts`, which yodel-new may not change"
+      ],
+      "label": "yodel new also writes src/legacy.generated.ts, outside migrations/, so nothing is pushed",
+      "expect": [
+        {
+          "exit": 0
+        }
+      ]
+    }
+  ],
+  "break": {
+    "env": {
+      "BREAK": "1",
+      "CHANT_COMMIT_HARNESS_BREAK": "paths"
+    },
+    "note": "The push jobs land without the path check (CHANT_COMMIT_HARNESS_BREAK=paths, BREAK=1, on the Forgejo push jobs only), so the change to src/legacy.generated.ts is pushed and the legacy-refused step's reply says pushed, not refused."
+  }
+}

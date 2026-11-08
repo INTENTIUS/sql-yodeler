@@ -1440,8 +1440,9 @@ export async function commitPipelines(dir: string, envs_: Environments): Promise
   const respondRebase = rebaseRespond(envs_);
   if (!respondsNew(envs_) && respondRebase === "off") return [];
   const tc = toolchainOf(envs_);
-  const rebase = { envs: envs_.names, variables: envs_.names.flatMap((env) => readerVariables(env, envs_.dialect, envs_.credentials?.[env])) };
-  const r = { dir: resolve(dir), respond: respondsNew(envs_) ? (envs_.respondNew ?? "comment") : ("off" as const), respondRebase, rebase, image: tc.image, yodelImage: tc.yodelImage };
+  // Both words read every applied environment's history with its reader. A cloud-minted reader gets no identity there, so then /yodel new reads none and /yodel rebase is off.
+  const readers = cloudReaders(envs_).length > 0 ? undefined : { envs: envs_.names, variables: envs_.names.flatMap((env) => readerVariables(env, envs_.dialect, envs_.credentials?.[env])) };
+  const r = { dir: resolve(dir), respond: respondsNew(envs_) ? (envs_.respondNew ?? "comment") : ("off" as const), respondRebase, ...(readers ? { readers } : {}), image: tc.image, yodelImage: tc.yodelImage };
   const out: RenderedFile[] = [];
   for (const [forge, word] of FORGES.flatMap((f) => (["new", "rebase"] as const).map((w) => [f, w] as const))) {
     for (const file of await commitFiles(r, forge, word)) {

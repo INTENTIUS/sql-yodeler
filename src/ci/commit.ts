@@ -7,7 +7,11 @@
  * commenter who cannot write, a change outside `migrations/`, a head the
  * job pushed itself and a fourth push to one pull request.
  *
- * - `new` runs `yodel new --if-changed --replace-own`.
+ * - `new` runs `yodel new [<name>] --if-changed --replace-own --env <env>...`
+ *   with each environment's reader variables, so `--replace-own` reads the
+ *   histories and refuses a migration one of them records (chant pull
+ *   request 4834). `/yodel new <name>` names the migration: chant hands the
+ *   comment's argument to the command (chant pull request 4835).
  * - `rebase` merges the base branch into the head first (`mergeBase`), as a
  *   fork shows only on that merge, then runs `yodel rebase --env <env>...`
  *   with each environment's reader variables and nothing of a writer
@@ -81,8 +85,8 @@ async function pluginOf(forge: CommitForge): Promise<LexiconPlugin> {
   return plugin;
 }
 
-/** What `/yodel rebase` reads histories with: the environments, and their readers' variables. */
-export interface RebaseReaders {
+/** What `/yodel new` and `/yodel rebase` read histories with: the environments, and their readers' variables. */
+export interface HistoryReaders {
   envs: readonly string[];
   /** Every environment's reader variables, the URL first. */
   variables: readonly string[];
@@ -95,21 +99,21 @@ export interface CommitRender {
   respond: RespondNew;
   /** `ci.respond.rebase`, default `comment`. */
   respondRebase?: RespondRebase;
-  /** With `respondRebase`: the histories it reads. */
-  rebase?: RebaseReaders;
+  /** The histories both words read; none when a reader's password is cloud-minted, which the commit job gets no identity for. */
+  readers?: HistoryReaders;
   image: string;
   /** The yodel image (`ci.image`): it carries yodel and chant, so nothing is installed. */
   yodelImage: boolean;
 }
 
 /** The commit jobs' specs of `word` for `forge`, the comment's first. */
-export function commitSpecs(r: Pick<CommitRender, "dir" | "respond" | "respondRebase" | "rebase" | "yodelImage">, forge: CommitForge, word: YodelCommitWord = "new"): { comment?: CommitOpSpec; check?: CommitOpSpec } {
+export function commitSpecs(r: Pick<CommitRender, "dir" | "respond" | "respondRebase" | "readers" | "yodelImage">, forge: CommitForge, word: YodelCommitWord = "new"): { comment?: CommitOpSpec; check?: CommitOpSpec } {
   const respond = word === "new" ? r.respond : (r.respondRebase ?? "comment");
   if (respond === "off") return {};
   const setup = r.yodelImage ? [] : yodelCommitSetup({ dir: r.dir });
   const base: Omit<YodelCommitOptions, "on"> = {
     tokenEnv: COMMIT_TOKEN_ENV,
-    ...(word === "rebase" && r.rebase && r.rebase.envs.length > 0 ? { envs: r.rebase.envs, readerVariables: r.rebase.variables } : {}),
+    ...(r.readers && r.readers.envs.length > 0 ? { envs: r.readers.envs, readerVariables: r.readers.variables } : {}),
   };
   const spec = (name: string, commit: Record<string, unknown>): CommitOpSpec => ({ name, trigger: { kind: "pull_request" }, commit, ...(setup.length > 0 ? { setup } : {}) });
   // chant runs the check trigger on GitLab only when asked (gitlabCheck).

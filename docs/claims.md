@@ -46,3 +46,5 @@ These harness scenarios have no recorded row yet. Each is listed here as pending
 | waves | INTENTIUS/sql-yodeler | `sy-waves-postgres` | dev and prod applied as two waves on a Forgejo runner, each behind its own gate, each approved with yodel approve (Postgres template) |
 | forge | INTENTIUS/sql-yodeler | `sy-forge-clickhouse` | lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (ClickHouse template) |
 | forge | INTENTIUS/sql-yodeler | `sy-forge-postgres` | lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (Postgres template) |
+| forge | INTENTIUS/sql-yodeler | `sy-new-clickhouse` | /yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (ClickHouse template) |
+| forge | INTENTIUS/sql-yodeler | `sy-new-postgres` | /yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (Postgres template) |
