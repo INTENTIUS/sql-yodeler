@@ -310,7 +310,25 @@ export interface CiConfig {
    * newest migration of that name for the pull request's own.
    */
   new?: { name?: string };
+  /**
+   * What answers on a pull request (#312), with chant's commit job: `new`
+   * is `/yodel new`, which writes the migration the declared schema is
+   * ahead by (`yodel new --if-changed --replace-own`) and pushes it to the
+   * pull request's branch. `off` renders no job, `comment` (the default)
+   * the job that answers the comment, and `on-change` that job and one
+   * that runs after each push when `yodel lint` finds `unmigrated`. A
+   * push token is needed on each forge (docs/workflows.md).
+   */
+  respond?: CiRespond;
 }
+
+/** `ci.respond` (#312). */
+export interface CiRespond {
+  new?: RespondNew;
+}
+
+export type RespondNew = "off" | "comment" | "on-change";
+export const RESPOND_NEW: readonly RespondNew[] = ["off", "comment", "on-change"];
 
 /** The name `yodel new` takes with none given, `{pr}` the pull request's number (#311). */
 export const DEFAULT_CI_NEW_NAME = "pr-{pr}";

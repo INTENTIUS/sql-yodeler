@@ -7,7 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { opExportName } from "../src/chant/export-name.js";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -143,7 +143,10 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("commits the pull request and apply pipelines yodel ci renders", async () => {
     // Every file yodel ci renders, the workspace declaration with its check hooks among them (#298).
-    const rendered = await render(dir);
+    // /yodel new (#312) reaches the templates with the release that ships it (AGENTS.md, Releasing): until
+    // npm run templates:render writes its workflow there, the committed template is what yodel ci renders without it.
+    const staged = !existsSync(join(dir, ".github", "workflows", "yodel-new.yml"));
+    const rendered = await render(dir, staged ? { respondNew: "off" } : {});
     expect(rendered.map((f) => f.path)).toContain("chant.workspace.json");
     expect(manifest.files).toContain("chant.workspace.json");
     for (const file of rendered) {

@@ -4,9 +4,11 @@
  * chant's own sentences. terragucci and plywood pass theirs the same way.
  *
  * The prefix is `yodel` (#285 ruling B): statuses read `yodel/plan` and
- * `yodel/apply`. A member is an environment. The words name no comment
- * command: yodel applies on merge only (#285 ruling E), so nothing applies
- * before a merge and no `/yodel` comment starts an apply.
+ * `yodel/apply`. A member is an environment. yodel applies on merge only
+ * (#285 ruling E), so nothing applies before a merge and no `/yodel`
+ * comment starts an apply. The one comment command is `/yodel new` (#312),
+ * chant's commit job: it writes a migration and pushes it to the pull
+ * request's branch, and applies nothing.
  *
  * The op and the wave gates keep the names sql-yodeler has recorded on
  * `chant/lifecycle` since the waves began (`yodel-apply`,
@@ -36,7 +38,7 @@ export interface YodelWords {
   stages: Record<YodelStage, string>;
   verbs: { plan: [string, string]; apply: [string, string] };
   noun: [string, string];
-  commands: Record<string, "plan" | "apply" | "lock" | "unlock" | "agent">;
+  commands: Record<string, "plan" | "apply" | "lock" | "unlock" | "agent" | "commit">;
   approve: string;
   override: string;
   op: string;
@@ -54,8 +56,8 @@ export const YODEL_WORDS: YodelWords = {
   stages: { plan: "plan", apply: "apply", record: "record", check: "check", drift: "drift", lock: "lock", approval: "approval", control: "control" },
   verbs: { plan: ["plan", "planned"], apply: ["apply", "applied"] },
   noun: ["environment", "environments"],
-  // Merge only (#285 ruling E): no comment command, so no apply before merge.
-  commands: {},
+  // Merge only (#285 ruling E): no command applies before merge. /yodel new is chant's commit job (#312).
+  commands: { new: "commit" },
   // The environment or tenant is the wave's run target (chant#4574).
   approve: "yodel approve {target} --plan {digest} {sign}",
   override: "yodel override {target} --rule {rule} --reason <text>",
@@ -64,6 +66,9 @@ export const YODEL_WORDS: YodelWords = {
   approval: "per-wave",
   bin: YODEL_CHANT_BIN,
 };
+
+/** The words without their comment commands, for a part of chant's product pipeline that renders none of their jobs (the waves). */
+export const WAVE_WORDS: YodelWords = { ...YODEL_WORDS, commands: {} };
 
 /** One op-wave job of chant's product pipeline: its name and its argv, with yodel's bin in place of `chant`. */
 export interface ProductWaveJob {

@@ -183,6 +183,31 @@ export const gitlab = {
 
 By default every job runs in `node:22-bookworm` (GitHub's plan jobs on the runner, with `setup-node`) and installs the project's packages with `npm ci`. `ci.image` runs every job in the CI image instead, `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`, which a release publishes with Node, yodel, chant and the lexicons on it: no job runs `npm ci` or `setup-node`, and a checkout resolves chant and the lexicons from the image. It is taken only pinned by its digest, which the release's `image` job writes to its summary, so a job never runs a different image under the same tag. Use the version the project's `package.json` installs, so the image's yodel renders the same pipelines `yodel ci --check` compares; a project whose jobs need packages of their own leaves `image` unset.
 
+### /yodel new: the migration committed to the pull request
+
+A pull request that changes the declared schema needs the migration that goes with it. Commenting `/yodel new` on the pull request writes it in CI and pushes it to the branch, through chant's commit job:
+
+1. The first job holds a read token and no push token. It refuses a pull request from a fork, a commenter who cannot write to the repository, a head the job pushed itself, and a pull request it has already pushed to three times. It then runs `yodel new --if-changed --replace-own` on the pull request's head, in a worktree with no forge token in its environment ([In chant's commit job](migrations.md#in-chants-commit-job)). The migration is named `pr-<number>` unless `ci.new.name` says otherwise, and asking again replaces it rather than adding a second one.
+2. The second job holds the push token. It refuses a change outside `migrations/`, commits what the first wrote with a `Commit-run:` trailer, pushes it without force, and replies on the pull request. When `yodel new` refused, the reply names the migration and the environment from yodel's refusal line.
+
+Nothing is applied, approved or merged. The pushed commit is a new head, so its plan is new: an approval of the old head's plan digest does not count for it, and the plan comment asks for an approval of the new one.
+
+`ci.respond.new` in `yodel.config.ts` picks when it runs:
+
+| `ci.respond.new` | What `yodel ci` renders |
+|---|---|
+| `comment` (default) | the job that answers `/yodel new`: `yodel-new.yml` on GitHub and Forgejo, and `.gitlab/yodel-commit.gitlab-ci.yml`, which `.gitlab-ci.yml` includes |
+| `on-change` | that job, and a check on each push to a pull request, `yodel lint --commit-trigger new`, which exits 2 when lint finds `unmigrated`. The commit job follows it then (`yodel-new-check.yml`, and the same GitLab file) |
+| `off` | neither |
+
+The push job reads its token from `YODEL_PUSH_TOKEN`:
+
+- GitHub: a repository secret holding a token that can push and comment: a GitHub App's installation token or a fine-grained personal access token with `contents: write` and `pull-requests: write`. A push made with the job's own token starts no workflow run, so the new head would get no lint and no plan.
+- GitLab: a CI/CD variable, protected and masked, scoped to the environment `yodel-new-push`: a project access token with `write_repository` and `api`. GitLab runs no pipeline on a comment, so `/yodel new` reaches the job as a pipeline of the default branch started with `CHANT_COMMIT_PR=<iid>` and `CHANT_COMMIT=new`, from a webhook relay or by hand. The file's header says so.
+- Forgejo: a repository secret holding a user's access token with `write:repository` and `write:issue`.
+
+In chant's commit job, `--replace-own` reads no environment's history yet (INTENTIUS/chant#4815), so a project that applies a pull request's migration before merge should not let `/yodel new` replace one that ran there.
+
 ### Upgrading the pipelines to chant 0.124.67
 
 From chant 0.124.67 the pipelines run on chant's product pipeline, the one terragucci and plywood use ([SQL Yodeler on chant CI](chant-ci.md#from-chant-012467) has each part). A project made from a template before then, or one whose chant is older, moves in one commit:

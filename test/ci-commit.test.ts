@@ -1,0 +1,177 @@
+/**
+ * `/yodel new` through chant's commit job (#312): the jobs `yodel ci`
+ * renders from the sql lexicon's `yodelCommitSpec`, `ci.respond.new`, the
+ * check `yodel lint --commit-trigger new`, the refusal reply the bin sets
+ * before `chant commit land`, and `yodel new` in a worktree with no
+ * `node_modules`, as the commit job runs it.
+ */
+
+import { execFileSync, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { activeCommitRefusalReply, setCommitRefusalReply } from "@intentius/chant/ci-commit";
+import { parseYAMLDocument } from "@intentius/chant/yaml";
+import { yodelCommitRefusalReply } from "@intentius/chant-lexicon-sql/yodel-run";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { commitSpecs, NEW_CHECK_COMMAND } from "../src/ci/commit.js";
+import { runChantVerb, setRefusalReply } from "../src/commands/chant.js";
+import { checkYodelConfig } from "../src/config/load.js";
+import { fallbackImportArgs, ownModules } from "../src/chant/resolve-fallback.js";
+import { copyTemplate, fixture, json, repoRoot, yodel } from "./helpers/run.js";
+import { offline } from "./helpers/new-suite.js";
+
+offline();
+
+const temps: string[] = [];
+afterEach(() => {
+  for (const t of temps.splice(0)) rmSync(t, { recursive: true, force: true });
+});
+
+/** The ClickHouse template in a directory of its own, with yodel's node_modules linked in and `ci` set to `ci`, as test/ci.test.ts makes it. */
+function template(ci: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "yodel-commit-"));
+  temps.push(dir);
+  copyTemplate("clickhouse", dir);
+  symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
+  const config = join(dir, "yodel.config.ts");
+  writeFileSync(config, readFileSync(config, "utf8").replace(/^ {2}ci: .*$/m, `  ci: ${ci},`));
+  // chant finds the Ops from the git root.
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  return dir;
+}
+
+const read = (dir: string, f: string) => readFileSync(join(dir, f), "utf8");
+
+describe("yodel ci renders /yodel new through chant's commit job (#312)", () => {
+  it("by default answers the comment on every forge, with the lexicon's argv, migrations/ only and the push token", async () => {
+    const dir = template('{ forges: ["github", "gitlab", "forgejo"] }');
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    for (const f of [".github/workflows/yodel-new.yml", ".forgejo/workflows/yodel-new.yml"]) {
+      const text = read(dir, f);
+      expect(text, f).toContain("startsWith(github.event.comment.body, '/yodel new')");
+      expect(text, f).toContain(`CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own"]'`);
+      expect(text, f).toContain(`CHANT_COMMIT_ALLOWED: '["migrations/"]'`);
+      expect(text, f).toContain("secrets.YODEL_PUSH_TOKEN");
+      expect(text, f).toContain("yodel chant commit land --forge");
+      expect(text, f).toContain("# The push job reads the YODEL_PUSH_TOKEN secret");
+      // The command's job holds no push token.
+      const doc = parseYAMLDocument(text) as { jobs: Record<string, { steps: Array<{ env?: Record<string, string> }> }> };
+      expect(JSON.stringify(doc.jobs["yodel-new"])).not.toContain("YODEL_PUSH_TOKEN");
+    }
+    const gitlab = read(dir, ".gitlab/yodel-commit.gitlab-ci.yml");
+    expect(gitlab).toContain('$CHANT_COMMIT == "new"');
+    expect(gitlab).toContain("yodel chant commit land --forge gitlab");
+    expect(gitlab).toContain("$YODEL_PUSH_TOKEN");
+    expect((parseYAMLDocument(read(dir, ".gitlab-ci.yml")) as { include: Array<{ local: string }> }).include).toContainEqual({ local: ".gitlab/yodel-commit.gitlab-ci.yml" });
+    expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
+  }, 120_000);
+
+  it("with respond.new on-change, also follows a check that exits 2 on lint's unmigrated; with off, renders none", async () => {
+    const dir = template('{ forges: ["github", "gitlab"], respond: { new: "on-change" } }');
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    const check = read(dir, ".github/workflows/yodel-new-check.yml");
+    expect(check).toContain(NEW_CHECK_COMMAND.join(" "));
+    expect(check).toContain("pull_request");
+    expect(check).toContain("CHANT_COMMIT_ON: check");
+    const gitlab = read(dir, ".gitlab/yodel-commit.gitlab-ci.yml");
+    expect(gitlab).toContain("yodel-new-check");
+    expect(gitlab).toContain(NEW_CHECK_COMMAND.join(" "));
+
+    const off = template('{ forges: ["github", "gitlab"], respond: { new: "off" } }');
+    expect((await yodel(["ci", "--dir", off])).code).toBe(0);
+    expect(existsSync(join(off, ".github/workflows/yodel-new.yml"))).toBe(false);
+    expect(read(off, ".gitlab-ci.yml")).not.toContain("yodel-commit");
+  }, 120_000);
+
+  it("takes the specs from yodelCommitSpec, and nothing installed in the yodel image", () => {
+    const { comment, check } = commitSpecs({ dir: "/p", respond: "on-change", yodelImage: true }, "gitlab");
+    expect(comment).toMatchObject({ name: "yodel-new", commit: { on: "comment", comment: "/yodel new", allowed: ["migrations/"], tokenEnv: "YODEL_PUSH_TOKEN" } });
+    expect(comment?.setup).toBeUndefined();
+    expect(check).toMatchObject({ name: "yodel-new-check", commit: { on: "check", findings: [2], gitlabCheck: true } });
+    expect(commitSpecs({ dir: "/p", respond: "on-change", yodelImage: false }, "github").check?.commit).not.toHaveProperty("gitlabCheck");
+  });
+
+  it("checks ci.respond", () => {
+    expect(checkYodelConfig({ ci: { respond: { new: "on-change" } } }, "yodel.config.ts").ci).toEqual({ respond: { new: "on-change" } });
+    expect(() => checkYodelConfig({ ci: { respond: { new: "always" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.new: one of off, comment, on-change/);
+    expect(() => checkYodelConfig({ ci: { respond: { merge: "comment" } } }, "yodel.config.ts")).toThrow(/ci\.respond: expected \{ new\? \}/);
+  });
+});
+
+describe("yodel lint --commit-trigger new (#312)", () => {
+  it("exits 2 while the declared schema is ahead of the newest migration, 0 once it is not", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-trigger-"));
+    temps.push(dir);
+    cpSync(fixture("postgres"), dir, { recursive: true });
+    symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
+    expect((await yodel(["new", "init", "--dir", dir])).code).toBe(0);
+    expect((await yodel(["lint", "--commit-trigger", "new", "--dir", dir])).code).toBe(0);
+    const schema = join(dir, "src", "schema.ts");
+    writeFileSync(schema, readFileSync(schema, "utf8").replace("amount numeric(12, 2) NOT NULL\n", "amount numeric(12, 2) NOT NULL,\n    note   text\n"));
+    const ahead = await yodel(["lint", "--commit-trigger", "new", "--dir", dir]);
+    expect(ahead.code).toBe(2);
+    expect(ahead.out).toContain("warning  unmigrated:");
+    const bad = await yodel(["lint", "--commit-trigger", "rebase", "--dir", dir]);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain("--commit-trigger takes new");
+  }, 60_000);
+});
+
+describe("the refusal reply (#312)", () => {
+  const was = activeCommitRefusalReply();
+  afterAll(() => {
+    setCommitRefusalReply(was);
+  });
+  it("is the sql lexicon's, set before chant's commit commands run", async () => {
+    setCommitRefusalReply(undefined);
+    await setRefusalReply();
+    expect(activeCommitRefusalReply()).toBe(yodelCommitRefusalReply);
+    setCommitRefusalReply(undefined);
+    // Through the verb: a commit command sets it, whatever chant then does with the argv.
+    let ran: string[] = [];
+    const code = await runChantVerb(["commit", "land", "--help"], { out: () => undefined, err: () => undefined }, {
+      product: () => Promise.resolve({ runChantInProcess: (argv: string[]) => ((ran = argv), Promise.resolve(0)) } as never),
+    });
+    expect(code).toBe(0);
+    expect(ran).toEqual(["commit", "land", "--help"]);
+    expect(activeCommitRefusalReply()).toBe(yodelCommitRefusalReply);
+  });
+});
+
+describe("yodel new in a worktree with no node_modules (#312)", () => {
+  let project = "";
+  beforeAll(() => {
+    // Outside the repository and any node_modules, as chant's commit job's worktree of the head is.
+    project = mkdtempSync(join(tmpdir(), "yodel-worktree-"));
+    cpSync(fixture("postgres"), project, { recursive: true });
+  });
+  afterAll(() => {
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  it("finds yodel's own install, and gives chant's children the hook", () => {
+    expect(ownModules()).toBe(join(repoRoot, "node_modules"));
+    const args = fallbackImportArgs();
+    expect(args[0]).toBe("--import");
+    expect(args[1]).toMatch(/^data:text\/javascript,/);
+  });
+
+  it("resolves the project's packages from yodel's install, so the migration is written", () => {
+    expect(readdirSync(project)).not.toContain("node_modules");
+    const tsx = createRequire(import.meta.url).resolve("tsx");
+    const ran = spawnSync(process.execPath, ["--import", tsx, join(repoRoot, "src", "bin.ts"), "new", "--if-changed", "--replace-own", "--json", "--dir", project], {
+      cwd: project,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", CHANT_COMMIT_PR: "3", YODEL_E2E_POSTGRES_URL: "postgres://127.0.0.1:9/postgres" },
+      timeout: 120_000,
+    });
+    expect(ran.status, ran.stderr).toBe(0);
+    expect(json({ code: 0, out: ran.stdout, err: "" })).toMatchObject({ written: true, id: expect.stringMatching(/-pr-3$/) as unknown });
+    // Only migrations/: src/sql-types.d.ts is not refreshed in the commit job, which may change migrations/ alone.
+    expect(readdirSync(project).sort()).toEqual([...readdirSync(fixture("postgres")), "migrations"].sort());
+  }, 120_000);
+});

@@ -120,7 +120,8 @@ describe("yodel ci", () => {
     // yodel ci writes the files that change. The waves spec (#289) names no image, so it is written only when the
     // template's committed spec is not the one this chant gives.
     const pipelines = rendered.filter((f) => f !== WAVES_SPEC);
-    expect(pipelines).toHaveLength(11);
+    // 11, and /yodel new's commit job on each forge (#312).
+    expect(pipelines).toHaveLength(14);
     for (const f of pipelines) {
       const text = readFileSync(join(dir, f), "utf8");
       expect(text, f).not.toContain("npm ci");
@@ -205,24 +206,27 @@ describe("yodel ci", () => {
     expect(rendered).toEqual([
       ".forgejo/workflows/watch-dev.yml",
       ".forgejo/workflows/watch-prod.yml",
+      ".forgejo/workflows/yodel-new.yml",
       ".forgejo/workflows/yodel-pr.yml",
       ".github/workflows/watch-dev.yml",
       ".github/workflows/watch-prod.yml",
+      ".github/workflows/yodel-new.yml",
       ".github/workflows/yodel-pr.yml",
       ".gitlab-ci.yml",
+      ".gitlab/yodel-commit.gitlab-ci.yml",
       ".gitlab/yodel-watch.gitlab-ci.yml",
     ]);
     // No file in the project names a writer.
     for (const f of rendered) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/WRITER|writer:/);
     const gitlab = parseYAMLDocument(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as { stages: string[]; include: Array<{ local: string }> };
     expect(gitlab.stages).toEqual(["review", "ops"]);
-    expect(gitlab.include).toEqual([{ local: ".gitlab/yodel-watch.gitlab-ci.yml" }]);
+    expect(gitlab.include).toEqual([{ local: ".gitlab/yodel-watch.gitlab-ci.yml" }, { local: ".gitlab/yodel-commit.gitlab-ci.yml" }]);
     const pr = parseYAMLDocument(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
     expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-prod"]);
     expect(pr.jobs["plan-prod"]?.steps.some((st) => st.run === "yodel config check prod dev --write-probe")).toBe(true);
     const check = await yodel(["ci", "--check", "--dir", dir]);
     expect(check.code, check.err).toBe(0);
-    expect(check.out).toBe("8 CI files are up to date\n");
+    expect(check.out).toBe("11 CI files are up to date\n");
   });
 
   it("refuses ci.apply: false with a pr-review wave or with ci.resume, naming the setting (#175)", () => {

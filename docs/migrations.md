@@ -58,7 +58,9 @@ chant's commit job runs `yodel new` on the pull request's head and pushes the mi
 
 `--replace-own --env <env>` reads each environment's history first, and refuses (exit 1, nothing written) a migration one of them records, with `yodel new: refused: <id> is applied in <env>, so it is not replaced`. chant's reply on the pull request names the migration and the environment from that line.
 
-`yodel lint` reports `unmigrated` while the declared schema is ahead of the newest migration ([Lint](lint.md)), which is the finding the commit job's check trigger starts `yodel new` on.
+The job runs the command in a git worktree of the head, outside the checkout it installed, so the worktree has no `node_modules`. yodel then resolves the packages `chant.config.ts` and `src/` import from its own install, the checkout's (or the CI image's), for any file with no `node_modules` above it. With `CHANT_COMMIT_PR` set, `yodel new` leaves `src/sql-types.d.ts` as it is, since the job pushes a change to `migrations/` only.
+
+`yodel lint` reports `unmigrated` while the declared schema is ahead of the newest migration ([Lint](lint.md)), which is the finding the commit job's check trigger starts `yodel new` on. `/yodel new` on a pull request runs it there ([The migration committed to the pull request](workflows.md#yodel-new-the-migration-committed-to-the-pull-request)).
 
 ## Hand-written migrations
 
