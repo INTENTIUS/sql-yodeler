@@ -20,6 +20,12 @@
  *       `/yodel` comment on the open pull request from <branch> (its BREAK
  *       arm's, <branch>-break, in that arm): 0 when the reply holds <text>,
  *       else 1, with the reply.
+ *   tsx scenarios/harness/act.ts move-main <job>
+ *       Waits, up to 15 minutes, for forgejo-runner to start a container
+ *       for <job> (yodel-rebase-push: the command has run on the base it
+ *       merged, and the push has not landed yet), then commits a note to
+ *       main through the forge's API, with [skip ci], so main moves while
+ *       the commit job runs. 0 once main moved.
  *
  * scenarios/harness/run.ts gives them the arm's project and the forge:
  * YODEL_HARNESS_PROJECT, and the YODEL_HARNESS_FORGEJO_URL, _REPO and _ADMIN
@@ -103,10 +109,41 @@ async function reply(a: ForgeAccess, branch: string, text: string): Promise<numb
   }
 }
 
+/** forgejo-runner's job containers carry this in their names (chant's JOB_CONTAINER_MARK). */
+const JOB_CONTAINER_MARK = "ACTIONS-TASK";
+
+/** Whether `docker ps` names (one per line) show a running container of `job`. */
+export function jobRunning(names: string, job: string): boolean {
+  return names.split("\n").some((n) => n.includes(JOB_CONTAINER_MARK) && n.includes(`JOB-${job}`));
+}
+
+/** Once `job`'s container is up, a commit on main: a note, with [skip ci], so no pipeline starts. */
+async function moveMain(a: ForgeAccess, job: string): Promise<number> {
+  const deadline = Date.now() + 15 * 60_000;
+  for (;;) {
+    const ps = await run("docker", ["ps", "--format", "{{.Names}}"], { cwd: process.cwd(), timeoutMs: 30_000, echo: false });
+    if (ps.code === 0 && jobRunning(ps.out, job)) break;
+    if (Date.now() > deadline) {
+      process.stderr.write(`no ${job} job started in 15 minutes${ps.code === 0 ? "" : ` (docker ps exited ${String(ps.code)}: ${ps.err.trim()})`}\n`);
+      return 1;
+    }
+    await new Promise((res) => setTimeout(res, 2_000));
+  }
+  const at = new Date().toISOString();
+  const path = `notes/moved-${at.replace(/[^0-9]/g, "")}.md`;
+  await forgejo(a, a.admin, "POST", `/repos/${a.repo}/contents/${path}`, {
+    branch: "main",
+    message: `chore: main moves while ${job} runs [skip ci]`,
+    content: Buffer.from(`main moved at ${at}, while ${job} ran.\n`).toString("base64"),
+  });
+  process.stdout.write(`main moved: ${path}, while ${job} ran\n`);
+  return 0;
+}
+
 export async function act(argv: string[]): Promise<number> {
   const [verb, env, ...rest] = argv;
   if (!verb || !env) {
-    process.stderr.write("usage: tsx scenarios/harness/act.ts approve|override|audit <env> [--rule <id> --reason <text>], or reply <branch> <text>\n");
+    process.stderr.write("usage: tsx scenarios/harness/act.ts approve|override|audit <env> [--rule <id> --reason <text>], reply <branch> <text>, or move-main <job>\n");
     return 2;
   }
   if (verb === "reply") {
@@ -117,6 +154,7 @@ export async function act(argv: string[]): Promise<number> {
     }
     return reply(forgeAccess(process.env, "", ""), env, text);
   }
+  if (verb === "move-main") return moveMain(forgeAccess(process.env, "", ""), env);
   const p = project();
   const a = forgeAccess(process.env, "", "");
   // yodel approve starts the waiting job again through Forgejo's API with this token.
@@ -144,7 +182,7 @@ export async function act(argv: string[]): Promise<number> {
     case "audit":
       return (await run("npx", ["yodel", "report", env], { cwd: p.dir, env: p.env, timeoutMs: 600_000 })).code;
     default:
-      process.stderr.write(`act.ts: ${verb} is not approve, override, audit or reply\n`);
+      process.stderr.write(`act.ts: ${verb} is not approve, override, audit, reply or move-main\n`);
       return 2;
   }
 }

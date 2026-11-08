@@ -28,6 +28,13 @@
  *   refused, since the job may change migrations/ only. BREAK: the push
  *   jobs land without the path check (CHANT_COMMIT_HARNESS_BREAK=paths), so
  *   that change is pushed.
+ * - sy-rebase-<dialect> (claim forge, #313): two pull requests each add a
+ *   migration on the same parent; once one merges, the other's migrations
+ *   directory forks with main's, and `/yodel rebase` on it gets chant's
+ *   commit job. main moves again while the job runs, so the push is
+ *   refused: the base moved. BREAK: the push jobs land without the
+ *   moved-base check (CHANT_COMMIT_HARNESS_BREAK=moved-base), so the merge
+ *   of the stale base is pushed.
  *
  * The setup of each scenario (which environments the project keeps, its
  * policy, its project job) is {@link SETUPS}; the overlays its steps name
@@ -54,6 +61,12 @@ export interface Setup {
   policy: boolean;
   /** The overlays the steps name, in the order the scenario merges them; each is made on top of the ones before. */
   overlays: readonly string[];
+  /**
+   * false: the project keeps no src/sql-types.d.ts. Two branches that each
+   * refresh it change the same lines, so git could not merge them, and the
+   * rebase scenario needs a merge that only the migrations fork.
+   */
+  sqlTypes?: false;
 }
 
 export const SETUPS: Readonly<Record<string, Setup>> = {
@@ -61,6 +74,7 @@ export const SETUPS: Readonly<Record<string, Setup>> = {
   "sy-waves": { claim: "waves", waves: ["dev", "prod"], projectJob: false, policy: false, overlays: ["add-note"] },
   "sy-approval": { claim: "approval", waves: ["dev"], projectJob: false, policy: true, overlays: ["add-note", "loosen-gate", "drop-note"] },
   "sy-new": { claim: "forge", waves: ["dev"], projectJob: false, policy: false, overlays: ["unmigrated-note", "legacy-source"] },
+  "sy-rebase": { claim: "forge", waves: ["dev"], projectJob: false, policy: false, overlays: ["add-note", "add-memo"], sqlTypes: false },
 };
 
 export const dialectOf = (id: string): Dialect => (id.endsWith("-clickhouse") ? "ch" : "pg");

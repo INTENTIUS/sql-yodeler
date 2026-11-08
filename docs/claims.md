@@ -48,3 +48,5 @@ These harness scenarios have no recorded row yet. Each is listed here as pending
 | forge | INTENTIUS/sql-yodeler | `sy-forge-postgres` | lint with the replay, the plan comment and the approved apply on Forgejo, and lint failing a forked migration (Postgres template) |
 | forge | INTENTIUS/sql-yodeler | `sy-new-clickhouse` | /yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (ClickHouse template) |
 | forge | INTENTIUS/sql-yodeler | `sy-new-postgres` | /yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (Postgres template) |
+| forge | INTENTIUS/sql-yodeler | `sy-rebase-clickhouse` | /yodel rebase on a fork two merged branches make, refused on Forgejo when main moves while it runs (ClickHouse template) |
+| forge | INTENTIUS/sql-yodeler | `sy-rebase-postgres` | /yodel rebase on a fork two merged branches make, refused on Forgejo when main moves while it runs (Postgres template) |

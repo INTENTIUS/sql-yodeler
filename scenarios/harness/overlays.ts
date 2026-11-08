@@ -24,6 +24,12 @@
  *   generated file nor a migration. `/yodel new` writes the migration and
  *   `src/legacy.generated.ts`, a file outside migrations/ that no guard
  *   covers, which the commit job may not push.
+ * - add-memo: a memos table of its own, in src/memo.ts, and its migration,
+ *   made on the base rather than on the overlays before it. Opened beside
+ *   add-note and left open while add-note merges, its migration follows
+ *   the same parent as add-note's: the fork two merged branches make, which
+ *   `/yodel rebase` settles. The files differ from add-note's, so git merges
+ *   the two branches cleanly.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
@@ -32,9 +38,12 @@ import type { Dialect } from "../lib/claim.js";
 import { run } from "../lib/exec.js";
 import { ddlToDeclarations } from "../../src/sources/ddl.js";
 
-export type OverlayName = "add-note" | "fork" | "loosen-gate" | "drop-note" | "unmigrated-note" | "legacy-source";
+export type OverlayName = "add-note" | "fork" | "loosen-gate" | "drop-note" | "unmigrated-note" | "legacy-source" | "add-memo";
 
-const OVERLAYS: readonly string[] = ["add-note", "fork", "loosen-gate", "drop-note", "unmigrated-note", "legacy-source"];
+const OVERLAYS: readonly string[] = ["add-note", "fork", "loosen-gate", "drop-note", "unmigrated-note", "legacy-source", "add-memo"];
+
+/** The overlays made on the base, not on the ones before them. */
+const FROM_BASE: readonly OverlayName[] = ["add-memo"];
 
 export const isOverlay = (name: string): name is OverlayName => OVERLAYS.includes(name);
 
@@ -84,6 +93,31 @@ export function templateNamespace(schema: string, dialect: Dialect): string {
 export const legacyDdl = (ns: string, dialect: Dialect): string =>
   dialect === "ch" ? `CREATE TABLE ${ns}.legacy (id UInt64) ENGINE = MergeTree ORDER BY id;\n` : `CREATE TABLE ${ns}.legacy (id bigint PRIMARY KEY);\n`;
 
+/** src/memo.ts: a memos table in the template's schema (Postgres) or database (ClickHouse). */
+export function memoModule(dialect: Dialect): string {
+  return dialect === "ch"
+    ? `import { table } from "@intentius/chant-lexicon-sql/clickhouse";
+import { db } from "./schema.js";
+
+export const memos = table\`
+  CREATE TABLE \${db}.memos (
+    id   UInt64,
+    body String
+  )
+  ENGINE = MergeTree
+  ORDER BY id\`;
+`
+    : `import { table } from "@intentius/chant-lexicon-sql/postgres";
+import { app } from "./schema.js";
+
+export const memos = table\`
+  CREATE TABLE \${app}.memos (
+    id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    body text NOT NULL
+  )\`;
+`;
+}
+
 /** The file yodel writes from the DDL source `legacy`, which the legacy-source overlay leaves for `/yodel new` to write. */
 export const LEGACY_GENERATED = join("src", "legacy.generated.ts");
 
@@ -127,6 +161,10 @@ export async function makeChange(c: Checkout, name: OverlayName): Promise<void> 
       await sh(c, "npx", ["chant", "sql", "types", "--output", join("src", "sql-types.d.ts")]);
       return;
     }
+    case "add-memo":
+      writeFileSync(join(c.dir, "src", "memo.ts"), memoModule(c.dialect));
+      await sh(c, "npx", ["yodel", "new", "add-memo"]);
+      return;
     case "drop-note":
       writeFileSync(schemaPath, editColumn(readFileSync(schemaPath, "utf8"), c.dialect, "note", "drop"));
       await sh(c, "npx", ["yodel", "new", "drop-note"]);
@@ -174,8 +212,10 @@ export async function makeOverlays(base: Checkout, clone: string, names: readonl
   const c: Checkout = { ...base, dir: clone, env: { ...base.env, PATH: `${join(base.dir, "node_modules", ".bin")}:${base.env.PATH ?? ""}` } };
   if (!existsSync(join(clone, "node_modules"))) symlinkSync(join(base.dir, "node_modules"), join(clone, "node_modules"));
   const out = new Map<string, Record<string, string>>();
+  const start = (await sh(c, "git", ["rev-parse", "HEAD"])).trim();
   for (const name of names) {
     if (!isOverlay(name)) throw new Error(`${name} is not an overlay sql-yodeler's scenarios make (${OVERLAYS.join(", ")})`);
+    if (FROM_BASE.includes(name)) await sh(c, "git", ["checkout", "-q", "--detach", start]);
     await makeChange(c, name);
     const left = LEFT_OUT[name] ?? [];
     const files = Object.fromEntries(Object.entries(await changedFiles(c)).filter(([f]) => !left.includes(f)));
