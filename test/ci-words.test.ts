@@ -41,7 +41,7 @@ const capture = () => {
 };
 
 describe("yodel's words (#287)", () => {
-  it("name yodel, environments, /yodel new as the one comment command, and sql-yodeler's op and wave gates", () => {
+  it("name yodel, environments, /yodel new and /yodel rebase as the comment commands, and sql-yodeler's op and wave gates", () => {
     expect(YODEL_WORDS.product).toBe("yodel");
     expect(YODEL_WORDS.stages.plan).toBe("plan");
     expect(YODEL_WORDS.stages.apply).toBe("apply");
@@ -49,7 +49,7 @@ describe("yodel's words (#287)", () => {
     expect(YODEL_WORDS.verbs).toEqual({ plan: ["plan", "planned"], apply: ["apply", "applied"] });
     expect(YODEL_WORDS.noun).toEqual(["environment", "environments"]);
     // #285 ruling E: merge only, so no command a comment could start an apply with. /yodel new is the commit job (#312).
-    expect(YODEL_WORDS.commands).toEqual({ new: "commit" });
+    expect(YODEL_WORDS.commands).toEqual({ new: "commit", rebase: "commit" });
     expect(YODEL_WORDS.op).toBe("yodel-apply");
     expect(YODEL_WORDS.gateName).toBe("yodel-apply-wave-{k}");
     expect(YODEL_WORDS.approval).toBe("per-wave");
@@ -65,7 +65,7 @@ describe("yodel's words (#287)", () => {
   it.skipIf(!hasProduct)("chant's assertProductWords accepts them, and refuses an apply command with no apply job", () => {
     const words = cp("assertProductWords")(YODEL_WORDS as never) as { product: string; commands: Record<string, string>; gateName: string };
     expect(words.product).toBe("yodel");
-    expect(words.commands).toEqual({ new: "commit" });
+    expect(words.commands).toEqual({ new: "commit", rebase: "commit" });
     expect(words.gateName).toBe("yodel-apply-wave-{k}");
     expect(() => cp("assertProductWords")({ ...YODEL_WORDS, commands: { apply: "apply" } } as never, { jobs: ["plan"] } as never)).toThrow(/needs a apply job/);
   });

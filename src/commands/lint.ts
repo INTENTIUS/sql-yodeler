@@ -19,7 +19,7 @@ import { loadPolicies, policyRules } from "../lint/policies.js";
 import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
-const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json | --format <format> [--output <file>]] [--dir <project>] [--update-checksum <id>]... [--rules] [--commit-trigger new]";
+const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json | --format <format> [--output <file>]] [--dir <project>] [--update-checksum <id>]... [--rules] [--commit-trigger new|rebase]";
 
 const help = `${usage}
 
@@ -124,10 +124,12 @@ Options:
                           Refused without it, --reset or not
   --keep                  with --replay: leave the replayed database in place
   --rules                 list the rules and their levels, and exit
-  --commit-trigger new    exit as chant's commit job reads it (#312): 2 when
-                          lint finds unmigrated, so /yodel new follows, 1 when
-                          the lint fails otherwise, 0 when not; the report
-                          is printed as without it
+  --commit-trigger new|rebase
+                          exit as chant's commit job reads it (#312, #313):
+                          2 when lint finds unmigrated (new) or a fork
+                          (rebase), so /yodel new or /yodel rebase follows,
+                          1 when the lint fails otherwise, 0 when not; the
+                          report is printed as without it
   --json                  print the findings as JSON (--format json)
   --format <format>       text (the default), json, or the findings as a
                           forge shows them on the migration files (#129):
@@ -170,7 +172,7 @@ interface LintArgs {
   update: string[];
   rules: boolean;
   /** --commit-trigger: the commit job whose finding sets the exit code. */
-  commitTrigger: "new" | undefined;
+  commitTrigger: "new" | "rebase" | undefined;
 }
 
 function parseLintArgs(args: string[]): LintArgs {
@@ -225,9 +227,9 @@ function parseLintArgs(args: string[]): LintArgs {
   };
 }
 
-function commitTriggerOf(value: unknown): "new" | undefined {
+function commitTriggerOf(value: unknown): "new" | "rebase" | undefined {
   if (value === undefined) return undefined;
-  if (value !== "new") throw new YodelError(`--commit-trigger takes new (the commit job /yodel new), got ${JSON.stringify(value)}\n${usage}`);
+  if (value !== "new" && value !== "rebase") throw new YodelError(`--commit-trigger takes new or rebase (the commit jobs /yodel new and /yodel rebase), got ${JSON.stringify(value)}\n${usage}`);
   return value;
 }
 

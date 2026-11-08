@@ -316,8 +316,13 @@ export interface CiConfig {
    * ahead by (`yodel new --if-changed --replace-own`) and pushes it to the
    * pull request's branch. `off` renders no job, `comment` (the default)
    * the job that answers the comment, and `on-change` that job and one
-   * that runs after each push when `yodel lint` finds `unmigrated`. A
-   * push token is needed on each forge (docs/workflows.md).
+   * that runs after each push when `yodel lint` finds `unmigrated`.
+   * `rebase` is `/yodel rebase` (#313), which merges the base branch into
+   * the head and rebases a forked migrations directory (`yodel rebase
+   * --env <env>...`, every environment the apply pipeline applies, read
+   * with its reader): `off`, `comment` (the default) or `on-fork`, also
+   * after each push when lint finds `fork`. On GitLab it runs after the
+   * check only. A push token is needed on each forge (docs/workflows.md).
    */
   respond?: CiRespond;
 }
@@ -325,10 +330,14 @@ export interface CiConfig {
 /** `ci.respond` (#312). */
 export interface CiRespond {
   new?: RespondNew;
+  rebase?: RespondRebase;
 }
 
 export type RespondNew = "off" | "comment" | "on-change";
 export const RESPOND_NEW: readonly RespondNew[] = ["off", "comment", "on-change"];
+
+export type RespondRebase = "off" | "comment" | "on-fork";
+export const RESPOND_REBASE: readonly RespondRebase[] = ["off", "comment", "on-fork"];
 
 /** The name `yodel new` takes with none given, `{pr}` the pull request's number (#311). */
 export const DEFAULT_CI_NEW_NAME = "pr-{pr}";

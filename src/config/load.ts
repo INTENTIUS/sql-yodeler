@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, RESPOND_REBASE, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
@@ -198,8 +198,9 @@ function checkCi(value: unknown, where: string): void {
   for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new, respond)`);
   if (value.respond !== undefined) {
     const r = value.respond;
-    if (!isRecord(r) || !Object.keys(r).every((k) => k === "new")) throw new YodelError(`${where}.respond: expected { new? }`);
+    if (!isRecord(r) || !Object.keys(r).every((k) => k === "new" || k === "rebase")) throw new YodelError(`${where}.respond: expected { new?, rebase? }`);
     if (r.new !== undefined && !(RESPOND_NEW as readonly unknown[]).includes(r.new)) throw new YodelError(`${where}.respond.new: one of ${RESPOND_NEW.join(", ")}`);
+    if (r.rebase !== undefined && !(RESPOND_REBASE as readonly unknown[]).includes(r.rebase)) throw new YodelError(`${where}.respond.rebase: one of ${RESPOND_REBASE.join(", ")}`);
   }
   if (value.new !== undefined) {
     const n = value.new;

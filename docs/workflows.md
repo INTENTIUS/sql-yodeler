@@ -208,6 +208,21 @@ The push job reads its token from `YODEL_PUSH_TOKEN`:
 
 In chant's commit job, `--replace-own` reads no environment's history yet (INTENTIUS/chant#4815), so a project that applies a pull request's migration before merge should not let `/yodel new` replace one that ran there.
 
+### /yodel rebase: a forked migrations directory on the pull request
+
+When the base branch gains a migration after a pull request added its own, the two follow the same parent and `yodel lint` fails on the fork. Commenting `/yodel rebase` settles it in CI, through the same commit job as `/yodel new`, with two differences:
+
+- The job merges the base branch's tip into the head before the command runs, and the commit it pushes is that merge with the rebase's change, so its parents are the head and the base tip. A merge that conflicts is refused. When the base moves while the job runs, nothing is pushed, and the reply says to ask again.
+- The command is `yodel rebase --env <env>...` for every environment the apply pipeline applies ([Forks and yodel rebase](migrations.md#forks-and-yodel-rebase)). It reads each history with that environment's reader. On GitHub and Forgejo each of those variables comes from the secret of the same name, on the command's step only. On GitLab they are the project's CI/CD variables. No writer variable and no `YODEL_ROLE` reaches it.
+
+`ci.respond.rebase` picks when it runs: `comment` (the default), `on-fork` (that, and a check on each push to a pull request, `yodel lint --commit-trigger rebase`, which exits 2 on a fork, and the job follows it), or `off`. On GitHub the check runs on the pull request's merge commit, so it sees a fork with the base.
+
+On GitLab a comment's job runs in a pipeline of the default branch, which cannot read the merge request's target branch, so chant refuses the base merge there. `/yodel rebase` runs on GitLab after the merge request's check only (`.gitlab/yodel-rebase.gitlab-ci.yml`), for `comment` and `on-fork` alike. A merge request pipeline runs on the source branch unless the project turns on merged results pipelines, and without them the check sees no fork.
+
+A reader whose password a cloud token source mints (`rds-iam`, `cloud-sql-iam`, `entra`) gets no identity in chant's commit job yet. For such a project `ci.respond.rebase` is `off` by default, and `yodel ci` refuses the other values.
+
+When both branches change one object, chant's reply does not yet name the object (INTENTIUS/chant#4821). The job's log has yodel's refusal line, which does.
+
 ### Upgrading the pipelines to chant 0.124.67
 
 From chant 0.124.67 the pipelines run on chant's product pipeline, the one terragucci and plywood use ([SQL Yodeler on chant CI](chant-ci.md#from-chant-012467) has each part). A project made from a template before then, or one whose chant is older, moves in one commit:

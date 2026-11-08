@@ -146,7 +146,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     // /yodel new (#312) reaches the templates with the release that ships it (AGENTS.md, Releasing): until
     // npm run templates:render writes its workflow there, the committed template is what yodel ci renders without it.
     const staged = !existsSync(join(dir, ".github", "workflows", "yodel-new.yml"));
-    const rendered = await render(dir, staged ? { respondNew: "off" } : {});
+    const rendered = await render(dir, staged ? { respondNew: "off", respondRebase: "off" } : {});
     expect(rendered.map((f) => f.path)).toContain("chant.workspace.json");
     expect(manifest.files).toContain("chant.workspace.json");
     for (const file of rendered) {
