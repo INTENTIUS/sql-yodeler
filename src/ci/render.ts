@@ -352,11 +352,14 @@ const secrets = (names: readonly string[]) => Object.fromEntries(names.map((n) =
 
 /**
  * The approvals: `chant approve` records them on the chant/lifecycle branch,
- * and approvers push it. A CI checkout fetches one ref, so fetch this one too.
- * The remote-tracking ref is what chant's push lease reads.
+ * and approvers push it. A CI checkout fetches one ref, so each job fetches
+ * this one too, through chant's reader (`yodel ci --fetch-ledger`, #326):
+ * yodel writes neither the branch nor the remote-tracking ref chant's push
+ * leases against. `yodel` is the project's, named by path, as the line may
+ * run before the install's PATH reaches the step; in the yodel image, the
+ * image's.
  */
-export const FETCH_APPROVALS =
-  "git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'";
+export const fetchApprovals = (tc: Pick<Toolchain, "yodelImage"> = { yodelImage: false }): string => `${tc.yodelImage ? "yodel" : "./node_modules/.bin/yodel"} ci --fetch-ledger`;
 
 
 /** The watch reads; it never pushes. See the comment at the top. */
@@ -536,7 +539,7 @@ function setupSteps(inContainer: boolean, tc: Toolchain, approvals = true): ASte
   const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": 0 } })];
   if (!inContainer) steps.push(new Step({ uses: SETUP_NODE, with: { "node-version": 22, cache: "npm" } }));
   steps.push(...installLines(tc, "github").map((run) => new Step({ run })));
-  if (approvals) steps.push(new Step({ name: "Fetch the approvals (chant/lifecycle)", run: FETCH_APPROVALS }));
+  if (approvals) steps.push(new Step({ name: "Fetch the approvals (chant/lifecycle)", run: fetchApprovals(tc) }));
   return steps;
 }
 
@@ -735,7 +738,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     ".yodel",
     new GitLabJob({
       image: new Image({ name: tc.image }),
-      before_script: [...installLines(tc, "gitlab"), FETCH_APPROVALS],
+      before_script: [...installLines(tc, "gitlab"), fetchApprovals(tc)],
     }),
   );
   const svc = REPLAY_SERVICE[dialect];
@@ -1068,7 +1071,7 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
       {
         specFile: WAVES_SPEC,
         image: tc.image,
-        beforeScript: [...installLines(tc, forge), FETCH_APPROVALS],
+        beforeScript: [...installLines(tc, forge), fetchApprovals(tc)],
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
       },
       dir,
@@ -1385,7 +1388,7 @@ export async function watchPipelines(dir: string, envs_: Environments, product: 
       forge,
       {
         image: tc.image,
-        beforeScript: [...installLines(tc, forge), FETCH_APPROVALS, NO_PUSH],
+        beforeScript: [...installLines(tc, forge), fetchApprovals(tc), NO_PUSH],
         extraScript,
         ...(forge === "gitlab" ? { opsStage: "ops", opsFileName: GITLAB_WATCH_FILE } : {}),
       },

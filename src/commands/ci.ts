@@ -4,7 +4,7 @@ import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, YodelError } from "../project.js";
 
-const usage = "usage: yodel ci [--check] [--dir <project>]\n       yodel ci --replay [--dir <project>] [-- <yodel lint options>]";
+const usage = "usage: yodel ci [--check] [--dir <project>]\n       yodel ci --replay [--dir <project>] [-- <yodel lint options>]\n       yodel ci --fetch-ledger [--dir <project>]";
 
 const help = `${usage}
 
@@ -55,6 +55,11 @@ Options:
                    replay profile pointed at it, yodel lint --replay replay
                    --reset, and the server removed. Options after -- go to
                    yodel lint. The exit code is yodel lint's
+  --fetch-ledger   what each job runs before it reads an approval: fetch
+                   chant/lifecycle through chant's reader, which fetches the
+                   way chant's writer expects and never moves the ref its
+                   push leases against. Exit 1 only when this checkout's
+                   branch has diverged from the remote's
   -C, --dir <dir>  the project directory (default: the working directory)
 
 Exit codes:
@@ -66,11 +71,12 @@ interface CiArgs {
   dir: string;
   check: boolean;
   replay: boolean;
+  fetchLedger: boolean;
   rest: string[];
 }
 
 function parseCiArgs(args: readonly string[]): CiArgs {
-  const out: CiArgs = { dir: process.cwd(), check: false, replay: false, rest: [] };
+  const out: CiArgs = { dir: process.cwd(), check: false, replay: false, fetchLedger: false, rest: [] };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--") {
@@ -79,6 +85,7 @@ function parseCiArgs(args: readonly string[]): CiArgs {
     }
     if (a === "--check") out.check = true;
     else if (a === "--replay") out.replay = true;
+    else if (a === "--fetch-ledger") out.fetchLedger = true;
     else if (a === "--dir" || a === "-C") {
       const v = args[++i];
       if (v === undefined) throw new YodelError(`${a} needs a directory\n${usage}`);
@@ -86,7 +93,7 @@ function parseCiArgs(args: readonly string[]): CiArgs {
     } else if (a?.startsWith("--dir=")) out.dir = a.slice("--dir=".length);
     else throw new YodelError(`unknown argument ${String(a)}\n${usage}`);
   }
-  if (out.check && out.replay) throw new YodelError(`--check and --replay are two things; give one\n${usage}`);
+  if ([out.check, out.replay, out.fetchLedger].filter(Boolean).length > 1) throw new YodelError(`--check, --replay and --fetch-ledger are three things; give one\n${usage}`);
   if (out.rest.length > 0 && !out.replay) throw new YodelError(`options after -- are for --replay\n${usage}`);
   return out;
 }
@@ -99,6 +106,10 @@ export const ci: Command = {
   run: (args, io) =>
     guarded("ci", io, args, help, async () => {
       const a = parseCiArgs(args);
+      if (a.fetchLedger) {
+        const { fetchLedger } = await import("../chant/ledger-fetch.js");
+        return fetchLedger(resolve(a.dir), io);
+      }
       // The project, as every command reads it: chant.config.ts and a checked yodel.config.ts.
       const dir = (await loadProject(resolve(a.dir))).dir;
       if (a.replay) {

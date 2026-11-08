@@ -24,7 +24,7 @@ Audit (7 entries):
   ...
 ```
 
-By default it reads every environment in `chant.config.ts`'s `sql.profiles`, in that order; name some to read only those (`yodel report dev prod`). In CI, fetch the `chant/lifecycle` branch first so the ledger is there. It reads only and takes no lock.
+By default it reads every environment in `chant.config.ts`'s `sql.profiles`, in that order; name some to read only those (`yodel report dev prod`). In CI, fetch the `chant/lifecycle` branch first so the ledger is there (`npx yodel ci --fetch-ledger`, as the jobs `yodel ci` renders do). It reads only and takes no lock.
 
 ## The audit log
 

@@ -157,7 +157,7 @@ describe("yodel ci", () => {
     expect(step(forgejo)?.env).toEqual({ CHANT_FORGE_TOKEN: "${{ secrets.CHANT_FORGE_TOKEN }}" });
     expect(readFileSync(join(dir, ".forgejo/workflows/yodel-apply-resume.yml"), "utf8")).toContain("write:repository");
     // The fetch of chant/lifecycle before it, where the approvals are.
-    for (const doc of [github, forgejo]) expect(doc.jobs.resume.steps.some((s) => s.run?.includes("refs/heads/chant/lifecycle"))).toBe(true);
+    for (const doc of [github, forgejo]) expect(doc.jobs.resume.steps.some((s) => s.run?.includes("yodel ci --fetch-ledger"))).toBe(true);
 
     // GitLab: a schedule-only job in the apply file, its stage in the main file, and a Developer token named.
     const apply = parseYAMLDocument(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { stage?: string; rules?: unknown; script?: string[] }>;
@@ -248,8 +248,9 @@ describe("yodel ci", () => {
     expect(checkYodelConfig({ ci: { resume: { schedule: "*/10 * * * *" } } }, "yodel.config.ts").ci).toEqual({ resume: { schedule: "*/10 * * * *" } });
   });
 
-  it("takes --check or --replay, not both, and options after -- only with --replay", async () => {
-    expect((await yodel(["ci", "--check", "--replay"])).err).toContain("--check and --replay are two things");
+  it("takes one of --check, --replay and --fetch-ledger, and options after -- only with --replay", async () => {
+    expect((await yodel(["ci", "--check", "--replay"])).err).toContain("--check, --replay and --fetch-ledger are three things");
+    expect((await yodel(["ci", "--check", "--fetch-ledger"])).err).toContain("are three things; give one");
     expect((await yodel(["ci", "--", "--json"])).err).toContain("options after -- are for --replay");
   });
 });
