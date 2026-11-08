@@ -1,0 +1,18 @@
+{
+  "name": "sql-yodeler",
+  "schema": 1,
+  "minReader": "0.124.77",
+  "members": [],
+  "ci": {
+    "green": {
+      "branch": "main",
+      "window": "24h",
+      "phases": {
+        "check": ["check"],
+        "image": ["image"],
+        "site": ["docs-site"]
+      },
+      "require": ["check", "image", "site"]
+    }
+  }
+}

@@ -25,7 +25,6 @@ import * as claims from "./claims.js";
 import * as claimsWeekly from "./claims-weekly.js";
 import * as image from "./image.js";
 import * as pages from "./pages.js";
-import * as publish from "./publish.js";
 import * as templates from "./templates.js";
 import { rendered } from "./shared.js";
 
@@ -33,8 +32,12 @@ interface Declared {
   workflow: unknown;
 }
 
-/** Output file name (without .yml) to its declaration. publish must stay publish: npm's trusted publisher names the file. */
-const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claimsWeekly, pages, publish, templates };
+/**
+ * Output file name (without .yml) to its declaration. publish.yml is not one:
+ * `chant release workflow` writes it from chant.config.ts's release block
+ * (#319), and test/release-config.test.ts checks it.
+ */
+const declared: Record<string, Declared> = { ci, claims, "claims-weekly": claimsWeekly, pages, templates };
 
 const repoDir = fileURLToPath(new URL("../../", import.meta.url));
 

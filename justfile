@@ -38,9 +38,9 @@ serve:
 bench:
     npm run bench
 
-# Open the release pull request, or tag the release once main is at version (scripts/release.sh; --dry-run says what it would do).
-release version *flags:
-    npm run release -- {{version}} {{flags}}
+# Start the release of package.json's version: one dispatched run of publish.yml, chant's release workflow (AGENTS.md, Releasing).
+release:
+    npm run release
 
 # The e2e suites, writing only to databases and schemas named <prefix>_*; YODEL_E2E_CLICKHOUSE_URL and YODEL_E2E_POSTGRES_* say where the emulator is (test/e2e/emulator.ts).
 e2e prefix *args:
