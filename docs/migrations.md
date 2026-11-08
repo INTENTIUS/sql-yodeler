@@ -48,6 +48,18 @@ No changes: the declared schema matches the newest migration's recorded schema (
 
 It refuses (exit 1) when the directory is not one chain (a fork, a missing parent) or a migration of that id is already there. `yodel new <name> --sql` writes a migration you write yourself ([below](#hand-written-migrations)). `yodel new <name> --backfill` ends the migration with a backfill step written from `backfills/<name>.json` ([Data migrations](steps.md#backfills)), and `--retain <duration>` keeps the old column of a Postgres rename, or the old table of a rebuild, that long after the switch ([Data migrations](steps.md#postgres-postgresmigrationop)).
 
+### In chant's commit job
+
+chant's commit job runs `yodel new` on the pull request's head and pushes the migration it writes to the branch. It runs exactly `yodel new --if-changed --replace-own [--dir <project>]`:
+
+- With no name, the name is `yodel.config.ts` `ci.new.name` with `{pr}` the pull request's number, which the job sets in `CHANT_COMMIT_PR`; by default `pr-<number>`. Without `CHANT_COMMIT_PR`, `yodel new` needs a name.
+- `--if-changed` compares the build with the newest migration's recorded schema first, and writes nothing (exit 0) when they are the same.
+- `--replace-own` redoes the newest migration when it is the pull request's own: named the same, and holding only what `yodel new` writes from the schema (not hand-written, no backfill step, no `--check`, no `--retain`). Any other newest migration is kept, and the new one follows it. So asking twice gives one migration, and a migration someone wrote by hand on the branch is never written over.
+
+`--replace-own --env <env>` reads each environment's history first, and refuses (exit 1, nothing written) a migration one of them records, with `yodel new: refused: <id> is applied in <env>, so it is not replaced`. chant's reply on the pull request names the migration and the environment from that line.
+
+`yodel lint` reports `unmigrated` while the declared schema is ahead of the newest migration ([Lint](lint.md)), which is the finding the commit job's check trigger starts `yodel new` on.
+
 ## Hand-written migrations
 
 Some changes are yours to write: reference rows a migration ships, a data fix, a statement yodel would not write. `yodel new <name> --sql` writes a hand-written migration: `migration.json` marks it `"source": "sql"`, and `migration.sql` holds a header and no statements. Write them under the header, each ending with `;`, then record them:

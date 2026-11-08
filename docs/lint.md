@@ -53,6 +53,8 @@ refused-step       error
                    a step yodel apply refuses to run: a manual step, or an Op step it does not run
 migration-sql      error
                    migration.sql does not hold a statement as migration.json records it; apply runs migration.json's
+unmigrated         warning
+                   the declared schema has a change no migration records: yodel new would write one (a warning)
 silence            error
                    a yodel:allow line that is malformed, names a rule no statement can silence, has no reason, or silences nothing
 replay             error
@@ -120,6 +122,8 @@ SQLCH128           the check's level, silenceable, clickhouse
 ```
 
 `fork`, `directory`, `checksum`, `unreadable-object` and `checkpoint` are integrity rules: always errors. `unreadable-object` means an object in a recorded schema, or a step, that the `sql` lexicon cannot read or classify; it is never skipped. `destructive`, `pg-rewrite`, `pg-lock`, `ch-mutation` and `ch-rebuild` come from the classifier's class of each statement or step, and can be silenced one statement at a time. The `pg-` and `ch-` rules apply to their own dialect.
+
+`unmigrated` builds the declared schema, offline, and reports a warning when it has a change the newest migration's recorded schema does not, the change `yodel new` would write. It says nothing over a fork or a broken chain (rebase first), when the project has no source directory, or when the build fails (chant's build says why). `lint.rules.unmigrated: "error"` fails the lint on it. chant's commit job reads it to start `yodel new` on a pull request ([In chant's commit job](migrations.md#in-chants-commit-job)).
 
 Two Postgres rules are about access control ([Access control](access.md)). `pg-access` flags a statement that takes access away: a privilege revoked (SQLPG297), a policy dropped (SQLPG292), row-level security turned off or no longer forced (SQLPG293). A revoke on an object the same migration creates is left out, since nobody held the privilege. A wave with gate `on-destructive` waits on it. `pg-rls-not-forced`, a warning, flags a migration that enables a table's row-level security while its recorded schema does not force it, so the table's owner is not held to its policies.
 

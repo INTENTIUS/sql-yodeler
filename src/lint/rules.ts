@@ -23,7 +23,8 @@
  *
  * The rest (`refused-step`, `pg-routine-in-use`, `migration-sql`,
  * `silence`) say a migration will not apply as written or a silence is
- * wrong. Their level can be
+ * wrong, and `unmigrated` (a warning, `./unmigrated.ts`) that the declared
+ * schema is ahead of the newest migration. Their level can be
  * changed in `yodel.config.ts`, but they cannot be silenced.
  */
 
@@ -71,6 +72,7 @@ export const LINT_RULES = {
   "ch-access": statement("ch-access", "ClickHouse: takes access away: a privilege or role revoked from a user or role (SQLCH274)", "clickhouse"),
   "refused-step": shape("refused-step", "a step yodel apply refuses to run: a manual step, or an Op step it does not run"),
   "migration-sql": shape("migration-sql", "migration.sql does not hold a statement as migration.json records it; apply runs migration.json's"),
+  unmigrated: shape("unmigrated", "the declared schema has a change no migration records: yodel new would write one (a warning)", "warning"),
   silence: shape("silence", "a yodel:allow line that is malformed, names a rule no statement can silence, has no reason, or silences nothing"),
 } as const satisfies Record<string, LintRule>;
 

@@ -94,7 +94,7 @@ describe("yodel", () => {
       expect(out).toMatch(/Exit codes:\n {2}0 [\s\S]*\n {2}[2-8] [\s\S]*\n {2}1 /);
     }
     expect((await run(["apply", "-h"])).out).toContain("  3  stopped at the gate");
-    expect((await run(["new", "--help"])).out).toMatch(/^usage: yodel new <name>[\s\S]*Exit codes:\n {2}0 [\s\S]*\n {2}1 /);
+    expect((await run(["new", "--help"])).out).toMatch(/^usage: yodel new \[<name>\][\s\S]*Exit codes:\n {2}0 [\s\S]*\n {2}1 /);
   });
 
   it("fails plan, apply and drift outside a project", async () => {

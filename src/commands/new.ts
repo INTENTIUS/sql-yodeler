@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError, type Project, yodelRefusal } from "../project.js";
+import { DEFAULT_CI_NEW_NAME } from "../config/define.js";
 import { closeVersioned, inspect, openVersioned } from "../versioned/index.js";
 import type { Migration } from "../migrations/index.js";
 import { buildSchema } from "../chant/build.js";
@@ -15,6 +16,7 @@ import {
   createHandWritten,
   createMigration,
   describeExpect,
+  isHandWritten,
   migrationChecks,
   parseCheckArg,
   migrationId,
@@ -29,7 +31,7 @@ import {
 } from "../migrations/index.js";
 import { asBackfill, asForm, BACKFILL_FILE, backfillTemplate, describeForm, describeFormSql, formPath, formProblems, formTemplate, loadBackfill, PG_MIGRATION_OP, REBUILD_OP, TEMPLATE_MARK, type BackfillForm } from "../steps/index.js";
 
-const usage = "usage: yodel new <name> [--sql | --backfill [<file>]] [--retain <duration>] [--check <sql>]... [--replace [--env <env>]...] [--json] [--dir <project>]";
+const usage = "usage: yodel new [<name>] [--sql | --backfill [<file>]] [--retain <duration>] [--check <sql>]... [--replace | --replace-own] [--env <env>]... [--if-changed] [--json] [--dir <project>]";
 
 const help = `${usage}
 
@@ -37,7 +39,10 @@ Writes the next migration, migrations/<YYYYMMDDTHHMM>-<name>/, by diffing
 the newest migration's recorded schema (an empty schema for the first)
 against the current build of the declared schema. Offline: no database,
 dev or otherwise, is read. The name is lowercase letters and digits, words
-joined by - or _. The timestamp is UTC.
+joined by - or _. The timestamp is UTC. With no name, it is yodel.config.ts
+ci.new.name with {pr} the pull request's number from CHANT_COMMIT_PR, which
+chant's commit job sets (default pr-{pr}); without CHANT_COMMIT_PR a name is
+needed.
 
 The migration holds migration.sql (each statement after a comment naming its
 object, rule and class) and migration.json (id, parent, checksum, the
@@ -105,6 +110,20 @@ id, and the old one is removed. It is for a migration you just wrote and
 have not applied: refused when the migration is applied in an environment
 --env names (each one is read), and it says so when git already tracks it.
 
+--replace-own is how chant's commit job runs it (/yodel new): it redoes the
+newest migration when it is this pull request's own, and otherwise writes
+a new one after it, so asking twice gives one migration. The newest is its
+own when it is named <name> (the default name holds the pull request's
+number) and holds only what yodel new writes from the schema: not
+hand-written, no backfill step, no --check and no --retain. A history
+--env names that records it applied refuses the run, exit 1, and nothing
+is written.
+
+--if-changed compares the build with the newest migration's recorded
+schema first, and writes nothing (exit 0) when they are the same, so
+--replace and --replace-own do not write a migration again for a schema it
+already records. Without either, yodel new already writes nothing then.
+
 Options:
   --sql                a hand-written migration: an empty migration.sql to
                        write, recorded with yodel lint --update-checksum <id>
@@ -115,8 +134,12 @@ Options:
   --check <sql>        a pre-migration check that must return no rows
                        (repeatable; "<name>: <sql>" names it)
   --replace            redo the newest migration, named <name>
-  --env <env>          with --replace: refuse if it is applied in <env>
-                       (repeatable)
+  --replace-own        redo the newest migration when it is this pull
+                       request's own, else write a new one
+  --env <env>          with --replace or --replace-own: refuse if it is
+                       applied in <env> (repeatable)
+  --if-changed         write nothing when the build is the newest
+                       migration's recorded schema
   --json               print what was written as JSON
   -C, --dir <dir>      the project directory (default: the working directory)
 
@@ -125,19 +148,23 @@ Exit codes:
      newest recorded schema (then nothing is written)
   1  no migration could be made: a bad config, a declaration chant cannot
      build, a migrations directory that is not one chain (a fork, a missing
-     parent), a migration of that id already there; or --replace refused,
-     nothing written: the newest migration is not named <name>, or it is
-     applied in an environment --env names
+     parent), a migration of that id already there, no name and no
+     CHANT_COMMIT_PR; or --replace or --replace-own refused, nothing
+     written: the newest migration is not named <name> (--replace), or it
+     is applied in an environment --env names
 `;
 
 interface NewArgs {
-  name: string;
+  /** Undefined: ci.new.name, from CHANT_COMMIT_PR. */
+  name: string | undefined;
   json: boolean;
   dir: string;
   /** The file --backfill names; "" for the default form. */
   backfill: string | undefined;
   retain: string | undefined;
   replace: boolean;
+  replaceOwn: boolean;
+  ifChanged: boolean;
   envs: string[];
   checks: MigrationCheck[];
   sql: boolean;
@@ -156,19 +183,37 @@ function parseNewArgs(args: string[]): NewArgs {
       args: bareBackfill(args),
       allowPositionals: true,
       strict: true,
-      options: { json: { type: "boolean" }, dir: { type: "string", short: "C" }, sql: { type: "boolean" }, backfill: { type: "string" }, retain: { type: "string" }, replace: { type: "boolean" }, env: { type: "string", multiple: true }, check: { type: "string", multiple: true } },
+      options: {
+        json: { type: "boolean" },
+        dir: { type: "string", short: "C" },
+        sql: { type: "boolean" },
+        backfill: { type: "string" },
+        retain: { type: "string" },
+        replace: { type: "boolean" },
+        "replace-own": { type: "boolean" },
+        "if-changed": { type: "boolean" },
+        env: { type: "string", multiple: true },
+        check: { type: "string", multiple: true },
+      },
     });
   } catch (e) {
     throw new YodelError(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
   }
   const [name, ...rest] = parsed.positionals;
-  if (name === undefined || rest.length > 0) throw new YodelError(usage);
-  if (parsed.values.env !== undefined && parsed.values.replace !== true) throw new YodelError(`--env goes with --replace\n${usage}`);
-  migrationId(name, new Date()); // a bad name fails before anything is built
+  if (rest.length > 0) throw new YodelError(usage);
+  const replace = parsed.values.replace === true;
+  const replaceOwn = parsed.values["replace-own"] === true;
+  const ifChanged = parsed.values["if-changed"] === true;
+  if (replace && replaceOwn) throw new YodelError(`--replace and --replace-own: give one of them\n${usage}`);
+  if (parsed.values.env !== undefined && !replace && !replaceOwn) throw new YodelError(`--env goes with --replace or --replace-own\n${usage}`);
+  if (name !== undefined) migrationId(name, new Date()); // a bad name fails before anything is built
   const retain = typeof parsed.values.retain === "string" ? parsed.values.retain : undefined;
   const sql = parsed.values.sql === true;
-  if (sql && (parsed.values.backfill !== undefined || parsed.values.retain !== undefined || parsed.values.check !== undefined || parsed.values.replace === true)) {
-    throw new YodelError(`--sql writes a migration you write yourself, so it takes no --backfill, --retain, --check or --replace\n${usage}`);
+  if (sql && (parsed.values.backfill !== undefined || parsed.values.retain !== undefined || parsed.values.check !== undefined || replace || replaceOwn || ifChanged)) {
+    throw new YodelError(`--sql writes a migration you write yourself, so it takes no --backfill, --retain, --check, --replace, --replace-own or --if-changed\n${usage}`);
+  }
+  if (parsed.values.backfill !== undefined && (replaceOwn || ifChanged)) {
+    throw new YodelError(`--backfill writes a migration even when the declared schema has not changed, so it takes no --replace-own or --if-changed\n${usage}`);
   }
   if (retain !== undefined && !DURATION.test(retain)) throw new YodelError(`--retain takes a duration such as 7d, 12h or 0s, got ${JSON.stringify(retain)}\n${usage}`);
   return {
@@ -177,7 +222,9 @@ function parseNewArgs(args: string[]): NewArgs {
     dir: typeof parsed.values.dir === "string" ? parsed.values.dir : process.cwd(),
     backfill: typeof parsed.values.backfill === "string" ? parsed.values.backfill : undefined,
     retain,
-    replace: parsed.values.replace === true,
+    replace,
+    replaceOwn,
+    ifChanged,
     envs: Array.isArray(parsed.values.env) ? parsed.values.env.filter((e): e is string => typeof e === "string") : [],
     checks: parseChecks(parsed.values.check),
     sql,
@@ -295,8 +342,10 @@ export const newCommand: Command = {
   implemented: true,
   run: (args, io) =>
     guarded("new", io, args, help, async () => {
-      const { name, json, dir, backfill: backfillArg, retain, replace, envs, checks, sql } = parseNewArgs(args);
+      const { name: given, json, dir, backfill: backfillArg, retain, replace, replaceOwn, ifChanged, envs, checks, sql } = parseNewArgs(args);
+      if (given === undefined) pullRequest(); // no name and no pull request fails before anything is loaded
       const project = await loadProject(dir);
+      const name = given ?? defaultName(project);
       if (sql) return writeHandWritten(io, project, name, json);
       let backfill: { text: string } | { form: BackfillForm } | undefined;
       if (backfillArg !== undefined) {
@@ -327,14 +376,27 @@ export const newCommand: Command = {
       }
       const migrationsDir = join(project.dir, MIGRATIONS_DIR);
       const ordered = readMigrations(migrationsDir);
-      const replaced = replace ? await replaceable(project, ordered, name, envs, io) : undefined;
-      const previous = replaced ? ordered[ordered.length - 2] : newestMigration(ordered);
-      if (previous && !verifyChecksum(previous).ok) {
-        io.err(`yodel new: warning: ${previous.id}'s files no longer match its recorded checksum; the new migration follows it as recorded\n`);
-      }
+      const newest = newestMigration(ordered);
+      let replaced = replace ? await replaceable(project, ordered, name, envs, io) : undefined;
       const build = await buildSchema(project);
       let made: ReturnType<typeof createMigration>;
+      let previous: Migration | undefined;
       try {
+        if (ifChanged || replaceOwn) {
+          // The newest migration already records the build: nothing to write, whatever --replace or --replace-own would redo.
+          const ahead = createMigration({ name, build: build.output, previous: newest });
+          if (ahead.id === undefined) {
+            const from = newest ? `the newest migration's recorded schema (${newest.id})` : "an empty schema (the declared schema declares nothing)";
+            if (json) io.out(`${JSON.stringify({ written: false, parent: newest?.id ?? null, dialect: project.dialect, hints: ahead.statements.hints }, null, 2)}\n`);
+            else io.out(`No changes: the declared schema matches ${from}. Nothing written.\n`);
+            return 0;
+          }
+        }
+        if (replaceOwn) replaced = await ownMigration(project, ordered, name, envs, io);
+        previous = replaced ? ordered[ordered.length - 2] : newest;
+        if (previous && !verifyChecksum(previous).ok) {
+          io.err(`yodel new: warning: ${previous.id}'s files no longer match its recorded checksum; the new migration follows it as recorded\n`);
+        }
         made = createMigration({ name, build: build.output, previous, ...(backfill ? { backfill } : {}), ...(retain !== undefined ? { retain } : {}), ...(checks.length > 0 ? { checks } : {}) });
       } finally {
         build.dispose();
@@ -409,6 +471,71 @@ function writeHandWritten(io: Io, project: Project, name: string, json: boolean)
   return 0;
 }
 
+
+/**
+ * The name `yodel new` takes with none given (#311): `ci.new.name` (default
+ * `pr-{pr}`) with `{pr}` the pull request's number, from `CHANT_COMMIT_PR`,
+ * which chant's commit job sets in the command's environment.
+ */
+export function defaultName(project: Project, env: NodeJS.ProcessEnv = process.env): string {
+  return (project.yodel?.config.ci?.new?.name ?? DEFAULT_CI_NEW_NAME).replaceAll("{pr}", pullRequest(env));
+}
+
+/** `CHANT_COMMIT_PR`, the pull request's number, or a usage error when it is not set to one. */
+function pullRequest(env: NodeJS.ProcessEnv = process.env): string {
+  const pr = env.CHANT_COMMIT_PR ?? "";
+  if (!/^[1-9][0-9]*$/.test(pr)) {
+    throw new YodelError(
+      `yodel new needs a name: give one, or run it in chant's commit job, which sets CHANT_COMMIT_PR to the pull request's number for yodel.config.ts ci.new.name (default ${DEFAULT_CI_NEW_NAME})` +
+        `${pr === "" ? "" : `; CHANT_COMMIT_PR is ${JSON.stringify(pr)}, not a number`}\n${usage}`,
+    );
+  }
+  return pr;
+}
+
+/** What a migration holds that `yodel new <name>` alone does not write from the schema, or undefined when it holds none. */
+function notPlain(m: Migration): string | undefined {
+  if (isHandWritten(m.document)) return "hand-written statements";
+  if (m.document.steps.some((st) => asBackfill(st) !== undefined)) return "a backfill step";
+  if ((m.document.checks ?? []).length > 0) return "pre-migration checks";
+  if (m.document.steps.some((st) => st.kind === "op" && typeof st.options.retain === "string")) return "a retain";
+  if (m.files.extra && Object.keys(m.files.extra).length > 0) return "files of its own";
+  return undefined;
+}
+
+/**
+ * The newest migration, when --replace-own redoes it: named `name`, holding
+ * only what yodel new writes, and applied or run in none of `envs`. Else
+ * undefined, and the new migration follows it. A history that records it
+ * refuses the run.
+ */
+async function ownMigration(project: Project, ordered: readonly Migration[], name: string, envs: readonly string[], io: Io): Promise<Migration | undefined> {
+  const newest = newestMigration(ordered);
+  if (!newest || newest.id.slice(newest.id.indexOf("-") + 1) !== name) return undefined;
+  const extra = notPlain(newest);
+  if (extra) {
+    io.err(`yodel new: ${newest.id} holds ${extra}, which --replace-own does not write again, so it is kept and the new migration follows it\n`);
+    return undefined;
+  }
+  for (const envName of envs) {
+    const env = resolveEnvironment(project, envName);
+    const venv = await openVersioned(project, env);
+    try {
+      const { status } = await inspect(venv, ordered, { sync: false });
+      if (status.applied.some((a) => a.id === newest.id)) {
+        throw yodelRefusal(`refused: ${newest.id} is applied in ${env.name}, so it is not replaced; write the change as a new migration (yodel new <name>). Nothing written.`);
+      }
+      const ran = status.pending.find((p) => p.id === newest.id && p.partWay !== undefined);
+      if (ran?.partWay) {
+        throw yodelRefusal(`refused: ${newest.id} ran part way in ${env.name} (${ran.partWay.status}), so it is not replaced; resume it with yodel apply ${env.name}, then write the change as a new migration. Nothing written.`);
+      }
+    } finally {
+      await closeVersioned(venv);
+    }
+  }
+  if (envs.length === 0) io.err(`yodel new: --replace-own checked no environment's history; with --env <env>, it refuses a migration applied there\n`);
+  return newest;
+}
 
 /** The newest migration, when --replace may redo it: named `name`, and applied in none of `envs`. */
 async function replaceable(project: Project, ordered: readonly Migration[], name: string, envs: readonly string[], io: Io): Promise<Migration> {
