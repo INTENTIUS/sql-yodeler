@@ -6,9 +6,9 @@
  * The prefix is `yodel` (#285 ruling B): statuses read `yodel/plan` and
  * `yodel/apply`. A member is an environment. yodel applies on merge only
  * (#285 ruling E), so nothing applies before a merge and no `/yodel`
- * comment starts an apply. The one comment command is `/yodel new` (#312),
- * chant's commit job: it writes a migration and pushes it to the pull
- * request's branch, and applies nothing.
+ * comment starts an apply. The comment commands are `/yodel new` (#312)
+ * and `/yodel rebase` (#313), chant's commit job: each writes migrations
+ * and pushes them to the pull request's branch, and applies nothing.
  *
  * The op and the wave gates keep the names sql-yodeler has recorded on
  * `chant/lifecycle` since the waves began (`yodel-apply`,
@@ -56,8 +56,8 @@ export const YODEL_WORDS: YodelWords = {
   stages: { plan: "plan", apply: "apply", record: "record", check: "check", drift: "drift", lock: "lock", approval: "approval", control: "control" },
   verbs: { plan: ["plan", "planned"], apply: ["apply", "applied"] },
   noun: ["environment", "environments"],
-  // Merge only (#285 ruling E): no command applies before merge. /yodel new is chant's commit job (#312).
-  commands: { new: "commit" },
+  // Merge only (#285 ruling E): no command applies before merge. /yodel new and /yodel rebase are chant's commit job (#312, #313).
+  commands: { new: "commit", rebase: "commit" },
   // The environment or tenant is the wave's run target (chant#4574).
   approve: "yodel approve {target} --plan {digest} {sign}",
   override: "yodel override {target} --rule {rule} --reason <text>",

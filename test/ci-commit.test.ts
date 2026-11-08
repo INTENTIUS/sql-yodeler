@@ -13,9 +13,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeCommitRefusalReply, setCommitRefusalReply } from "@intentius/chant/ci-commit";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
-import { yodelCommitRefusalReply } from "@intentius/chant-lexicon-sql/yodel-run";
+import { yodelCommitRefusalReply, yodelRefusalReply } from "@intentius/chant-lexicon-sql/yodel-run";
+import { createMigration, readMigrations, writeMigration } from "../src/migrations/index.js";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { commitSpecs, NEW_CHECK_COMMAND } from "../src/ci/commit.js";
+import { rebaseRespond } from "../src/ci/render.js";
 import { runChantVerb, setRefusalReply } from "../src/commands/chant.js";
 import { checkYodelConfig } from "../src/config/load.js";
 import { fallbackImportArgs, ownModules } from "../src/chant/resolve-fallback.js";
@@ -95,10 +97,51 @@ describe("yodel ci renders /yodel new through chant's commit job (#312)", () => 
     expect(commitSpecs({ dir: "/p", respond: "on-change", yodelImage: false }, "github").check?.commit).not.toHaveProperty("gitlabCheck");
   });
 
+  it("renders /yodel rebase on the base merged into the head, with every environment's reader and no writer (#313)", async () => {
+    const dir = template('{ forges: ["github", "gitlab", "forgejo"] }');
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    for (const f of [".github/workflows/yodel-rebase.yml", ".forgejo/workflows/yodel-rebase.yml"]) {
+      const text = read(dir, f);
+      expect(text, f).toContain("startsWith(github.event.comment.body, '/yodel rebase')");
+      expect(text, f).toContain(`CHANT_COMMIT_COMMAND: '["yodel","rebase","--env","dev","--env","prod"]'`);
+      expect(text, f).toContain("CHANT_COMMIT_MERGE_BASE: '1'");
+      expect(text, f).toContain(`CHANT_COMMIT_COMMAND_ENV: '["DEV_CLICKHOUSE_URL","DEV_CLICKHOUSE_READER_USER","DEV_CLICKHOUSE_READER_PASSWORD","PROD_CLICKHOUSE_URL","PROD_CLICKHOUSE_READER_USER","PROD_CLICKHOUSE_READER_PASSWORD"]'`);
+      expect(text, f).not.toMatch(/WRITER|YODEL_ROLE|YODEL_CREDENTIALS/);
+    }
+    // GitLab: no comment job (chant refuses mergeBase there), the check trigger only.
+    const gitlab = read(dir, ".gitlab/yodel-rebase.gitlab-ci.yml");
+    expect(gitlab).toContain("yodel lint --commit-trigger rebase");
+    expect(gitlab).toContain("yodel-rebase-check-commit:");
+    expect(gitlab).not.toContain('$CHANT_COMMIT == "rebase"');
+    expect((parseYAMLDocument(read(dir, ".gitlab-ci.yml")) as { include: Array<{ local: string }> }).include).toContainEqual({ local: ".gitlab/yodel-rebase.gitlab-ci.yml" });
+
+    const fork = template('{ forges: ["github"], respond: { rebase: "on-fork", new: "off" } }');
+    expect((await yodel(["ci", "--dir", fork])).code).toBe(0);
+    expect(read(fork, ".github/workflows/yodel-rebase-check.yml")).toContain("yodel lint --commit-trigger rebase");
+    expect(existsSync(join(fork, ".github/workflows/yodel-new.yml"))).toBe(false);
+  }, 120_000);
+
+  it("leaves /yodel rebase off by default with a cloud-minted reader, which the commit job gets no identity for, and refuses asking for it", () => {
+    const envs = { names: ["dev"], credentials: { dev: { reader: { cloud: "rds-iam" }, writer: {} } } as never };
+    expect(rebaseRespond(envs)).toBe("off");
+    expect(() => rebaseRespond({ ...envs, respondRebase: "comment" })).toThrow(/ci\.respond\.rebase: comment reads each environment's history in chant's commit job, and dev's reader mints its password from a cloud identity/);
+    expect(rebaseRespond({ names: ["dev"] })).toBe("comment");
+    expect(commitSpecs({ dir: "/p", respond: "off", respondRebase: "comment", rebase: { envs: ["dev"], variables: ["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "DEV_POSTGRES_READER_PASSWORD"] }, yodelImage: true }, "github", "rebase").comment?.commit).toMatchObject({
+      on: "comment",
+      comment: "/yodel rebase",
+      mergeBase: true,
+      command: ["yodel", "rebase", "--env", "dev"],
+      commandEnv: ["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "DEV_POSTGRES_READER_PASSWORD"],
+    });
+  });
+
   it("checks ci.respond", () => {
     expect(checkYodelConfig({ ci: { respond: { new: "on-change" } } }, "yodel.config.ts").ci).toEqual({ respond: { new: "on-change" } });
+    expect(checkYodelConfig({ ci: { respond: { rebase: "on-fork" } } }, "yodel.config.ts").ci).toEqual({ respond: { rebase: "on-fork" } });
+    expect(() => checkYodelConfig({ ci: { respond: { rebase: "on-change" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.rebase: one of off, comment, on-fork/);
     expect(() => checkYodelConfig({ ci: { respond: { new: "always" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.new: one of off, comment, on-change/);
-    expect(() => checkYodelConfig({ ci: { respond: { merge: "comment" } } }, "yodel.config.ts")).toThrow(/ci\.respond: expected \{ new\? \}/);
+    expect(() => checkYodelConfig({ ci: { respond: { merge: "comment" } } }, "yodel.config.ts")).toThrow(/ci\.respond: expected \{ new\?, rebase\? \}/);
   });
 });
 
@@ -115,9 +158,41 @@ describe("yodel lint --commit-trigger new (#312)", () => {
     const ahead = await yodel(["lint", "--commit-trigger", "new", "--dir", dir]);
     expect(ahead.code).toBe(2);
     expect(ahead.out).toContain("warning  unmigrated:");
-    const bad = await yodel(["lint", "--commit-trigger", "rebase", "--dir", dir]);
+    // rebase reads the fork finding: there is none.
+    expect((await yodel(["lint", "--commit-trigger", "rebase", "--dir", dir])).code).toBe(0);
+    const bad = await yodel(["lint", "--commit-trigger", "merge", "--dir", dir]);
     expect(bad.code).toBe(1);
-    expect(bad.err).toContain("--commit-trigger takes new");
+    expect(bad.err).toContain("--commit-trigger takes new or rebase");
+  }, 60_000);
+});
+
+describe("yodel rebase's refusal, read by chant's reply (#313)", () => {
+  it("names both sides and the object when two branches change one table differently", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "yodel-rebase-reply-"));
+    temps.push(dir);
+    cpSync(fixture("postgres"), dir, { recursive: true });
+    symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
+    expect((await yodel(["new", "init", "--dir", dir])).code).toBe(0);
+    const migrations = join(dir, "migrations");
+    const [init] = readMigrations(migrations);
+    if (!init) throw new Error("no init");
+    const orders = init.document.schema.objects.find((o) => o.export === "orders");
+    if (!orders) throw new Error("no orders");
+    const ids: string[] = [];
+    for (const [name, column, minute] of [["add-note", "note text", 1], ["add-memo", "memo text", 2]] as const) {
+      const ddl = orders.ddl.replace("amount numeric(12, 2) NOT NULL", `amount numeric(12, 2) NOT NULL,\n    ${column}`);
+      const made = createMigration({ name, previous: init, now: new Date(Date.UTC(2030, 0, 1, 0, minute)), build: { ...init.document.schema, objects: init.document.schema.objects.map((o) => (o.export === "orders" ? { ...o, ddl } : o)) } });
+      if (made.id === undefined) throw new Error(`no change for ${name}`);
+      writeMigration(migrations, made);
+      ids.push(made.id);
+    }
+    const argv = ["rebase", "--dir", dir];
+    const refused = await yodel(argv);
+    expect(refused.code).toBe(1);
+    // The wording stays as it is (#311): the other side is the range of migrations it moves onto.
+    expect(refused.err).toContain(`yodel rebase: refused: ${ids[1] ?? ""} and the migrations after ${init.id} up to ${ids[0] ?? ""} both change orders, differently;`);
+    // chant's reply reads only "<a> and <b> both change", so this one keeps chant's own reply until INTENTIUS/chant#4821.
+    expect(yodelRefusalReply({ command: ["yodel", ...argv], rc: "1", output: refused.err })).toBeUndefined();
   }, 60_000);
 });
 

@@ -79,8 +79,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type RespondNew, type WaveGate, type YodelConfig } from "../config/define.js";
-import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILE } from "./commit.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type RespondNew, type RespondRebase, type WaveGate, type YodelConfig } from "../config/define.js";
+import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
 import { CLOUD_OF, jobLogins, loginSteps, tradeIdTokens, type Login, type LoginSteps } from "./login.js";
@@ -211,6 +211,8 @@ export interface Environments {
   checkHooks?: true;
   /** yodel.config.ts `ci.respond.new` (#312): what answers `/yodel new`, through chant's commit job. Default `comment`. */
   respondNew?: RespondNew;
+  /** yodel.config.ts `ci.respond.rebase` (#313): what answers `/yodel rebase`. Default `comment`, or `off` when a reader's password is cloud-minted. */
+  respondRebase?: RespondRebase;
 }
 
 /** The line the lint job runs chant's check moment with (#294): the hooks are read at the pull request's base. */
@@ -825,7 +827,8 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
           "# pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI.",
         ]),
     `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
-    ...(respondsNew(envs_) ? [`# /yodel new, chant's commit job, is in ${GITLAB_COMMIT_FILE} (stage ops).`] : []),
+    ...(respondsNew(envs_) ? [`# /yodel new, chant's commit job, is in ${GITLAB_COMMIT_FILES.new} (stage ops).`] : []),
+    ...(rebaseRespond(envs_) !== "off" ? [`# /yodel rebase, after the merge request's check, is in ${GITLAB_COMMIT_FILES.rebase} (stage ops).`] : []),
     "#",
     "# GitLab gives every job the project's CI/CD variables unless a variable is",
     "# protected or scoped to an environment, so the split between reader and",
@@ -860,7 +863,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const applyStages = apply ? [...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : [])] : [];
   const pipeline = new GitLabPipeline({
     comment: asComment(header),
-    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILE }] : [])],
+    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILES.new }] : []), ...(rebaseRespond(envs_) !== "off" ? [{ local: GITLAB_COMMIT_FILES.rebase }] : [])],
     stages: [...new Set([...jobStages, ...applyStages, "ops"])],
     variables: { GIT_DEPTH: "0" },
   });
@@ -1407,22 +1410,44 @@ export async function watchPipelines(dir: string, envs_: Environments, product: 
 /** Whether `/yodel new` gets chant's commit job (#312): `ci.respond.new` is not `off`. */
 export const respondsNew = (envs: Pick<Environments, "respondNew" | "checkOnly">): boolean => envs.checkOnly !== true && (envs.respondNew ?? "comment") !== "off";
 
+/** The environments whose reader's password a cloud token source mints, which chant's commit job gets no identity for yet. */
+const cloudReaders = (envs: Pick<Environments, "names" | "credentials">): string[] => envs.names.filter((env) => envs.credentials?.[env]?.reader.cloud !== undefined);
+
 /**
- * `/yodel new`, chant's commit job (#312, ./commit.ts): a workflow per job
- * on GitHub and Forgejo, and one file GitLab's pipeline includes.
+ * What answers `/yodel rebase` (#313): `ci.respond.rebase`, by default
+ * `comment`. The rebase reads every environment's history with its reader,
+ * and chant's commit job takes no cloud identity yet, so with a
+ * cloud-minted reader the default is `off`, and asking for it is refused.
+ */
+export function rebaseRespond(envs: Pick<Environments, "respondRebase" | "checkOnly" | "names" | "credentials">): RespondRebase {
+  if (envs.checkOnly === true) return "off";
+  const cloud = cloudReaders(envs);
+  if (cloud.length === 0) return envs.respondRebase ?? "comment";
+  if (envs.respondRebase === undefined || envs.respondRebase === "off") return "off";
+  throw new Error(
+    `yodel.config.ts ci.respond.rebase: ${envs.respondRebase} reads each environment's history in chant's commit job, and ${cloud.join(", ")}'s reader mints its password from a cloud identity, which that job does not get; set ci.respond.rebase: "off"`,
+  );
+}
+
+/**
+ * `/yodel new` and `/yodel rebase`, chant's commit job (#312, #313,
+ * ./commit.ts): a workflow per job on GitHub and Forgejo, and a file per
+ * word GitLab's pipeline includes.
  */
 export async function commitPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
-  if (!respondsNew(envs_)) return [];
+  const respondRebase = rebaseRespond(envs_);
+  if (!respondsNew(envs_) && respondRebase === "off") return [];
   const tc = toolchainOf(envs_);
-  const r = { dir: resolve(dir), respond: envs_.respondNew ?? "comment", image: tc.image, yodelImage: tc.yodelImage };
+  const rebase = { envs: envs_.names, variables: envs_.names.flatMap((env) => readerVariables(env, envs_.dialect, envs_.credentials?.[env])) };
+  const r = { dir: resolve(dir), respond: respondsNew(envs_) ? (envs_.respondNew ?? "comment") : ("off" as const), respondRebase, rebase, image: tc.image, yodelImage: tc.yodelImage };
   const out: RenderedFile[] = [];
-  for (const forge of FORGES) {
-    for (const file of await commitFiles(r, forge)) {
-      const at = forge === "gitlab" ? GITLAB_COMMIT_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
+  for (const [forge, word] of FORGES.flatMap((f) => (["new", "rebase"] as const).map((w) => [f, w] as const))) {
+    for (const file of await commitFiles(r, forge, word)) {
+      const at = forge === "gitlab" ? GITLAB_COMMIT_FILES[word] : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
       const token = forge === "gitlab"
-        ? [`# The push job reads ${COMMIT_TOKEN_ENV}: a project access token with write_repository and api,`, "# as a protected, masked CI/CD variable (docs/workflows.md, /yodel new)."]
-        : [`# The push job reads the ${COMMIT_TOKEN_ENV} secret: a token of a person or an app that can push`, "# to the repository; a push with the job's own token would start no pipeline (docs/workflows.md, /yodel new)."];
+        ? [`# The push job reads ${COMMIT_TOKEN_ENV}: a project access token with write_repository and api,`, `# as a protected, masked CI/CD variable (docs/workflows.md, /yodel ${word}).`]
+        : [`# The push job reads the ${COMMIT_TOKEN_ENV} secret: a token of a person or an app that can push`, `# to the repository; a push with the job's own token would start no pipeline (docs/workflows.md, /yodel ${word}).`];
       out.push({ path: at, content: `${HEADER.join("\n")}\n${token.join("\n")}\n${yaml}` });
     }
   }
@@ -1490,6 +1515,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(check ? { check: true as const } : {}),
     ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
     ...(ci?.respond?.new ? { respondNew: ci.respond.new } : {}),
+    ...(ci?.respond?.rebase ? { respondRebase: ci.respond.rebase } : {}),
   };
 }
 
@@ -1606,12 +1632,12 @@ export async function requireProduct(): Promise<ChantProduct> {
  * check hooks into when the project has none on disk: the one `yodel
  * upgrade` adds (#298). A project with no declaration, in its directory or
  * given here, keeps the lint job's own steps ({@link checkHooksDeclaration}).
- * `options.respondNew` stands in for yodel.config.ts `ci.respond.new`.
+ * `options.respondNew` and `options.respondRebase` stand in for yodel.config.ts `ci.respond`.
  */
-export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew } = {}): Promise<RenderedFile[]> {
+export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew; respondRebase?: RespondRebase } = {}): Promise<RenderedFile[]> {
   const read = await environments(dir);
   // The starter templates render as the release before #312 did until the release that ships /yodel new renders them (test/template.test.ts).
-  const envs = options.respondNew ? { ...read, respondNew: options.respondNew } : read;
+  const envs = { ...read, ...(options.respondNew ? { respondNew: options.respondNew } : {}), ...(options.respondRebase ? { respondRebase: options.respondRebase } : {}) };
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   const product = await requireProduct();
