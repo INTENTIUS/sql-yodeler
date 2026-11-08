@@ -221,7 +221,7 @@ On GitLab a comment's job runs in a pipeline of the default branch, which cannot
 
 A reader whose password a cloud token source mints (`rds-iam`, `cloud-sql-iam`, `entra`) gets no identity in chant's commit job yet. For such a project `ci.respond.rebase` is `off` by default, and `yodel ci` refuses the other values.
 
-When both branches change one object, chant's reply does not yet name the object (INTENTIUS/chant#4821). The job's log has yodel's refusal line, which does.
+When both branches change one object, the rebase refuses, and chant's reply names the pull request's migration, the base's migrations it would move onto and the object, from yodel's refusal line, with how to resolve it on the branch.
 
 ### Upgrading the pipelines to chant 0.124.67
 
