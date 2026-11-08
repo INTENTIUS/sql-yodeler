@@ -101,7 +101,7 @@ This approves the plan jcs1-sha256:c6a49076c4a2b58c984b7a73d59e86c5788e82cb89728
 This records the resolution as a fact; it does not itself re-run anything. Run `chant run migrate-dev` and it walks through gate "approve-migrate-dev".
 ```
 
-The approval is a commit on the local `chant/lifecycle` branch. chant pushes it to the remote's `chant/lifecycle` when the repository has a remote, so CI sees it: every job in the starter templates fetches that branch first. In the templates, the pull request comment ends with the approve command; approve before merging, and the apply job after the merge goes through. A merge with nothing approved applies nothing and fails with the command to run; [`yodel approve`](#approve-and-resume) records the approval and starts that job again.
+The approval is a commit on the local `chant/lifecycle` branch. chant pushes it to the remote's `chant/lifecycle` when the repository has a remote, so CI sees it: every job `yodel ci` renders fetches that branch first, with `yodel ci --fetch-ledger`, which goes through chant's reader and never moves the ref chant's push leases against. In the templates, the pull request comment ends with the approve command; approve before merging, and the apply job after the merge goes through. A merge with nothing approved applies nothing and fails with the command to run; [`yodel approve`](#approve-and-resume) records the approval and starts that job again.
 
 Then `yodel apply` runs through the gate:
 

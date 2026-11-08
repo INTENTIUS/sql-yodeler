@@ -333,15 +333,26 @@ process.exitCode = await main(args, {
   return run("node", [script, answer, ...args], { cwd: p.dir, env: { ...p.env, ...extra }, timeoutMs: 600_000 });
 }
 
-/** main and chant/lifecycle from the forge into the project: main fast-forwarded, the ledger branch forced to the forge's. */
+/**
+ * chant/lifecycle from the forge into the project, through chant's reader
+ * (#326): it fetches the way chant's writer expects and never moves the ref
+ * the writer's push leases against. No ledger branch on the forge yet is
+ * nothing approved yet; one this project cannot read is an error.
+ */
+export async function fetchLedger(p: Pick<Seeded, "dir">): Promise<void> {
+  const { fetchLifecycleStatus } = await import("@intentius/chant/lifecycle/git");
+  const fetched = await fetchLifecycleStatus({ cwd: p.dir });
+  if (fetched.status === "diverged" || fetched.status === "unreachable") throw new Error(`chant/lifecycle could not be fetched from ${fetched.remote} (${fetched.status}): ${fetched.stderr.trim()}`);
+}
+
+/** main and chant/lifecycle from the forge into the project: main fast-forwarded, the ledger through chant's reader. */
 export async function pullProject(p: Pick<Seeded, "dir" | "env">): Promise<void> {
   const git = (args: string[]) => run("git", args, { cwd: p.dir, env: p.env, timeoutMs: 120_000 });
   const fetched = await git(["fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
   if (fetched.code !== 0) throw new Error(`git fetch origin main failed: ${fetched.err}`);
   const merged = await git(["merge", "-q", "--ff-only", "origin/main"]);
   if (merged.code !== 0) throw new Error(`main does not fast-forward to the forge's: ${merged.err}`);
-  // No ledger branch on the forge yet is nothing approved yet.
-  await git(["fetch", "-q", "origin", "+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle"]);
+  await fetchLedger(p);
 }
 
 /** Pushes the project's chant/lifecycle, where an approval or an override was just recorded. */
@@ -352,7 +363,7 @@ export async function pushLedger(p: Pick<Seeded, "dir" | "env">): Promise<void> 
 
 /** The run ledger's `op` records under `env`, as the forge's chant/lifecycle has them now. */
 export async function ledgerRuns(p: Pick<Seeded, "dir" | "env">, env: string, op: string): Promise<RunRecordView[]> {
-  await run("git", ["fetch", "-q", "origin", "+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle"], { cwd: p.dir, env: p.env, timeoutMs: 120_000 });
+  await fetchLedger(p);
   const { readRunLedger } = await import("@intentius/chant/lifecycle/run-ledger");
   const { records } = await readRunLedger(env, op, { cwd: p.dir });
   return records;

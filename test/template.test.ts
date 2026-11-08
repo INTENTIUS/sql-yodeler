@@ -20,6 +20,7 @@ import { YODEL_PRESETS } from "../src/ci/check-hooks.js";
 import {
   render,
   environments,
+  fetchApprovals,
   FORGEJO_UPLOAD_ARTIFACT,
   UPLOAD_ARTIFACT,
   readerVariables,
@@ -152,8 +153,10 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     expect(manifest.files).toContain("chant.workspace.json");
     // The actions pinned by SHA from chant's ACTION_PINS (#319) reach the templates with the same release, so until then a uses: line compares by its action alone.
     const actionOnly = (text: string) => (staged ? text.replace(/^(\s*(?:- )?uses: *)\S*?([^/\s@]+)@\S+(?: # \S+)?$/gm, "$1$2") : text);
+    // The jobs' fetch of chant/lifecycle through chant's reader (#326) reaches them with that release too; until then they keep the git line it replaced.
+    const ledgerFetch = (text: string) => (staged ? text.replaceAll(fetchApprovals(), STAGED_LEDGER_FETCH) : text);
     for (const file of rendered) {
-      expect(actionOnly(readFileSync(join(dir, file.path), "utf8")), file.path).toBe(actionOnly(file.content));
+      expect(actionOnly(readFileSync(join(dir, file.path), "utf8")), file.path).toBe(actionOnly(ledgerFetch(file.content)));
     }
   });
 
@@ -279,6 +282,10 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     }
   });
 });
+
+/** The templates' fetch of chant/lifecycle until the release that renders `yodel ci --fetch-ledger` there (#326). */
+const STAGED_LEDGER_FETCH =
+  "git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'";
 
 describe("yodel ci and the templates' scripts", () => {
   it("read yodel.config.ts waves, refusing an environment that is not one and a gate that is not a policy", async () => {
