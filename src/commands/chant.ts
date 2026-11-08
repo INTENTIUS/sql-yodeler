@@ -34,6 +34,16 @@ export interface ChantVerbDeps {
   cwd?: string;
 }
 
+/**
+ * `setCommitRefusalReply(yodelCommitRefusalReply)`, before `chant commit
+ * land` replies on the pull request: the sql lexicon's reply reads yodel's
+ * refusal line from the command's output (chant pull request 4798).
+ */
+export async function setRefusalReply(): Promise<void> {
+  const [{ setCommitRefusalReply }, { yodelCommitRefusalReply }] = await Promise.all([import("@intentius/chant/ci-commit"), import("@intentius/chant-lexicon-sql/yodel-run")]);
+  setCommitRefusalReply(yodelCommitRefusalReply);
+}
+
 /** Runs `yodel chant <argv>`; resolves to chant's exit code. */
 export async function runChantVerb(argv: string[], io: Io, deps: ChantVerbDeps = {}): Promise<number> {
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
@@ -41,7 +51,11 @@ export async function runChantVerb(argv: string[], io: Io, deps: ChantVerbDeps =
     return argv.length === 0 ? EXIT_FAILED : 0;
   }
   const product = await (deps.product ?? chantProduct)();
-  if (product) return product.runChantInProcess(argv, YODEL_WORDS);
+  if (product) {
+    // chant's commit job (#312): a refused yodel new or yodel rebase gets a reply that names the migration and the object.
+    if (argv[0] === "commit") await setRefusalReply();
+    return product.runChantInProcess(argv, YODEL_WORDS);
+  }
   const ran = await (deps.child ?? runChant)(argv, { cwd: deps.cwd ?? process.cwd(), onStdout: io.out, onStderr: io.err });
   return ran.code;
 }

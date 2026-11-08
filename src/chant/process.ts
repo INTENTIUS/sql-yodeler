@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { fallbackImportArgs } from "./resolve-fallback.js";
 
 export interface ChantInstall {
   /** The `@intentius/chant` package directory. */
@@ -72,7 +73,7 @@ export function chantEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
 export function runChant(args: readonly string[], options: RunChantOptions): Promise<ChantResult> {
   const { main, loader } = chantInstall();
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, ["--import", loader, main, ...args], {
+    const child = spawn(process.execPath, [...fallbackImportArgs(), "--import", loader, main, ...args], {
       cwd: options.cwd,
       env: chantEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],

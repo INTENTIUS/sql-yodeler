@@ -442,6 +442,8 @@ export const newCommand: Command = {
 
 /** Refreshes src/sql-types.d.ts after a migration from src/ (#273), and says so; under --json only a warning, on stderr. */
 async function sqlTypes(io: Io, project: Project, json: boolean): Promise<void> {
+  // chant's commit job (#312) pushes a change to migrations/ only, and refuses one that touches src/.
+  if (process.env.CHANT_COMMIT_PR !== undefined) return;
   const r = await refreshSqlTypes(project);
   if (r.warning) io.err(`yodel new: warning: ${r.warning}\n`);
   else if (r.updated && !json) io.out(`Updated ${r.updated} from the declarations.\n`);

@@ -14,11 +14,12 @@ import type { LintReport, LintSettings } from "../lint/index.js";
 import { chantLevel, CODE_QUALITY_FILE, codeQuality, FORGE_FORMAT, forgeFormat, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
 import { unmigratedRule } from "../lint/unmigrated.js";
+import { yodelFindingExit } from "@intentius/chant-lexicon-sql/yodel-run";
 import { loadPolicies, policyRules } from "../lint/policies.js";
 import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
 
-const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json | --format <format> [--output <file>]] [--dir <project>] [--update-checksum <id>]... [--rules]";
+const usage = "usage: yodel lint [--env <env>] [--replay <env> [--reset] [--reset-shared <profile>]... [--keep]] [--json | --format <format> [--output <file>]] [--dir <project>] [--update-checksum <id>]... [--rules] [--commit-trigger new]";
 
 const help = `${usage}
 
@@ -123,6 +124,10 @@ Options:
                           Refused without it, --reset or not
   --keep                  with --replay: leave the replayed database in place
   --rules                 list the rules and their levels, and exit
+  --commit-trigger new    exit as chant's commit job reads it (#312): 2 when
+                          lint finds unmigrated, so /yodel new follows, 1 when
+                          the lint fails otherwise, 0 when not; the report
+                          is printed as without it
   --json                  print the findings as JSON (--format json)
   --format <format>       text (the default), json, or the findings as a
                           forge shows them on the migration files (#129):
@@ -164,6 +169,8 @@ interface LintArgs {
   dir: string;
   update: string[];
   rules: boolean;
+  /** --commit-trigger: the commit job whose finding sets the exit code. */
+  commitTrigger: "new" | undefined;
 }
 
 function parseLintArgs(args: string[]): LintArgs {
@@ -185,6 +192,7 @@ function parseLintArgs(args: string[]): LintArgs {
         dir: { type: "string", short: "C" },
         "update-checksum": { type: "string", multiple: true },
         rules: { type: "boolean" },
+        "commit-trigger": { type: "string" },
       },
     });
   } catch (e) {
@@ -213,7 +221,14 @@ function parseLintArgs(args: string[]): LintArgs {
     dir: typeof v.dir === "string" ? v.dir : process.cwd(),
     update: Array.isArray(update) ? update.filter((u): u is string => typeof u === "string") : [],
     rules: v.rules === true,
+    commitTrigger: commitTriggerOf(v["commit-trigger"]),
   };
+}
+
+function commitTriggerOf(value: unknown): "new" | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "new") throw new YodelError(`--commit-trigger takes new (the commit job /yodel new), got ${JSON.stringify(value)}\n${usage}`);
+  return value;
 }
 
 /** Every rule `lint.rules` can name: yodel's, the replay check, the lexicon's schema checks and the project's own checks (#227). */
@@ -335,6 +350,8 @@ function emit(report: LintReport, a: LintArgs, project: Project, io: Io, replay?
     if (a.format === "github") io.out(workflowCommands(report, root));
     if (a.format === "gitlab") writeFileSync(resolve(a.output), `${JSON.stringify(codeQuality(report, root), null, 2)}\n`);
   }
+  // --commit-trigger (#312): the code chant's check trigger reads, from the report as --json gives it.
+  if (a.commitTrigger) return yodelFindingExit(lintJson(report), a.commitTrigger);
   return lintExitCode(report);
 }
 

@@ -4,8 +4,11 @@
 // chant.config.ts and *.op.ts in this process. Register tsx's loader before
 // anything imports them, the way chant's own bin runs under tsx.
 import { register } from "tsx/esm/api";
+import { registerResolveFallback } from "./chant/resolve-fallback.js";
 
 register();
+// A project with no node_modules of its own, such as chant's commit job's worktree of the head, takes yodel's (#312).
+registerResolveFallback();
 const { main } = await import("./cli.js");
 
 const terminal = process.stdin.isTTY && process.stderr.isTTY;

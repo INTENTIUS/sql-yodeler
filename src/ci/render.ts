@@ -79,7 +79,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type RespondNew, type WaveGate, type YodelConfig } from "../config/define.js";
+import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILE } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
 import { CLOUD_OF, jobLogins, loginSteps, tradeIdTokens, type Login, type LoginSteps } from "./login.js";
@@ -114,7 +115,7 @@ import {
   WorkflowRule,
 } from "@intentius/chant-lexicon-gitlab";
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
-import { chantProduct, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
+import { chantProduct, WAVE_WORDS, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
 import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
@@ -208,6 +209,8 @@ export interface Environments {
    * the moment and the project has a declaration.
    */
   checkHooks?: true;
+  /** yodel.config.ts `ci.respond.new` (#312): what answers `/yodel new`, through chant's commit job. Default `comment`. */
+  respondNew?: RespondNew;
 }
 
 /** The line the lint job runs chant's check moment with (#294): the hooks are read at the pull request's base. */
@@ -822,6 +825,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
           "# pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI.",
         ]),
     `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
+    ...(respondsNew(envs_) ? [`# /yodel new, chant's commit job, is in ${GITLAB_COMMIT_FILE} (stage ops).`] : []),
     "#",
     "# GitLab gives every job the project's CI/CD variables unless a variable is",
     "# protected or scoped to an environment, so the split between reader and",
@@ -856,7 +860,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const applyStages = apply ? [...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : [])] : [];
   const pipeline = new GitLabPipeline({
     comment: asComment(header),
-    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }],
+    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILE }] : [])],
     stages: [...new Set([...jobStages, ...applyStages, "ops"])],
     variables: { GIT_DEPTH: "0" },
   });
@@ -1250,7 +1254,7 @@ export async function withTenants(dir: string, waves: readonly Wave[]): Promise<
 
 /** The spec under yodel's words, and the wave jobs chant's product pipeline names for `forge`. */
 export function productWaves(product: ChantProduct, forge: Forge, spec: WavesSpec): { spec: WavesSpec; jobs: ProductWaveJob[] } {
-  const out = product.productPipelineJobs(forge, spec.waves[0]?.name ?? MAIN, { words: YODEL_WORDS, waves: spec, wavesSpecFile: WAVES_SPEC });
+  const out = product.productPipelineJobs(forge, spec.waves[0]?.name ?? MAIN, { words: WAVE_WORDS, waves: spec, wavesSpecFile: WAVES_SPEC });
   if (!out.waves) throw new Error(`${forge}: chant's product pipeline gave no apply waves`);
   if (out.waves.specFile !== WAVES_SPEC) throw new Error(`${forge}: chant's product pipeline reads the waves from ${out.waves.specFile}, not ${WAVES_SPEC}`);
   const named = out.waves.spec as WavesSpec;
@@ -1400,6 +1404,31 @@ export async function watchPipelines(dir: string, envs_: Environments, product: 
   return out;
 }
 
+/** Whether `/yodel new` gets chant's commit job (#312): `ci.respond.new` is not `off`. */
+export const respondsNew = (envs: Pick<Environments, "respondNew" | "checkOnly">): boolean => envs.checkOnly !== true && (envs.respondNew ?? "comment") !== "off";
+
+/**
+ * `/yodel new`, chant's commit job (#312, ./commit.ts): a workflow per job
+ * on GitHub and Forgejo, and one file GitLab's pipeline includes.
+ */
+export async function commitPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
+  if (!respondsNew(envs_)) return [];
+  const tc = toolchainOf(envs_);
+  const r = { dir: resolve(dir), respond: envs_.respondNew ?? "comment", image: tc.image, yodelImage: tc.yodelImage };
+  const out: RenderedFile[] = [];
+  for (const forge of FORGES) {
+    for (const file of await commitFiles(r, forge)) {
+      const at = forge === "gitlab" ? GITLAB_COMMIT_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
+      const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
+      const token = forge === "gitlab"
+        ? [`# The push job reads ${COMMIT_TOKEN_ENV}: a project access token with write_repository and api,`, "# as a protected, masked CI/CD variable (docs/workflows.md, /yodel new)."]
+        : [`# The push job reads the ${COMMIT_TOKEN_ENV} secret: a token of a person or an app that can push`, "# to the repository; a push with the job's own token would start no pipeline (docs/workflows.md, /yodel new)."];
+      out.push({ path: at, content: `${HEADER.join("\n")}\n${token.join("\n")}\n${yaml}` });
+    }
+  }
+  return out;
+}
+
 // ── The project ─────────────────────────────────────────────────────────────
 
 /** Whether the project has a test file for yodel test (tests/*.test.ts). */
@@ -1460,6 +1489,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.apply === false ? { apply: false as const } : {}),
     ...(check ? { check: true as const } : {}),
     ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
+    ...(ci?.respond?.new ? { respondNew: ci.respond.new } : {}),
   };
 }
 
@@ -1576,9 +1606,12 @@ export async function requireProduct(): Promise<ChantProduct> {
  * check hooks into when the project has none on disk: the one `yodel
  * upgrade` adds (#298). A project with no declaration, in its directory or
  * given here, keeps the lint job's own steps ({@link checkHooksDeclaration}).
+ * `options.respondNew` stands in for yodel.config.ts `ci.respond.new`.
  */
-export async function render(dir: string, options: { declaration?: RenderedFile } = {}): Promise<RenderedFile[]> {
-  const envs = await environments(dir);
+export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew } = {}): Promise<RenderedFile[]> {
+  const read = await environments(dir);
+  // The starter templates render as the release before #312 did until the release that ships /yodel new renders them (test/template.test.ts).
+  const envs = options.respondNew ? { ...read, respondNew: options.respondNew } : read;
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   const product = await requireProduct();
@@ -1586,7 +1619,13 @@ export async function render(dir: string, options: { declaration?: RenderedFile 
   const hooks = await checkHooksDeclaration(dir, envs, options.declaration);
   const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
-  const files = [...review(reviewed), ...(hooks ? [hooks] : []), ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []), ...(await watchPipelines(dir, envs, product))];
+  const files = [
+    ...review(reviewed),
+    ...(hooks ? [hooks] : []),
+    ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []),
+    ...(await watchPipelines(dir, envs, product)),
+    ...(await commitPipelines(dir, envs)),
+  ];
   return files.filter((f) => {
     const forge = forgeOf(f.path);
     return forge === undefined || forges.includes(forge);
