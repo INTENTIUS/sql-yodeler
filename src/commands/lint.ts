@@ -13,6 +13,7 @@ import { changeFindings, declarativeLint, declaredSchemaFindings } from "../decl
 import type { LintReport, LintSettings } from "../lint/index.js";
 import { chantLevel, CODE_QUALITY_FILE, codeQuality, FORGE_FORMAT, forgeFormat, LINT_FORMATS, workflowCommands, type LintFormat, LINT_RULES, SCHEMA_RULES, lintExitCode, lintJson, lintMigrations, lintSettings, renderLint, updateChecksum, type LintOptions, type LintRule } from "../lint/index.js";
 import { projectRules, REPLAY_RULE, replayRule } from "../lint/project-rules.js";
+import { unmigratedRule } from "../lint/unmigrated.js";
 import { loadPolicies, policyRules } from "../lint/policies.js";
 import type { PostSynthCheck } from "@intentius/chant/lint/post-synth";
 import { renderReplay, replayHistory, replayJson, type ReplayResult } from "../replay/index.js";
@@ -68,6 +69,9 @@ Rules (yodel lint --rules lists them with their levels):
   migration-sql      migration.sql does not hold a statement migration.json
                      records (apply runs migration.json's)
   silence            a yodel:allow line that is wrong or silences nothing
+  unmigrated         the declared schema has a change no migration records
+                     (yodel new writes it): it builds src/, offline; a
+                     warning
   replay             with --replay <env>: the history, replayed into a fresh
                      database on <env>'s server, does not give a migration's
                      recorded schema (names the first that differs); each
@@ -254,7 +258,10 @@ export const lint: Command = {
       if (!hasMigrations(project)) return declarativeLintRun(project, a, settings, policies, io);
       const dir = migrationsDir(project);
 
-      const options: LintOptions = { dialect: project.dialect, project, settings, rules: projectRules, policies };
+      const own = [...projectRules, unmigratedRule(project, (t) => {
+        io.err(`yodel lint: ${t}\n`);
+      })];
+      const options: LintOptions = { dialect: project.dialect, project, settings, rules: own, policies };
       if (a.env !== undefined) {
         const env = resolveEnvironment(project, a.env);
         const ordered = scanMigrations(dir).ordered;
@@ -307,7 +314,7 @@ export const lint: Command = {
         if (scanMigrations(dir).ordered) {
           // A target that is not fresh throws here, exit 1, before anything is linted or run.
           replay = await replayHistory(project, env, { reset: a.reset, resetShared: a.resetShared, keep: a.keep, log: (l) => { io.err(`replay: ${l}\n`); } });
-          options.rules = [...projectRules, replayRule(replay)];
+          options.rules = [...own, replayRule(replay)];
         } else {
           io.err(`yodel lint: the migrations directory is not one chain, so it is not replayed; fix the findings below first\n`);
         }

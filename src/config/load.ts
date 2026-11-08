@@ -14,6 +14,7 @@ import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
 import { checksProblem } from "../migrations/checks.js";
+import { MIGRATION_NAME } from "../migrations/directory.js";
 import { loginProblem } from "../ci/login.js";
 
 export const CONFIG_FILE = "yodel.config.ts";
@@ -193,8 +194,15 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new)`);
+  if (value.new !== undefined) {
+    const n = value.new;
+    if (!isRecord(n) || !Object.keys(n).every((k) => k === "name")) throw new YodelError(`${where}.new: expected { name? }`);
+    if (n.name !== undefined && (typeof n.name !== "string" || !n.name.includes("{pr}") || !MIGRATION_NAME.test(n.name.replaceAll("{pr}", "1")))) {
+      throw new YodelError(`${where}.new.name: a migration name holding {pr}, the pull request's number, such as "pr-{pr}" (lowercase letters and digits, words joined by - or _)`);
+    }
+  }
   const tools = value.tools;
   if (tools !== undefined && !(Array.isArray(tools) && tools.every((t) => (CHECK_TOOLS as readonly unknown[]).includes(t)) && new Set(tools).size === tools.length)) {
     throw new YodelError(`${where}.tools: a list of ${CHECK_TOOLS.join(", ")}, each once`);

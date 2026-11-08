@@ -301,7 +301,19 @@ export interface CiConfig {
    * writes when the installed chant has it; without it they do not run.
    */
   tools?: CheckTool[];
+  /**
+   * `yodel new` in chant's commit job (#311), where it runs with no name.
+   * `name` is the migration's name, with `{pr}` standing for the pull
+   * request's number (`CHANT_COMMIT_PR`, which the commit job sets).
+   * Default `"pr-{pr}"`. It must hold `{pr}`, so no two pull requests
+   * write a migration of the same name: `yodel new --replace-own` takes a
+   * newest migration of that name for the pull request's own.
+   */
+  new?: { name?: string };
 }
+
+/** The name `yodel new` takes with none given, `{pr}` the pull request's number (#311). */
+export const DEFAULT_CI_NEW_NAME = "pr-{pr}";
 
 /** A SQL tool yodel ships a check preset for (#294). */
 export type CheckTool = "squawk" | "sqlfluff";
