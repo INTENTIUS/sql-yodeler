@@ -37,6 +37,18 @@
       "scenario": "sy-approval-postgres",
       "claim": "approval",
       "note": "the digest-bound gate, the gate read at the base, an override for a denied drop, and the audit, in CI (Postgres template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-new-clickhouse",
+      "claim": "forge",
+      "note": "/yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (ClickHouse template)"
+    },
+    {
+      "repo": "INTENTIUS/sql-yodeler",
+      "scenario": "sy-new-postgres",
+      "claim": "forge",
+      "note": "/yodel new pushes the migration to the pull request on Forgejo, and a change outside migrations/ is refused (Postgres template)"
     }
   ]
 }

@@ -54,7 +54,11 @@ describe("yodel ci renders /yodel new through chant's commit job (#312)", () => 
     for (const f of [".github/workflows/yodel-new.yml", ".forgejo/workflows/yodel-new.yml"]) {
       const text = read(dir, f);
       expect(text, f).toContain("startsWith(github.event.comment.body, '/yodel new')");
-      expect(text, f).toContain(`CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own"]'`);
+      // Every applied environment's history, read with its reader (chant pull request 4834), and the comment's name (4835).
+      expect(text, f).toContain(`CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own","--env","dev","--env","prod"]'`);
+      expect(text, f).toContain(`CHANT_COMMIT_COMMAND_ENV: '["DEV_CLICKHOUSE_URL","DEV_CLICKHOUSE_READER_USER","DEV_CLICKHOUSE_READER_PASSWORD","PROD_CLICKHOUSE_URL","PROD_CLICKHOUSE_READER_USER","PROD_CLICKHOUSE_READER_PASSWORD"]'`);
+      expect(text, f).toContain(`CHANT_COMMIT_COMMENT_ARG: '{"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","position":2}'`);
+      expect(text, f).not.toMatch(/WRITER|YODEL_ROLE|YODEL_CREDENTIALS/);
       expect(text, f).toContain(`CHANT_COMMIT_ALLOWED: '["migrations/"]'`);
       expect(text, f).toContain("secrets.YODEL_PUSH_TOKEN");
       expect(text, f).toContain("yodel chant commit land --forge");
@@ -122,12 +126,24 @@ describe("yodel ci renders /yodel new through chant's commit job (#312)", () => 
     expect(existsSync(join(fork, ".github/workflows/yodel-new.yml"))).toBe(false);
   }, 120_000);
 
+  it("passes /yodel new each environment with its reader, and none when a reader is cloud-minted (#312)", () => {
+    const readers = { envs: ["dev"], variables: ["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "DEV_POSTGRES_READER_PASSWORD"] };
+    expect(commitSpecs({ dir: "/p", respond: "comment", readers, yodelImage: true }, "forgejo").comment?.commit).toMatchObject({
+      command: ["yodel", "new", "--if-changed", "--replace-own", "--env", "dev"],
+      commandEnv: readers.variables,
+      commentArg: { position: 2 },
+    });
+    const none = commitSpecs({ dir: "/p", respond: "comment", yodelImage: true }, "forgejo").comment?.commit;
+    expect(none?.command).toEqual(["yodel", "new", "--if-changed", "--replace-own"]);
+    expect(none).not.toHaveProperty("commandEnv");
+  });
+
   it("leaves /yodel rebase off by default with a cloud-minted reader, which the commit job gets no identity for, and refuses asking for it", () => {
     const envs = { names: ["dev"], credentials: { dev: { reader: { cloud: "rds-iam" }, writer: {} } } as never };
     expect(rebaseRespond(envs)).toBe("off");
     expect(() => rebaseRespond({ ...envs, respondRebase: "comment" })).toThrow(/ci\.respond\.rebase: comment reads each environment's history in chant's commit job, and dev's reader mints its password from a cloud identity/);
     expect(rebaseRespond({ names: ["dev"] })).toBe("comment");
-    expect(commitSpecs({ dir: "/p", respond: "off", respondRebase: "comment", rebase: { envs: ["dev"], variables: ["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "DEV_POSTGRES_READER_PASSWORD"] }, yodelImage: true }, "github", "rebase").comment?.commit).toMatchObject({
+    expect(commitSpecs({ dir: "/p", respond: "off", respondRebase: "comment", readers: { envs: ["dev"], variables: ["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "DEV_POSTGRES_READER_PASSWORD"] }, yodelImage: true }, "github", "rebase").comment?.commit).toMatchObject({
       on: "comment",
       comment: "/yodel rebase",
       mergeBase: true,

@@ -15,6 +15,11 @@
  *   tsx scenarios/harness/act.ts audit <env>
  *       yodel report <env>: 0 when every applied migration has its approval,
  *       its override or none needed, and no gap.
+ *   tsx scenarios/harness/act.ts reply <branch> <text>
+ *       Waits, up to 15 minutes, for chant's commit job to answer the newest
+ *       `/yodel` comment on the open pull request from <branch> (its BREAK
+ *       arm's, <branch>-break, in that arm): 0 when the reply holds <text>,
+ *       else 1, with the reply.
  *
  * scenarios/harness/run.ts gives them the arm's project and the forge:
  * YODEL_HARNESS_PROJECT, and the YODEL_HARNESS_FORGEJO_URL, _REPO and _ADMIN
@@ -55,11 +60,62 @@ function project(): Pick<Seeded, "dir" | "env"> {
   return { dir, env: { ...process.env, ...saved, PATH: `${join(dir, "node_modules", ".bin")}:${process.env.PATH ?? ""}` } };
 }
 
+interface Comment {
+  body: string;
+}
+
+/** The open pull request from `branch`, or from `<branch>-break`, the newest. */
+async function pullFrom(a: ForgeAccess, branch: string): Promise<number | undefined> {
+  const pulls = (await forgejo<Array<{ number: number; head?: { ref?: string } }>>(a, a.admin, "GET", `/repos/${a.repo}/pulls?state=open&limit=50`)) ?? [];
+  return pulls
+    .filter((p) => p.head?.ref === branch || p.head?.ref === `${branch}-break`)
+    .map((p) => p.number)
+    .sort((x, y) => y - x)[0];
+}
+
+/** chant's reply to the newest `/yodel` comment on `pull`: the first `yodel: ` comment after it. */
+export function replyTo(comments: readonly Comment[]): string | undefined {
+  const asked = comments.map((c) => c.body.trimStart().startsWith("/yodel ")).lastIndexOf(true);
+  if (asked < 0) return undefined;
+  return comments.slice(asked + 1).find((c) => c.body.startsWith("yodel: "))?.body;
+}
+
+/** Waits for chant's commit job to answer on the pull request from `branch`; 0 when the reply holds `text`. */
+async function reply(a: ForgeAccess, branch: string, text: string): Promise<number> {
+  const deadline = Date.now() + 15 * 60_000;
+  for (;;) {
+    const pull = await pullFrom(a, branch);
+    if (pull !== undefined) {
+      const comments = (await forgejo<Comment[]>(a, a.admin, "GET", `/repos/${a.repo}/issues/${String(pull)}/comments?limit=50`)) ?? [];
+      const said = replyTo(comments);
+      if (said !== undefined) {
+        process.stdout.write(`pull request ${String(pull)}: ${said}\n`);
+        if (said.includes(text)) return 0;
+        process.stderr.write(`the reply does not hold ${JSON.stringify(text)}\n`);
+        return 1;
+      }
+    }
+    if (Date.now() > deadline) {
+      process.stderr.write(`no reply from the commit job on ${pull === undefined ? `a pull request from ${branch}` : `pull request ${String(pull)}`} in 15 minutes\n`);
+      return 1;
+    }
+    await new Promise((res) => setTimeout(res, 5_000));
+  }
+}
+
 export async function act(argv: string[]): Promise<number> {
   const [verb, env, ...rest] = argv;
   if (!verb || !env) {
-    process.stderr.write("usage: tsx scenarios/harness/act.ts approve|override|audit <env> [--rule <id> --reason <text>]\n");
+    process.stderr.write("usage: tsx scenarios/harness/act.ts approve|override|audit <env> [--rule <id> --reason <text>], or reply <branch> <text>\n");
     return 2;
+  }
+  if (verb === "reply") {
+    const text = rest.join(" ");
+    if (!text) {
+      process.stderr.write("usage: tsx scenarios/harness/act.ts reply <branch> <text>\n");
+      return 2;
+    }
+    return reply(forgeAccess(process.env, "", ""), env, text);
   }
   const p = project();
   const a = forgeAccess(process.env, "", "");
@@ -88,7 +144,7 @@ export async function act(argv: string[]): Promise<number> {
     case "audit":
       return (await run("npx", ["yodel", "report", env], { cwd: p.dir, env: p.env, timeoutMs: 600_000 })).code;
     default:
-      process.stderr.write(`act.ts: ${verb} is not approve, override or audit\n`);
+      process.stderr.write(`act.ts: ${verb} is not approve, override, audit or reply\n`);
       return 2;
   }
 }

@@ -16,16 +16,25 @@
  * - loosen-gate: dev's wave gate set to never in yodel.config.ts, and an
  *   audit column with its migration.
  * - drop-note: the note column dropped, and its migration.
+ * - unmigrated-note: the note column added to the declared schema, and
+ *   sql-types.d.ts refreshed for it, with no migration: what `/yodel new`
+ *   writes on the pull request.
+ * - legacy-source: a DDL source in yodel.config.ts (`sources.legacy`, the
+ *   file db/legacy.sql) and sql-types.d.ts with its table, but neither the
+ *   generated file nor a migration. `/yodel new` writes the migration and
+ *   `src/legacy.generated.ts`, a file outside migrations/ that no guard
+ *   covers, which the commit job may not push.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Dialect } from "../lib/claim.js";
 import { run } from "../lib/exec.js";
+import { ddlToDeclarations } from "../../src/sources/ddl.js";
 
-export type OverlayName = "add-note" | "fork" | "loosen-gate" | "drop-note";
+export type OverlayName = "add-note" | "fork" | "loosen-gate" | "drop-note" | "unmigrated-note" | "legacy-source";
 
-const OVERLAYS: readonly string[] = ["add-note", "fork", "loosen-gate", "drop-note"];
+const OVERLAYS: readonly string[] = ["add-note", "fork", "loosen-gate", "drop-note", "unmigrated-note", "legacy-source"];
 
 export const isOverlay = (name: string): name is OverlayName => OVERLAYS.includes(name);
 
@@ -64,6 +73,30 @@ export function setGate(config: string, env: string, gate: "always" | "on-destru
   return next;
 }
 
+/** The schema (Postgres) or database (ClickHouse) the template's declared schema creates. */
+export function templateNamespace(schema: string, dialect: Dialect): string {
+  const name = (dialect === "ch" ? /CREATE DATABASE (\w+)/ : /CREATE SCHEMA (\w+);/).exec(schema)?.[1];
+  if (!name) throw new Error(`the template's schema creates no ${dialect === "ch" ? "database" : "schema"}`);
+  return name;
+}
+
+/** A table of its own, as an ORM's DDL would print it, in `ns`. */
+export const legacyDdl = (ns: string, dialect: Dialect): string =>
+  dialect === "ch" ? `CREATE TABLE ${ns}.legacy (id UInt64) ENGINE = MergeTree ORDER BY id;\n` : `CREATE TABLE ${ns}.legacy (id bigint PRIMARY KEY);\n`;
+
+/** The file yodel writes from the DDL source `legacy`, which the legacy-source overlay leaves for `/yodel new` to write. */
+export const LEGACY_GENERATED = join("src", "legacy.generated.ts");
+
+/** The files an overlay's change makes that its pull request leaves out. */
+const LEFT_OUT: Partial<Record<OverlayName, readonly string[]>> = { "legacy-source": [LEGACY_GENERATED] };
+
+/** yodel.config.ts with the DDL source `legacy`, read from db/legacy.sql. */
+export function withLegacySource(config: string): string {
+  const next = config.replace(/^( {2}ci: )/m, `  sources: { legacy: { file: "db/legacy.sql" } },\n$1`);
+  if (next === config) throw new Error("could not add sources.legacy to yodel.config.ts");
+  return next;
+}
+
 /** Makes `name`'s change in the checkout, uncommitted. */
 export async function makeChange(c: Checkout, name: OverlayName): Promise<void> {
   const schemaPath = join(c.dir, "src", "schema.ts");
@@ -78,6 +111,22 @@ export async function makeChange(c: Checkout, name: OverlayName): Promise<void> 
       writeFileSync(schemaPath, editColumn(readFileSync(schemaPath, "utf8"), c.dialect, "audit", "add"));
       await sh(c, "npx", ["yodel", "new", "add-audit"]);
       return;
+    case "unmigrated-note":
+      writeFileSync(schemaPath, editColumn(readFileSync(schemaPath, "utf8"), c.dialect, "note", "add"));
+      // The pull request's own lint checks sql-types.d.ts, so its author refreshes it.
+      await sh(c, "npx", ["chant", "sql", "types", "--output", join("src", "sql-types.d.ts")]);
+      return;
+    case "legacy-source": {
+      const ddl = legacyDdl(templateNamespace(readFileSync(schemaPath, "utf8"), c.dialect), c.dialect);
+      mkdirSync(join(c.dir, "db"), { recursive: true });
+      writeFileSync(join(c.dir, "db", "legacy.sql"), ddl);
+      writeFileSync(configPath, withLegacySource(readFileSync(configPath, "utf8")));
+      // sql-types.d.ts with the source's table, as the build that writes the generated file declares it; the generated file stays out of the overlay.
+      const declared = await ddlToDeclarations(c.dialect === "ch" ? "clickhouse" : "postgres", ddl, { origin: "yodel.config.ts sources.legacy" });
+      writeFileSync(join(c.dir, LEGACY_GENERATED), declared.content);
+      await sh(c, "npx", ["chant", "sql", "types", "--output", join("src", "sql-types.d.ts")]);
+      return;
+    }
     case "drop-note":
       writeFileSync(schemaPath, editColumn(readFileSync(schemaPath, "utf8"), c.dialect, "note", "drop"));
       await sh(c, "npx", ["yodel", "new", "drop-note"]);
@@ -128,7 +177,8 @@ export async function makeOverlays(base: Checkout, clone: string, names: readonl
   for (const name of names) {
     if (!isOverlay(name)) throw new Error(`${name} is not an overlay sql-yodeler's scenarios make (${OVERLAYS.join(", ")})`);
     await makeChange(c, name);
-    const files = await changedFiles(c);
+    const left = LEFT_OUT[name] ?? [];
+    const files = Object.fromEntries(Object.entries(await changedFiles(c)).filter(([f]) => !left.includes(f)));
     if (Object.keys(files).length === 0) throw new Error(`the ${name} overlay changed nothing`);
     out.set(name, files);
     await sh(c, "git", ["add", "-A", "--", ".", ":!node_modules"]);

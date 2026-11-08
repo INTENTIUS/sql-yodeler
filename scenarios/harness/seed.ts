@@ -11,6 +11,10 @@
  * `npm pack` (vendor/, committed, so every job's `npm ci` installs it: the
  * row's yodel is this commit's), and renders its pipelines with `yodel ci`.
  * Under the waves scenario's BREAK the waves are rendered with gate: never.
+ * Under a commit scenario's BREAK (break.env CHANT_COMMIT_HARNESS_BREAK,
+ * chant pull request 4837) the Forgejo push jobs of `/yodel new` and
+ * `/yodel rebase` get that variable and BREAK=1, and nothing else does: the
+ * command never sees it, and chant's land reads it only there.
  * The base is committed with `[skip ci]`, so pushing it starts no run and
  * the ledger holds only the scenario's own runs. On the forge, the
  * repository gets the secrets the pipelines name (the servers as a job on
@@ -113,6 +117,8 @@ export interface SeedInput {
   setup: Setup;
   /** BREAK's mode for this arm (the scenario's break.env YODEL_HARNESS_BREAK), or undefined for the plain arm. */
   breakMode: string | undefined;
+  /** The land checks this arm turns off (the scenario's break.env CHANT_COMMIT_HARNESS_BREAK), or undefined for the plain arm. */
+  commitBreak?: string | undefined;
   /** The arm's scratch directory; the project is made at `<work>/project`, fresh. */
   work: string;
   access: ForgeAccess;
@@ -215,6 +221,7 @@ export async function seedArm(i: SeedInput): Promise<Seeded> {
   // The apply waves read their gate at the first parent, so the base has one.
   await sh("git", ["commit", "-q", "--allow-empty", "-m", "chore: start [skip ci]"]);
   await sh("npm", ["run", "ci"]);
+  if (i.commitBreak) breakCommitPushJobs(dir, i.commitBreak);
   await sh("git", ["add", "-A"]);
   await sh("git", ["commit", "-qm", "feat: the harness base [skip ci]"]);
   const base = (await sh("git", ["rev-parse", "HEAD"])).out.trim();
@@ -227,6 +234,41 @@ export async function seedArm(i: SeedInput): Promise<Seeded> {
   rmSync(clone, { recursive: true, force: true });
   const overlays = await makeOverlays({ dir, dialect: d, env }, clone, setup.overlays);
   return { dir, dialect: d, env, waves: setup.waves, overlays };
+}
+
+/** chant's switch that turns land's checks off in a BREAK arm (chant's COMMIT_HARNESS_BREAK_ENV). */
+export const COMMIT_HARNESS_BREAK = "CHANT_COMMIT_HARNESS_BREAK";
+
+/**
+ * A Forgejo commit workflow with `checks` off in its push job: BREAK=1 and
+ * CHANT_COMMIT_HARNESS_BREAK added to that job's env, the other jobs as
+ * they were. Undefined when the workflow has no push job.
+ */
+export function breakPushJob(yaml: string, checks: string): string | undefined {
+  const lines = yaml.split("\n");
+  const at = lines.findIndex((l) => /^ {2}[\w-]+-push:\s*$/.test(l));
+  if (at < 0) return undefined;
+  const add = [`      BREAK: "1"`, `      ${COMMIT_HARNESS_BREAK}: ${JSON.stringify(checks)}`];
+  // The job's own keys are at four spaces, up to the next job.
+  let end = lines.findIndex((l, n) => n > at && /^ {0,2}\S/.test(l));
+  if (end < 0) end = lines.length;
+  const env = lines.findIndex((l, n) => n > at && n < end && /^ {4}env:\s*$/.test(l));
+  if (env >= 0) lines.splice(env + 1, 0, ...add);
+  else lines.splice(at + 1, 0, "    env:", ...add);
+  return lines.join("\n");
+}
+
+/** The project's Forgejo commit workflows with `checks` off in each push job. */
+export function breakCommitPushJobs(dir: string, checks: string): void {
+  const workflows = join(dir, ".forgejo", "workflows");
+  let broke = 0;
+  for (const f of readdirSync(workflows).filter((n) => /^yodel-(new|rebase)(-check)?\.yml$/.test(n))) {
+    const next = breakPushJob(readFileSync(join(workflows, f), "utf8"), checks);
+    if (next === undefined) continue;
+    writeFileSync(join(workflows, f), next);
+    broke++;
+  }
+  if (broke === 0) throw new Error(`the project has no Forgejo commit workflow with a push job to set ${COMMIT_HARNESS_BREAK} on`);
 }
 
 /** The repository, made when missing, with the pipelines' secrets, no pull request open and no branch but main. */
@@ -248,6 +290,8 @@ async function prepareRepo(i: SeedInput, d: Dialect): Promise<void> {
     [`${prefix}_READER_PASSWORD`]: READER.password,
     [`${prefix}_WRITER_USER`]: WRITER.user,
     [`${prefix}_WRITER_PASSWORD`]: WRITER.password,
+    // The commit jobs' push token (yodel ci's COMMIT_TOKEN_ENV): the author's, who can push and comment.
+    YODEL_PUSH_TOKEN: a.author.token,
   };
   for (const [k, v] of Object.entries(secrets)) await forgejo(a, a.admin, "PUT", `${r}/actions/secrets/${k}`, { data: v });
   for (const pull of (await forgejo<Array<{ number: number }>>(a, a.admin, "GET", `${r}/pulls?state=open&limit=50`)) ?? []) {
