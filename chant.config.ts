@@ -20,9 +20,6 @@ import type { ChantConfig } from "@intentius/chant";
  * package.json.
  */
 
-/** npm trusted publishing needs npm 11.5.1 or later. */
-const NPM_TRUSTED_PUBLISHING_MIN = "11.5.1";
-
 const IMAGE = "ghcr.io/intentius/sql-yodeler";
 
 export default {
@@ -40,13 +37,11 @@ export default {
       // The gate cut only a commit CI passed, so the cut and the publish build and check nothing more.
       build: "npm run build",
       chant: "npx chant",
-      // GHCR: the oci target pushes with this run's token.
-      permissions: { packages: "write" },
-      env: { OCI_USERNAME: "${{ github.actor }}", OCI_PASSWORD: "${{ github.token }}" },
+      // chant adds packages: write and this run's token for the GHCR oci target, and npm 11.5.1 or later for
+      // trusted publishing, from the targets (chant issue 4786).
       setup: [
         // QEMU, so an amd64 runner builds the arm64 half of the image.
         { uses: "docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0", with: { platforms: "arm64" } },
-        { run: `have="$(npm --version)"; if [ "$(printf '%s\\n' "${NPM_TRUSTED_PUBLISHING_MIN}" "$have" | sort -V | head -n1)" != "${NPM_TRUSTED_PUBLISHING_MIN}" ]; then npm install -g npm@^${NPM_TRUSTED_PUBLISHING_MIN}; fi; npm --version` },
       ],
       after: [
         // The v<version> tag yodel create takes a release's templates from (src/commands/create.ts), on the commit the cut tagged.
