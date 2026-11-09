@@ -35,6 +35,11 @@ jobs:
         run: |
           commit="$(npx chant ci last-green --from "$GITHUB_SHA" --json | node -e 'const f=process.argv[1];const t=f?require("fs").readFileSync(f,"utf8"):require("fs").readFileSync(0,"utf8");const d=JSON.parse(t);process.stdout.write(String(d.commit?.sha??""))')"
           if [ -z "$commit" ]; then echo "no green commit at or below $GITHUB_SHA, so no release is cut" >&2; exit 1; fi
+          if ! git diff --quiet "$commit" "$GITHUB_SHA" -- ":(top).github/workflows"; then
+            changed="$(git log -1 --format=%H "$commit..$GITHUB_SHA" -- ":(top).github/workflows")"
+            echo "the newest green commit, $commit, has other workflow files than $GITHUB_SHA, and GitHub refuses this job's token a tag on it, so no release is cut. Dispatch again once ${changed:-$GITHUB_SHA}, which changed .github/workflows, or a commit after it is green." >&2
+            exit 1
+          fi
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
   cut:
     needs: gate
@@ -56,7 +61,7 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: "arm64"
-      - run: "have=\"$(npm --version)\"; if [ \"$(printf '%s\\n' \"11.5.1\" \"$have\" | sort -V | head -n1)\" != \"11.5.1\" ]; then npm install -g npm@^11.5.1; fi; npm --version"
+      - run: "have=\"$(npm --version)\"; if [ \"$(printf '%s\\n' \"11.5.1\" \"$have\" | sort -V | head -n1)\" != \"11.5.1\" ]; then npm install -g npm@11.19.0; fi; npm --version"
       - run: git fetch origin 'refs/tags/ci/*:refs/tags/ci/*'
       - run: rc=0; git ls-remote --exit-code --heads origin chant/lifecycle >/dev/null || rc=$?; if [ "$rc" = 0 ]; then git fetch origin chant/lifecycle:chant/lifecycle; elif [ "$rc" != 2 ]; then exit "$rc"; fi
       - run: |
@@ -92,15 +97,15 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           platforms: "arm64"
-      - run: "have=\"$(npm --version)\"; if [ \"$(printf '%s\\n' \"11.5.1\" \"$have\" | sort -V | head -n1)\" != \"11.5.1\" ]; then npm install -g npm@^11.5.1; fi; npm --version"
+      - run: "have=\"$(npm --version)\"; if [ \"$(printf '%s\\n' \"11.5.1\" \"$have\" | sort -V | head -n1)\" != \"11.5.1\" ]; then npm install -g npm@11.19.0; fi; npm --version"
       - run: git fetch origin 'refs/tags/ci/*:refs/tags/ci/*'
       - run: git fetch origin chant/lifecycle:chant/lifecycle
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: chant-release-images
           path: dist/images
-      - run: npx chant release images "$CHANT_RELEASE_LABEL" --no-build -o .chant/release-digests.json
-      - run: echo "CHANT_RELEASE_DIGESTS=$PWD/.chant/release-digests.json" >> "$GITHUB_ENV"
+      - run: npx chant release images "$CHANT_RELEASE_LABEL" --no-build -o "$RUNNER_TEMP/chant-release-digests.json"
+      - run: echo "CHANT_RELEASE_DIGESTS=$RUNNER_TEMP/chant-release-digests.json" >> "$GITHUB_ENV"
       - run: npm run build
       - run: npx chant release publish "$CHANT_RELEASE_LABEL" --yes
   after-release:
