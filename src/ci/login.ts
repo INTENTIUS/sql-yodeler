@@ -16,21 +16,19 @@
  * `id_tokens` are chant's (`CHANT_ID_TOKEN_<CLOUD>`).
  *
  * Forgejo gives a job no OIDC token, so there is nothing to trade: a login
- * is rendered only when the config's `tokenFile` names a token the runner
- * provides, and it is yodel's own, from that file:
- * - aws: AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_SESSION_NAME,
- *   which the aws command line assumes the role with.
- * - gcp: an external_account credential configuration over the token file
- *   (the workload identity provider, impersonating the service account),
- *   `gcloud auth login --cred-file` with it, and GOOGLE_APPLICATION_CREDENTIALS.
- * - azure: `az login --service-principal --federated-token`, and
- *   AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_FEDERATED_TOKEN_FILE.
- * The variables go to $GITHUB_ENV, so every later step has them (the
- * report too). Yodel's own login on GitHub and GitLab, from before the
- * trade, left in 0.12 (#303).
+ * is rendered only for a cloud whose config's `tokenFile` names a token the
+ * runner provides, and it is chant's cloud login from that file (chant's
+ * `forgejoCloudLogin`, `@intentius/chant/ci-login`): AWS web identity
+ * variables, a Google `external_account` credential that gcloud and the
+ * SDKs read, and Azure's federated token variables with `az login`. yodel
+ * keeps only the mapping from `ci.login` to chant's login spec
+ * ({@link forgejoLoginSpec}). The variables go to $GITHUB_ENV, so every
+ * later step has them (the report too). Yodel's own login on GitHub and
+ * GitLab, from before the trade, left in 0.12 (#303).
  */
 
 import { gitlabTradeIdTokens, gitlabTradeLines, TRADE_SPEC_ENV, tradeLine } from "@intentius/chant/ci-identity";
+import { forgejoCloudLogin, type CloudLoginSpec } from "@intentius/chant/ci-login";
 import type { AwsLogin, AzureLogin, CiLogin, CloudLogins, GcpLogin } from "../config/define.js";
 import type { CloudToken, Role } from "../credentials.js";
 
@@ -123,41 +121,30 @@ export function jobLogins(login: CiLogin | undefined, held: ReadonlyArray<readon
   });
 }
 
-/** Writes the gcloud credential configuration: `node -e '<this>' <provider> <service account> <token file> <config file>`. */
-const GCP_CREDENTIALS =
-  'const [provider, sa, token, file] = process.argv.slice(1); require("fs").writeFileSync(file, JSON.stringify({ type: "external_account", audience: "//iam.googleapis.com/" + provider, subject_token_type: "urn:ietf:params:oauth:token-type:jwt", token_url: "https://sts.googleapis.com/v1/token", service_account_impersonation_url: "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/" + sa + ":generateAccessToken", credential_source: { file: token } }, null, 2))';
-
 const quote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
-/** A path that may name a variable ($RUNNER_TEMP): double-quoted, so the shell expands it. */
-const path = (s: string): string => `"${s}"`;
 
-/** The variables a cloud's login sets, from its token file (and gcp's credential configuration). */
-function loginVariables(l: Login, tokenFile: string): Record<string, string> {
-  if (l.cloud === "aws") return { AWS_ROLE_ARN: l.config.roleArn, AWS_WEB_IDENTITY_TOKEN_FILE: tokenFile, AWS_ROLE_SESSION_NAME: l.config.sessionName ?? "yodel" };
-  if (l.cloud === "gcp") return { GOOGLE_APPLICATION_CREDENTIALS: `${tokenFile}.json` };
-  return { AZURE_CLIENT_ID: l.config.clientId, AZURE_TENANT_ID: l.config.tenantId, AZURE_FEDERATED_TOKEN_FILE: tokenFile };
+/**
+ * yodel.config.ts `ci.login` for a Forgejo job, as chant's login spec: each
+ * cloud whose config names a `tokenFile`. A cloud without one is left out,
+ * since there the runner's own identity mints. AWS keeps yodel's session
+ * name, and Azure logs the `az` command line in too, as before.
+ */
+export function forgejoLoginSpec(logins: readonly Login[]): CloudLoginSpec {
+  const spec: CloudLoginSpec = {};
+  for (const l of logins) {
+    const tokenFile = l.config.tokenFile;
+    if (tokenFile === undefined) continue;
+    if (l.cloud === "aws") spec.aws = { role: l.config.roleArn, tokenFile, sessionName: l.config.sessionName ?? "yodel", ...(l.config.region ? { region: l.config.region } : {}) };
+    else if (l.cloud === "gcp") spec.gcp = { serviceAccount: l.config.serviceAccount, provider: l.config.workloadIdentityProvider, tokenFile };
+    else spec.azure = { clientId: l.config.clientId, tenantId: l.config.tenantId, tokenFile, cli: true };
+  }
+  return spec;
 }
 
-const STEP_NAME: Record<Cloud, string> = { aws: "Log in to AWS (web identity)", gcp: "Log in to Google Cloud (workload identity)", azure: "Log in to Azure (federated token)" };
-
-/** A Forgejo job's login from the runner's token file; a cloud without a `tokenFile` is left out, since the runner's own identity mints there. */
+/** A Forgejo job's login: chant's (`forgejoCloudLogin`), from the runner's token files. */
 function forgejoSteps(logins: readonly Login[]): LoginSteps {
-  const out: LoginSteps = { steps: [], variables: {} };
-  for (const l of logins) {
-    const file = l.config.tokenFile;
-    if (file === undefined) continue;
-    const lines: string[] = [];
-    if (l.cloud === "gcp") {
-      lines.push(`node -e ${quote(GCP_CREDENTIALS)} ${quote(l.config.workloadIdentityProvider)} ${quote(l.config.serviceAccount)} ${path(file)} ${path(`${file}.json`)}`);
-      lines.push(`gcloud auth login --cred-file=${path(`${file}.json`)} --quiet`);
-    }
-    if (l.cloud === "azure") {
-      lines.push(`az login --service-principal --username ${quote(l.config.clientId)} --tenant ${quote(l.config.tenantId)} --federated-token "$(cat ${path(file)})" --allow-no-subscriptions --output none`);
-    }
-    lines.push(...Object.entries(loginVariables(l, file)).map(([k, v]) => `echo "${k}=${v}" >> "$GITHUB_ENV"`));
-    out.steps.push({ name: STEP_NAME[l.cloud], lines });
-  }
-  return out;
+  const out = forgejoCloudLogin(forgejoLoginSpec(logins));
+  return { steps: out.steps.map((st) => ({ name: st.name, lines: st.run })), variables: {} };
 }
 
 /** The login steps of a job on `forge`, for `logins`: chant's trade on GitHub and GitLab, the runner's token file on Forgejo. */

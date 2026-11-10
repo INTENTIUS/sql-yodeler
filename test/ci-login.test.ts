@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { gitlabTradeLines, TRADE_SPEC_ENV } from "@intentius/chant/ci-identity";
-import { jobLogins, loginProblem, loginSteps, type Login } from "../src/ci/login.js";
+import { forgejoLoginSpec, jobLogins, loginProblem, loginSteps, type Login } from "../src/ci/login.js";
 import { repoRoot, yodel } from "./helpers/run.js";
 import { CHANT } from "./helpers/chant-bin.js";
 
@@ -67,7 +67,9 @@ const step = (job: ActionsJob, name: string): string => job.steps.find((s) => s.
 /** chant's trade step (#296), naming the clouds of the roles a job holds. test/ci-identity.test.ts covers its lines. */
 const TRADED = (clouds: string) => `Cloud identity (chant ci-identity: ${clouds})`;
 
-const AZURE = "Log in to Azure (federated token)";
+/** chant's cloud login (chant issue 4788), which logs a Forgejo job in from the runner's token file. */
+const AZURE = "Cloud login (chant ci-login: azure)";
+const LOGGED_IN = (n: string) => n.startsWith("Cloud login");
 
 describe("yodel ci: the cloud login of a job holding a cloud-minted role", () => {
   it("GitHub and GitLab through chant's trade: one step per job, naming only the clouds of the roles it holds (#296)", async () => {
@@ -115,19 +117,20 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     const dir = project();
     expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
     for (const [f, job] of [[".forgejo/workflows/yodel-pr.yml", "plan-prod"], [".forgejo/workflows/yodel-apply.yml", "wave-2-prod"], [".forgejo/workflows/watch-prod.yml", "watch-prod"]] as const) {
-      expect(names(actionsJob(dir, f, job)).some((n) => n.startsWith("Log in")), `${f} ${job}`).toBe(false);
+      expect(names(actionsJob(dir, f, job)).some(LOGGED_IN), `${f} ${job}`).toBe(false);
     }
 
     const given = project(`{ azure: { clientId: "${CLIENT}", tenantId: "${TENANT}", tokenFile: "/var/run/forge/azure-token" } }`);
     expect((await yodel(["ci", "--dir", given])).code).toBe(0);
     const prod = actionsJob(given, ".forgejo/workflows/yodel-pr.yml", "plan-prod");
     const az = step(prod, AZURE);
-    expect(az).not.toContain("ACTIONS_ID_TOKEN_REQUEST_URL");
-    expect(az.split("\n")[0]).toBe(`az login --service-principal --username '${CLIENT}' --tenant '${TENANT}' --federated-token "$(cat "/var/run/forge/azure-token")" --allow-no-subscriptions --output none`);
-    expect(az).toContain('echo "AZURE_FEDERATED_TOKEN_FILE=/var/run/forge/azure-token" >> "$GITHUB_ENV"');
+    // The spec names the token file, so the login reads it and requests no token.
+    const spec = JSON.parse(/^export CHANT_CLOUD_LOGIN='([^']*)'/.exec(az)?.[1] ?? "{}") as Record<string, unknown>;
+    expect(spec).toEqual({ azure: { clientId: CLIENT, tenantId: TENANT, tokenFile: "/var/run/forge/azure-token", cli: true, audience: "api://AzureADTokenExchange" } });
+    expect(az).toContain('"$GITHUB_ENV" github-env forgejo');
     // No gcp login configured: dev's cloud-sql-iam reader gets none, here or on GitHub.
-    expect(names(prod).filter((n) => n.startsWith("Log in"))).toEqual([AZURE]);
-    expect(names(actionsJob(given, ".github/workflows/yodel-pr.yml", "plan-dev")).some((n) => n.startsWith("Log in") || n.startsWith("Cloud identity"))).toBe(false);
+    expect(names(prod).filter(LOGGED_IN)).toEqual([AZURE]);
+    expect(names(actionsJob(given, ".github/workflows/yodel-pr.yml", "plan-dev")).some((n) => LOGGED_IN(n) || n.startsWith("Cloud identity"))).toBe(false);
   });
 
   it("renders nothing for a job whose roles are not cloud-minted, and the templates do not change", async () => {
@@ -182,7 +185,14 @@ describe("the login steps, per cloud and forge", () => {
       expect(Object.keys(gl.variables)).toEqual([TRADE_SPEC_ENV]);
       expect(loginSteps("forgejo", [l]).steps).toEqual([]);
     }
-    expect(loginSteps("forgejo", [{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/t" } }]).steps[0]?.lines).toEqual(['echo "AWS_ROLE_ARN=arn:aws:iam::123456789012:role/yodel" >> "$GITHUB_ENV"', 'echo "AWS_WEB_IDENTITY_TOKEN_FILE=/run/t" >> "$GITHUB_ENV"', 'echo "AWS_ROLE_SESSION_NAME=yodel" >> "$GITHUB_ENV"']);
+    // chant's login spec (chant issue 4788): the token file, yodel's session name, and the az command line for Azure.
+    expect(forgejoLoginSpec([{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/t" } }])).toEqual({ aws: { role: ROLE, tokenFile: "/run/t", sessionName: "yodel" } });
+    expect(forgejoLoginSpec([{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/t", sessionName: "ci-run", region: "eu-west-1" } }])).toEqual({ aws: { role: ROLE, tokenFile: "/run/t", sessionName: "ci-run", region: "eu-west-1" } });
+    expect(forgejoLoginSpec([{ cloud: "gcp", config: { workloadIdentityProvider: PROVIDER, serviceAccount: SA, tokenFile: "/run/t" } }])).toEqual({ gcp: { serviceAccount: SA, provider: PROVIDER, tokenFile: "/run/t" } });
+    expect(forgejoLoginSpec([{ cloud: "azure", config: { clientId: CLIENT, tenantId: TENANT, tokenFile: "/run/t" } }, aws])).toEqual({ azure: { clientId: CLIENT, tenantId: TENANT, tokenFile: "/run/t", cli: true } });
+    const one = loginSteps("forgejo", [{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/t" } }, { cloud: "azure", config: { clientId: CLIENT, tenantId: TENANT, tokenFile: "/run/t" } }]);
+    expect(one.steps.map((st) => st.name)).toEqual(["Cloud login (chant ci-login: aws, azure)"]);
+    expect(one.steps[0]?.lines[0]).toMatch(/^export CHANT_CLOUD_LOGIN='/);
   });
 
   it("logs a job in once per cloud, and refuses two environments with different logins for one", () => {
