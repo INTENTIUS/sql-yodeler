@@ -1223,7 +1223,8 @@ export interface WatchSpec {
   name: string;
   variables?: Record<string, string>;
   permissions?: Record<string, "read" | "write">;
-  setup?: Array<{ run: string }>;
+  /** A step's name is written on GitHub and Forgejo (chant issue 4932); GitLab's script lines have none. */
+  setup?: Array<{ name?: string; run: string }>;
   gitlab?: { idTokens: Record<string, { aud: string }> };
 }
 
@@ -1239,8 +1240,8 @@ export function watchSpec(env: string, forge: Forge, envs: Pick<Environments, "d
   const held: Array<[string, Role]> = [[env, "reader"]];
   const logins = loginsOf(envs, held);
   const login = loginSteps(forge, logins);
-  // GitLab: a script line each, as the job's own lines are; GitHub and Forgejo: a step each.
-  const steps = forge === "gitlab" ? login.steps.flatMap((st) => st.lines.map((run) => ({ run }))) : login.steps.map((st) => ({ run: st.lines.join("\n") }));
+  // GitLab: a script line each, as the job's own lines are; GitHub and Forgejo: a named step each.
+  const steps = forge === "gitlab" ? login.steps.flatMap((st) => st.lines.map((run) => ({ run }))) : login.steps.map((st) => ({ name: st.name, run: st.lines.join("\n") }));
   const setup = steps.length > 0 ? { setup: steps } : {};
   if (forge === "gitlab") {
     const clouds = cloudsOf(envs, held);
