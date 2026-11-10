@@ -1,0 +1,91 @@
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
+# The push job reads YODEL_PUSH_TOKEN: a project access token with write_repository and api,
+# as a protected, masked CI/CD variable (docs/workflows.md, /yodel new).
+# chant Ops — one job per Op under stage "ops", each
+# selected by its own rules:. A merge_request_event or push job needs no
+# setup; its rule fires on the event itself.
+#
+#   yodel-new: answers /yodel new from a pipeline of the default branch started with CHANT_COMMIT_PR=<iid> and CHANT_COMMIT=new
+#     yodel-new-push pushes with YODEL_PUSH_TOKEN: scope it to environment yodel-new-push, protected and masked
+#     the change may touch migrations/; at most 3 commits per merge request, counted on the ledger
+
+stages:
+  - ops
+
+yodel-new:
+  stage: ops
+  image: node:22-bookworm
+  resource_group: yodel-new
+  timeout: '25 minutes'
+  variables:
+    CHANT_COMMIT_NAME: yodel-new
+    CHANT_COMMIT_ON: comment
+    CHANT_COMMIT_COMMENT: /yodel new
+    CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own","--env","dev","--env","prod"]'
+    CHANT_COMMIT_ALLOWED: '["migrations/"]'
+    CHANT_COMMIT_FINDINGS: '2'
+    CHANT_COMMIT_MAX_RUNS: '3'
+    CHANT_COMMIT_TIMEOUT: '10'
+    CHANT_COMMIT_ENV: local
+    CHANT_COMMIT_COMMAND_ENV: '["DEV_CLICKHOUSE_URL","DEV_CLICKHOUSE_READER_USER","DEV_CLICKHOUSE_READER_PASSWORD","PROD_CLICKHOUSE_URL","PROD_CLICKHOUSE_READER_USER","PROD_CLICKHOUSE_READER_PASSWORD"]'
+    CHANT_COMMIT_COMMENT_ARG: '{"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","position":2}'
+    GIT_DEPTH: '0'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api|trigger|chat)$/ && $CHANT_COMMIT_PR =~ /^[0-9]+$/ && $CHANT_COMMIT == "new" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  script:
+    - |
+      case "$CHANT_COMMIT_PR" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
+      git -c protocol.version=2 fetch -q --no-tags origin "+refs/merge-requests/$CHANT_COMMIT_PR/head:refs/chant/commit-head"
+    - git fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
+    - git remote set-url origin "$CI_SERVER_URL/$CI_PROJECT_PATH.git"
+    - node -e 'const m = Number(process.versions.node.split(".")[0]); if (m < 22) { console.error("the sql lexicon needs Node 22 or newer; this image has " + process.versions.node); process.exit(1); }'
+    - '{ [ -d node_modules/@intentius/chant-lexicon-sql ] || npm ci; } && export PATH="$PWD/node_modules/.bin:$PATH" && if [ -n "${GITHUB_PATH:-}" ]; then echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"; fi'
+    - unset CHANT_FORGE_TOKEN CHANT_GITHUB_TOKEN CHANT_FORGEJO_TOKEN CHANT_GITLAB_TOKEN CHANT_CHECKOUT_TOKEN GITHUB_TOKEN GH_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITLAB_TOKEN CI_JOB_TOKEN ACTIONS_RUNTIME_TOKEN
+    - yodel chant commit prepare --forge gitlab --output .chant/commit
+    - yodel chant commit run --forge gitlab --output .chant/commit
+  artifacts:
+    when: always
+    paths:
+      - .chant/commit
+    expire_in: '7 days'
+
+yodel-new-push:
+  stage: ops
+  image: node:22-bookworm
+  resource_group: yodel-new-push
+  environment:
+    name: yodel-new-push
+    action: access
+  variables:
+    CHANT_COMMIT_NAME: yodel-new
+    CHANT_COMMIT_ON: comment
+    CHANT_COMMIT_COMMENT: /yodel new
+    CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own","--env","dev","--env","prod"]'
+    CHANT_COMMIT_ALLOWED: '["migrations/"]'
+    CHANT_COMMIT_FINDINGS: '2'
+    CHANT_COMMIT_MAX_RUNS: '3'
+    CHANT_COMMIT_TIMEOUT: '10'
+    CHANT_COMMIT_ENV: local
+    CHANT_COMMIT_COMMAND_ENV: '["DEV_CLICKHOUSE_URL","DEV_CLICKHOUSE_READER_USER","DEV_CLICKHOUSE_READER_PASSWORD","PROD_CLICKHOUSE_URL","PROD_CLICKHOUSE_READER_USER","PROD_CLICKHOUSE_READER_PASSWORD"]'
+    CHANT_COMMIT_COMMENT_ARG: '{"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","position":2}'
+    GIT_DEPTH: '0'
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(web|api|trigger|chat)$/ && $CHANT_COMMIT_PR =~ /^[0-9]+$/ && $CHANT_COMMIT == "new" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  needs:
+    - job: yodel-new
+      artifacts: true
+  script:
+    - if [ ! -f .chant/commit/decision.json ]; then echo "yodel-new did not run"; exit 0; fi
+    - |
+      case "$CHANT_COMMIT_PR" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
+      git -c protocol.version=2 fetch -q --no-tags origin "+refs/merge-requests/$CHANT_COMMIT_PR/head:refs/chant/commit-head"
+    - git fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
+    - git remote set-url origin "$CI_SERVER_URL/$CI_PROJECT_PATH.git"
+    - node -e 'const m = Number(process.versions.node.split(".")[0]); if (m < 22) { console.error("the sql lexicon needs Node 22 or newer; this image has " + process.versions.node); process.exit(1); }'
+    - '{ [ -d node_modules/@intentius/chant-lexicon-sql ] || npm ci; } && export PATH="$PWD/node_modules/.bin:$PATH" && if [ -n "${GITHUB_PATH:-}" ]; then echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"; fi'
+    - export CHANT_GITLAB_TOKEN="$YODEL_PUSH_TOKEN"
+    - chant_auth="$(printf 'oauth2:%s' "$YODEL_PUSH_TOKEN" | base64 | tr -d '\n')"
+    - 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $chant_auth"'
+    - unset chant_auth
+    - yodel chant commit land --forge gitlab --output .chant/commit

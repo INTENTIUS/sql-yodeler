@@ -29,14 +29,20 @@ Created:
   .forgejo/workflows/watch-dev.yml
   .forgejo/workflows/watch-prod.yml
   .forgejo/workflows/yodel-apply.yml
+  .forgejo/workflows/yodel-new.yml
   .forgejo/workflows/yodel-pr.yml
+  .forgejo/workflows/yodel-rebase.yml
   .github/workflows/watch-dev.yml
   .github/workflows/watch-prod.yml
   .github/workflows/yodel-apply.yml
+  .github/workflows/yodel-new.yml
   .github/workflows/yodel-pr.yml
+  .github/workflows/yodel-rebase.yml
   .gitignore
   .gitlab-ci.yml
   .gitlab/yodel-apply.gitlab-ci.yml
+  .gitlab/yodel-commit.gitlab-ci.yml
+  .gitlab/yodel-rebase.gitlab-ci.yml
   .gitlab/yodel-watch.gitlab-ci.yml
   chant.config.ts
   chant.workspace.json

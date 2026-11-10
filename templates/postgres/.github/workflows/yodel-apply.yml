@@ -50,7 +50,7 @@ jobs:
           fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-      - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - run: ./node_modules/.bin/yodel ci --fetch-ledger
       - name: Plan, gate and apply wave 1 (dev)
         run: yodel chant run wave --spec yodel-waves.json --wave 1
       - name: Keep the job's outcome
@@ -67,7 +67,7 @@ jobs:
         run: mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
       - name: Keep the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yodel-report-wave-1-dev
           path: yodel-report
@@ -110,7 +110,7 @@ jobs:
           path: .chant/op-waves/yodel-apply/outcomes
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
-      - run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+      - run: ./node_modules/.bin/yodel ci --fetch-ledger
       - name: Plan, gate and apply wave 2 (prod)
         run: yodel chant run wave --spec yodel-waves.json --wave 2
       - name: Keep the job's outcome
@@ -127,7 +127,7 @@ jobs:
         run: mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
       - name: Keep the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yodel-report-wave-2-prod
           path: yodel-report

@@ -1,0 +1,161 @@
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
+# The push job reads the YODEL_PUSH_TOKEN secret: a token of a person or an app that can push
+# to the repository; a push with the job's own token would start no pipeline (docs/workflows.md, /yodel new).
+name: yodel-new
+
+on:
+  issue_comment:
+    types:
+      - created
+
+concurrency:
+  group: yodel-new-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  yodel-new:
+    if: github.event_name == 'issue_comment' && (github.event.issue.pull_request || github.event.is_pull) && startsWith(github.event.comment.body, '/yodel new')
+    runs-on: docker
+    container: node:22-bookworm
+    timeout-minutes: 25
+    env:
+      CHANT_COMMIT_NAME: yodel-new
+      CHANT_COMMIT_ON: comment
+      CHANT_COMMIT_COMMENT: /yodel new
+      CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own","--env","dev","--env","prod"]'
+      CHANT_COMMIT_ALLOWED: '["migrations/"]'
+      CHANT_COMMIT_FINDINGS: '2'
+      CHANT_COMMIT_MAX_RUNS: '3'
+      CHANT_COMMIT_TIMEOUT: '10'
+      CHANT_COMMIT_ENV: local
+      CHANT_COMMIT_COMMAND_ENV: '["DEV_CLICKHOUSE_URL","DEV_CLICKHOUSE_READER_USER","DEV_CLICKHOUSE_READER_PASSWORD","PROD_CLICKHOUSE_URL","PROD_CLICKHOUSE_READER_USER","PROD_CLICKHOUSE_READER_PASSWORD"]'
+      CHANT_COMMIT_COMMENT_ARG: '{"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","position":2}'
+    outputs:
+      report_0: '${{ steps.chant-commit.outputs.report_0 }}'
+      report_1: '${{ steps.chant-commit.outputs.report_1 }}'
+      report_2: '${{ steps.chant-commit.outputs.report_2 }}'
+      report_3: '${{ steps.chant-commit.outputs.report_3 }}'
+    steps:
+      - name: Check out the target branch's commit and the pull request's head
+        env:
+          CHANT_CHECKOUT_TOKEN: '${{ github.token }}'
+          PR_NUMBER: '${{ github.event.issue.number }}'
+        run: |
+          set -eu
+          git config --global --add safe.directory "$PWD" 2>/dev/null || true
+          [ -d .git ] || git init -q .
+          git remote get-url origin >/dev/null 2>&1 || git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          if [ -n "${CHANT_CHECKOUT_TOKEN:-}" ]; then
+            chant_auth="$(printf 'x-access-token:%s' "$CHANT_CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+            export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $chant_auth"
+            unset chant_auth
+          fi
+          ref="$GITHUB_REF"
+          want="$GITHUB_SHA"
+          case "$ref" in
+            refs/heads/*) target="refs/remotes/origin/${ref#refs/heads/}" ;;
+            refs/tags/*) target="$ref" ;;
+            refs/*) target="refs/remotes/${ref#refs/}" ;;
+            *) target="refs/remotes/origin/chant-head" ;;
+          esac
+          if git rev-parse -q --verify HEAD >/dev/null; then git clean -ffdxq; fi
+          git -c protocol.version=2 fetch -q --prune --no-recurse-submodules origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' "+$want:$target"
+          git -c protocol.version=2 fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
+          case "$ref" in
+            refs/heads/*) git checkout -q --force -B "${ref#refs/heads/}" "$target" ;;
+            *) git checkout -q --force --detach "$target" ;;
+          esac
+          case "$PR_NUMBER" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
+          git -c protocol.version=2 fetch -q --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/chant/commit-head"
+      - run: node -e 'const m = Number(process.versions.node.split(".")[0]); if (m < 22) { console.error("the sql lexicon needs Node 22 or newer; this image has " + process.versions.node); process.exit(1); }'
+      - run: '{ [ -d node_modules/@intentius/chant-lexicon-sql ] || npm ci; } && export PATH="$PWD/node_modules/.bin:$PATH" && if [ -n "${GITHUB_PATH:-}" ]; then echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"; fi'
+      - name: Decide whether the command runs
+        env:
+          GITHUB_TOKEN: '${{ github.token }}'
+        run: yodel chant commit prepare --forge forgejo --output .chant/commit
+      - id: chant-commit
+        name: Run the command
+        env:
+          DEV_CLICKHOUSE_URL: '${{ secrets.DEV_CLICKHOUSE_URL }}'
+          DEV_CLICKHOUSE_READER_USER: '${{ secrets.DEV_CLICKHOUSE_READER_USER }}'
+          DEV_CLICKHOUSE_READER_PASSWORD: '${{ secrets.DEV_CLICKHOUSE_READER_PASSWORD }}'
+          PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
+          PROD_CLICKHOUSE_READER_USER: '${{ secrets.PROD_CLICKHOUSE_READER_USER }}'
+          PROD_CLICKHOUSE_READER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_READER_PASSWORD }}'
+        run: |
+          if [ -z "${CHANT_NO_FORGE_TOKEN:-}" ] && [ "${0#*/}" != "$0" ] && [ -f "$0" ] && ! { [ "${0##*/}" = sh ] || [ "${0##*/}" = bash ] || [ "${0##*/}" = dash ]; } && command -v env >/dev/null 2>&1 && command -v sh >/dev/null 2>&1; then exec env -u CHANT_FORGE_TOKEN -u CHANT_GITHUB_TOKEN -u CHANT_FORGEJO_TOKEN -u CHANT_GITLAB_TOKEN -u CHANT_CHECKOUT_TOKEN -u GITHUB_TOKEN -u GH_TOKEN -u FORGEJO_TOKEN -u GITEA_TOKEN -u GITLAB_TOKEN -u CI_JOB_TOKEN -u ACTIONS_RUNTIME_TOKEN CHANT_NO_FORGE_TOKEN=1 sh -e "$0"; fi; unset CHANT_FORGE_TOKEN CHANT_GITHUB_TOKEN CHANT_FORGEJO_TOKEN CHANT_GITLAB_TOKEN CHANT_CHECKOUT_TOKEN GITHUB_TOKEN GH_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITLAB_TOKEN CI_JOB_TOKEN ACTIONS_RUNTIME_TOKEN
+          chant_report="$PWD/.chant/commit"
+          chant_handover() { node -e 'const fs=require("fs"),p=require("path"),z=require("zlib");const [dir,out]=process.argv.slice(1);const CHUNK=1000000,PARTS=4,NOTE=["decision.json","rc","output","change.patch"];const all={};const walk=(d,r)=>{let n=[];try{n=fs.readdirSync(d).sort()}catch{return}for(const x of n){const f=p.join(d,x),k=r?r+"/"+x:x;let s;try{s=fs.lstatSync(f)}catch{continue}if(s.isDirectory())walk(f,k);else if(s.isFile())all[k]=fs.readFileSync(f).toString("base64")}};walk(dir,"");const pack=(o)=>z.gzipSync(JSON.stringify(o)).toString("base64");let b=pack(all);if(b.length>CHUNK*PARTS){b=pack(Object.fromEntries(Object.entries(all).filter(([k])=>NOTE.includes(k))));if(b.length>CHUNK*PARTS){b=pack({});console.error("chant-commit: the report is too large to hand to the next job, even cut to decision.json, rc, output, change.patch; it hands on none of it")}else console.error("chant-commit: the report is too large to hand to the next job whole; it hands on decision.json, rc, output, change.patch")}let o="";for(let i=0;i*CHUNK<b.length;i++)o+="report_"+i+"="+b.slice(i*CHUNK,(i+1)*CHUNK)+"\n";fs.appendFileSync(out,o);' "$chant_report" "${GITHUB_OUTPUT:-/dev/null}" || echo "chant-commit: the report could not be handed to the next job" >&2; }
+          trap chant_handover EXIT
+          yodel chant commit run --forge forgejo --output .chant/commit
+  yodel-new-push:
+    needs: yodel-new
+    if: always() && needs.yodel-new.result == 'success'
+    runs-on: docker
+    container: node:22-bookworm
+    env:
+      CHANT_COMMIT_NAME: yodel-new
+      CHANT_COMMIT_ON: comment
+      CHANT_COMMIT_COMMENT: /yodel new
+      CHANT_COMMIT_COMMAND: '["yodel","new","--if-changed","--replace-own","--env","dev","--env","prod"]'
+      CHANT_COMMIT_ALLOWED: '["migrations/"]'
+      CHANT_COMMIT_FINDINGS: '2'
+      CHANT_COMMIT_MAX_RUNS: '3'
+      CHANT_COMMIT_TIMEOUT: '10'
+      CHANT_COMMIT_ENV: local
+      CHANT_COMMIT_COMMAND_ENV: '["DEV_CLICKHOUSE_URL","DEV_CLICKHOUSE_READER_USER","DEV_CLICKHOUSE_READER_PASSWORD","PROD_CLICKHOUSE_URL","PROD_CLICKHOUSE_READER_USER","PROD_CLICKHOUSE_READER_PASSWORD"]'
+      CHANT_COMMIT_COMMENT_ARG: '{"pattern":"^[a-z0-9]+(?:[-_][a-z0-9]+)*$","position":2}'
+    steps:
+      - name: Check out the target branch's commit and the pull request's head
+        env:
+          CHANT_CHECKOUT_TOKEN: '${{ github.token }}'
+          PR_NUMBER: '${{ github.event.issue.number }}'
+        run: |
+          set -eu
+          git config --global --add safe.directory "$PWD" 2>/dev/null || true
+          [ -d .git ] || git init -q .
+          git remote get-url origin >/dev/null 2>&1 || git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          if [ -n "${CHANT_CHECKOUT_TOKEN:-}" ]; then
+            chant_auth="$(printf 'x-access-token:%s' "$CHANT_CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+            export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $chant_auth"
+            unset chant_auth
+          fi
+          ref="$GITHUB_REF"
+          want="$GITHUB_SHA"
+          case "$ref" in
+            refs/heads/*) target="refs/remotes/origin/${ref#refs/heads/}" ;;
+            refs/tags/*) target="$ref" ;;
+            refs/*) target="refs/remotes/${ref#refs/}" ;;
+            *) target="refs/remotes/origin/chant-head" ;;
+          esac
+          if git rev-parse -q --verify HEAD >/dev/null; then git clean -ffdxq; fi
+          git -c protocol.version=2 fetch -q --prune --no-recurse-submodules origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' "+$want:$target"
+          git -c protocol.version=2 fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
+          case "$ref" in
+            refs/heads/*) git checkout -q --force -B "${ref#refs/heads/}" "$target" ;;
+            *) git checkout -q --force --detach "$target" ;;
+          esac
+          case "$PR_NUMBER" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
+          git -c protocol.version=2 fetch -q --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/chant/commit-head"
+      - name: Take the change from the commit job
+        run: |
+          set -u
+          node -e 'const fs=require("fs"),p=require("path"),z=require("zlib");const dir=process.argv[1];let b="";for(const l of fs.readFileSync(0,"utf8").split("\n")){if(!l.trim())continue;let s="";try{s=JSON.parse(l)}catch{}if(typeof s==="string")b+=s}if(!b){console.log("chant: the yodel-new job handed on no report");process.exit(0)}let files;try{files=JSON.parse(z.gunzipSync(Buffer.from(b,"base64"),{maxOutputLength:268435456}).toString("utf8"))}catch(e){console.log("chant: the report the yodel-new job handed on does not read: "+e.message);process.exit(0)}if(!files||typeof files!=="object"||Array.isArray(files)){console.log("chant: the report the yodel-new job handed on is not a set of files");process.exit(0)}let n=0;for(const [k,v] of Object.entries(files)){const parts=k.split("/");if(typeof v!=="string"||k.length>1024||parts.some((x)=>!x||x==="."||x===".."||/[\\\x00-\x1f]/.test(x))){console.log("chant: left out "+JSON.stringify(k));continue}try{const f=p.join(dir,...parts);fs.mkdirSync(p.dirname(f),{recursive:true});fs.writeFileSync(f,Buffer.from(v,"base64"));n++}catch(e){console.log("chant: could not write "+JSON.stringify(k)+": "+e.message)}}console.log("chant: took "+n+" report files from the yodel-new job")' .chant/commit <<'END_OF_REPORT'
+          ${{ toJSON(needs.yodel-new.outputs.report_0) }}
+          ${{ toJSON(needs.yodel-new.outputs.report_1) }}
+          ${{ toJSON(needs.yodel-new.outputs.report_2) }}
+          ${{ toJSON(needs.yodel-new.outputs.report_3) }}
+          END_OF_REPORT
+      - run: node -e 'const m = Number(process.versions.node.split(".")[0]); if (m < 22) { console.error("the sql lexicon needs Node 22 or newer; this image has " + process.versions.node); process.exit(1); }'
+      - run: '{ [ -d node_modules/@intentius/chant-lexicon-sql ] || npm ci; } && export PATH="$PWD/node_modules/.bin:$PATH" && if [ -n "${GITHUB_PATH:-}" ]; then echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"; fi'
+      - name: Push the change to the pull request
+        env:
+          CHANT_COMMIT_TOKEN: '${{ secrets.YODEL_PUSH_TOKEN }}'
+          GITHUB_TOKEN: '${{ secrets.YODEL_PUSH_TOKEN }}'
+          CHANT_FORGEJO_TOKEN: '${{ secrets.YODEL_PUSH_TOKEN }}'
+        run: |
+          chant_auth="$(printf 'x-access-token:%s' "$CHANT_COMMIT_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $chant_auth"
+          unset chant_auth
+          yodel chant commit land --forge forgejo --output .chant/commit
