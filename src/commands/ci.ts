@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { planFile, planRemoval, staleGeneratedFiles, writePlannedFiles } from "@intentius/chant/planned-files";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, YodelError } from "../project.js";
@@ -122,49 +122,29 @@ export const ci: Command = {
         return replayLocally(dir, a.rest);
       }
       // Loaded here: the forge lexicons are for this command alone.
-      const { render, PIPELINE_DIRS, renderedByYodel } = await import("../ci/render.js");
-      /** The pipeline files in the project that carry yodel ci's header, as project-relative paths. */
-      const ownedPipelines = (root: string): string[] => {
-        const candidates = [".gitlab-ci.yml"];
-        for (const d of PIPELINE_DIRS) {
-          const abs = join(root, d);
-          if (!existsSync(abs)) continue;
-          for (const e of readdirSync(abs, { withFileTypes: true })) {
-            if (e.isFile() && /\.ya?ml$/.test(e.name)) candidates.push(`${d}/${e.name}`);
-          }
-        }
-        return candidates.filter((p) => existsSync(join(root, p)) && renderedByYodel(readFileSync(join(root, p), "utf8")));
-      };
+      const { render, PIPELINE_DIRS, PIPELINE_HEADER } = await import("../ci/render.js");
       let files;
       try {
         files = await render(dir);
       } catch (e) {
         throw new YodelError(e instanceof Error ? e.message : String(e));
       }
-      const stale: string[] = [];
-      for (const file of files) {
-        const abs = join(dir, file.path);
-        const current = existsSync(abs) ? readFileSync(abs, "utf8") : undefined;
-        if (current === file.content) continue;
-        if (a.check) {
-          stale.push(file.path);
-          continue;
-        }
-        mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, file.content);
-        io.out(`wrote ${file.path}\n`);
-      }
+      const planned = files.map((f) => ({ rel: f.path, file: planFile(join(dir, f.path), f.content) }));
+      const stale = planned.filter((p) => p.file.status !== "unchanged").map((p) => p.rel);
       // A pipeline file yodel ci wrote before and renders no more (#348): removed, or under --check reported.
-      const rendered = new Set(files.map((f) => f.path));
-      const left: string[] = [];
-      for (const path of ownedPipelines(dir)) {
-        if (rendered.has(path)) continue;
-        if (a.check) {
-          left.push(path);
-          continue;
-        }
-        unlinkSync(join(dir, path));
-        io.out(`removed ${path}\n`);
+      const left = staleGeneratedFiles({
+        root: dir,
+        dirs: PIPELINE_DIRS,
+        files: [".gitlab-ci.yml"],
+        match: /\.ya?ml$/,
+        header: PIPELINE_HEADER,
+        rendered: files.map((f) => f.path),
+      });
+      if (!a.check) {
+        const removals = left.flatMap((p) => planRemoval(join(dir, p)) ?? []);
+        writePlannedFiles([...planned.map((p) => p.file), ...removals]);
+        for (const p of stale) io.out(`wrote ${p}\n`);
+        for (const p of left) io.out(`removed ${p}\n`);
       }
       if (a.check && (stale.length > 0 || left.length > 0)) {
         if (stale.length > 0) io.err(`stale, run yodel ci: ${stale.join(", ")}\n`);
