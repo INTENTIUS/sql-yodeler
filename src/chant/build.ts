@@ -1,6 +1,7 @@
 /**
- * Building the declared schema: `chant build <sourceDir> --lexicon sql`, the
- * same build the project's ApplyOp runs, written to a file the planner reads.
+ * Building the declared schema: `chant build --lexicon sql`, which builds the
+ * config's `sourceDir` by chant's rule (chant issue 4794), the same build the
+ * project's ApplyOp runs, written to a file the planner reads.
  */
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -38,7 +39,7 @@ export interface Build {
  * a temporary directory that {@link Build.dispose} removes. A build that
  * fails, or that holds another dialect than the project's, is an error.
  */
-export async function buildSchema(project: Project, options: { out?: string; env?: NodeJS.ProcessEnv; empty?: boolean } = {}): Promise<Build> {
+export async function buildSchema(project: Project, options: { out?: string; env?: NodeJS.ProcessEnv; empty?: boolean; src?: string } = {}): Promise<Build> {
   const tmp = options.out ? undefined : mkdtempSync(join(tmpdir(), "yodel-build-"));
   const path = options.out ?? join(tmp ?? ".", "schema.json");
   const dispose = () => {
@@ -49,7 +50,8 @@ export async function buildSchema(project: Project, options: { out?: string; env
     const synced = await syncSources(project, options.env ? { env: options.env } : {});
     // --root-only: a project with its own chant.workspace.json (a template's, or one `yodel upgrade` wrote) is a
     // declared workspace root, where chant build refuses with WSP000 unless told to build the root project alone.
-    const result = await runChant(["build", project.sourceDir, "--lexicon", "sql", "--root-only", "-o", path], {
+    // `src` is a directory of the caller's own (yodel check's server snapshot); without it chant builds sourceDir.
+    const result = await runChant(["build", ...(options.src ? [options.src] : []), "--lexicon", "sql", "--root-only", "-o", path], {
       cwd: project.dir,
       ...(options.env ? { env: options.env } : {}),
     });

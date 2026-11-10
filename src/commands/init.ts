@@ -21,8 +21,9 @@ const help = `${usage}
 
 Adopts an existing database. Reads the live database sql.profiles.<env>
 binds, with chant's import (what chant import --from <env> runs), writes
-its declarations to the source directory (sourceDir, else src/), builds
-them and plans them against the same database, which must show no change.
+its declarations to the source directory (sourceDir, else the project
+root), builds them and plans them against the same database, which must
+show no change.
 Then writes the baseline migration, migrations/<YYYYMMDDTHHMM>-baseline/,
 the first migration (no parent), whose statements create everything, and
 records it applied in the history table (yodel.config.ts history.database,

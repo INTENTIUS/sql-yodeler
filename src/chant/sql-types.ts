@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { resolveSourceDir } from "@intentius/chant/config";
 import type { Project } from "../project.js";
 import { runChant } from "./process.js";
 
@@ -20,7 +21,7 @@ export const SQL_TYPES_FILE = "sql-types.d.ts";
  * why it could not be written, which never fails the command that asked.
  */
 export async function refreshSqlTypes(project: Project): Promise<{ updated?: string; warning?: string }> {
-  const path = join(project.dir, project.sourceDir, SQL_TYPES_FILE);
+  const path = join(resolveSourceDir(project.dir, project.config), SQL_TYPES_FILE);
   if (!existsSync(path)) return {};
   const before = readFileSync(path, "utf8");
   const ran = await runChant(["sql", "types", "--output", path], { cwd: project.dir });

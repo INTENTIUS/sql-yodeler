@@ -198,7 +198,7 @@ describe("preflight", () => {
   it("passes a project with no declarations and no migrations", () => {
     const { p, env: e } = project("clickhouse", ch);
     expect(() => { preflight(p, e, { processEnv: env }); }).not.toThrow();
-    expect(schemaDir(p)).toBe(join(dir, "src"));
+    expect(schemaDir(p)).toBe(dir);
   });
 
   it("writes to sourceDir when the config names one", () => {
@@ -210,7 +210,7 @@ describe("preflight", () => {
     const { p, env: e } = project("clickhouse", ch);
     mkdirSync(join(dir, "src"));
     writeFileSync(join(dir, "src", "schema.ts"), "export {}");
-    expect(() => { preflight(p, e, { processEnv: env }); }).toThrow(/already declares a schema \(schema\.ts\).*--force/s);
+    expect(() => { preflight(p, e, { processEnv: env }); }).toThrow(/already declares a schema \(src\/schema\.ts\).*--force/s);
     expect(() => { preflight(p, e, { force: true, processEnv: env }); }).not.toThrow();
   });
 

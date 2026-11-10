@@ -14,16 +14,16 @@
  */
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { buildSchema } from "../chant/build.js";
 import { createMigration, newestMigration } from "../migrations/index.js";
+import { resolveSourceDir } from "@intentius/chant/config";
 import type { Project } from "../project.js";
 import type { ProjectRule, RawFinding } from "./check.js";
 import { LINT_RULES } from "./rules.js";
 
-/** Whether the project names a directory its schema is declared in. */
+/** Whether the project names a directory its schema is declared in: a `sourceDir` that exists. */
 const declares = (project: Project): boolean =>
-  (project.config as { sourceDir?: unknown }).sourceDir !== undefined ? existsSync(join(project.dir, project.sourceDir)) : existsSync(join(project.dir, "src"));
+  (project.config as { sourceDir?: unknown }).sourceDir !== undefined && existsSync(resolveSourceDir(project.dir, project.config));
 
 /** The rule over `project`; `note` gets the reason it did not run, for standard error. */
 export function unmigratedRule(project: Project, note: (text: string) => void = () => {}): ProjectRule {

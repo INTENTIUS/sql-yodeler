@@ -6,6 +6,7 @@ import "@intentius/chant-lexicon-sql";
 // yodel_34_claim to the claim's own, yodel_34_<claim>.
 export default {
   lexicons: ["sql"],
+  sourceDir: "src",
   sql: {
     dialect: "postgres",
     profiles: {

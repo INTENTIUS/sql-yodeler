@@ -27,6 +27,7 @@
 import { exec } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+import { resolveSourceDir } from "@intentius/chant/config";
 import type { BuildOutput } from "../chant/build.js";
 import { YodelError, type Project } from "../project.js";
 import { ddlObjects, ddlToDeclarations, type DdlObject } from "./ddl.js";
@@ -55,7 +56,7 @@ export interface SyncedSource {
 const SOURCE_NAME = /^[a-z][a-z0-9-]*$/;
 
 /** The generated file a source writes, relative to the project directory. */
-export const generatedPath = (project: Project, name: string): string => join(project.sourceDir, `${name}.generated.ts`);
+export const generatedPath = (project: Project, name: string): string => relative(project.dir, join(resolveSourceDir(project.dir, project.config), `${name}.generated.ts`));
 
 /** Checks `sources` in yodel.config.ts. */
 export function checkSources(value: unknown, where: string): Record<string, DdlSource> {

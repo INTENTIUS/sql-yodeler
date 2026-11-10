@@ -7,6 +7,7 @@ import "@intentius/chant-lexicon-sql";
 // its place when the suite copies this fixture.
 export default {
   lexicons: ["sql"],
+  sourceDir: "src",
   sql: {
     dialect: "postgres",
     profiles: {
