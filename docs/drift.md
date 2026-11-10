@@ -101,7 +101,7 @@ A scheduled job can stop with no error anywhere. GitHub turns a scheduled workfl
 Warning: Op `watch-dev` is overdue: its schedule `17 * * * *` has fired at least twice and its last run was on 2026-10-18. GitHub turns a scheduled workflow off after 60 days with no activity in the repository. Turn the workflow on again under Actions, or run it by hand.
 ```
 
-The watch is the `WatchOp` whose `env` is the environment, and the job is the file `npm run ci` rendered for it: `.github/workflows/watch-<env>.yml`, `.forgejo/workflows/watch-<env>.yml`, or the job in `.gitlab/yodel-watch.gitlab-ci.yml` whose rules select it (`src/pr/overdue.ts`). A watch with no rendered file is not checked. With no run on record, the count starts at the commit that added the file. chant gives the verdict (`overdueVerdict`, `op/schedule-overdue.ts:107` in chant 0.124.46), so one late or dropped run is not a warning.
+The watch is the `WatchOp` whose `env` is the environment, and the job is the file `npm run ci` rendered for it: `.github/workflows/watch-<env>.yml`, `.forgejo/workflows/watch-<env>.yml`, or the job in `.gitlab/yodel-watch.gitlab-ci.yml` whose rules select it. chant finds the file and gives the verdict (`checkOverdueOps` in `op/schedule-overdue.ts`), so one late or dropped run is not a warning. A watch with no rendered file is not checked. With no run on record, the count starts at the commit that added the file.
 
 The warning never fails the plan. A forge that does not answer is a line in the job log and no warning. On GitHub the plan job reads the workflow's runs with `actions: read`, which the rendered `yodel-pr.yml` asks for; run `npm run ci` to add it to pipelines rendered before.
 
