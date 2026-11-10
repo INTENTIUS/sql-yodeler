@@ -137,7 +137,7 @@ describe("a project's reader and writer", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
     const yaml = (f: string) => parseYAMLDocument(readFileSync(join(dir, f), "utf8")) as Record<string, unknown>;
-    type Job = { env?: Record<string, string>; steps: Array<{ name?: string; run?: string }>; id_tokens?: unknown; script?: string[] };
+    type Job = { env?: Record<string, string>; steps: Array<{ name?: string; run?: string }>; id_tokens?: unknown; script?: string[]; permissions?: Record<string, string> };
 
     // The pull request: no password variable for a token-minted reader; prod's reader is entra, so an OIDC token.
     const pr = yaml(".github/workflows/yodel-pr.yml");
@@ -152,8 +152,11 @@ describe("a project's reader and writer", () => {
 
     // The apply: prod's writer is rds-iam.
     const apply = yaml(".github/workflows/yodel-apply.yml");
-    expect(apply.permissions).toEqual({ contents: "write", "id-token": "write" });
+    // Only the job that holds the cloud-minted role asks for an OIDC token (#4791): chant's wave idTokens.
+    expect(apply.permissions).toEqual({ contents: "write" });
     const waves = apply.jobs as Record<string, Job>;
+    expect(waves["wave-2-prod"]?.permissions).toEqual({ contents: "write", "id-token": "write" });
+    expect(waves["wave-1-dev"]?.permissions).toBeUndefined();
     expect(Object.keys(waves["wave-2-prod"]?.env ?? {})).toContain("PROD_POSTGRES_WRITER_USER");
     expect(Object.keys(waves["wave-2-prod"]?.env ?? {})).not.toContain("PROD_POSTGRES_WRITER_PASSWORD");
     // chant's sql-migrate plans the wave without the writer, so the job holds prod's reader too (entra: no password variable).

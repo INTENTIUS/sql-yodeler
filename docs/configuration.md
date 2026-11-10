@@ -131,7 +131,7 @@ A token is reused until 80% of its lifetime has passed (`ttlSeconds`; 900 for `r
 
 | Forge | What `yodel ci` renders |
 |---|---|
-| GitHub | `permissions: id-token: write` on the workflow (the pull request, apply or watch workflow whose jobs hold such a role) |
+| GitHub | `permissions: id-token: write`: on the pull request and watch workflows whose jobs hold such a role, and in the apply pipeline on each wave job (and the plans job) that holds one |
 | GitLab | `id_tokens` on each job holding such a role: chant's `CHANT_ID_TOKEN_AWS`, `_GCP` or `_AZURE` for a cloud `ci.login` names, else `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
 | Forgejo | nothing: Forgejo gives a job no OIDC token, so the runner's own cloud identity (an instance profile, a workload or managed identity) mints. The rendered files say so. |
 

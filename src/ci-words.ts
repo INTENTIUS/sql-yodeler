@@ -93,8 +93,6 @@ export interface ChantProduct {
   runChantInProcess: (argv: string[], words: YodelWords) => Promise<number>;
   approveLine: (words: unknown, input: { op: string; gate: string; digest: string; sign?: boolean; target?: string }) => string;
   productPipelineJobs: (forge: "github" | "gitlab" | "forgejo", env: string, options: { words: YodelWords; waves?: unknown; wavesSpecFile?: string }) => ProductPipeline;
-  /** A shell line with the words' bin in place of `chant`. */
-  productCommand: (words: unknown, line: string) => string;
 }
 
 let product: Promise<ChantProduct> | undefined;

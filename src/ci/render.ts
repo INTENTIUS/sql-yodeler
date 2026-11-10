@@ -83,6 +83,7 @@ import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type Approva
 import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
+import type { OpWaveJobInputs, OpWaveRunStep, OpWavesPipelineOptions, OpWavesRecordPlansInputs } from "@intentius/chant/lexicon";
 import { CLOUD_OF, jobLogins, loginSteps, tradeIdTokens, type Login, type LoginSteps } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
@@ -93,7 +94,6 @@ import { chantCheckHooks, checkPresets, declarationFile, declarationWithHooks, t
 import type { CheckTool } from "../config/define.js";
 import type { Declarable } from "@intentius/chant/declarable";
 import type { SerializerResult } from "@intentius/chant/serializer";
-import { emitYAMLEntry, parseYAMLDocument } from "@intentius/chant/yaml";
 import { ACTION_PINS, tagComments, usesRef } from "@intentius/chant/action-pins";
 import {
   Concurrency,
@@ -300,32 +300,11 @@ const loginsOf = (envs: Pick<Environments, "credentials" | "login">, held: Reado
 /** A job's login steps as the github lexicon's Steps. */
 const actionsLogin = (forge: Actions, logins: readonly Login[]): AStep[] => loginSteps(forge, logins).steps.map((st) => new Step({ name: st.name, run: st.lines.join("\n") }));
 
-/** A job's login steps as plain step objects, for YAML chant rendered and yodel edits. */
-const rawLogin = (forge: Actions, logins: readonly Login[]): Array<Record<string, unknown>> => loginSteps(forge, logins).steps.map((st) => ({ name: st.name, run: st.lines.join("\n") }));
-
 /** A GitLab job's login: its script lines and its variables. */
 const gitlabLogin = (logins: readonly Login[]): { lines: string[]; variables: LoginSteps["variables"] } => {
   const out = loginSteps("gitlab", logins);
   return { lines: out.steps.flatMap((st) => st.lines), variables: out.variables };
 };
-
-/** Puts `steps` before the first step `at` picks (refusing a job without one). */
-function insertSteps(steps: Array<Record<string, unknown>>, add: ReadonlyArray<Record<string, unknown>>, at: (step: Record<string, unknown>) => boolean, what: string): void {
-  if (add.length === 0) return;
-  const i = steps.findIndex(at);
-  if (i < 0) throw new Error(`${what}: no step to log in before`);
-  steps.splice(i, 0, ...add);
-}
-
-/** Puts `lines` before the first script line `at` picks (refusing a job without one). */
-function insertLines(script: string[] | undefined, add: readonly string[], at: (line: string) => boolean, what: string): void {
-  if (add.length === 0) return;
-  const i = script?.findIndex(at) ?? -1;
-  if (!script || i < 0) throw new Error(`${what}: no script line to log in before`);
-  script.splice(i, 0, ...add);
-}
-
-const runsChant = (st: Record<string, unknown>): boolean => typeof st.run === "string" && st.run.startsWith("chant run ");
 
 /** The roles a pull request's plan job for `env` holds: the environment's reader and the reader of the one it requires. */
 const planRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> => [env, ...requiredOf(waves, env)].map((e) => [e, "reader"]);
@@ -338,7 +317,7 @@ const waveRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> =
 function identityHeader(forge: Forge, clouds: readonly CloudToken[]): string[] {
   if (clouds.length === 0) return [];
   const names = clouds.join(", ");
-  if (forge === "github") return [`# Cloud identity: a password here is a ${names} token, minted from the job's`, "# identity, so the workflow grants id-token: write (an OIDC token)."];
+  if (forge === "github") return [`# Cloud identity: a password here is a ${names} token, minted from the job's`, "# identity, so the jobs that hold one get id-token: write (an OIDC token)."];
   if (forge === "gitlab") return [`# Cloud identity: a password here is a ${names} token, minted from the job's`, `# identity: the jobs that hold one declare id_tokens (${clouds.map((c) => ID_TOKENS[c].variable).join(", ")}).`];
   return [`# Cloud identity: a password here is a ${names} token. Forgejo gives a job no`, "# OIDC token, so the runner's own cloud identity mints it."];
 }
@@ -928,15 +907,22 @@ interface WavesSpec {
     approval?: ApprovalMode;
     environment?: { name: string };
     variables?: Record<string, string>;
+    idTokens?: Record<string, string>;
     hooks?: OpWaveHooks;
   }>;
   /** The scheduled resume job (yodel.config.ts `ci.resume`); only the pipelines are rendered from it, the spec file leaves it out. */
   resume?: { schedule: string };
 }
 
+/** A wave job's own variables and the OIDC tokens it requests, on one forge, as the spec's wave carries them (chant's `variables` and `idTokens`). */
+export interface WaveJobSettings {
+  variables: Record<string, string>;
+  idTokens?: Record<string, string>;
+}
+
 /**
  * The waves spec. What the file holds is the same for every forge; each
- * forge's jobs get their own variables on top (`variables`).
+ * forge's jobs get their own variables and OIDC tokens on top (`job`).
  *
  * The spec names the sql lexicon's `sql-migrate` capability (#291,
  * chant#4569), and chant plans and applies each run through it, which calls
@@ -955,7 +941,7 @@ interface WavesSpec {
  * the base commit, as it does run by hand. A step runs once, under the
  * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => Record<string, string>, resume?: { schedule: string }): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
@@ -971,7 +957,7 @@ export function wavesSpec(waves: readonly Wave[], variables?: (env: string) => R
       gate: w.gate,
       ...(w.shares !== undefined && w.shares > 1 ? { shares: w.shares } : {}),
       ...(w.approval !== undefined && w.approval !== "ledger" ? { approval: w.approval } : {}),
-      ...(variables ? { environment: { name: w.env }, variables: variables(w.env) } : {}),
+      ...(job ? { environment: { name: w.env }, ...job(w.env) } : {}),
       // The steps around apply (#64) as chant's stage hooks, which the apply runs under its lock (#206).
       ...hooksOf(w.steps),
     })),
@@ -988,42 +974,90 @@ function hooksOf(steps: ApplySteps | undefined): { hooks?: OpWaveHooks } {
   return plan && plan.length > 0 ? { hooks: { before: { plan } } } : {};
 }
 
-interface WavesPipelineResult {
-  success: boolean;
-  files?: Array<{ name: string; yaml: string }>;
-  error?: string;
+/**
+ * What a job holding the roles `held` adds on `forge` for its cloud login
+ * (#132), in the shape chant's generators take (#4791): the login's steps,
+ * its variables (GitLab's trade spec; on GitHub and Forgejo the steps write
+ * $GITHUB_ENV) and the OIDC tokens the job requests. Forgejo gives a job no
+ * OIDC token, so it requests none there.
+ */
+function jobLogin(forge: Forge, envs: Pick<Environments, "credentials" | "login">, held: ReadonlyArray<readonly [string, Role]>): { before: OpWaveRunStep[]; variables: Record<string, string>; idTokens?: Record<string, string> } {
+  const logins = loginsOf(envs, held);
+  const out = loginSteps(forge, logins);
+  const clouds = cloudsOf(envs, held);
+  const before = out.steps.map((st) => ({ name: st.name, run: st.lines }));
+  if (forge === "forgejo" || clouds.length === 0) return { before, variables: out.variables };
+  const tokens = Object.fromEntries(Object.entries(idTokens(clouds, logins)).map(([name, t]) => [name, t.aud]));
+  return { before, variables: out.variables, idTokens: tokens };
 }
 
 /**
  * The waves spec file and the apply pipeline on each forge. The spec comes
  * from chant's productPipelineJobs under yodel's words (#289), and each job
- * runs `yodel chant` where chant's own runs `chant` ({@link productWaves}).
+ * runs `yodel chant` where chant's own runs `chant` (chant's `bin`,
+ * {@link productWaves}). What yodel adds to chant's jobs goes in as
+ * generateOpWavesPipeline's inputs (#4791): each wave job's cloud login,
+ * its `yodel report` and the report's artifact (`waveJobs`), the plans
+ * job's login, write probe and readers (`recordPlans`), and each wave's
+ * variables and OIDC tokens in the spec.
  */
 export async function applyPipelines(dir: string, envs: Environments, product: ChantProduct): Promise<RenderedFile[]> {
   const { dialect, waves } = envs;
   const tc = toolchainOf(envs);
   const { generateOpWavesPipeline } = (await import("@intentius/chant/op")) as unknown as {
-    generateOpWavesPipeline: (spec: unknown, lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<WavesPipelineResult>;
+    generateOpWavesPipeline: (spec: unknown, lexicon: string, options: OpWavesPipelineOptions, cwd: string) => Promise<{ success: boolean; files?: Array<{ name: string; yaml: string }>; error?: string }>;
   };
   const named = (forge: Forge, spec: WavesSpec) => productWaves(product, forge, spec);
   const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
-  const variables = (forge: Forge) => (env: string) => {
+  const jobOf = (forge: Forge) => (env: string): WaveJobSettings => {
     const wave = waves.find((w) => w.env === env);
     const required = wave?.requires;
+    const login = jobLogin(forge, envs, waveRoles(waves, env));
     return {
-      YODEL_CREDENTIALS: `writer:${env}`,
-      ...(forge === "gitlab"
-        ? {}
-        : {
-            ...secrets([...writerVariables(env, dialect, envs.credentials?.[env]), ...WEBHOOK_VARIABLES]),
-            // chant's sql-migrate runs the wave's yodel plan --part and --wave-plan with the writer taken out
-            // (readerEnv in the sql lexicon), so they connect as the environment's reader.
-            ...secrets(readerVariables(env, dialect, envs.credentials?.[env])),
-            ...(required ? secrets(readerVariables(required, dialect, envs.credentials?.[required])) : {}),
-            // A pr-review wave (#48) reads the merged pull request's reviews with the job's token.
-            ...(wave?.approval === "pr-review" ? { GITHUB_TOKEN: "${{ github.token }}" } : {}),
-          }),
+      variables: {
+        YODEL_CREDENTIALS: `writer:${env}`,
+        ...(forge === "gitlab"
+          ? {}
+          : {
+              ...secrets([...writerVariables(env, dialect, envs.credentials?.[env]), ...WEBHOOK_VARIABLES]),
+              // chant's sql-migrate runs the wave's yodel plan --part and --wave-plan with the writer taken out
+              // (readerEnv in the sql lexicon), so they connect as the environment's reader.
+              ...secrets(readerVariables(env, dialect, envs.credentials?.[env])),
+              ...(required ? secrets(readerVariables(required, dialect, envs.credentials?.[required])) : {}),
+              // A pr-review wave (#48) reads the merged pull request's reviews with the job's token.
+              ...(wave?.approval === "pr-review" ? { GITHUB_TOKEN: "${{ github.token }}" } : {}),
+            }),
+        ...login.variables,
+      },
+      ...(login.idTokens ? { idTokens: login.idTokens } : {}),
+    };
+  };
+  // Each wave's jobs: the cloud login (#132) before the wave's command, and the report, kept as an artifact whatever the exit (a wave that waits exits 3).
+  const waveJobs = (forge: Forge): Record<string, OpWaveJobInputs> =>
+    Object.fromEntries(
+      waves.map((w) => {
+        const login = jobLogin(forge, envs, waveRoles(waves, w.env));
+        const inputs: OpWaveJobInputs = {
+          ...(login.before.length > 0 ? { before: login.before } : {}),
+          report: { name: `yodel report ${w.env}`, run: [reportCommand(w.env, tc)] },
+          artifact: { step: "Keep the report", name: reportArtifact("{job}"), path: forge === "gitlab" ? `${REPORT_DIR}/` : REPORT_DIR },
+        };
+        return [w.env, inputs];
+      }),
+    );
+  // The plans job of a pr-review wave (#48): each environment's reader, which it plans the waves with, and the write probe first, as every pull request job has (#50, #130).
+  const recordPlans = (forge: Forge): OpWavesRecordPlansInputs => {
+    const waveEnvs = [...new Set(waves.map((w) => w.env))];
+    const login = jobLogin(forge, envs, waveEnvs.map((e): [string, Role] => [e, "reader"]));
+    return {
+      before: [...login.before, { name: "This job cannot write", run: [writeProbe(waveEnvs)] }],
+      variables: {
+        [RECORD_PLANS_ENV]: "1",
+        ...(forge === "gitlab" ? {} : secrets(waveEnvs.flatMap((e) => readerVariables(e, dialect, envs.credentials?.[e])))),
+        ...login.variables,
+      },
+      ...(login.idTokens ? { idTokens: login.idTokens } : {}),
     };
   };
   const header = [
@@ -1063,14 +1097,17 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
-    const { spec, jobs } = named(forge, wavesSpec(waves, variables(forge), envs.resume));
+    const { spec, jobs } = named(forge, wavesSpec(waves, jobOf(forge), envs.resume));
     const result = await generateOpWavesPipeline(
       spec,
       forge,
       {
         specFile: WAVES_SPEC,
+        bin: YODEL_WORDS.bin,
         image: tc.image,
         beforeScript: [...installLines(tc, forge), fetchApprovals(tc)],
+        waveJobs: waveJobs(forge),
+        recordPlans: recordPlans(forge),
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
       },
       dir,
@@ -1079,127 +1116,13 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     for (const file of result.files) {
       const at = forge === "gitlab" ? GITLAB_APPLY_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
-      // The resume workflow (GitHub, Forgejo) has no wave job to report on.
-      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), withBin(product, yaml)) });
+      if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-resume.yml`) out.push({ path: at, content: withHeader(resumeHeader(forge), yaml) });
       // The pull request workflow that records the plans a review approves (#48).
-      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, withBin(product, withPlansReaders(forge, yaml, waves, dialect, envs))) });
-      else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveLines(forge, withBin(product, withWaveReports(forge, yaml, waves, tc, envs)), jobs)) });
+      else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, yaml) });
+      else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveLines(forge, yaml, jobs)) });
     }
   }
   return out;
-}
-
-/**
- * The wave jobs' report: chant's generateOpWavesPipeline takes run lines
- * after the wave's command but no step that runs when it fails (a wave that
- * waits exits 3), and no artifact, so they are added to its output here.
- * The output is parsed and emitted again; the emitter is checked to give
- * back chant's text unchanged before anything is added, so a change in
- * chant's emitter fails here instead of rendering something else.
- */
-/**
- * chant writes a SHA-pinned action as `uses: owner/action@<sha> # vX.Y.Z`
- * (chant#4403, #4410); the `# vX.Y.Z` is a YAML comment, which parsing drops.
- * Each re-emit below puts every one back on the line that names the same
- * pinned ref, so the re-emitted text still matches chant's and the files keep
- * the release each SHA stands for.
- */
-export function withPinComments(original: string, emitted: string): string {
-  const comments = new Map<string, string>();
-  for (const [, ref, comment] of original.matchAll(/uses: (\S+@[0-9a-f]{40}) (# [^\n]*)$/gm)) {
-    if (ref !== undefined && comment !== undefined) comments.set(ref, comment);
-  }
-  if (comments.size === 0) return emitted;
-  return emitted.replace(/uses: (\S+@[0-9a-f]{40})$/gm, (line: string, ref: string) => {
-    const comment = comments.get(ref);
-    return comment ? `${line} ${comment}` : line;
-  });
-}
-
-function withWaveReports(forge: Forge, yaml: string, waves: readonly Wave[], tc: Toolchain, envs: Pick<Environments, "credentials" | "login"> = {}): string {
-  // A wide wave's jobs are wave-<k>-<env>-decide and -share-<i>.
-  const envOf = (job: string) => waves.find((w, i) => new RegExp(`^wave-${String(i + 1)}-${w.env.replace(/[^A-Za-z0-9]/g, "\\$&")}(-decide|-share-\\d+)?$`).test(job))?.env;
-  const body = yaml.search(/^[^#\n]/m);
-  const header = yaml.slice(0, body);
-  const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
-  if (forge === "gitlab") {
-    const emit = (d: Record<string, unknown>) => withPinComments(yaml, `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`);
-    if (emit(doc) !== yaml) throw new Error("gitlab: the apply waves do not emit back to chant's text");
-    // The merge request job that records the plans a review approves (#48): the waves as after the merge.
-    const record = doc[`${APPLY_PIPELINE}-record-plans`] as { variables?: Record<string, string>; id_tokens?: unknown; script?: string[] } | undefined;
-    if (record) {
-      record.variables = { ...(record.variables ?? {}), [RECORD_PLANS_ENV]: "1" };
-      // It holds readers only, and shows it first, as every merge request job does (#50, #130).
-      const waveEnvs = [...new Set(waves.map((w) => w.env))];
-      const at = record.script?.findIndex((l) => l.includes("--record-plans")) ?? -1;
-      if (!record.script || at < 0) throw new Error("gitlab: the record-plans job has no chant run wave --record-plans line");
-      record.script.splice(at, 0, writeProbe(waveEnvs));
-      const readerRoles = waveEnvs.map((e): [string, Role] => [e, "reader"]);
-      const readers = cloudsOf(envs, readerRoles);
-      const logins = loginsOf(envs, readerRoles);
-      if (readers.length > 0) record.id_tokens = idTokens(readers, logins);
-      const login = gitlabLogin(logins);
-      insertLines(record.script, login.lines, (l) => l === writeProbe(waveEnvs), "gitlab: the record-plans job");
-      if (Object.keys(login.variables).length > 0) record.variables = { ...record.variables, ...login.variables };
-    }
-    for (const [name, job] of Object.entries(doc)) {
-      const env = envOf(name);
-      if (!env || typeof job !== "object" || job === null) continue;
-      const clouds = cloudsOf(envs, waveRoles(waves, env));
-      const logins = loginsOf(envs, waveRoles(waves, env));
-      const login = gitlabLogin(logins);
-      const w = job as { script?: string[]; variables?: Record<string, string> };
-      insertLines(w.script, login.lines, (l) => l.startsWith("chant run "), `gitlab: ${name}`);
-      if (Object.keys(login.variables).length > 0) w.variables = { ...w.variables, ...login.variables };
-      Object.assign(job, { after_script: [reportCommand(env, tc)], artifacts: { name: reportArtifact(name), when: "always", paths: [`${REPORT_DIR}/`] }, ...(clouds.length > 0 ? { id_tokens: idTokens(clouds, logins) } : {}) });
-    }
-    return emit(doc);
-  }
-  const at = yaml.indexOf("\njobs:\n");
-  if (at < 0) throw new Error(`${forge}: the apply waves have no jobs`);
-  const jobs = doc.jobs as Record<string, { steps: Array<Record<string, unknown>> }>;
-  const top = yaml.slice(0, at + 1);
-  const emitJobs = () => withPinComments(yaml, `${emitYAMLEntry("jobs", jobs)}\n`);
-  if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the apply waves do not emit back to chant's text`);
-  for (const [name, job] of Object.entries(jobs)) {
-    const env = envOf(name);
-    if (!env) continue;
-    // The cloud login (#132) before the wave's chant run, when a role it holds is cloud-minted.
-    insertSteps(job.steps, rawLogin(forge, loginsOf(envs, waveRoles(waves, env))), runsChant, `${forge}: ${name}`);
-    job.steps.push(
-      { name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) },
-      { name: "Keep the report", if: "always()", uses: uploadArtifact(forge), with: { name: reportArtifact(name), path: REPORT_DIR, "if-no-files-found": "ignore" } },
-    );
-  }
-  return `${withIdToken(forge, top, cloudsOf(envs, waves.flatMap((w) => waveRoles(waves, w.env))))}${emitJobs()}`;
-}
-
-/**
- * The plans workflow (GitHub, Forgejo) for a pr-review wave (#48): chant's,
- * with each environment's reader (the waves are planned on every one, and a
- * wave reads the history of the one it requires) and {@link RECORD_PLANS_ENV}
- * on its job. The output is parsed and emitted again, checked first to give
- * back chant's text unchanged.
- */
-function withPlansReaders(forge: Forge, yaml: string, waves: readonly Wave[], dialect: Dialect, creds: Pick<Environments, "credentials" | "login"> = {}): string {
-  const at = yaml.indexOf("\njobs:\n");
-  if (at < 0) throw new Error(`${forge}: the plans workflow has no jobs`);
-  const doc = parseYAMLDocument(yaml) as { jobs: Record<string, Record<string, unknown>> };
-  const top = yaml.slice(0, at + 1);
-  const emitJobs = () => withPinComments(yaml, `${emitYAMLEntry("jobs", doc.jobs)}\n`);
-  if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the plans workflow does not emit back to chant's text`);
-  const job = doc.jobs["record-plans"];
-  if (!job) throw new Error(`${forge}: the plans workflow has no record-plans job`);
-  const envs = [...new Set(waves.map((w) => w.env))];
-  const steps = job.steps as Array<Record<string, unknown>>;
-  // It holds readers only, and shows it before it plans, as every pull request job does (#50, #130).
-  const recordAt = steps.findIndex((st) => typeof st.run === "string" && st.run.includes("--record-plans"));
-  if (recordAt < 0) throw new Error(`${forge}: the record-plans job has no chant run wave --record-plans step`);
-  steps.splice(recordAt, 0, ...(forge === "gitlab" ? [] : rawLogin(forge, loginsOf(creds, envs.map((e): [string, Role] => [e, "reader"])))), { name: "This job cannot write", run: writeProbe(envs) });
-  delete job.steps;
-  Object.assign(job, { env: { [RECORD_PLANS_ENV]: "1", ...secrets(envs.flatMap((e) => readerVariables(e, dialect, creds.credentials?.[e]))) }, steps });
-  // A reader whose password is a cloud token (#50) is minted from the job's identity.
-  return `${withIdToken(forge, top, cloudsOf(creds, envs.map((e): [string, Role] => [e, "reader"])))}${emitJobs()}`;
 }
 
 /** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
@@ -1250,8 +1173,8 @@ export async function withTenants(dir: string, waves: readonly Wave[]): Promise<
 // the names on the ledger since the waves began, so approvals already
 // recorded keep counting), and each job running `yodel chant` where chant's
 // own runs `chant`, so the job writes yodel's statuses and approve lines.
-// The forge lexicons serialize the jobs as before, and yodel adds its
-// reports, logins and readers to them as before.
+// The forge lexicons serialize the jobs, and yodel's reports, logins and
+// readers go in as generateOpWavesPipeline's inputs (#4791).
 //
 // Still yodel's own: the plan jobs (`yodel plan <env> --comment` with the
 // write probe), which post chant's note (../pr/note.ts, #290); the lint
@@ -1267,15 +1190,6 @@ export function productWaves(product: ChantProduct, forge: Forge, spec: WavesSpe
   const named = out.waves.spec as WavesSpec;
   if (named.name !== APPLY_PIPELINE) throw new Error(`${forge}: chant's product pipeline names the waves ${named.name}, and the ledger has them as ${APPLY_PIPELINE}`);
   return { spec: named, jobs: out.waves.jobs };
-}
-
-/** A `chant` command line in a rendered file: a step's `run:` or a GitLab script line, never a comment. */
-const CHANT_LINE = /^(\s*(?:- )?(?:run: )?)(chant [a-z].*)$/gm;
-
-/** `yaml` with yodel's bin in each chant command line (#289), through chant's own productCommand. */
-export function withBin(product: ChantProduct, yaml: string): string {
-  const words = product.assertProductWords(YODEL_WORDS);
-  return yaml.replace(CHANT_LINE, (_m, lead: string, line: string) => `${lead}${product.productCommand(words, line)}`);
 }
 
 /** Refuses an apply file whose wave jobs do not run the line chant's product pipeline gives each of them. */
@@ -1297,75 +1211,54 @@ interface OpsPipelineResult {
   error?: string;
 }
 
+/** A watch's spec: chant's ScheduledOpSpec, the parts yodel fills. */
+export interface WatchSpec {
+  name: string;
+  variables?: Record<string, string>;
+  permissions?: Record<string, "read" | "write">;
+  setup?: Array<{ run: string }>;
+  gitlab?: { idTokens: Record<string, { aud: string }> };
+}
+
 /**
- * The watch's spec for one environment: the Op, and on GitHub and Forgejo the
- * reader's secrets. A GitLab job already has the project's variables (a
- * writer's only under its environment, which the watch does not declare), and
- * `NAME: $NAME` there would refer to itself.
+ * The watch's spec for one environment: the Op, the cloud login (#132) when
+ * its reader is cloud-minted, as setup steps before the job's other lines,
+ * and on GitHub and Forgejo the reader's secrets. A GitLab job already has
+ * the project's variables (a writer's only under its environment, which the
+ * watch does not declare), and `NAME: $NAME` there would refer to itself;
+ * there the login's variables and the job's ID tokens go on the job.
  */
-export function watchSpec(env: string, dialect: Dialect, forge: Forge, creds?: EnvCredentials): { name: string; variables?: Record<string, string>; permissions?: Record<string, string> } {
-  if (forge === "gitlab") return { name: `watch-${env}` };
+export function watchSpec(env: string, forge: Forge, envs: Pick<Environments, "dialect" | "credentials" | "login">): WatchSpec {
+  const held: Array<[string, Role]> = [[env, "reader"]];
+  const logins = loginsOf(envs, held);
+  const login = loginSteps(forge, logins);
+  // GitLab: a script line each, as the job's own lines are; GitHub and Forgejo: a step each.
+  const steps = forge === "gitlab" ? login.steps.flatMap((st) => st.lines.map((run) => ({ run }))) : login.steps.map((st) => ({ run: st.lines.join("\n") }));
+  const setup = steps.length > 0 ? { setup: steps } : {};
+  if (forge === "gitlab") {
+    const clouds = cloudsOf(envs, held);
+    return {
+      name: `watch-${env}`,
+      ...setup,
+      ...(Object.keys(login.variables).length > 0 ? { variables: login.variables } : {}),
+      ...(clouds.length > 0 ? { gitlab: { idTokens: idTokens(clouds, logins) } } : {}),
+    };
+  }
+  const creds = envs.credentials?.[env];
   // The job's token, for the tracking issue: GitHub grants it issues: write here, Forgejo's can write already.
   return {
     name: `watch-${env}`,
-    variables: { ...secrets([...readerVariables(env, dialect, creds), ...WEBHOOK_VARIABLES]), GITHUB_TOKEN: "${{ github.token }}" },
-    ...(forge === "github" ? { permissions: { issues: "write", ...(creds?.reader.cloud ? { "id-token": "write" } : {}) } } : {}),
+    variables: { ...secrets([...readerVariables(env, envs.dialect, creds), ...WEBHOOK_VARIABLES]), GITHUB_TOKEN: "${{ github.token }}" },
+    ...(forge === "github" ? { permissions: { issues: "write", ...(creds?.reader.cloud ? { "id-token": "write" as const } : {}) } } : {}),
+    ...setup,
   };
 }
 
-/** A GitHub workflow's top-level `permissions:` with `id-token: write` added, when a job holds a cloud-minted role. */
-function withIdToken(forge: Forge, top: string, clouds: readonly CloudToken[]): string {
-  if (forge !== "github" || clouds.length === 0) return top;
-  const added = top.replace(/^permissions:\n((?: {2}\S.*\n)*)/m, (_m, scopes: string) => `permissions:\n${scopes}  id-token: write\n`);
-  if (added === top) throw new Error("github: the apply waves have no top-level permissions to add id-token: write to");
-  return added;
-}
-
 /**
- * A GitHub or Forgejo watch file with the cloud login (#132) before the
- * job's chant run, when its reader is cloud-minted and logs in. Parsed and
- * emitted again, checked against chant's text first.
- */
-function withWatchLogin(forge: Actions, yaml: string, env: string, envs: Pick<Environments, "credentials" | "login">): string {
-  const login = rawLogin(forge, loginsOf(envs, [[env, "reader"]]));
-  if (login.length === 0) return yaml;
-  const at = yaml.indexOf("\njobs:\n");
-  if (at < 0) throw new Error(`${forge}: the watch for ${env} has no jobs`);
-  const doc = parseYAMLDocument(yaml) as { jobs: Record<string, { steps: Array<Record<string, unknown>> }> };
-  const top = yaml.slice(0, at + 1);
-  const emitJobs = () => withPinComments(yaml, `${emitYAMLEntry("jobs", doc.jobs)}\n`);
-  if (`${top}${emitJobs()}` !== yaml) throw new Error(`${forge}: the watch for ${env} does not emit back to chant's text`);
-  const job = doc.jobs[`watch-${env}`];
-  if (!job) throw new Error(`${forge}: the watch for ${env} has no watch-${env} job`);
-  insertSteps(job.steps, login, runsChant, `${forge}: watch-${env}`);
-  return `${top}${emitJobs()}`;
-}
-
-/** The GitLab watch file with `id_tokens` (and the cloud login, #132) on each watch job whose reader is cloud-minted. Parsed and emitted again, checked against chant's text first. */
-function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "credentials" | "login">): string {
-  const clouds = (env: string) => cloudsOf(envs, [[env, "reader"]]);
-  if (!envs.names.some((env) => clouds(env).length > 0)) return yaml;
-  const body = yaml.search(/^[^#\n]/m);
-  const header = yaml.slice(0, body);
-  const doc = parseYAMLDocument(yaml) as Record<string, unknown>;
-  const emit = (d: Record<string, unknown>) => withPinComments(yaml, `${header}${Object.entries(d).map(([k, v]) => emitYAMLEntry(k, v)).join("\n\n")}\n`);
-  if (emit(doc) !== yaml) throw new Error("gitlab: the watch file does not emit back to chant's text");
-  for (const env of envs.names) {
-    const job = doc[`watch-${env}`] as { script?: string[]; variables?: Record<string, string> } | undefined;
-    if (clouds(env).length === 0 || job === undefined) continue;
-    const logins = loginsOf(envs, [[env, "reader"]]);
-    const login = gitlabLogin(logins);
-    insertLines(job.script, login.lines, (l) => l.startsWith("chant run "), `gitlab: watch-${env}`);
-    if (Object.keys(login.variables).length > 0) job.variables = { ...job.variables, ...login.variables };
-    Object.assign(job, { id_tokens: idTokens(clouds(env), logins) });
-  }
-  return emit(doc);
-}
-
-/**
- * The drift watches, through chant's product pipeline (#289): each job runs
- * `yodel chant run watch-<env>` where chant's runs `chant run watch-<env>`,
- * so the Op's statuses and notices say yodel.
+ * The drift watches, through chant's generateOpsPipeline: each job runs
+ * `yodel chant run watch-<env>` where chant's runs `chant run watch-<env>`
+ * (the generator's `runCommand`), so the Op's statuses and notices say
+ * yodel (#289).
  *
  * The job stays chant's generateOpsPipeline and its last line stays `yodel
  * drift <env> --issue`, which plans the build for ClickHouse grant drift
@@ -1374,14 +1267,14 @@ function withWatchIdTokens(yaml: string, envs: Pick<Environments, "names" | "cre
  * sql lexicon's live diff, the watch moves onto chant's drift job with
  * `stages.drift` and the workaround goes.
  */
-export async function watchPipelines(dir: string, envs_: Environments, product: ChantProduct): Promise<RenderedFile[]> {
-  const { dialect, names: envs } = envs_;
+export async function watchPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
+  const { names: envs } = envs_;
   const tc = toolchainOf(envs_);
   const { generateOpsPipeline } = (await import("@intentius/chant/op")) as unknown as {
     generateOpsPipeline: (ops: unknown[], lexicon: string, options: Record<string, unknown>, cwd: string) => Promise<OpsPipelineResult>;
   };
   const out: RenderedFile[] = [];
-  const emit = async (forge: Forge, specs: unknown[], extraScript: string[]) => {
+  const emit = async (forge: Forge, specs: WatchSpec[], extraScript: string[]) => {
     const result = await generateOpsPipeline(
       specs,
       forge,
@@ -1389,6 +1282,7 @@ export async function watchPipelines(dir: string, envs_: Environments, product: 
         image: tc.image,
         beforeScript: [...installLines(tc, forge), fetchApprovals(tc), NO_PUSH],
         extraScript,
+        runCommand: [...YODEL_WORDS.bin.split(" "), "run", "{name}"],
         ...(forge === "gitlab" ? { opsStage: "ops", opsFileName: GITLAB_WATCH_FILE } : {}),
       },
       dir,
@@ -1397,17 +1291,15 @@ export async function watchPipelines(dir: string, envs_: Environments, product: 
     for (const file of result.files) {
       const at = forge === "gitlab" ? GITLAB_WATCH_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
       const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
-      // A GitHub or Forgejo file is one environment's watch: its name is watch-<env>.yml.
-      const env = file.name.replace(/^watch-|\.yml$/g, "");
-      out.push({ path: at, content: `${HEADER.join("\n")}\n${withBin(product, forge === "gitlab" ? withWatchIdTokens(yaml, envs_) : withWatchLogin(forge, yaml, env, envs_))}` });
+      out.push({ path: at, content: `${HEADER.join("\n")}\n${yaml}` });
     }
   };
   // `chant run` exits 0 when a watch finds drift; the last line, yodel drift, fails the job then.
   for (const forge of ["github", "forgejo"] as const) {
-    for (const env of envs) await emit(forge, [watchSpec(env, dialect, forge, envs_.credentials?.[env])], [watchDrift(env)]);
+    for (const env of envs) await emit(forge, [watchSpec(env, forge, envs_)], [watchDrift(env)]);
   }
   // GitLab: one file for every watch, so the last line takes the environment from the job's own name.
-  await emit("gitlab", envs.map((env) => watchSpec(env, dialect, "gitlab")), [watchDrift('"${CI_JOB_NAME#watch-}"')]);
+  await emit("gitlab", envs.map((env) => watchSpec(env, "gitlab", envs_)), [watchDrift('"${CI_JOB_NAME#watch-}"')]);
   return out;
 }
 
@@ -1650,7 +1542,7 @@ export async function render(dir: string, options: { declaration?: RenderedFile;
     ...review(reviewed),
     ...(hooks ? [hooks] : []),
     ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []),
-    ...(await watchPipelines(dir, envs, product)),
+    ...(await watchPipelines(dir, envs)),
     ...(await commitPipelines(dir, envs)),
   ];
   // Each pinned `uses:` line with its release beside it, as chant writes them (#319).

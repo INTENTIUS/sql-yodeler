@@ -42,6 +42,8 @@ wave-1-dev:
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
     - yodel chant run wave --spec yodel-waves.json --wave 1
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
   allow_failure:
     exit_codes:
       - 1
@@ -49,9 +51,9 @@ wave-1-dev:
     name: yodel-report-wave-1-dev
     when: always
     paths:
+      - .chant/op-waves/yodel-apply/outcomes/
       - yodel-report/
-  after_script:
-    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
+    expire_in: '30 days'
 
 wave-2-prod:
   stage: wave-2-prod
@@ -74,6 +76,8 @@ wave-2-prod:
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
     - yodel chant run wave --spec yodel-waves.json --wave 2
+  after_script:
+    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
   allow_failure:
     exit_codes:
       - 1
@@ -81,6 +85,6 @@ wave-2-prod:
     name: yodel-report-wave-2-prod
     when: always
     paths:
+      - .chant/op-waves/yodel-apply/outcomes/
       - yodel-report/
-  after_script:
-    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
+    expire_in: '30 days'
