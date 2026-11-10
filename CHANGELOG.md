@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.0
+
+### Changed: where the source is, and the tracking issue's body
+
+A project's source directory is `sourceDir` in `chant.config.ts`, else the project's root, the rule chant now uses for every command (chant issue 4794). Before, yodel fell back to `src/` when it existed. The starter templates set `sourceDir: "src"`, so a project made from them builds as before. A project with declarations in `src/` and no `sourceDir` now builds its whole root: set `sourceDir: "src"` to keep the old behaviour. `yodel init` writes declarations to the root when there is no `sourceDir`, and the unmigrated-schema lint runs only when `sourceDir` is set.
+
+The drift tracking issue `yodel drift` keeps is chant's (chant issue 4790). Its body is chant's table of drifted objects, with yodel's words and marker, so each open tracking issue is rewritten once on the first run after the upgrade. The `fingerprint` in `--json` and in the notify event is unchanged.
+
+### Changed: the pipelines yodel writes
+
+- The apply waves and the drift watch come from chant's Op waves pipeline with yodel's login, report and readers passed in (chant issue 4791). On GitHub, `id-token: write` moves from the workflow to the jobs that hold a cloud-minted role. On GitLab, wave jobs keep chant's outcome files in their artifacts. Run `yodel ci` to write them again.
+- On Forgejo the cloud login is chant's (chant issue 4788): one login step, `AWS_REGION` set for AWS, and gcloud reading the workload identity file with no `gcloud auth login`.
+- The overdue check of a scheduled Op is chant's (chant issue 4789). Its log line keeps the `yodel plan: ` prefix and drops yodel's `Warning: `.
+- The CI image is chant's product image (chant issue 4784): it runs as `yodel` with `HOME=/tmp` and chant's reproducibility settings.
+- Forge flags, the note size limit and how yodel runs chant are chant's helpers (chant issue 4800); a bad `--forge` or `--repo` is refused in chant's words.
+
+### Removed
+
+- yodel's checks for chant parts its pinned chant always has (chant issue 4792), and the part list `yodel upgrade` printed.
+
+chant is at 0.124.87, and the starter templates take `^0.13.0`.
+
 ## 0.12.1
 
 ### Fixed: a wave job's plan has its environment's reader

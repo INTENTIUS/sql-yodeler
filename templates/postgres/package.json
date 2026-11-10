@@ -14,9 +14,9 @@
     "replay": "yodel ci --replay"
   },
   "dependencies": {
-    "@intentius/chant": "0.124.86",
-    "@intentius/chant-lexicon-sql": "0.124.86",
-    "@intentius/sql-yodeler": "^0.12.1"
+    "@intentius/chant": "0.124.87",
+    "@intentius/chant-lexicon-sql": "0.124.87",
+    "@intentius/sql-yodeler": "^0.13.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

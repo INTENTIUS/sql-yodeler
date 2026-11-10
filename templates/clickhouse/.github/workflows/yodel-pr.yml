@@ -36,13 +36,13 @@ jobs:
     env:
       REPLAY_CLICKHOUSE_URL: http://replay-clickhouse:8123
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
-        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+        run: ./node_modules/.bin/yodel ci --fetch-ledger
       - name: Wait for the replay server (replay-clickhouse)
         run: node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "replay-clickhouse", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-clickhouse:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
       - name: Check hooks at the base (chant ci check)
@@ -56,17 +56,17 @@ jobs:
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
-        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+        run: ./node_modules/.bin/yodel ci --fetch-ledger
       - name: This job cannot write
         run: yodel config check dev --write-probe
       - name: yodel plan dev --comment
@@ -78,7 +78,7 @@ jobs:
         run: mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
       - name: Keep the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yodel-report-plan-dev
           path: yodel-report
@@ -95,17 +95,17 @@ jobs:
       YODEL_WEBHOOK_URL: '${{ secrets.YODEL_WEBHOOK_URL }}'
       YODEL_WEBHOOK_KEY: '${{ secrets.YODEL_WEBHOOK_KEY }}'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Fetch the approvals (chant/lifecycle)
-        run: git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+        run: ./node_modules/.bin/yodel ci --fetch-ledger
       - name: This job cannot write
         run: yodel config check prod dev --write-probe
       - name: yodel plan prod --comment
@@ -117,7 +117,7 @@ jobs:
         run: mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
       - name: Keep the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: yodel-report-plan-prod
           path: yodel-report

@@ -24,7 +24,7 @@ watch-dev:
   script:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
-    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - ./node_modules/.bin/yodel ci --fetch-ledger
     - git remote set-url --push origin no-push://the-drift-watch-only-reads
     - yodel chant run watch-dev
     - 'yodel drift "${CI_JOB_NAME#watch-}" --issue'
@@ -38,7 +38,7 @@ watch-prod:
   script:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
-    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - ./node_modules/.bin/yodel ci --fetch-ledger
     - git remote set-url --push origin no-push://the-drift-watch-only-reads
     - yodel chant run watch-prod
     - 'yodel drift "${CI_JOB_NAME#watch-}" --issue'

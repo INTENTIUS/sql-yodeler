@@ -4,6 +4,8 @@
 # Merge requests: lint and the plan comment (stage review). A push to the
 # default branch: the apply waves, one stage each, in .gitlab/yodel-apply.gitlab-ci.yml.
 # The drift watches are in .gitlab/yodel-watch.gitlab-ci.yml (stage ops).
+# /yodel new, chant's commit job, is in .gitlab/yodel-commit.gitlab-ci.yml (stage ops).
+# /yodel rebase, after the merge request's check, is in .gitlab/yodel-rebase.gitlab-ci.yml (stage ops).
 #
 # GitLab gives every job the project's CI/CD variables unless a variable is
 # protected or scoped to an environment, so the split between reader and
@@ -26,6 +28,8 @@
 include:
   - local: .gitlab/yodel-apply.gitlab-ci.yml
   - local: .gitlab/yodel-watch.gitlab-ci.yml
+  - local: .gitlab/yodel-commit.gitlab-ci.yml
+  - local: .gitlab/yodel-rebase.gitlab-ci.yml
 
 stages:
   - review
@@ -49,7 +53,7 @@ workflow:
   before_script:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
-    - git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'
+    - ./node_modules/.bin/yodel ci --fetch-ledger
 
 lint:
   extends: .yodel
