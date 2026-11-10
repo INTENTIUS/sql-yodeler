@@ -310,7 +310,7 @@ describe("each command's --json output validates against its schema", () => {
       },
     };
     const result = driftFromLifecycle("dev", doc);
-    result.columns = { events: ["id", "ts"] };
+    result.pending = [{ subject: "column shop.events.note", change: "the server has column note String, which the declaration does not", entities: ["events"] }];
     result.lockWait = "waited 5s (lockTimeoutMs) for a lock on shop.orders";
     result.against = { source: "history", migration: "20261010T0900-init" };
     const parts = { dialect: "clickhouse" as const, server, drifted: true, fingerprint: await driftFingerprint(result) };

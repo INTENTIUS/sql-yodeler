@@ -20,6 +20,7 @@
 import { makeNotifyEvent, sendNotify, type NotifyConfig, type NotifyDelivery, type NotifyFetch, type NotifyFields } from "@intentius/chant/notify";
 import { driftNotifyFields, productNotifySource, productSendOptions } from "@intentius/chant/notify-product";
 import { assertProductWords } from "@intentius/chant/ci-product-words";
+import type { DriftRunStack } from "@intentius/chant/drift-issue";
 import type { Io } from "../command.js";
 import { YODEL_WORDS } from "../ci-words.js";
 
@@ -87,13 +88,15 @@ export function eventFromRun(command: "apply" | "plan", doc: Record<string, unkn
  * drifted: chant's drift event (`driftNotifyFields`) under yodel's words, so
  * `drift.changed` and `targets` name the environment, as every product on
  * chant names its members, and `detail` the objects that changed or are gone.
+ * Given the run's `stacks` (its drift records), chant computes the
+ * fingerprint from them (chant issue 4944).
  */
-export function eventFromDrift(doc: { environment?: string; drifted?: boolean; changed?: Array<{ name: string }>; missing?: string[]; fingerprint?: string }): YodelFields | undefined {
+export function eventFromDrift(doc: { environment?: string; drifted?: boolean; changed?: Array<{ name: string }>; missing?: string[]; fingerprint?: string; stacks?: readonly DriftRunStack[] }): YodelFields | undefined {
   if (!doc.drifted) return undefined;
   const changed = (doc.changed ?? []).map((c) => c.name);
   const missing = doc.missing ?? [];
   const environment = doc.environment ?? "";
-  const fields = driftNotifyFields(WORDS, { changed: [environment], environment, ...(doc.fingerprint ? { fingerprint: doc.fingerprint } : {}) });
+  const fields = driftNotifyFields(WORDS, { changed: [environment], environment, ...(doc.stacks ? { stacks: doc.stacks } : doc.fingerprint ? { fingerprint: doc.fingerprint } : {}) });
   const objects = [changed.length > 0 ? `${changed.join(", ")} changed` : "", missing.length > 0 ? `${missing.join(", ")} missing` : ""].filter(Boolean).join("; ");
   return { ...fields, status: "drifted", summary: objects ? `${fields.summary} (${objects})` : fields.summary, detail: { command: "drift", changed, missing } };
 }

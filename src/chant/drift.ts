@@ -4,7 +4,12 @@
  * --json`, the sql lexicon's section of it:
  *
  * - `deep.drifted[].changes[]`: a declared object whose live definition
- *   differs, property by property, declared against live;
+ *   differs, property by property, declared against live; a column is
+ *   addressed by its name (`columns[#country].default.expr`), and a
+ *   ClickHouse grant declared and not held is `absent` on its grant;
+ * - `deep.pending`: a change on no one object's properties, which an apply
+ *   would undo: a column the server has and the declaration does not, a
+ *   privilege granted by hand (chant issue 4944);
  * - `resources.missing`: a declared object the server does not have;
  * - `resources.unobserved` and `deep.unobserved`: a declared object chant
  *   could not read (no credentials, a kind it cannot observe). Not drift, and
@@ -17,13 +22,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LiveDiffResult, UnobservedResource } from "@intentius/chant/lifecycle/live-diff";
-import type { DeepDiffResult, DeepEntityDrift, DeepEntityUnclaimed } from "@intentius/chant/lifecycle/deep-diff";
+import type { DeepDiffResult, DeepEntityDrift } from "@intentius/chant/lifecycle/deep-diff";
+import type { DeepPendingChange } from "@intentius/chant/deep-observation";
 import { YodelError, type Environment, type Project } from "../project.js";
 import { runChant } from "@intentius/chant/chant-install";
 import { describeServer, type ServerInfo } from "../server.js";
-import type { Build, BuildOutput } from "./build.js";
+import type { BuildOutput } from "./build.js";
 import { CH_ACCESS_TYPES } from "./access.js";
-import { planEnvironment } from "./plan.js";
 import { EXIT_DRIFT } from "../exit.js";
 
 /** The `lexicons.sql` section of `chant lifecycle diff --live --json`. */
@@ -38,12 +43,12 @@ export interface Drift {
   changed: DeepEntityDrift[];
   /** Declared objects the server does not have. */
   missing: string[];
+  /** Changes on no one object's properties that an apply would undo, such as a column or a privilege added by hand. Absent when there are none. */
+  pending?: DeepPendingChange[];
   /** Declared objects chant could not read. */
   unobserved: UnobservedResource[];
   /** Postgres: a read gave up at the lock timeout, and what it waited on (#18). */
   lockWait?: string | undefined;
-  /** Each changed table's declared column names, by position, so `columns[3]` reads as the column's name (#19). */
-  columns?: Record<string, string[]>;
   /** What the server was compared with (#49): `src/`, or the schema the newest applied migration records. */
   against?: DriftAgainst;
   /** Objects on the server of a kind yodel cannot declare (#251), as `<kind> <name>`: unmanaged, never drift. */
@@ -106,45 +111,12 @@ export function recordedAccessSource(objects: ReadonlyArray<{ export: string; ty
   return `${lines.join("\n")}\n`;
 }
 
-/**
- * ClickHouse grants (#46), which `chant lifecycle diff` leaves unobserved (a
- * grant is compared as part of its grantee's grants): yodel plans `build`
- * against the environment and reads each `grants <grantee>` change as drift.
- * A grant declared and not held is `absent`; one held and not declared
- * (granted by hand, which the next apply revokes) is `changed`, declared
- * nothing. A grantee the server does not have is gone. The grant
- * declarations come off `unobserved`, since they were compared.
- */
-export async function withClickHouseGrants(drift: Drift, project: Project, env: Environment, build: Build): Promise<Drift> {
-  const grants = build.output.objects.filter((o) => o.type === "ClickHouse::Grant");
-  if (grants.length === 0) return drift;
-  const plan = await planEnvironment(project, env, build);
-  const byGrantee = new Map<string, DeepEntityDrift>();
-  const missing: string[] = [];
-  for (const c of plan.diff.changes) {
-    if (!c.object.startsWith("grants ")) continue;
-    if (c.rule === "SQLCH200") {
-      missing.push(c.object);
-      continue;
-    }
-    if (c.rule !== "SQLCH273" && c.rule !== "SQLCH274") continue;
-    const e = byGrantee.get(c.object) ?? { name: c.object, type: "ClickHouse::Grant", changes: [] };
-    e.changes.push(c.rule === "SQLCH273" ? { path: c.field, kind: "absent", declared: c.after } : { path: c.field, kind: "changed", live: c.before });
-    byGrantee.set(c.object, e);
-  }
-  const compared = new Set(grants.map((o) => o.export));
-  return {
-    ...drift,
-    changed: [...drift.changed, ...byGrantee.values()],
-    missing: [...drift.missing, ...missing].sort(),
-    unobserved: drift.unobserved.filter((u) => !compared.has(u.name)),
-  };
-}
-
+/** Whether the drift has anything an apply would change: an object changed or gone, or a pending change. */
+export const hasDrift = (drift: Drift): boolean => drift.changed.length > 0 || drift.missing.length > 0 || (drift.pending?.length ?? 0) > 0;
 
 /** `2` on drift; `1` when there is none but part of the environment could not be read; `0` when clean. */
 export function driftExitCode(drift: Drift): number {
-  if (drift.changed.length > 0 || drift.missing.length > 0) return EXIT_DRIFT;
+  if (hasDrift(drift)) return EXIT_DRIFT;
   return drift.unobserved.length > 0 ? 1 : 0;
 }
 
@@ -165,44 +137,19 @@ export function driftFromLifecycle(environment: string, doc: unknown): Drift {
     if (!unobserved.has(u.name)) unobserved.set(u.name, u);
   }
   const changed = new Map<string, DeepEntityDrift>();
-  for (const d of [...(sql.deep?.drifted ?? []), ...extraColumns(sql.deep?.unclaimed ?? [])]) {
+  for (const d of sql.deep?.drifted ?? []) {
     if (d.changes.length === 0) continue;
     const had = changed.get(d.name);
     changed.set(d.name, had ? { ...had, changes: [...had.changes, ...d.changes] } : d);
   }
+  const pending = sql.deep?.pending ?? [];
   return {
     environment,
     changed: [...changed.values()],
     missing: [...(sql.resources?.missing ?? [])].sort(),
+    ...(pending.length > 0 ? { pending: [...pending] } : {}),
     unobserved: [...unobserved.values()].sort((a, b) => a.name.localeCompare(b.name)),
   };
-}
-
-/**
- * Columns on the server that a declared table does not declare (#273), as
- * drift: `column <name>`, declared none, live its type. chant reports a live
- * column past the declared ones as unclaimed fields `columns[N].*`, which it
- * does not count as drift, since nothing in src/ set them. A group with its
- * own `name` is a whole column; a field of a declared column that src/ does
- * not set (`columns[2].default`) has no name of its own and stays unclaimed.
- */
-export function extraColumns(unclaimed: readonly DeepEntityUnclaimed[]): DeepEntityDrift[] {
-  const out: DeepEntityDrift[] = [];
-  for (const u of unclaimed) {
-    const byIndex = new Map<string, Record<string, unknown>>();
-    for (const f of u.fields) {
-      const m = /^columns\[(\d+)\]\.(.+)$/.exec(f.path);
-      if (!m?.[1] || !m[2]) continue;
-      const column = byIndex.get(m[1]) ?? {};
-      column[m[2]] = f.live;
-      byIndex.set(m[1], column);
-    }
-    const changes = [...byIndex.values()]
-      .filter((c) => typeof c.name === "string")
-      .map((c) => ({ path: `column ${String(c.name)}`, kind: "changed" as const, live: c.type ?? null }));
-    if (changes.length > 0) out.push({ name: u.name, type: u.type, changes });
-  }
-  return out;
 }
 
 /** Runs `chant lifecycle diff <env> --live --json` in the project and reads the drift from it. */
@@ -222,49 +169,6 @@ export async function readDrift(project: Project, env: Environment, options: { e
   return driftFromLifecycle(env.name, doc);
 }
 
-const COLUMN_PATH = /^columns\[(\d+)\]/;
-
-/**
- * The declared column names of each changed object whose drift is named by
- * column position (chant's ClickHouse tables keep columns as a list, so a
- * change reads `columns[3].default.expr`). Read from the project's build,
- * with the dialect's own tag, the way chant reads the declaration.
- */
-export async function declaredColumns(project: Project, drift: Drift, build: () => Promise<{ output: { objects: Array<{ export: string; ddl: string }> }; dispose: () => void }>): Promise<Record<string, string[]>> {
-  const wanted = new Set(drift.changed.filter((e) => e.changes.some((c) => COLUMN_PATH.test(c.path))).map((e) => e.name));
-  if (wanted.size === 0) return {};
-  const b = await build();
-  try {
-    const tag =
-      project.dialect === "postgres"
-        ? (await import("@intentius/chant-lexicon-sql/postgres/entities")).table
-        : (await import("@intentius/chant-lexicon-sql/clickhouse/entities")).table;
-    const out: Record<string, string[]> = {};
-    for (const o of b.output.objects) {
-      if (!wanted.has(o.export)) continue;
-      try {
-        const strings = Object.assign([o.ddl], { raw: [o.ddl] }) as unknown as TemplateStringsArray;
-        const columns = (tag(strings).props as { columns?: unknown }).columns;
-        if (Array.isArray(columns)) out[o.export] = columns.map((c) => { const n = (c as { name?: unknown }).name; return typeof n === "string" ? n : ""; });
-      } catch {
-        // Not a table this tag reads: its paths stay as chant gives them.
-      }
-    }
-    return out;
-  } finally {
-    b.dispose();
-  }
-}
-
-/** `columns[3].default.expr` as `column country: default.expr`, when the declaration names column 3. */
-export function describePath(path: string, columns: readonly string[] | undefined): string {
-  const m = COLUMN_PATH.exec(path);
-  const name = m && columns ? columns[Number(m[1])] : undefined;
-  if (!m || !name) return path;
-  const rest = path.slice(m[0].length).replace(/^\./, "");
-  return `column ${name}${rest ? ` ${rest}` : ""}`;
-}
-
 const show = (v: unknown) => (v === undefined ? "(none)" : typeof v === "string" ? v : JSON.stringify(v));
 
 /** What the server was compared with, in words. */
@@ -281,7 +185,7 @@ export function renderDrift(drift: Drift, server?: ServerInfo): string {
   const lines: string[] = [`Drift in ${drift.environment}${server ? ` (${describeServer(server)})` : ""}`, ""];
   const against = describeAgainst(drift.against);
   if (against) lines.push(against, "");
-  if (drift.changed.length === 0 && drift.missing.length === 0) {
+  if (!hasDrift(drift)) {
     lines.push(drift.unobserved.length > 0 ? "No drift in the declared objects that could be read." : "No drift: every declared object matches the server.");
   }
   if (drift.changed.length > 0) {
@@ -289,8 +193,7 @@ export function renderDrift(drift: Drift, server?: ServerInfo): string {
     for (const e of drift.changed) {
       lines.push(`  ${e.name} (${e.type})`);
       for (const c of e.changes) {
-        const path = describePath(c.path, drift.columns?.[e.name]);
-        lines.push(c.kind === "absent" ? `    ${path}: declared ${show(c.declared)}, absent live` : `    ${path}: declared ${show(c.declared)}, live ${show(c.live)}`);
+        lines.push(c.kind === "absent" ? `    ${c.path}: declared ${show(c.declared)}, absent live` : `    ${c.path}: declared ${show(c.declared)}, live ${show(c.live)}`);
       }
     }
   }
@@ -298,6 +201,11 @@ export function renderDrift(drift: Drift, server?: ServerInfo): string {
     if (drift.changed.length > 0) lines.push("");
     lines.push("Gone (declared, not on the server):");
     for (const name of drift.missing) lines.push(`  ${name}`);
+  }
+  if (drift.pending?.length) {
+    if (drift.changed.length > 0 || drift.missing.length > 0) lines.push("");
+    lines.push("Added on the server, which the next apply undoes:");
+    for (const p of drift.pending) lines.push(`  ${p.subject}: ${p.change}`);
   }
   if (drift.unobserved.length > 0) {
     lines.push("", "Could not be read, so their state is unknown:");
