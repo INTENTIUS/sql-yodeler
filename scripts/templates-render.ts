@@ -24,8 +24,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CHANT_CI_FLOOR, CHANT_PACKAGES, installedVersion } from "../src/chant-floor.js";
-import { chantProduct } from "../src/ci-words.js";
+import { CHANT_PACKAGES, installedVersion } from "../src/chant-floor.js";
 import { TEMPLATE_DECLARATION_NAME, upgradeFiles, writeRendered } from "../src/commands/upgrade.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -49,7 +48,6 @@ for (const [pkg, v] of Object.entries(versions)) {
   if (v === undefined) fail(`${pkg} is not installed; run npm ci first`);
   else if (!published(pkg, v)) fail(`${pkg} ${v} is not on npm: the templates are rendered only against a published chant`);
 }
-if ((await chantProduct()) === undefined) fail(`the installed chant has no product pipeline; the templates move onto it from chant ${CHANT_CI_FLOOR}`);
 
 const io = { out: (t: string) => process.stdout.write(t), err: (t: string) => process.stderr.write(t) };
 

@@ -2,17 +2,13 @@
  * yodel's words for chant's product pipeline (#287): chant accepts them, the
  * bin passes them to chant, a status context reads yodel/plan, and the wave
  * gates keep the names a 0.10.1 ledger holds.
- *
- * `@intentius/chant/ci-product` arrives with chant#4550's release. Against a
- * chant without it, the cases that need it skip, and the rest show yodel
- * works as before.
  */
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseGateLedger } from "@intentius/chant/lifecycle/gate-ledger";
 import { waveGateName } from "@intentius/chant/gated-waves";
-import { chantProduct, YODEL_CHANT_BIN, YODEL_WORDS, type ChantProduct } from "../src/ci-words.js";
+import { YODEL_CHANT_BIN, YODEL_WORDS, type ChantProduct } from "../src/ci-words.js";
 import { runChantVerb } from "../src/commands/chant.js";
 import { main } from "../src/cli.js";
 import type { Io } from "../src/command.js";
@@ -21,13 +17,11 @@ import { wavesSpec, type Wave } from "../src/ci/render.js";
 import { WAVES_PIPELINE } from "../src/waves/record.js";
 import { fixture } from "./helpers/run.js";
 
-const specifier = "@intentius/chant/ci-product";
 /** chant's product entry, typed loosely: the test reaches more of it than src does. */
-const ciProduct = (await import(specifier).catch(() => undefined)) as Record<string, (...args: never[]) => unknown> | undefined;
-const hasProduct = typeof ciProduct?.productPipelineJobs === "function";
-/** One function of chant's product entry; the cases that call it skip when chant has none. */
+const ciProduct = (await import("@intentius/chant/ci-product")) as unknown as Record<string, (...args: never[]) => unknown>;
+/** One function of chant's product entry. */
 const cp = (name: string): ((...args: never[]) => unknown) => {
-  const f = ciProduct?.[name];
+  const f = ciProduct[name];
   if (typeof f !== "function") throw new Error(`chant's product entry has no ${name}`);
   return f;
 };
@@ -58,11 +52,7 @@ describe("yodel's words (#287)", () => {
     expect(YODEL_WORDS.bin).toBe(YODEL_CHANT_BIN);
   });
 
-  it("the feature-detect finds chant's product entry exactly when the installed chant has it", async () => {
-    expect((await chantProduct()) !== undefined).toBe(hasProduct);
-  });
-
-  it.skipIf(!hasProduct)("chant's assertProductWords accepts them, and refuses an apply command with no apply job", () => {
+  it("chant's assertProductWords accepts them, and refuses an apply command with no apply job", () => {
     const words = cp("assertProductWords")(YODEL_WORDS as never) as { product: string; commands: Record<string, string>; gateName: string };
     expect(words.product).toBe("yodel");
     expect(words.commands).toEqual({ new: "commit", rebase: "commit" });
@@ -70,7 +60,7 @@ describe("yodel's words (#287)", () => {
     expect(() => cp("assertProductWords")({ ...YODEL_WORDS, commands: { apply: "apply" } } as never, { jobs: ["plan"] } as never)).toThrow(/needs a apply job/);
   });
 
-  it.skipIf(!hasProduct)("a chant status context comes out as yodel/plan under the words", async () => {
+  it("a chant status context comes out as yodel/plan under the words", async () => {
     const { prStatusContext, withProductWords } = ciProduct as unknown as {
       prStatusContext: (stage: string, member?: string) => string;
       withProductWords: <T>(words: unknown, fn: () => Promise<T>) => Promise<T>;
@@ -80,7 +70,7 @@ describe("yodel's words (#287)", () => {
     expect(await withProductWords(YODEL_WORDS, () => Promise.resolve(prStatusContext("apply", "prod")))).toBe("yodel/apply/prod");
   });
 
-  it.skipIf(!hasProduct)("chant's approve line from the words is yodel approve's own line", () => {
+  it("chant's approve line from the words is yodel approve's own line", () => {
     const words = cp("assertProductWords")(YODEL_WORDS as never);
     const line = (target: string, sign: boolean) =>
       cp("approveLine")(words as never, { op: WAVES_PIPELINE, gate: "yodel-apply-wave-2", digest: "jcs1-sha256:d", target, sign } as never);
@@ -149,7 +139,7 @@ describe("wave gate names on chant/lifecycle (#287)", () => {
     expect(waves.map((_, i) => waveGateName(spec.name, i + 1))).toEqual(recorded);
   });
 
-  it.skipIf(!hasProduct)("the spec under yodel's words names the same op and gates, so recorded approvals keep counting", () => {
+  it("the spec under yodel's words names the same op and gates, so recorded approvals keep counting", () => {
     const named = cp("productWavesSpec")(wavesSpec(waves) as never, YODEL_WORDS as never) as { name: string; gateName?: string; waves: Array<{ approval?: string }> };
     expect(named.name).toBe(WAVES_PIPELINE);
     expect(waves.map((_, i) => opWaveGateName(named, i + 1))).toEqual(recorded);

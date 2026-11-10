@@ -8,12 +8,8 @@
  * `finished` lines in `_gates/<op>/applied.jsonl`. `chant ledger gates` and
  * `chant query` read them.
  *
- * The installed chant has them from chant 0.124.55.
  * {@link gatedRequests} imports `@intentius/chant/lifecycle/gated-request`
- * lazily, with the specifier in a variable, so this compiles and runs on a
- * published chant without it: the callers then keep their own gate on the
- * migrations Op, as before. The types below are the parts yodel reads,
- * written out here for the same reason.
+ * on first use. The types below are the parts yodel reads.
  *
  * A requester's own approval never counts (chant's rule for every gated
  * request). The requester is the user chant names an approver by:
@@ -65,26 +61,16 @@ export interface GatedRequestApi {
   gatedRequestDigest(op: string, request: GatedRequest): string;
 }
 
-let api: Promise<GatedRequestApi | undefined> | undefined;
+let api: Promise<GatedRequestApi> | undefined;
 
 /**
- * chant's gated-request API, once, or undefined when the installed chant has
- * none. `YODEL_GATED_REQUESTS=0` turns it off, so a project can keep the old
- * gate names until every machine that approves runs a chant with them.
+ * chant's gated-request API, once, or undefined when
+ * `YODEL_GATED_REQUESTS=0` turns it off: the callers then keep their own
+ * gate on the migrations Op, which a person working alone can approve.
  */
 export function gatedRequests(env: NodeJS.ProcessEnv = process.env): Promise<GatedRequestApi | undefined> {
   if (env.YODEL_GATED_REQUESTS === "0") return Promise.resolve(undefined);
-  api ??= (async () => {
-    const specifier = "@intentius/chant/lifecycle/gated-request";
-    let m: Partial<GatedRequestApi> | undefined;
-    try {
-      m = (await import(specifier)) as Partial<GatedRequestApi>;
-    } catch {
-      return undefined;
-    }
-    const all: Array<keyof GatedRequestApi> = ["requestGate", "spendGatedRequest", "finishGatedRequest", "readGatedRequests", "gatedRequestDigest"];
-    return all.every((k) => typeof m[k] === "function") ? (m as GatedRequestApi) : undefined;
-  })();
+  api ??= import("@intentius/chant/lifecycle/gated-request").then((m) => m as unknown as GatedRequestApi);
   return api;
 }
 

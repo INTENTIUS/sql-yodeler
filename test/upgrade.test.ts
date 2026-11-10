@@ -1,7 +1,7 @@
 /**
  * `yodel upgrade` (#298): a project rendered by 0.10.1 moves onto chant's
- * product pipeline in one commit once its chant is at the floor, and the
- * docs name the same floor the command does.
+ * product pipeline in one commit, and the docs name 0.12's chant floor in
+ * one place.
  */
 
 import { execFileSync } from "node:child_process";
@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { CHANT_CI_FLOOR, chantParts, installedVersion, installLine } from "../src/chant-floor.js";
+import { installedVersion } from "../src/chant-floor.js";
 import { declarationAbove, newDeclaration, TEMPLATE_DECLARATION_NAME, upgradeFiles, workspaceName } from "../src/commands/upgrade.js";
 import { copyTemplate, repoRoot, yodel } from "./helpers/run.js";
 
@@ -58,19 +58,18 @@ function project(dialect: "clickhouse" | "postgres"): string {
 
 const page = (name: string) => readFileSync(join(repoRoot, "docs", name), "utf8");
 
-describe("the chant floor", () => {
-  it("is a version, and the install line pins chant and the sql lexicon at it", () => {
-    expect(CHANT_CI_FLOOR).toMatch(/^\d+\.\d+\.\d+$/);
-    expect(installLine()).toBe(`npm install -E @intentius/chant@${CHANT_CI_FLOOR} @intentius/chant-lexicon-sql@${CHANT_CI_FLOOR}`);
-  });
+/** The chant release yodel 0.12 took as its floor (#303), which the upgrade docs name. */
+const CHANT_CI_FLOOR = "0.124.67";
+const installLine = `npm install -E @intentius/chant@${CHANT_CI_FLOOR} @intentius/chant-lexicon-sql@${CHANT_CI_FLOOR}`;
 
+describe("the chant floor", () => {
   it("the docs name the same floor, and workflows.md the same install line", () => {
     const text = page("chant-ci.md");
     expect(text).toContain(`## From chant ${CHANT_CI_FLOOR}`);
     expect(text).toContain("https://intentius.io/chant/concepts/ci-products/");
     const workflows = page("workflows.md");
     expect(workflows).toContain(`### Upgrading the pipelines to chant ${CHANT_CI_FLOOR}`);
-    expect(workflows).toContain(installLine());
+    expect(workflows).toContain(installLine);
     // Every version the upgrade's text names is the floor: chant-ci.md, workflows.md's upgrade section, and cli.md's rows for yodel upgrade and yodel chant.
     const upgrade = workflows.slice(workflows.indexOf("### Upgrading the pipelines"), workflows.indexOf("## ClickHouse objects"));
     const rows = page("cli.md").split("\n").filter((l) => l.startsWith("| `yodel upgrade`") || l.startsWith("| `yodel chant"));
@@ -93,17 +92,6 @@ describe("the chant floor", () => {
     expect(v).toMatch(/^\d+\.\d+\.\d+/);
     expect(installedVersion("@intentius/no-such-package")).toBeUndefined();
   });
-
-  it("lists every part of chant CI, the product pipeline first", async () => {
-    const parts = await chantParts();
-    expect(parts[0]?.name).toMatch(/^product pipeline/);
-    // The floor has every part (#303).
-    for (const p of parts) expect(p.has, p.name).toBe(true);
-    expect(new Set(parts.map((p) => p.section)).size).toBe(parts.length);
-    // Each part's section is a heading of docs/chant-ci.md.
-    const anchors = new Set([...page("chant-ci.md").matchAll(/^#{2,4} (.+)$/gm)].map((m) => (m[1] ?? "").toLowerCase().replace(/[^a-z0-9 -]/g, "").replace(/ /g, "-")));
-    for (const p of parts) expect(anchors, p.section).toContain(p.section);
-  });
 });
 
 describe("the workspace declaration yodel upgrade adds", () => {
@@ -119,13 +107,13 @@ describe("the workspace declaration yodel upgrade adds", () => {
     expect(workspaceName(dir)).toBe("yodel");
   });
 
-  it("declares the project as the workspace, with no members", async () => {
+  it("declares the project as the workspace, with no members", () => {
     const dir = scratch("declaration");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "shop" }));
-    const d = await newDeclaration(dir);
+    const d = newDeclaration(dir);
     expect(d.path).toBe("chant.workspace.json");
     expect(JSON.parse(d.content)).toMatchObject({ name: "shop", schema: 1, members: [] });
-    expect((JSON.parse((await newDeclaration(dir, TEMPLATE_DECLARATION_NAME)).content) as { name: string }).name).toBe("{{chant:name}}");
+    expect((JSON.parse(newDeclaration(dir, TEMPLATE_DECLARATION_NAME).content) as { name: string }).name).toBe("{{chant:name}}");
   });
 
   it("is not added under a repository whose declaration is above the project", () => {

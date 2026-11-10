@@ -1,32 +1,26 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { CI_CHECK_HOOK_FLOOR } from "@intentius/chant/components/check-hooks";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { EXIT_FAILED, EXIT_OK } from "../exit.js";
 import { loadProject, YodelError } from "../project.js";
-import { chantParts, installedVersion } from "../chant-floor.js";
-import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
+import { installedVersion } from "../chant-floor.js";
 import type { RenderedFile } from "../ci/render.js";
 
 const usage = "usage: yodel upgrade [--check] [--dir <project>]";
 
 const help = `${usage}
 
-Moves the project's pipelines onto chant's product pipeline, once the
-installed chant is ${CHANT_CI_FLOOR} or later. Install chant first:
-
-  ${installLine()}
-
-then run yodel upgrade, and commit what it writes with package.json and
-package-lock.json in one commit. It lists the parts of chant CI the
-installed chant has, then:
+Moves the project's pipelines onto chant's product pipeline. Run it once,
+and commit what it writes with package.json and package-lock.json in one
+commit. It prints the installed chant and sql lexicon, then:
 
   - adds chant.workspace.json when the project has no workspace
     declaration, for the check hooks the pull request's lint job runs
   - renders every file yodel ci renders, through chant's product pipeline
 
-From then on yodel ci renders the same files. With a chant before
-${CHANT_CI_FLOOR} it writes nothing and exits 1.
+From then on yodel ci renders the same files.
 
 Options:
   --check          write nothing; exit 1 naming each file the upgrade would
@@ -35,8 +29,7 @@ Options:
 
 Exit codes:
   0  upgraded, or (--check) nothing left to write
-  1  the installed chant has no product pipeline; (--check) a file would
-     change; anything else failed
+  1  (--check) a file would change; anything else failed
 `;
 
 interface UpgradeArgs {
@@ -103,22 +96,14 @@ export function declarationAbove(dir: string): string | undefined {
  * hooks refuses the file rather than skipping them. `name` overrides the
  * name (the templates pass `{{chant:name}}`).
  */
-export async function newDeclaration(dir: string, name: string = workspaceName(dir)): Promise<RenderedFile> {
-  const specifier = "@intentius/chant/components/check-hooks";
-  let floor: string | undefined;
-  try {
-    const m = (await import(specifier)) as { CI_CHECK_HOOK_FLOOR?: unknown };
-    if (typeof m.CI_CHECK_HOOK_FLOOR === "string") floor = m.CI_CHECK_HOOK_FLOOR;
-  } catch {
-    // no check hooks: render() leaves the declaration out
-  }
-  const doc = { name, schema: 1, ...(floor ? { minReader: floor } : {}), members: [] as unknown[] };
+export function newDeclaration(dir: string, name: string = workspaceName(dir)): RenderedFile {
+  const doc = { name, schema: 1, minReader: CI_CHECK_HOOK_FLOOR, members: [] as unknown[] };
   return { path: "chant.workspace.json", content: `${JSON.stringify(doc, null, 2)}\n` };
 }
 
 /**
  * Every file the upgrade writes: the declaration it adds, when the project
- * has none and chant has the check hooks to put in it, then every file
+ * has none, then every file
  * `yodel ci` renders through chant's product pipeline.
  */
 export async function upgradeFiles(dir: string, options: { declarationName?: string } = {}): Promise<{ files: RenderedFile[]; notes: string[] }> {
@@ -129,10 +114,10 @@ export async function upgradeFiles(dir: string, options: { declarationName?: str
   if (declarationFile(dir) === undefined) {
     const above = declarationAbove(dir);
     if (above) notes.push(`${relative(dir, above)} is the repository's workspace declaration, above the project: yodel ci writes check hooks only into one in the project's directory, so the lint job keeps its own steps`);
-    else declaration = await newDeclaration(dir, options.declarationName);
+    else declaration = newDeclaration(dir, options.declarationName);
   }
   const files = await render(dir, declaration ? { declaration } : {});
-  // render() returns the declaration with the hooks in it; one it left out (no check hooks) is not added.
+  // render() returns the declaration with the hooks in it.
   return { files, notes };
 }
 
@@ -164,12 +149,6 @@ export const upgrade: Command = {
       const chant = installedVersion("@intentius/chant");
       const lexicon = installedVersion("@intentius/chant-lexicon-sql");
       io.out(`chant ${chant ?? "(not found)"}, sql lexicon ${lexicon ?? "(not found)"}\n`);
-      const parts = await chantParts();
-      for (const p of parts) io.out(`  ${p.has ? "has" : "no "}  ${p.name}\n`);
-      if (!parts[0]?.has) {
-        io.err(`yodel upgrade: this chant has no product pipeline; yodel's pipelines move onto it from chant ${CHANT_CI_FLOOR}. Install it, then run yodel upgrade again:\n  ${installLine()}\n`);
-        return EXIT_FAILED;
-      }
       let rendered;
       try {
         rendered = await upgradeFiles(dir);

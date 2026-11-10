@@ -117,7 +117,6 @@ import {
 } from "@intentius/chant-lexicon-gitlab";
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
 import { chantProduct, WAVE_WORDS, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
-import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
 export const FORGES: readonly Forge[] = ["github", "gitlab", "forgejo"];
@@ -1600,8 +1599,7 @@ export function review(envs: Environments): RenderedFile[] {
 
 /**
  * The workspace declaration with yodel's check presets in `ci.hooks.check`
- * (#294), or undefined when the installed chant has no check moment or the
- * project has no declaration. The hooks are one list for every forge: the
+ * (#294), or undefined when the project has no declaration. The hooks are one list for every forge: the
  * lint and check presets print with `--format forge`, so a GitHub or
  * Forgejo job annotates the files and a GitLab job writes the code quality
  * report its artifact keeps.
@@ -1609,7 +1607,6 @@ export function review(envs: Environments): RenderedFile[] {
 export async function checkHooksDeclaration(dir: string, envs_: Environments, declaration?: RenderedFile): Promise<RenderedFile | undefined> {
   const chant = await chantCheckHooks();
   const file = declarationFile(dir);
-  if (!chant) return undefined;
   if (file) return { path: file, content: declarationWithHooks(chant, dir, file, checkHooksOf(envs_)) };
   // A declaration `yodel upgrade` adds, rendered before it is written (#298).
   if (declaration) return { path: declaration.path, content: declarationWithHooks(chant, dir, declaration.path, checkHooksOf(envs_), declaration.content) };
@@ -1624,11 +1621,9 @@ export function forgeOf(path: string): Forge | undefined {
   return undefined;
 }
 
-/** chant's product pipeline (#289), which every pipeline renders through; refused, naming the install line, on a chant without it. */
+/** chant's product pipeline (#289), which every pipeline renders through. */
 export async function requireProduct(): Promise<ChantProduct> {
-  const product = await chantProduct();
-  if (!product) throw new Error(`the installed chant has no product pipeline (@intentius/chant/ci-product), and yodel ci renders every pipeline on it from chant ${CHANT_CI_FLOOR}. Install it, then run yodel upgrade:\n  ${installLine()}`);
-  return product;
+  return chantProduct();
 }
 
 /**

@@ -17,12 +17,10 @@
  * that `yodel chant run wave` runs sends its trace with `yodel.*`
  * attributes. Without the exporter nothing is sent, as before.
  *
- * Both are imported lazily, with the specifier in a variable, so a yodel
- * command that serves nothing does not load chant's server.
+ * Both are imported on first use, so a yodel command that serves nothing
+ * does not load chant's server.
  */
 import { YODEL_WORDS } from "../ci-words.js";
-import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
-import { YodelError } from "../project.js";
 import { assertReadOnly, yodelTools, type YodelTool } from "./tools.js";
 
 /** What the server tells an agent it serves, and what is a person's to do. */
@@ -52,19 +50,13 @@ export interface YodelMcpHook {
 export interface ChantHooks {
   runChantInProcess: (argv: string[], words: unknown, options: { mcp?: YodelMcpHook }) => Promise<number>;
   configureOtlp: (opts: { prefix: string }) => unknown;
-  PRODUCT_MCP_HOOK_FLOOR: string;
 }
 
 let hooks: Promise<ChantHooks> | undefined;
 
-/** chant's product tool hook and OTLP exporter (chant#4555), once; refused, naming the install line, on a chant without them. */
+/** chant's product tool hook and OTLP exporter (chant#4555), once. */
 export function chantHooks(): Promise<ChantHooks> {
-  hooks ??= (async () => {
-    const specifier = "@intentius/chant/ci-product";
-    const m = (await import(specifier).catch(() => ({}))) as Partial<ChantHooks>;
-    if (typeof m.runChantInProcess === "function" && typeof m.configureOtlp === "function" && typeof m.PRODUCT_MCP_HOOK_FLOOR === "string") return m as ChantHooks;
-    throw new YodelError(`the installed chant has no product tool hook (chant serve mcp with yodel's tools), which yodel mcp serves on from chant ${CHANT_CI_FLOOR}. Install it:\n  ${installLine()}`);
-  })();
+  hooks ??= import("@intentius/chant/ci-product").then((m) => m as unknown as ChantHooks);
   return hooks;
 }
 

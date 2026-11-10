@@ -17,11 +17,8 @@
  * annotations still reach the pull request; on GitLab the lint preset
  * writes the code quality report the job keeps as its artifact.
  *
- * The installed chant has the check moment from chant 0.124.55.
- * {@link chantCheckHooks} imports `@intentius/chant/components/check-hooks`
- * lazily, with the specifier in a variable; without it, or in a project
- * with no workspace declaration, the lint job runs the commands itself, as
- * before.
+ * In a project with no workspace declaration the lint job runs the
+ * commands itself.
  */
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,20 +37,11 @@ export interface ChantCheckHooks {
   runCheckHooks(options: { base: string; targets?: readonly string[]; cwd?: string }): { status: "passed" | "failed" | "none" };
 }
 
-let api: Promise<ChantCheckHooks | undefined> | undefined;
+let api: Promise<ChantCheckHooks> | undefined;
 
-/** chant's check moment, once, or undefined when the installed chant has none (a release before chant#4556). */
-export function chantCheckHooks(): Promise<ChantCheckHooks | undefined> {
-  api ??= (async () => {
-    const specifier = "@intentius/chant/components/check-hooks";
-    let m: Partial<ChantCheckHooks> | undefined;
-    try {
-      m = (await import(specifier)) as Partial<ChantCheckHooks>;
-    } catch {
-      return undefined;
-    }
-    return typeof m.writeCiHook === "function" && typeof m.runCheckHooks === "function" ? (m as ChantCheckHooks) : undefined;
-  })();
+/** chant's check moment (chant#4556), loaded on first use. */
+export function chantCheckHooks(): Promise<ChantCheckHooks> {
+  api ??= import("@intentius/chant/components/check-hooks").then((m) => m as unknown as ChantCheckHooks);
   return api;
 }
 
