@@ -7,21 +7,19 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
-import { resolveSourceDir } from "@intentius/chant/config";
+import { relative } from "node:path";
+import { sqlTypesPath } from "@intentius/chant-lexicon-sql/sql-types";
 import type { Project } from "../project.js";
 import { runChant } from "@intentius/chant/chant-install";
 
-/** The file `chant sql types` writes, beside the declarations. */
-export const SQL_TYPES_FILE = "sql-types.d.ts";
-
 /**
- * Regenerates the project's `sql-types.d.ts` when it has one. `updated` is
- * its path, relative to the project, when the text changed; `warning` says
- * why it could not be written, which never fails the command that asked.
+ * Regenerates the project's `sql-types.d.ts` when it has one, at the path
+ * chant's `sqlTypesPath` gives (chant issue 4897). `updated` is its path,
+ * relative to the project, when the text changed; `warning` says why it
+ * could not be written, which never fails the command that asked.
  */
 export async function refreshSqlTypes(project: Project): Promise<{ updated?: string; warning?: string }> {
-  const path = join(resolveSourceDir(project.dir, project.config), SQL_TYPES_FILE);
+  const path = sqlTypesPath(project.dir, project.config);
   if (!existsSync(path)) return {};
   const before = readFileSync(path, "utf8");
   const ran = await runChant(["sql", "types", "--output", path], { cwd: project.dir, noColor: true, resolveFallback: true });
