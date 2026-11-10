@@ -33,7 +33,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { YodelError, type Environment, type Project } from "../project.js";
-import { runChant } from "../chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { discoveryError, readApplyRun, type ApplyRun } from "../chant/apply.js";
 import { REVERT_ENV, REVERT_STEP_ENV } from "./revert.js";
 import { EXIT_WAITING } from "../exit.js";
@@ -230,6 +230,8 @@ export async function runMigrateOp(
     const result = await runChant(["run", op.name, "--gated-exit", String(EXIT_WAITING)], {
       cwd: project.dir,
       env,
+      noColor: true,
+      resolveFallback: true,
       ...(options.onOutput ? { onStdout: options.onOutput, onStderr: options.onOutput } : {}),
     });
     const run = readApplyRun(result.code, `${result.stdout}\n${result.stderr}`);

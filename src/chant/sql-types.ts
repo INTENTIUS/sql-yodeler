@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { resolveSourceDir } from "@intentius/chant/config";
 import type { Project } from "../project.js";
-import { runChant } from "./process.js";
+import { runChant } from "@intentius/chant/chant-install";
 
 /** The file `chant sql types` writes, beside the declarations. */
 export const SQL_TYPES_FILE = "sql-types.d.ts";
@@ -24,7 +24,7 @@ export async function refreshSqlTypes(project: Project): Promise<{ updated?: str
   const path = join(resolveSourceDir(project.dir, project.config), SQL_TYPES_FILE);
   if (!existsSync(path)) return {};
   const before = readFileSync(path, "utf8");
-  const ran = await runChant(["sql", "types", "--output", path], { cwd: project.dir });
+  const ran = await runChant(["sql", "types", "--output", path], { cwd: project.dir, noColor: true, resolveFallback: true });
   const where = relative(project.dir, path);
   if (ran.code !== 0) return { warning: `chant sql types did not refresh ${where} (exit ${String(ran.code)}): ${(ran.stderr || ran.stdout).trim().split("\n")[0] ?? ""}; run npx chant sql types` };
   return readFileSync(path, "utf8") === before ? {} : { updated: where };

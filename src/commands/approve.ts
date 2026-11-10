@@ -18,7 +18,7 @@ import { baseEnvironment } from "../tenants/target.js";
 import type { VersionedEnv } from "../versioned/engine.js";
 import type { MigrateOpRef } from "../versioned/op.js";
 import { readMigrations } from "../migrations/index.js";
-import { runChant } from "../chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { runnableAsWriter } from "../chant/runnable.js";
 import { describeWave, WAVES_PIPELINE, waveView } from "../waves/index.js";
 import { EXIT_WAITING, EXIT_FAILED, EXIT_MOVED } from "../exit.js";
@@ -183,7 +183,7 @@ async function record(
   run: typeof runChant = runChant,
 ): Promise<number> {
   const since = new Date(Date.now() - 1000).toISOString();
-  const ran = await run(chantApproveArgs(op, gate, digest, resume, signing), { cwd: dir, onStdout: io.err, onStderr: io.err });
+  const ran = await run(chantApproveArgs(op, gate, digest, resume, signing), { cwd: dir, noColor: true, resolveFallback: true, onStdout: io.err, onStderr: io.err });
   if (ran.code !== 0) {
     if (resume && (await approvalRecorded(dir, op, gate, digest, since).catch(() => false))) {
       io.err(

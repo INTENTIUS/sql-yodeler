@@ -20,7 +20,6 @@ import { commitSpecs, NEW_CHECK_COMMAND } from "../src/ci/commit.js";
 import { rebaseRespond } from "../src/ci/render.js";
 import { runChantVerb, setRefusalReply } from "../src/commands/chant.js";
 import { checkYodelConfig } from "../src/config/load.js";
-import { fallbackImportArgs, ownModules } from "../src/chant/resolve-fallback.js";
 import { copyTemplate, fixture, json, repoRoot, yodel } from "./helpers/run.js";
 import { offline } from "./helpers/new-suite.js";
 
@@ -248,13 +247,6 @@ describe("yodel new in a worktree with no node_modules (#312)", () => {
   });
   afterAll(() => {
     rmSync(project, { recursive: true, force: true });
-  });
-
-  it("finds yodel's own install, and gives chant's children the hook", () => {
-    expect(ownModules()).toBe(join(repoRoot, "node_modules"));
-    const args = fallbackImportArgs();
-    expect(args[0]).toBe("--import");
-    expect(args[1]).toMatch(/^data:text\/javascript,/);
   });
 
   it("resolves the project's packages from yodel's install, so the migration is written", () => {

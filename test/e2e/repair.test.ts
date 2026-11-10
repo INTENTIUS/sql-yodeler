@@ -10,7 +10,7 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { computeChecksum, createMigration, scanMigrations, writeMigration, type Migration } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
@@ -71,7 +71,7 @@ describe.skipIf(!clickhouseReachable)("yodel repair and rebase on clickhouse", (
     const gated = await yodel(at("apply", "e2e", "--json"));
     expect(gated.code, gated.err).toBe(3);
     const approve = (json(gated) as StatusDoc).approve ?? "";
-    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir });
+    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
     expect(approved.code, approved.stderr).toBe(0);
     const applied = await yodel(at("apply", "e2e", "--json"));
     expect(applied.code, applied.err).toBe(0);

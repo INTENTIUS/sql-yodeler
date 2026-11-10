@@ -17,7 +17,7 @@ import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
 import { readApplyRun } from "../src/chant/apply.js";
-import { runChant } from "../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { chantApproveArgs } from "../src/commands/approve.js";
 import { projectFromConfig } from "../src/project.js";
 import { gitLedger, verifyApproval } from "../src/versioned/approval.js";
@@ -54,11 +54,11 @@ function repo(op = TEMPLATE_OP) {
   git("commit", "-qm", "init");
   const env = { ...process.env, PATH: [join(dir, "bin"), process.env.PATH ?? ""].join(delimiter) };
   const run = async () => {
-    const r = await runChant(["run", "migrate-dev", "--gated-exit", String(EXIT_WAITING)], { cwd: dir, env });
+    const r = await runChant(["run", "migrate-dev", "--gated-exit", String(EXIT_WAITING)], { cwd: dir, env, noColor: true, resolveFallback: true });
     return readApplyRun(r.code, `${r.stdout}\n${r.stderr}`);
   };
   const approve = async (gate: string) => {
-    const r = await runChant(chantApproveArgs("migrate-dev", gate, DIGEST, false, { actor: "tester" }), { cwd: dir, env });
+    const r = await runChant(chantApproveArgs("migrate-dev", gate, DIGEST, false, { actor: "tester" }), { cwd: dir, env, noColor: true, resolveFallback: true });
     expect(r.code, r.stderr).toBe(0);
     return r;
   };
