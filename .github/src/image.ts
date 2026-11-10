@@ -13,7 +13,8 @@
  * that does run `npm ci` uses its own copies instead.
  */
 
-import type { ProductImageSpec } from "@intentius/chant/ci-image";
+import { productImageStages, type ProductImageSpec } from "@intentius/chant/ci-image";
+import { Dockerfile } from "@intentius/chant-lexicon-docker";
 
 export const comment = `The CI image, ghcr.io/intentius/sql-yodeler:<version>: Node 22, yodel, chant
 and the sql lexicon. A release's cut builds it from npm pack of the commit
@@ -42,7 +43,8 @@ const PREFIX = "/opt/yodel";
  * USER and HOME=/tmp for a job run as a uid with no passwd entry, no Node
  * compile cache or npm debug logs (a rebuild gives the same archive), then
  * yodel's npm bundle in /opt/yodel with /node_modules linked to it, and the
- * OCI labels. ./render.ts writes it with chant's `productImageDockerfile`.
+ * OCI labels. `dockerfile` below declares it with the docker lexicon, and
+ * ./render.ts writes it with the lexicon's serializer.
  */
 export const spec: ProductImageSpec = {
   name: "sql-yodeler",
@@ -62,3 +64,6 @@ export const spec: ProductImageSpec = {
     check: ['test "$(yodel --version)" = "$YODEL_VERSION"', "chant --version"],
   },
 };
+
+/** The CI image as the docker lexicon's Dockerfile, from chant's product image stages. */
+export const dockerfile = new Dockerfile({ stages: productImageStages(spec) });

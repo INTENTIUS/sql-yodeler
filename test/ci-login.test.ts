@@ -92,13 +92,15 @@ describe("yodel ci: the cloud login of a job holding a cloud-minted role", () =>
     expect(step(wave, TRADED("aws, gcp, azure"))).toContain(PROD_ROLE);
     // dev's wave plans as dev's cloud-sql-iam reader.
     expect(traded(actionsJob(dir, ".github/workflows/yodel-apply.yml", "wave-1-dev"))).toEqual([TRADED("gcp")]);
-    // The watch: each environment's reader, as chant's setup step (#4791), before chant run. A setup step has no name.
+    // The watch: each environment's reader, as chant's setup step (#4791), before chant run, named as the other jobs' (chant issue 4932).
     const watch = actionsJob(dir, ".github/workflows/watch-prod.yml", "watch-prod");
-    const setupTrade = (job: ActionsJob) => job.steps.filter((s) => s.name === undefined && s.run?.startsWith(`export ${env}=`));
+    const setupTrade = (job: ActionsJob) => job.steps.filter((s) => s.run?.startsWith(`export ${env}=`));
     const setupClouds = (job: ActionsJob) => setupTrade(job).map((s) => Object.keys(JSON.parse(/^export \S+='([^']*)'/.exec(s.run ?? "")?.[1] ?? "{}") as object));
     expect(setupClouds(watch)).toEqual([["azure"]]);
-    expect(watch.steps.findIndex((s) => s.name === undefined && s.run?.startsWith(`export ${env}=`))).toBeLessThan(names(watch).indexOf(`${CHANT} run watch-prod`));
+    expect(traded(watch)).toEqual([TRADED("azure")]);
+    expect(names(watch).indexOf(TRADED("azure"))).toBeLessThan(names(watch).indexOf(`${CHANT} run watch-prod`));
     expect(setupClouds(actionsJob(dir, ".github/workflows/watch-dev.yml", "watch-dev"))).toEqual([["gcp"]]);
+    expect(traded(actionsJob(dir, ".github/workflows/watch-dev.yml", "watch-dev"))).toEqual([TRADED("gcp")]);
 
     const main = yaml(dir, ".gitlab-ci.yml") as Record<string, GitLabJob>;
     expect(main["plan-prod"]?.id_tokens).toEqual({ CHANT_ID_TOKEN_GCP: { aud: `https://iam.googleapis.com/${PROVIDER}` }, CHANT_ID_TOKEN_AZURE: { aud: "api://AzureADTokenExchange" } });
