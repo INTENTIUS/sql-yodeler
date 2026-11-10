@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { describePath, renderDrift } from "../src/chant/drift.js";
+import { renderDrift } from "../src/chant/drift.js";
 import { discoveryError } from "../src/chant/apply.js";
 import { onlySilencesAdded } from "../src/lint/check.js";
 import { explainMove } from "../src/versioned/explain.js";
@@ -11,19 +11,14 @@ import { json, projectFrom, yodel } from "./helpers/run.js";
 import { migration } from "./helpers/fake-clickhouse.js";
 
 describe("CLI polish (#19)", () => {
-  it("drift names a column by its declared name, not its position", () => {
-    expect(describePath("columns[3].default.expr", ["id", "ts", "kind", "country"])).toBe("column country default.expr");
-    expect(describePath("columns[3]", ["id", "ts", "kind", "country"])).toBe("column country");
-    expect(describePath("columns[9].type", ["id"])).toBe("columns[9].type");
-    expect(describePath("engine", undefined)).toBe("engine");
+  it("drift names a column as chant addresses it, by its name", () => {
     const text = renderDrift({
       environment: "dev",
-      changed: [{ name: "events", type: "ClickHouse::Table", changes: [{ path: "columns[1].default.expr", kind: "changed", declared: "", live: "US" }] }] as never,
+      changed: [{ name: "events", type: "ClickHouse::Table", changes: [{ path: "columns[#country].default.expr", kind: "changed", declared: "", live: "US" }] }] as never,
       missing: [],
       unobserved: [],
-      columns: { events: ["id", "country"] },
     });
-    expect(text).toContain("    column country default.expr: declared , live US");
+    expect(text).toContain("    columns[#country].default.expr: declared , live US");
   });
 
   it("says why Ops need git, and what to run", () => {

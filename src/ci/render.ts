@@ -1269,11 +1269,8 @@ export function watchSpec(env: string, forge: Forge, envs: Pick<Environments, "d
  * yodel (#289).
  *
  * The job stays chant's generateOpsPipeline and its last line stays `yodel
- * drift <env> --issue`, which plans the build for ClickHouse grant drift
- * (../chant/drift.ts `withClickHouseGrants`), since `chant lifecycle diff
- * --live` leaves ClickHouse::Grant out. Once chant#4582 puts grants in the
- * sql lexicon's live diff, the watch moves onto chant's drift job with
- * `stages.drift` and the workaround goes.
+ * drift <env> --issue`, which compares with the history's recorded schema
+ * and keeps the tracking issue.
  */
 export async function watchPipelines(dir: string, envs_: Environments): Promise<RenderedFile[]> {
   const { names: envs } = envs_;

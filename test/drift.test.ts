@@ -54,33 +54,32 @@ describe("drift", () => {
     expect(text).not.toContain("handmade");
   });
 
-  it("reports a column added by hand to a declared table (#273), and not a field src/ leaves unset on a declared column", () => {
+  it("reports a column added by hand to a declared table (#273) as chant's pending change, and a field src/ leaves unset as no drift", () => {
     const unclaimed = (path: string, live: unknown) => ({ path, live, source: "claimed-fields" });
     const drift = driftFromLifecycle(
       "e2e",
       doc({
         resources: resources(),
         deep: deep({
-          drifted: [{ name: "events", type: "Postgres::Table", changes: [{ path: "columns[1].nullable", kind: "changed", declared: false, live: true }] }],
-          unclaimed: [
-            { name: "events", type: "Postgres::Table", fields: [unclaimed("columns[2].name", "note"), unclaimed("columns[2].type", "text"), unclaimed("columns[1].default", "'x'::text")] },
-            { name: "orders", type: "Postgres::Table", fields: [unclaimed("columns[0].default", "0")] },
-          ],
+          drifted: [{ name: "events", type: "Postgres::Table", changes: [{ path: "columns[#kind].nullable", kind: "changed", declared: false, live: true }] }],
+          unclaimed: [{ name: "orders", type: "Postgres::Table", fields: [unclaimed("columns[#id].default", "0")] }],
+          pending: [{ subject: "column shop.events.note", change: "the server has column note text, which the declaration does not", entities: ["events"] }],
         }),
       }),
     );
-    expect(drift.changed).toEqual([
-      {
-        name: "events",
-        type: "Postgres::Table",
-        changes: [
-          { path: "columns[1].nullable", kind: "changed", declared: false, live: true },
-          { path: "column note", kind: "changed", live: "text" },
-        ],
-      },
-    ]);
+    expect(drift.changed).toEqual([{ name: "events", type: "Postgres::Table", changes: [{ path: "columns[#kind].nullable", kind: "changed", declared: false, live: true }] }]);
+    expect(drift.pending).toEqual([{ subject: "column shop.events.note", change: "the server has column note text, which the declaration does not", entities: ["events"] }]);
     expect(driftExitCode(drift)).toBe(2);
-    expect(renderDrift(drift)).toContain("column note: declared (none), live text");
+    const text = renderDrift(drift);
+    expect(text).toContain("    columns[#kind].nullable: declared false, live true");
+    expect(text).toContain("Added on the server, which the next apply undoes:\n  column shop.events.note: the server has column note text, which the declaration does not");
+    expect(text).not.toContain("orders");
+  });
+
+  it("counts a pending change alone as drift", () => {
+    const drift = driftFromLifecycle("e2e", doc({ resources: resources(), deep: deep({ pending: [{ subject: "grants app_reader", change: "REVOKE INSERT ON shop.events FROM app_reader" }] }) }));
+    expect(driftExitCode(drift)).toBe(2);
+    expect(renderDrift(drift)).not.toContain("No drift");
   });
 
   it("exits 1 when nothing drifted but a declared object could not be read", () => {

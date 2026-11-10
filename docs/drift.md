@@ -5,7 +5,7 @@ type: concepts
 
 # Drift
 
-Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the declared objects with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported. A column added by hand to a declared table is: it reads `column <name>: declared (none), live <type>`.
+Drift is a declared object changed out of band (by hand, by another tool) or gone. `yodel drift <env>` compares the declared objects with the live ones, through chant (`chant lifecycle diff <env> --live`). An object the project does not declare is never reported. chant names a column by its name, so a changed default reads `columns[#country].default.expr`. A column added by hand to a declared table, and a privilege granted by hand, are drift too: the report lists them under "Added on the server, which the next apply undoes", and `--json` under `pending`.
 
 What the server is compared with (`--against`):
 

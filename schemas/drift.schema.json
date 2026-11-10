@@ -27,10 +27,14 @@
     },
     "unmanaged": { "description": "Objects on the server of a kind yodel cannot declare, as <kind> <name>. They are unmanaged and never drift.", "$ref": "common.schema.json#/$defs/stringList" },
     "lockWait": { "description": "Postgres: a read gave up at the lock timeout, and what it waited on.", "type": "string" },
-    "columns": {
-      "description": "Each changed table's declared column names, by position.",
-      "type": "object",
-      "additionalProperties": { "$ref": "common.schema.json#/$defs/stringList" }
+    "pending": {
+      "description": "chant's pending changes: what an apply would undo that is on no one declared object's properties, such as a column or a privilege added by hand. Drift: the command exits 2. Absent when there are none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["subject", "change"],
+        "properties": { "subject": { "type": "string" }, "change": { "type": "string" }, "entities": { "$ref": "common.schema.json#/$defs/stringList" } }
+      }
     },
     "against": {
       "description": "What the server was compared with: src, the project's declarations; or history, the schema the newest applied migration records (migration null when none is applied yet).",
@@ -44,7 +48,7 @@
         }
       ]
     },
-    "drifted": { "description": "A declared object changed or is gone: the command exits 2.", "type": "boolean" },
+    "drifted": { "description": "A declared object changed or is gone, or a change is pending: the command exits 2.", "type": "boolean" },
     "fingerprint": { "description": "A hash of the environment and what drifted: the same for the same drift, run after run.", "type": "string" },
     "issue": {
       "description": "--issue: what yodel did with the environment's tracking issue, and the issue when there is one.",

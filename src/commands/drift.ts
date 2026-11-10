@@ -6,21 +6,8 @@ import { eventFromDrift, sendEvent } from "../notify/index.js";
 import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { declarativeRefusal } from "../config/settings.js";
-import {
-  declaredColumns,
-  driftExitCode,
-  readDrift,
-  renderDrift,
-  withClickHouseGrants,
-  writeRecordedSource,
-  type Drift,
-  type DriftAgainst,
-} from "../chant/drift.js";
-import { buildSchema, type Build, type BuildOutput } from "../chant/build.js";
-import { clickhouseAccessManaged } from "../chant/access.js";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { driftExitCode, readDrift, renderDrift, writeRecordedSource, type Drift, type DriftAgainst } from "../chant/drift.js";
+import type { BuildOutput } from "../chant/build.js";
 import { probeServer, softly, type ServerInfo } from "../server.js";
 import type { Environment, Project, SqlDialect } from "../project.js";
 import { describeHolders, describeMs, isLockTimeout, lockHolders, lockTimeoutOptions } from "../versioned/postgres/waits.js";
@@ -28,7 +15,7 @@ import { DEFAULT_PG_TIMEOUTS } from "../versioned/postgres/executor.js";
 import { closeVersioned, hasMigrations, inspect, openVersioned, readChain } from "../versioned/index.js";
 import { isApplied } from "../history/index.js";
 import { describeForge, resolveForge, type ForgeFlags, type ForgeTarget } from "../pr/forge.js";
-import { driftFingerprint, driftIssueMarker, trackDrift, type IssueAction } from "../pr/issue.js";
+import { driftFingerprint, driftIssueMarker, driftStacks, trackDrift, type IssueAction } from "../pr/issue.js";
 import { describeUnsupported, findUnsupported } from "../init/unsupported.js";
 import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/live/client";
 
@@ -77,30 +64,6 @@ export async function recordedSchema(project: Project, env: Environment): Promis
     return undefined;
   } finally {
     await closeVersioned(venv);
-  }
-}
-
-/** A recorded schema as a build file the planner reads, in a temporary directory its dispose removes. */
-function recordedBuild(schema: BuildOutput): Build {
-  const dir = mkdtempSync(join(tmpdir(), "yodel-recorded-"));
-  const path = join(dir, "schema.json");
-  writeFileSync(path, JSON.stringify(schema));
-  return { path, output: schema, dispose: () => { rmSync(dir, { recursive: true, force: true }); } };
-}
-
-/**
- * ClickHouse access in a drift (#46): where the environment manages access,
- * the declared grants compared, which chant's lifecycle diff leaves
- * unobserved. Where it does not, chant reads no access and says so for each
- * access declaration, and so does the drift.
- */
-async function clickhouseAccess(project: Project, env: Environment, drift: Drift, recorded: BuildOutput | undefined): Promise<Drift> {
-  if (!clickhouseAccessManaged(project, env.name)) return drift;
-  const build = recorded ? recordedBuild(recorded) : await buildSchema(project);
-  try {
-    return await withClickHouseGrants(drift, project, env, build);
-  } finally {
-    build.dispose();
   }
 }
 
@@ -288,16 +251,12 @@ export const drift: Command = {
           result = await readDrift(project, env, chantEnv);
         }
         result.against = against;
-        if (project.dialect === "clickhouse" && (recorded || source === "src")) result = await clickhouseAccess(project, env, result, recorded);
         if (pg && result.unobserved.some((u) => isLockTimeout(u.detail) || isLockTimeout(u.reason))) result.lockWait = await lockWait(pg);
         // Unmanaged objects are reported, never drift; a reader that cannot list them leaves the list out.
         const unmanaged = (await findUnsupported(project, env).catch(() => [])).map(describeUnsupported);
         if (unmanaged.length > 0) result.unmanaged = unmanaged;
-        const ofRecorded = recorded;
-        const build = ofRecorded ? () => Promise.resolve({ output: ofRecorded, dispose: () => undefined }) : () => buildSchema(project);
-        const columns = await declaredColumns(project, result, build).catch(() => ({}));
-        if (Object.keys(columns).length > 0) result.columns = columns;
         const code = driftExitCode(result);
+        const stacks = await driftStacks(result);
         const fingerprint = await driftFingerprint(result);
         const run = runUrl(process.env);
         let action: IssueAction | undefined;
@@ -311,7 +270,7 @@ export const drift: Command = {
         if (a.json) io.out(`${JSON.stringify(driftJson(result, { dialect: project.dialect, server, drifted: code === 2, fingerprint, issue: action, issueError }), null, 2)}\n`);
         else io.out(renderDrift(result, server));
         // The watch runs yodel drift on a schedule: drift found goes to the webhook yodel.config.ts notify names (#61), with the fingerprint so a receiver can tell a repeat.
-        await sendEvent(project.yodel?.config.notify, eventFromDrift({ ...result, drifted: code === 2, fingerprint }), { io, verb: "drift" });
+        await sendEvent(project.yodel?.config.notify, eventFromDrift({ ...result, drifted: code === 2, stacks }), { io, verb: "drift" });
         return issueError && code !== 2 ? 1 : code;
       } catch (e) {
         // The drift could not be read: the tracking issue stays as it is.

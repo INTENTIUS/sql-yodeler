@@ -12,9 +12,9 @@
  * body that names a new run does not edit it on every scheduled run.
  */
 
-import type { DriftIssueRecord, DriftIssueWords } from "@intentius/chant/drift-issue";
+import type { DriftIssueRecord, DriftIssueWords, DriftRunStack } from "@intentius/chant/drift-issue";
 import type { PrForge } from "@intentius/chant/pr-forge";
-import { describeAgainst, describePath, type Drift } from "../chant/drift.js";
+import { describeAgainst, type Drift } from "../chant/drift.js";
 import { describeServer, type ServerInfo } from "../server.js";
 
 /**
@@ -40,25 +40,33 @@ export type IssueAction =
 
 /**
  * The drift as chant's records, through chant's `lexiconDriftRecords`
- * (chant issue 4896) over the sql section the drift was read from, with
- * what yodel adds to it: the ClickHouse grants, the extra columns and a
- * column by its name. An object gone is `missing`, the sql lexicon's
- * `absent`.
+ * (chant issue 4896) over the sql section the drift was read from: the
+ * deep read's changed objects and its pending changes (chant issue 4944),
+ * each pending change an attribute on the objects behind it. An object gone
+ * is `missing`, the sql lexicon's `absent`.
  */
 export async function driftRecords(drift: Drift, observedAt: string): Promise<DriftIssueRecord[]> {
   const { lexiconDriftRecords } = await import("@intentius/chant/drift-record");
-  const changed = drift.changed.map((e) => ({ ...e, changes: e.changes.map((c) => ({ ...c, path: describePath(c.path, drift.columns?.[e.name]) })) }));
   return lexiconDriftRecords({
     member: drift.environment,
     observedAt,
-    section: { resources: { missing: drift.missing, unobserved: drift.unobserved } as never, deep: { drifted: changed } as never, absent: "missing" },
+    section: {
+      resources: { missing: drift.missing, unobserved: drift.unobserved } as never,
+      deep: { drifted: drift.changed, ...(drift.pending ? { pending: drift.pending } : {}) } as never,
+      absent: "missing",
+    },
   });
+}
+
+/** The environment's records as the one stack of a run, observed at a fixed time, for chant's run fingerprint and drift notice. */
+export async function driftStacks(drift: Drift): Promise<DriftRunStack[]> {
+  return [{ stack: drift.environment, records: await driftRecords(drift, new Date(0).toISOString()) }];
 }
 
 /** The drift's fingerprint: chant's `driftRunFingerprint` over the environment's records, the value the tracking issue keeps. */
 export async function driftFingerprint(drift: Drift): Promise<string> {
   const { driftRunFingerprint } = await import("@intentius/chant/drift-issue");
-  return driftRunFingerprint([{ stack: drift.environment, records: await driftRecords(drift, new Date(0).toISOString()) }]);
+  return driftRunFingerprint(await driftStacks(drift));
 }
 
 /** yodel's words for chant's drift issue, for one run's drift and server. */
@@ -67,7 +75,7 @@ export function driftIssueWords(drift: Drift, server: ServerInfo | undefined): D
   return {
     product: "yodel",
     title: () => {
-      const names = [...drift.changed.map((e) => e.name), ...drift.missing];
+      const names = [...drift.changed.map((e) => e.name), ...drift.missing, ...(drift.pending ?? []).map((p) => p.subject)];
       const shown = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${String(names.length - 3)} more` : names.join(", ");
       return `Drift in ${env}: ${shown}`;
     },
