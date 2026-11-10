@@ -474,6 +474,12 @@ const HEADER = [
   "# Edit those and render again; yodel ci --check says when this file is stale.",
 ];
 
+/** The pipeline directories yodel ci writes into, besides the root `.gitlab-ci.yml`. */
+export const PIPELINE_DIRS = [".github/workflows", ".forgejo/workflows", ".gitlab"];
+
+/** Whether a file's text is one yodel ci wrote: it opens with the header (#348). */
+export const renderedByYodel = (text: string): boolean => text.startsWith(`${HEADER[0] ?? ""}\n`);
+
 const withHeader = (header: readonly string[], yaml: string): string => `${[...header, ""].join("\n")}${yaml}`;
 
 /** `#` lines as a declaration's `comment`: the text without its `# `, which the serializer writes back. */

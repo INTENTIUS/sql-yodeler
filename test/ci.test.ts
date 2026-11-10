@@ -52,7 +52,10 @@ describe("yodel ci", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
     expect(existsSync(join(dir, ".github/workflows/yodel-pr.yml"))).toBe(true);
-    expect(wrote.out).not.toContain(".forgejo/");
+    expect(wrote.out).not.toContain("wrote .forgejo/");
+    // The template's Forgejo files are yodel's, and forgejo is not in ci.forges: yodel ci removes them (#348).
+    expect(wrote.out).toContain("removed .forgejo/workflows/yodel-pr.yml\n");
+    expect(existsSync(join(dir, ".forgejo/workflows/yodel-pr.yml"))).toBe(false);
 
     const pr = parseYAMLDocument(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
     expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-prod", "unit"]);
