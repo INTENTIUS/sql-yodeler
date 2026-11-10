@@ -50,7 +50,6 @@ describe("yodel's tools on chant's MCP server (#297)", () => {
         return Promise.resolve(0);
       },
       configureOtlp: () => undefined,
-      PRODUCT_MCP_HOOK_FLOOR: "0.0.0",
     };
     const before = process.cwd();
     try {

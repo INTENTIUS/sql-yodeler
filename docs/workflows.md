@@ -234,7 +234,7 @@ From chant 0.124.67 the pipelines run on chant's product pipeline, the one terra
    npm install -E @intentius/chant@0.124.67 @intentius/chant-lexicon-sql@0.124.67
    ```
 
-2. Run `npx yodel upgrade`. It lists the parts of chant CI the installed chant has, adds `chant.workspace.json` when the project has no workspace declaration, and renders every file `yodel ci` renders. `yodel upgrade --check` writes nothing and names the files it would write. With a chant before 0.124.67 it writes nothing, exits 1 and prints the install line above.
+2. Run `npx yodel upgrade`. It prints the installed chant and sql lexicon, adds `chant.workspace.json` when the project has no workspace declaration, and renders every file `yodel ci` renders. `yodel upgrade --check` writes nothing and names the files it would write.
 
 3. Commit what it wrote with `package.json` and `package-lock.json`, in one commit, and open a pull request.
 

@@ -85,12 +85,8 @@ export interface Finding {
   message: string;
 }
 
-/**
- * What the harness module gives, as far as the scenarios use it. Each
- * member is checked to be there before the module counts.
- */
+/** What the harness module gives, as far as the scenarios use it. */
 export interface Harness {
-  E2E_HARNESS_FLOOR: string;
   lintScenario(data: unknown): Finding[];
   runClaim(scenario: Scenario, ports: unknown, opts: { approver: string; pollMs?: number }): Promise<{
     plain: { outcome: string; reason?: string };

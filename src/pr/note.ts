@@ -25,8 +25,6 @@
 
 import { execFileSync } from "node:child_process";
 import { chantProduct, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
-import { CHANT_CI_FLOOR, installLine } from "../chant-floor-version.js";
-import { YodelError } from "../project.js";
 import { describeMove, encodeSubject } from "../versioned/explain.js";
 import { describeWave } from "../waves/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
@@ -45,17 +43,18 @@ export interface ChantNote {
 
 let loaded: Promise<ChantNote> | undefined;
 
-/** chant's note renderer and change-set composer, once; refused, naming the install line, on a chant without them. */
+/** chant's note renderer and change-set composer, once. */
 export function chantNote(): Promise<ChantNote> {
   loaded ??= (async () => {
     const product = await chantProduct();
-    const specifier = "@intentius/chant/ci-product";
-    const m = (await import(specifier).catch(() => ({}))) as { renderPrNote?: ChantNote["renderPrNote"] };
-    const cs = (await import("@intentius/chant/change-set").catch(() => ({}))) as unknown as { composeChangeSet?: ChantNote["composeChangeSet"] };
-    if (!product || typeof m.renderPrNote !== "function" || typeof cs.composeChangeSet !== "function") {
-      throw new YodelError(`the installed chant has no pull request note renderer (renderPrNote), which yodel plan's note is rendered with from chant ${CHANT_CI_FLOOR}. Install it:\n  ${installLine()}`);
-    }
-    return { product, words: product.assertProductWords(YODEL_WORDS), renderPrNote: m.renderPrNote, composeChangeSet: cs.composeChangeSet };
+    const { renderPrNote } = await import("@intentius/chant/ci-product");
+    const { composeChangeSet } = await import("@intentius/chant/change-set");
+    return {
+      product,
+      words: product.assertProductWords(YODEL_WORDS),
+      renderPrNote: renderPrNote as unknown as ChantNote["renderPrNote"],
+      composeChangeSet: composeChangeSet as unknown as ChantNote["composeChangeSet"],
+    };
   })();
   return loaded;
 }

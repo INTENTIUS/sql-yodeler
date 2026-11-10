@@ -21,10 +21,9 @@
  * chant <args>` runs chant in this process with them (../commands/chant.ts),
  * and the jobs chant generates for yodel run that line in place of `chant`.
  *
- * {@link chantProduct} imports `@intentius/chant/ci-product` lazily, with
- * the specifier in a variable, so a chant below the floor is told what to
- * install (`yodel upgrade`, `yodel ci`) instead of failing to load. The
- * words themselves are plain data and need no import of chant.
+ * {@link chantProduct} imports `@intentius/chant/ci-product` on first use,
+ * so a command that renders no pipeline does not load it. The words
+ * themselves are plain data and need no import of chant.
  */
 
 import { WAVES_PIPELINE } from "./waves/record.js";
@@ -98,28 +97,10 @@ export interface ChantProduct {
   productCommand: (words: unknown, line: string) => string;
 }
 
-let product: Promise<ChantProduct | undefined> | undefined;
+let product: Promise<ChantProduct> | undefined;
 
-/**
- * chant's product entry, once, or undefined when the installed chant has
- * none (a release before chant#4550). Its presence is
- * `productPipelineJobs`, `approveLine` and `assertProductWords` together,
- * as chant's ci-product.ts asks a product to check, plus
- * `runChantInProcess`, which the bin calls, and `productCommand`, which
- * yodel ci puts the bin into its own jobs' lines with (#289).
- */
-export function chantProduct(): Promise<ChantProduct | undefined> {
-  product ??= (async () => {
-    const specifier = "@intentius/chant/ci-product";
-    let m: Partial<ChantProduct> | undefined;
-    try {
-      m = (await import(specifier)) as Partial<ChantProduct>;
-    } catch {
-      return undefined;
-    }
-    const has = (k: keyof ChantProduct) => typeof m[k] === "function";
-    const all: Array<keyof ChantProduct> = ["productPipelineJobs", "approveLine", "assertProductWords", "runChantInProcess", "productCommand"];
-    return all.every(has) ? (m as ChantProduct) : undefined;
-  })();
+/** chant's product entry, once (chant#4550; every chant yodel installs has it). */
+export function chantProduct(): Promise<ChantProduct> {
+  product ??= import("@intentius/chant/ci-product").then((m) => m as unknown as ChantProduct);
   return product;
 }

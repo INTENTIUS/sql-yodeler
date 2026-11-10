@@ -115,9 +115,8 @@ describe("the presets in the workspace declaration (#294)", () => {
     expect(JSON.parse(readFileSync(join(dir, "chant.workspace.json"), "utf8"))).toEqual(own);
   });
 
-  it("are accepted by chant's own writer when the installed chant has the check moment", async () => {
+  it("are accepted by chant's own writer", async () => {
     const chant = await chantCheckHooks();
-    if (!chant) return;
     const dir = mkdtempSync(join(tmpdir(), "yodel-294-"));
     writeFileSync(join(dir, "chant.workspace.json"), `${JSON.stringify({ version: 1, members: [] }, null, 2)}\n`);
     const out = JSON.parse(declarationWithHooks(chant, dir, "chant.workspace.json", checkPresets(input({ replay: true })))) as { ci: { hooks: { check: CheckHook[] } } };
