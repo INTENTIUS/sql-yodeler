@@ -7,6 +7,13 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.13.2
+
+- Changed: the drift fingerprint and records are chant's; a notify receiver sees one new fingerprint, and each open tracking issue is edited once.
+- Changed: `yodel ci` removes the pipeline files it no longer renders.
+- Changed: the release and CI images are built through chant; `YODEL_IMAGE_PLATFORMS` is gone.
+- chant 0.124.88. The starter templates take `^0.13.1`.
+
 ## 0.13.1
 
 - 0.13.0 was cut and not published; 0.13.1 carries its changes.

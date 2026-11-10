@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.2
+
+### Changed
+
+- The drift notice's fingerprint and the drift records are chant's (chant issue 4896). The fingerprint is 16 hex digits where it was `sha256:` and 64, so a receiver that dedups on it sees one new value after the upgrade. A declared object the server lacks is `missing`, where it was `pending`, so each open tracking issue is edited once.
+- `yodel ci` removes the pipeline files it wrote and no longer renders, such as a forge's files after it leaves `ci.forges`, and `yodel ci --check` lists them (issue 348).
+- The release image is a `dockerfile` entry in chant's `release.images` (chant issue 4908), which sets up QEMU itself (chant issue 4876). `scripts/release-image.sh` and the `YODEL_IMAGE_PLATFORMS` override are gone. The CI image is declared with the docker lexicon's `Dockerfile` (chant issue 4932), and the drift watch's login step has a name.
+- yodel runs chant and resolves imports with no install through chant's `runChant` and `installResolveFallback` (chant issue 4889), finds `sql-types.d.ts` with `sqlTypesPath` (chant issue 4897), and loads chant's approval prompt directly (chant issue 4916). `YODEL_OWN_CONFIRM=1` still selects yodel's own prompt.
+
+chant is at 0.124.88, and the starter templates take `^0.13.1`.
+
 ## 0.13.1
 
 0.13.0 was cut and never published: its package took in the release's image archive, which npm refused as too large. The package now leaves `dist/images` out. 0.13.1 carries everything below.
