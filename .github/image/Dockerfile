@@ -21,10 +21,14 @@ FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472
 ARG YODEL_VERSION
 ARG YODEL_PACKAGE
 ARG CHANT_PINS
+ENV USER=yodel
+ENV HOME=/tmp
+ENV NODE_DISABLE_COMPILE_CACHE=1
+ENV npm_config_logs_max=0
 ENV PATH=/opt/yodel/node_modules/.bin:$PATH
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates openssh-client && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates openssh-client && rm -rf /var/lib/apt/lists/* /var/log/apt/* /var/log/dpkg.log /var/cache/ldconfig/aux-cache
 RUN git config --system --add safe.directory '*'
-RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"yodel-image","private":true}' > package.json && { ok=; for try in 1 2 3; do if npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS 2>/tmp/npm.err; then ok=1; break; fi; cat /tmp/npm.err >&2; grep -qE "E404|ETARGET" /tmp/npm.err || break; [ "$try" = 3 ] || sleep 45; done; test -n "$ok"; } && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version
+RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"ci-image","private":true}' > package.json && { ok=; for try in 1 2 3; do if npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS 2>/tmp/npm.err; then ok=1; break; fi; cat /tmp/npm.err >&2; grep -qE "E404|ETARGET" /tmp/npm.err || break; [ "$try" = 3 ] || sleep 45; done; test -n "$ok"; } && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version
 LABEL org.opencontainers.image.title="sql-yodeler"
 LABEL org.opencontainers.image.description="yodel, chant and the sql lexicon on Node 22, for CI jobs"
 LABEL org.opencontainers.image.version="${YODEL_VERSION}"

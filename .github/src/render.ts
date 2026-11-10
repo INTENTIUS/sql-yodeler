@@ -10,15 +10,16 @@
  * fails the check.
  *
  * Each workflow's comment at the top of its file is the Workflow's `comment`
- * (rendered() in shared.ts). The docker lexicon's serializer writes no
- * comments, so the Dockerfile's is added here, from image.ts's `comment`.
+ * (rendered() in shared.ts). The Dockerfile is chant's product image
+ * (`productImageDockerfile`), and its comment is added here, from image.ts's
+ * `comment`.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { githubSerializer } from "@intentius/chant-lexicon-github/serializer";
-import { dockerSerializer } from "@intentius/chant-lexicon-docker/serializer";
+import { productImageDockerfile } from "@intentius/chant/ci-image";
 import type { Declarable } from "@intentius/chant/declarable";
 import * as ci from "./ci.js";
 import * as claims from "./claims.js";
@@ -45,12 +46,9 @@ const repoDir = fileURLToPath(new URL("../../", import.meta.url));
 const header = (comment: string): string =>
   rendered("image.ts", comment).split("\n").map((l) => (l ? `# ${l}` : "#")).join("\n");
 
-/** The CI image's Dockerfile: the docker lexicon's serializer writes it as Dockerfile.<export name>. */
+/** The CI image's Dockerfile: chant's product image from image.ts's spec. */
 function renderImage(): string {
-  const result = dockerSerializer.serialize(new Map([["image", image.image]]));
-  const dockerfile = typeof result === "string" ? undefined : result.files?.["Dockerfile.image"];
-  if (dockerfile === undefined) throw new Error("image.ts: the docker serializer wrote no Dockerfile");
-  return `${header(image.comment)}\n\n${dockerfile}`;
+  return `${header(image.comment)}\n\n${productImageDockerfile(image.spec)}`;
 }
 
 /** Each rendered file's path in the repository and its content. */
