@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { chantCheckHooks, checkPresets, declarationWithHooks, type ChantCheckHooks, type CheckHook, type PresetInput } from "../src/ci/check-hooks.js";
-import { actionsReview, checkHooksLine, checkHooksOf, gitlabPipeline, type Environments } from "../src/ci/render.js";
+import { actionsReview, checkHooksOf, gitlabPipeline, type Environments } from "../src/ci/render.js";
 import { CODE_QUALITY_FILE, forgeFormat } from "../src/lint/index.js";
 import { checkYodelConfig } from "../src/config/index.js";
 
@@ -63,20 +63,27 @@ describe("yodel's check presets (#294)", () => {
 
 describe("the lint job on the check moment (#294)", () => {
   const envs: Environments = { dialect: "postgres", names: ["dev"], replay: true, typedColumns: true, waves: [{ env: "dev", gate: "always" }], checkHooks: true };
-  type ActionsDoc = { jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }> };
+  type ActionsDoc = { jobs: Record<string, { services?: Record<string, { image?: string }>; steps: Array<{ name?: string; run?: string; env?: Record<string, string> }> }> };
   type GitLabDoc = Record<string, { script?: string[]; artifacts?: unknown }>;
 
   it("runs the hooks read at the pull request's base and none of the checks itself, so a pull request cannot remove one", () => {
+    // GitHub and Forgejo: chant's check job (chant issue 4964), with the replay server beside it and the wait before chant ci check.
     for (const forge of ["github", "forgejo"] as const) {
       for (const replay of [true, false]) {
-        const runs = (parseYAMLDocument(actionsReview(forge, { ...envs, replay }).content) as ActionsDoc).jobs.lint?.steps.map((s) => s.run ?? "") ?? [];
-        expect(runs.at(-1), `${forge} replay=${String(replay)}`).toBe("yodel chant ci check --base ${{ github.event.pull_request.base.sha }}");
-        expect(runs.some((r) => /^yodel (lint|ci --check|test|check)\b|^chant sql types/.test(r))).toBe(false);
+        const jobs = (parseYAMLDocument(actionsReview(forge, { ...envs, replay }).content) as ActionsDoc).jobs;
+        expect(jobs.lint, `${forge} replay=${String(replay)}`).toBeUndefined();
+        const runs = jobs.check?.steps.map((s) => s.run ?? "") ?? [];
+        const check = runs.find((r) => r.includes("yodel chant ci check --base")) ?? "";
+        expect(check, `${forge} replay=${String(replay)}`).toContain('yodel chant ci check --base "$BASE_SHA"');
+        expect(runs.some((r) => /^yodel (lint|ci --check|test|check)\b|^chant sql types/m.test(r))).toBe(false);
+        expect(check.includes("replay-postgres:5432") || check.includes('"replay-postgres"'), `${forge} replay=${String(replay)}`).toBe(replay);
+        if (replay) expect(Object.keys(jobs.check?.services ?? {})).toEqual(["replay-postgres"]);
       }
     }
+    // GitLab keeps yodel's lint job until chant's GitLab check job keeps the code quality report.
     for (const replay of [true, false]) {
       const lint = (parseYAMLDocument(gitlabPipeline({ ...envs, replay }).content) as GitLabDoc).lint;
-      expect(lint?.script?.at(-1)).toBe(checkHooksLine("gitlab"));
+      expect(lint?.script?.at(-1)).toBe("yodel chant ci check --base $CI_MERGE_REQUEST_DIFF_BASE_SHA");
       expect(lint?.script?.some((r) => /^yodel lint/.test(r))).toBe(false);
       expect(lint?.artifacts).toEqual({ when: "always", reports: { codequality: CODE_QUALITY_FILE } });
     }

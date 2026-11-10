@@ -194,8 +194,18 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new, respond)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond?, evidence?, refGate? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond", "evidence", "refGate"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new, respond, evidence, refGate)`);
+  if (value.evidence !== undefined) {
+    const e = value.evidence;
+    if (!isRecord(e) || !Object.keys(e).every((k) => ["runnerKeySecret", "identity", "audience"].includes(k))) throw new YodelError(`${where}.evidence: expected { runnerKeySecret } or { identity: "oidc", audience? }`);
+    if (e.identity !== undefined && e.identity !== "oidc") throw new YodelError(`${where}.evidence.identity: "oidc", the job's OIDC identity`);
+    if (e.audience !== undefined && (typeof e.audience !== "string" || e.identity !== "oidc")) throw new YodelError(`${where}.evidence.audience: a string, with identity: "oidc"`);
+    if ((e.runnerKeySecret === undefined) === (e.identity === undefined)) throw new YodelError(`${where}.evidence: give one of runnerKeySecret (the secret holding the runner key) and identity: "oidc"`);
+    if (e.runnerKeySecret !== undefined && (typeof e.runnerKeySecret !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.runnerKeySecret))) throw new YodelError(`${where}.evidence.runnerKeySecret: the name of the secret or CI/CD variable holding the runner key, such as "CHANT_RUNNER_KEY"`);
+  }
+  if (value.refGate !== undefined && typeof value.refGate !== "boolean") throw new YodelError(`${where}.refGate: true or false (the default)`);
+  if (value.refGate === true && value.evidence === undefined) throw new YodelError(`${where}.refGate: the ref gate needs signed checks, and ci.evidence names no runner identity; set ci.evidence first`);
   if (value.respond !== undefined) {
     const r = value.respond;
     if (!isRecord(r) || !Object.keys(r).every((k) => k === "new" || k === "rebase")) throw new YodelError(`${where}.respond: expected { new?, rebase? }`);

@@ -44,7 +44,7 @@ The waves take chant's lock grain. The sql lexicon gives a SQL member the `targe
 
 ### The check on chant's check hooks
 
-`yodel ci` writes yodel's checks into the workspace declaration's `ci.hooks.check` as presets (`yodel upgrade` adds `chant.workspace.json` when the project has none), and the lint job runs `yodel chant ci check --base <the pull request's base>`. The presets, in the order the job runs them:
+`yodel ci` writes yodel's checks into the workspace declaration's `ci.hooks.check` as presets (`yodel upgrade` adds `chant.workspace.json` when the project has none). On GitHub and Forgejo they run in chant's check job, `check`, which takes the lint job's place: it starts the replay server beside it, waits for it, and runs `yodel chant ci check --base <the pull request's base>` with no forge token. On GitLab the lint job runs the same line, since chant's GitLab check job does not keep the code quality report yet. The presets, in the order the job runs them:
 
 | Hook | Runs | When |
 |---|---|---|
@@ -64,6 +64,22 @@ export default defineConfig({ ci: { tools: ["squawk", "sqlfluff"] } });
 ```
 
 chant reads the hooks from the declaration at the pull request's base, so a pull request that removes one still runs it, and a hook a pull request adds runs once it is merged. Each hook runs with no forge token and no cloud credentials. The job's log shows each one's output, so `yodel lint`'s annotations still appear on GitHub and Forgejo, and on GitLab the job keeps the code quality report. `.chant/check/check-hooks.json` lists each hook with its result and exit code, and the job fails on the first hook that fails. `yodel ci --check` compares the declaration's hooks with the presets too. A hook removed from `ci.tools` stays in the declaration until you delete it there, since `yodel ci` adds and replaces hooks and never removes one.
+
+### Signed checks and the ref gate
+
+`ci.evidence` in `yodel.config.ts` names the pipeline's runner identity, and the pipelines sign what passed:
+
+- each environment's note job signs `plan:<env>` and `policy:<env>` from its plan job's report (on GitLab, `<env>-plan-evidence` in the plan notes pipeline);
+- on GitHub and Forgejo the `check-evidence` job signs each check hook that passed, by its name;
+- each deciding apply wave signs `plan:<wave>` and `policy:<wave>` (on GitLab, its `<wave job>-evidence` job).
+
+```ts
+export default defineConfig({ ci: { evidence: { runnerKeySecret: "CHANT_RUNNER_KEY" } } });
+```
+
+`runnerKeySecret` is the secret (GitHub, Forgejo) or CI/CD variable (GitLab) that holds the runner key as PEM, whose public key `.chant/trust.json` lists. On GitLab make the variable protected and scope it to the `chant-evidence` environment, where only the signing jobs run. `{ identity: "oidc" }` signs keyless from the job's OIDC identity instead, listed under `keyless.identities` in `.chant/trust.json`; `audience` is `keyless.audience` there (default `sigstore`). A check whose current evidence is local is skipped.
+
+`ci.refGate: true` adds a `refs` rule for main to `.chant/trust.json` that needs current evidence of `plan:<env>` and `policy:<env>` for every environment, and renders the `ref-gate` job, which sets `chant/ref-gate` on each pull request, so it can be a required status. It is off by default and needs `ci.evidence`: with the rule in place, a push to main that lacks the signed checks is refused, so list the runner first. A `.chant/trust.json` that has a rule for main is left as it is. `chant workspace ref-gate install` puts the pre-push hook in a checkout; `yodel ci` writes nothing in the git directory.
 
 ### Cloud login
 

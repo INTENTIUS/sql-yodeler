@@ -77,10 +77,10 @@
  * yodel's words (#289, ../ci-words.ts): {@link productWaves}.
  */
 
-import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiLogin, type RespondNew, type RespondRebase, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type WaveGate, type YodelConfig } from "../config/define.js";
 import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
@@ -219,21 +219,31 @@ export interface Environments {
   /** yodel.config.ts `ci.tools` (#294): the SQL tools run as check hooks beside yodel's checks. */
   tools?: readonly CheckTool[];
   /**
-   * The lint job runs chant's check moment (#294, chant#4556): `yodel chant
-   * ci check` with the hooks read from the workspace declaration at the
-   * pull request's base. Set by {@link render} when the installed chant has
-   * the moment and the project has a declaration.
+   * The pull request runs chant's check moment (#294, chant#4556): `yodel
+   * chant ci check` with the hooks read from the workspace declaration at
+   * the pull request's base, in chant's check job on GitHub and Forgejo
+   * (chant issue 4964) and in the lint job on GitLab. Set by {@link render}
+   * when the project has a declaration.
    */
   checkHooks?: true;
+  /** yodel.config.ts `ci.evidence` (sql-yodeler issue 346): the runner identity that signs the plans, the check hooks and the waves. */
+  evidence?: CiEvidence;
+  /** yodel.config.ts `ci.refGate`: the ref gate's rule in `.chant/trust.json` and its status job. */
+  refGate?: true;
   /** yodel.config.ts `ci.respond.new` (#312): what answers `/yodel new`, through chant's commit job. Default `comment`. */
   respondNew?: RespondNew;
   /** yodel.config.ts `ci.respond.rebase` (#313): what answers `/yodel rebase`. Default `comment`, or `off` when a reader's password is cloud-minted. */
   respondRebase?: RespondRebase;
 }
 
-/** The line the lint job runs chant's check moment with (#294): the hooks are read at the pull request's base. */
-export const checkHooksLine = (forge: Forge): string =>
-  `yodel chant ci check --base ${forge === "gitlab" ? "$CI_MERGE_REQUEST_DIFF_BASE_SHA" : "${{ github.event.pull_request.base.sha }}"}`;
+/**
+ * GitLab's lint job on chant's check moment (#294): the hooks the
+ * declaration at the merge request's base names. GitHub and Forgejo run
+ * them in chant's check job (chant issue 4964), which signs them; GitLab's
+ * stays yodel's until chant's GitLab check job keeps the code quality report
+ * as `artifacts:reports:codequality`.
+ */
+const GITLAB_CHECK_HOOKS = "yodel chant ci check --base $CI_MERGE_REQUEST_DIFF_BASE_SHA";
 
 /** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
 export function checkHooksOf(envs_: Environments): CheckHook[] {
@@ -557,10 +567,26 @@ export function productPlanOptions(forge: Forge, envs_: Environments, watches: r
       ...(own.length > 0 ? { idTokens: Object.fromEntries(own.map((c) => [ID_TOKENS[c].variable, ID_TOKENS[c].aud])) } : {}),
     };
   });
+  // The check moment (#294) on chant's check job (chant issue 4964): the hooks the declaration at base names, beside the replay server.
+  // Not on GitLab yet: chant's GitLab check job keeps no artifacts:reports:codequality, which yodel's lint job keeps (#129).
+  const svc = REPLAY_SERVICE[dialect];
+  const checkJob = envs_.checkHooks && forge !== "gitlab"
+    ? envs_.replay
+      ? {
+          services: [{ name: svc.name, image: svc.image, ...(Object.keys(svc.env).length > 0 ? { env: svc.env } : {}), health: svc.health }],
+          env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+          before: [waitFor(svc.name, svc.port)],
+        }
+      : true
+    : undefined;
   return {
     words: WAVE_WORDS,
     branch: MAIN,
     image: tc.image,
+    ...(checkJob ? { checkJob } : {}),
+    // Signed checks (sql-yodeler issue 346): each target's plan as plan:<env> and policy:<env>, each hook by its name.
+    ...(envs_.evidence ? { evidence: envs_.evidence } : {}),
+    ...(envs_.refGate ? { refGateStatus: true } : {}),
     // GitLab's runner clones one ref, so the plan job fetches the approvals itself; chant's checkout on GitHub and Forgejo fetches chant/lifecycle.
     beforeScript: [...installLines(tc, forge), ...(forge === "gitlab" ? [fetchApprovals(tc)] : [])],
     productPlan: {
@@ -615,8 +641,7 @@ function checkJob(forge: Actions, dialect: Dialect, tc: Toolchain): AJob {
   });
 }
 
-function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false, hooks = false): AJob {
-  if (hooks) return checkHooksJob(forge, dialect, replay, tc);
+function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain, tests = false, typedColumns = false, check = false): AJob {
   // With the replay check, the job runs in IMAGE on every forge and reaches
   // its replay server by the service's name on the job's own network. On
   // GitHub's VM the service would be on localhost through a published port,
@@ -642,25 +667,6 @@ function lintJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchai
       ...(tests ? [new Step({ name: "yodel test", run: TEST })] : []),
       ...(check ? [new Step({ name: "yodel check", run: checkCommand(forge) })] : []),
     ],
-  });
-}
-
-/**
- * The lint job on chant's check moment (#294): the replay server when the
- * project has one, then `yodel chant ci check`, which runs the hooks the
- * declaration at the pull request's base names. The job runs in IMAGE with
- * the replay server, as {@link lintJob} does.
- */
-function checkHooksJob(forge: Actions, dialect: Dialect, replay: boolean, tc: Toolchain): AJob {
-  const container = replay || inContainer(forge, tc);
-  const steps = [...setupSteps(container, tc), new Step({ name: "Check hooks at the base (chant ci check)", run: checkHooksLine(forge) })];
-  if (!replay) return new ActionsJob({ ...runner(container, tc), steps });
-  const { svc, services, env } = replayService(dialect);
-  return new ActionsJob({
-    ...runner(container, tc),
-    services,
-    env,
-    steps: [...setupSteps(container, tc), new Step({ name: `Wait for the replay server (${svc.name})`, run: waitFor(svc.name, svc.port) }), new Step({ name: "Check hooks at the base (chant ci check)", run: checkHooksLine(forge) })],
   });
 }
 
@@ -705,7 +711,8 @@ export function actionsReview(forge: Actions, envs_: Environments, watches: read
   const options = { ...productPlanOptions(forge, envs_, watches), header };
   const { doc } = forge === "github" ? generateProductPlanPipeline(YODEL_PR_ENV, options) : generateForgejoProductPlanPipeline(YODEL_PR_ENV, options);
   // yodel's lint job and the project's own jobs, declared with the github lexicon, beside chant's plan and note jobs.
-  const lint = jobsOf(forge, { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true, envs_.checkHooks === true) });
+  // With the check moment (#294) the lint job is chant's check job (chant issue 4964), in chant's document.
+  const lint = envs_.checkHooks ? {} : jobsOf(forge, { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true) });
   const yodels = { ...lint, ...doc.jobsDoc };
   const merged: GithubWorkflowDoc = {
     ...doc,
@@ -789,11 +796,11 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       rules: mr(),
       ...(replay
         ? {
-            script: envs_.checkHooks === true ? [waitFor(svc.name, svc.port), checkHooksLine("gitlab")] : [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
+            script: envs_.checkHooks === true ? [waitFor(svc.name, svc.port), GITLAB_CHECK_HOOKS] : [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
             services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
             variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
           }
-        : { script: envs_.checkHooks === true ? [checkHooksLine("gitlab")] : [CI_CHECK, ...types, lintCommand("gitlab")] }),
+        : { script: envs_.checkHooks === true ? [GITLAB_CHECK_HOOKS] : [CI_CHECK, ...types, lintCommand("gitlab")] }),
       // The code quality report, kept when lint fails too: that is when it has something to show.
       artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
     }),
@@ -1146,6 +1153,8 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
         beforeScript: [...installLines(tc, forge), fetchApprovals(tc)],
         waveJobs: waveJobs(forge),
         recordPlans: recordPlans(forge),
+        // Signed checks (sql-yodeler issue 346): each deciding wave signs plan:<wave> and policy:<wave>; on GitLab its <wave job>-evidence job, in chant-evidence.
+        ...(envs.evidence ? { evidence: envs.evidence } : {}),
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
       },
       dir,
@@ -1452,6 +1461,8 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
     ...(ci?.respond?.new ? { respondNew: ci.respond.new } : {}),
     ...(ci?.respond?.rebase ? { respondRebase: ci.respond.rebase } : {}),
+    ...(ci?.evidence ? { evidence: ci.evidence } : {}),
+    ...(ci?.refGate === true ? { refGate: true as const } : {}),
   };
 }
 
@@ -1521,6 +1532,34 @@ function ownJobs<T>(own: Record<string, Declarable> | undefined, yodels: Record<
     if (name in yodels) throw new Error(`ci.jobs: ${what} job ${name} has the name of one of yodel's jobs; name it something else`);
   }
   return own as Record<string, T>;
+}
+
+/**
+ * The ref gate's rule (yodel.config.ts `ci.refGate`, chant issues 4913 and
+ * 4978): chant's `refGateInitPlan` for main, needing current evidence of
+ * each environment's plan and policy, `plan:<env>` and `policy:<env>`,
+ * which each environment's note job signs. `.chant/trust.json` gets the rule
+ * when it has none for main and is left as it is when it has one. The
+ * pre-push hook is the person's to install (`chant workspace ref-gate
+ * install`), so yodel ci writes no file in the git directory.
+ */
+async function refGateFiles(dir: string, envs: Environments): Promise<RenderedFile[]> {
+  const { refGateInitPlan } = await import("@intentius/chant/ref-gate-init");
+  const sign = "open a pull request: its yodel-pr pipeline's note job signs it";
+  const plan = refGateInitPlan(dir, {
+    branch: MAIN,
+    checks: [
+      { check: "plan", command: sign },
+      { check: "policy", command: sign },
+    ],
+    targets: envs.names,
+    prePush: false,
+    chant: YODEL_WORDS.bin,
+    ...(envs.evidence?.runnerKeySecret ? { runnerKeySecret: envs.evidence.runnerKeySecret } : {}),
+  });
+  // chant names the files from git's top level, the real path, so the project's own is read the same way.
+  const root = realpathSync(dir);
+  return plan.files.filter((f) => !f.local).map((f) => ({ path: relative(root, f.path).split(sep).join("/"), content: f.content }));
 }
 
 /** The pull request pipelines, and GitLab's main file. `watches` are the drift watches the plan note checks for having stopped. */
@@ -1600,6 +1639,7 @@ export async function render(dir: string, options: { declaration?: RenderedFile;
     ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []),
     ...(await watchPipelines(dir, envs)),
     ...(await commitPipelines(dir, envs)),
+    ...(envs.refGate ? await refGateFiles(dir, envs) : []),
   ];
   // Each pinned `uses:` line with its release beside it, as chant writes them (#319).
   return files

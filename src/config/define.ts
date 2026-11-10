@@ -325,6 +325,36 @@ export interface CiConfig {
    * check only. A push token is needed on each forge (docs/workflows.md).
    */
   respond?: CiRespond;
+  /**
+   * Signed checks (chant issues 4870, 4869, 4964, 4978; sql-yodeler issue
+   * 346): the pipeline's runner identity, which signs each environment's
+   * plan as `plan:<env>` and `policy:<env>`, each check hook that passed by
+   * its name, and each apply wave's plan as `plan:<wave>`. `runnerKeySecret`
+   * names the secret (GitHub, Forgejo) or CI/CD variable (GitLab) holding
+   * the runner key as PEM, which `.chant/trust.json` lists; on GitLab make
+   * it protected and scope it to the `chant-evidence` environment, where
+   * only the signing jobs run. `identity: "oidc"` signs keyless from the
+   * job's OIDC identity instead, which `.chant/trust.json` lists under
+   * `keyless.identities` (`audience` as `keyless.audience` says, default
+   * `sigstore`). Absent: nothing is signed.
+   */
+  evidence?: CiEvidence;
+  /**
+   * The ref gate (chant issues 4867, 4913): `true` adds a `refs` rule for
+   * main to `.chant/trust.json` that needs current evidence of each
+   * environment's `plan:<env>` and `policy:<env>` and of each check hook,
+   * and renders the job that sets `chant/ref-gate` on each pull request.
+   * Off by default: with the rule in place a push to main is refused until
+   * its checks are signed, so set `evidence` and list the runner first.
+   */
+  refGate?: boolean;
+}
+
+/** `ci.evidence`: chant's `PipelineEvidence`, a runner key's secret or a keyless identity. */
+export interface CiEvidence {
+  runnerKeySecret?: string;
+  identity?: "oidc";
+  audience?: string;
 }
 
 /** `ci.respond` (#312). */
