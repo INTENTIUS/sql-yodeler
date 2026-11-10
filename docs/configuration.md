@@ -151,13 +151,13 @@ ci: {
 
 On GitHub and GitLab the login is chant's ci-identity trade: one step, `Cloud identity (chant ci-identity: <clouds>)`, with `ci.login` mapped to chant's trade spec, which exchanges the job's OIDC token for each cloud the job holds a role in and leaves the cloud's variables for the later steps (the report too). The sql lexicon mints the database token from what the trade leaves, so the job's image needs no `aws`, `gcloud` or `az` ([Cloud login](chant-ci.md#cloud-login) has the detail, `ci.login.aws.region` among it). yodel's own login steps there, which ran the cloud's command line from a token file, are gone from 0.12, and `tokenFile` is read on Forgejo only.
 
-Forgejo gives a job no token, so there a login is rendered only when `tokenFile` names a token the runner provides; without one, the runner's identity mints. That login is yodel's, from the file, and the job's image needs the cloud's command line:
+Forgejo gives a job no token, so there a login is rendered only when `tokenFile` names a token the runner provides; without one, the runner's identity mints. That login is chant's cloud login from the file (`forgejoCloudLogin`, `@intentius/chant/ci-login`): one step, `Cloud login (chant ci-login: <clouds>)`, which runs with `node -e` from `/` and leaves the token where the runner keeps it. Per cloud it sets:
 
 | Cloud (token source) | The Forgejo login step |
 |---|---|
-| `aws` (`rds-iam`) | `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE` and `AWS_ROLE_SESSION_NAME` (`sessionName`, default `yodel`), which the aws command line assumes the role with |
-| `gcp` (`cloud-sql-iam`) | a workload identity credential configuration over the file that impersonates `serviceAccount`, `gcloud auth login --cred-file` with it, and `GOOGLE_APPLICATION_CREDENTIALS` |
-| `azure` (`entra`) | `az login --service-principal --federated-token`, and `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` |
+| `aws` (`rds-iam`) | `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME` (`sessionName`, default `yodel`), and `AWS_REGION` and `AWS_DEFAULT_REGION` (`region`, default `us-east-1`) |
+| `gcp` (`cloud-sql-iam`) | an `external_account` credential file over the token that impersonates `serviceAccount`, in `GOOGLE_APPLICATION_CREDENTIALS` and `CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE`, so gcloud needs no `gcloud auth login` |
+| `azure` (`entra`) | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE` (and the azurerm provider's `ARM_` variables), and `az login --service-principal --federated-token`, so the job's image needs `az` |
 
 The variables go to `$GITHUB_ENV`, so the later steps have them. `environments.<env>` gives one environment's roles a login of their own; a job that holds two environments' roles with different logins for one cloud is refused, since it logs in once per cloud. `yodel ci` only renders these steps; nothing calls a cloud until the job runs. Trust the writer's cloud role from the apply job only: on GitHub by the subject `repo:<owner>/<repo>:environment:<env>`, on GitLab by `ref:main` and the environment.
 

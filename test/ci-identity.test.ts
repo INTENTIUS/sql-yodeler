@@ -8,6 +8,7 @@
  * trades a token or calls a cloud.
  */
 
+import { forgejoCloudLogin } from "@intentius/chant/ci-login";
 import { describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { gitlabTradeLines, tradeLine } from "@intentius/chant/ci-identity";
@@ -59,10 +60,10 @@ describe("the login steps through chant's trade (#296)", () => {
     expect(Object.keys(tradeIdTokens(logins) ?? {})).toEqual(["CHANT_ID_TOKEN_AWS", "CHANT_ID_TOKEN_GCP", "CHANT_ID_TOKEN_AZURE"]);
   });
 
-  it("stay yodel's own on Forgejo, from the runner's token file, and are none for a job with no login", () => {
+  it("are chant's cloud login on Forgejo, from the runner's token file, and none for a job with no login (chant issue 4788)", () => {
     const forgejo = loginSteps("forgejo", [{ cloud: "aws", config: { roleArn: ROLE, tokenFile: "/run/token" } }]);
-    expect(forgejo.steps[0]?.name).toBe("Log in to AWS (web identity)");
-    expect(forgejo.steps[0]?.lines).toEqual(['echo "AWS_ROLE_ARN=arn:aws:iam::123456789012:role/yodel" >> "$GITHUB_ENV"', 'echo "AWS_WEB_IDENTITY_TOKEN_FILE=/run/token" >> "$GITHUB_ENV"', 'echo "AWS_ROLE_SESSION_NAME=yodel" >> "$GITHUB_ENV"']);
+    expect(forgejo.steps).toEqual(forgejoCloudLogin({ aws: { role: ROLE, tokenFile: "/run/token", sessionName: "yodel" } }).steps.map((st) => ({ name: st.name, lines: st.run })));
+    expect(forgejo.steps[0]?.name).toBe("Cloud login (chant ci-login: aws)");
     expect(loginSteps("forgejo", logins).steps).toEqual([]);
     expect(loginSteps("github", [])).toEqual({ steps: [], variables: {} });
     expect(tradeIdTokens([])).toBeUndefined();
