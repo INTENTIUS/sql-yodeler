@@ -87,12 +87,26 @@ describe("yodel ci renders /yodel new through chant's commit job (#312)", () => 
     expect(gitlab).toContain("yodel-new-check");
     expect(gitlab).toContain(NEW_CHECK_COMMAND.join(" "));
 
+    // The starter template ships the /yodel new workflow, as a project that had it on (#348).
     const off = template('{ forges: ["github", "gitlab"], respond: { new: "off" } }');
-    // The starter template ships the /yodel new workflow; this project turns it off, so start without it.
-    rmSync(join(off, ".github/workflows/yodel-new.yml"), { force: true });
-    expect((await yodel(["ci", "--dir", off])).code).toBe(0);
+    expect(existsSync(join(off, ".github/workflows/yodel-new.yml"))).toBe(true);
+    const checked = await yodel(["ci", "--check", "--dir", off]);
+    expect(checked.code).toBe(1);
+    expect(checked.err).toContain("no longer rendered, run yodel ci to remove:");
+    expect(checked.err).toContain(".github/workflows/yodel-new.yml");
+    expect(checked.err).toContain(".gitlab/yodel-commit.gitlab-ci.yml");
+    const removed = await yodel(["ci", "--dir", off]);
+    expect(removed.code, removed.err).toBe(0);
+    expect(removed.out).toContain("removed .github/workflows/yodel-new.yml\n");
     expect(existsSync(join(off, ".github/workflows/yodel-new.yml"))).toBe(false);
+    expect(existsSync(join(off, ".gitlab/yodel-commit.gitlab-ci.yml"))).toBe(false);
     expect(read(off, ".gitlab-ci.yml")).not.toContain("yodel-commit");
+    // A forge left out of ci.forges: its files are yodel's, so they go too.
+    expect(existsSync(join(off, ".forgejo/workflows/yodel-pr.yml"))).toBe(false);
+    // A file without yodel's header is the project's own, and stays.
+    writeFileSync(join(off, ".github/workflows/own.yml"), "name: own\non: push\njobs: {}\n");
+    expect((await yodel(["ci", "--check", "--dir", off])).code).toBe(0);
+    expect(existsSync(join(off, ".github/workflows/own.yml"))).toBe(true);
   }, 120_000);
 
   it("takes the specs from yodelCommitSpec, and nothing installed in the yodel image", () => {
@@ -123,10 +137,19 @@ describe("yodel ci renders /yodel new through chant's commit job (#312)", () => 
     expect((parseYAMLDocument(read(dir, ".gitlab-ci.yml")) as { include: Array<{ local: string }> }).include).toContainEqual({ local: ".gitlab/yodel-rebase.gitlab-ci.yml" });
 
     const fork = template('{ forges: ["github"], respond: { rebase: "on-fork", new: "off" } }');
-    rmSync(join(fork, ".github/workflows/yodel-new.yml"), { force: true });
     expect((await yodel(["ci", "--dir", fork])).code).toBe(0);
     expect(read(fork, ".github/workflows/yodel-rebase-check.yml")).toContain("yodel lint --commit-trigger rebase");
     expect(existsSync(join(fork, ".github/workflows/yodel-new.yml"))).toBe(false);
+    expect((await yodel(["ci", "--check", "--dir", fork])).code).toBe(0);
+
+    // respond.rebase off on a project that had it (#348): the workflow goes.
+    const noRebase = template('{ forges: ["github"], respond: { rebase: "off" } }');
+    expect(existsSync(join(noRebase, ".github/workflows/yodel-rebase.yml"))).toBe(true);
+    const removed = await yodel(["ci", "--dir", noRebase]);
+    expect(removed.code, removed.err).toBe(0);
+    expect(removed.out).toContain("removed .github/workflows/yodel-rebase.yml\n");
+    expect(existsSync(join(noRebase, ".github/workflows/yodel-rebase.yml"))).toBe(false);
+    expect((await yodel(["ci", "--check", "--dir", noRebase])).code).toBe(0);
   }, 120_000);
 
   it("passes /yodel new each environment with its reader, and none when a reader is cloud-minted (#312)", () => {

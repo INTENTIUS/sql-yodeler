@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Command } from "../command.js";
 import { guarded } from "../env-args.js";
@@ -27,6 +27,10 @@ Ops), each declared with chant's lexicons:
 The pipelines come from the installed yodel, so upgrading yodel and running
 yodel ci again brings its fixes to the project; yodel ci --check then fails
 until the new files are committed.
+
+A pipeline file that carries yodel ci's header and that yodel ci no longer
+renders (a forge dropped from ci.forges, respond.new or respond.rebase
+turned off) is removed; --check names it.
 
 yodel.config.ts ci:
   forges   the forges to render for (default github, gitlab and forgejo)
@@ -64,7 +68,8 @@ Options:
 
 Exit codes:
   0  written, or (--check) every file is up to date
-  1  (--check) a file is stale or missing; anything else failed
+  1  (--check) a file is stale, missing or no longer rendered; anything
+     else failed
 `;
 
 interface CiArgs {
@@ -117,7 +122,19 @@ export const ci: Command = {
         return replayLocally(dir, a.rest);
       }
       // Loaded here: the forge lexicons are for this command alone.
-      const { render } = await import("../ci/render.js");
+      const { render, PIPELINE_DIRS, renderedByYodel } = await import("../ci/render.js");
+      /** The pipeline files in the project that carry yodel ci's header, as project-relative paths. */
+      const ownedPipelines = (root: string): string[] => {
+        const candidates = [".gitlab-ci.yml"];
+        for (const d of PIPELINE_DIRS) {
+          const abs = join(root, d);
+          if (!existsSync(abs)) continue;
+          for (const e of readdirSync(abs, { withFileTypes: true })) {
+            if (e.isFile() && /\.ya?ml$/.test(e.name)) candidates.push(`${d}/${e.name}`);
+          }
+        }
+        return candidates.filter((p) => existsSync(join(root, p)) && renderedByYodel(readFileSync(join(root, p), "utf8")));
+      };
       let files;
       try {
         files = await render(dir);
@@ -137,8 +154,21 @@ export const ci: Command = {
         writeFileSync(abs, file.content);
         io.out(`wrote ${file.path}\n`);
       }
-      if (a.check && stale.length > 0) {
-        io.err(`stale, run yodel ci: ${stale.join(", ")}\n`);
+      // A pipeline file yodel ci wrote before and renders no more (#348): removed, or under --check reported.
+      const rendered = new Set(files.map((f) => f.path));
+      const left: string[] = [];
+      for (const path of ownedPipelines(dir)) {
+        if (rendered.has(path)) continue;
+        if (a.check) {
+          left.push(path);
+          continue;
+        }
+        unlinkSync(join(dir, path));
+        io.out(`removed ${path}\n`);
+      }
+      if (a.check && (stale.length > 0 || left.length > 0)) {
+        if (stale.length > 0) io.err(`stale, run yodel ci: ${stale.join(", ")}\n`);
+        if (left.length > 0) io.err(`no longer rendered, run yodel ci to remove: ${left.join(", ")}\n`);
         return 1;
       }
       if (a.check) io.out(`${String(files.length)} CI files are up to date\n`);
