@@ -2,7 +2,7 @@
  * The CI image (#66): Node, yodel, chant and the sql lexicon, so a job needs
  * no `npm ci` to run yodel. Renders to .github/image/Dockerfile with
  * `npm run workflows`. A release's cut builds it from `npm pack` of the
- * commit it cuts (scripts/release-image.sh, chant.config.ts release.images),
+ * commit it cuts (the Dockerfile entry in chant.config.ts's release.images),
  * and the publish pushes it to ghcr.io/intentius/sql-yodeler:<version>.
  *
  * The packages are installed in /opt/yodel, and /node_modules links to its
@@ -17,7 +17,7 @@ import type { ProductImageSpec } from "@intentius/chant/ci-image";
 
 export const comment = `The CI image, ghcr.io/intentius/sql-yodeler:<version>: Node 22, yodel, chant
 and the sql lexicon. A release's cut builds it from npm pack of the commit
-(scripts/release-image.sh), and publish.yml pushes it with the npm release.
+(chant.config.ts, release.images), and publish.yml pushes it with the npm release.
 
 Build arguments:
   YODEL_VERSION  the version \`yodel --version\` must print, and the one
@@ -28,7 +28,7 @@ Build arguments:
                  context installs as /ctx/<file>.tgz.
   CHANT_PINS     @intentius/chant packages at exact versions, installed
                  beside yodel so its chant ranges resolve to them (ci.yml
-                 and scripts/release-image.sh pass package-lock.json's)
+                 and chant.config.ts pass package-lock.json's)
 
   docker build -f .github/image/Dockerfile --build-arg YODEL_VERSION=0.1.0 .github/image`;
 

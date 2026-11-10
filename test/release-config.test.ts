@@ -25,7 +25,8 @@ const scratch = mkdtempSync(join(tmpdir(), "yodel-release-"));
 afterAll(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
-for (const f of ["chant.config.ts", "chant.workspace.json", "package.json"]) cpSync(join(repoRoot, f), join(scratch, f));
+// The config reads package.json and package-lock.json for the image's build arguments.
+for (const f of ["chant.config.ts", "chant.workspace.json", "package.json", "package-lock.json"]) cpSync(join(repoRoot, f), join(scratch, f));
 mkdirSync(join(scratch, ".github"), { recursive: true });
 cpSync(join(repoRoot, ".github", "workflows"), join(scratch, ".github", "workflows"), { recursive: true });
 symlinkSync(join(repoRoot, "node_modules"), join(scratch, "node_modules"));
