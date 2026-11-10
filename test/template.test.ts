@@ -264,7 +264,9 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
       const doc = load(readFileSync(join(dir, f), "utf8")) as Record<string, { after_script?: string[]; artifacts?: { when?: string; paths?: string[] } }>;
       for (const [name, job] of Object.entries(doc).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
         expect(job.after_script, `${f} ${name}`).toEqual([reportCommand(name.replace(/^plan-|^wave-\d+-/, ""))]);
-        expect(job.artifacts, `${f} ${name}`).toMatchObject({ when: "always", paths: [`${REPORT_DIR}/`] });
+        expect(job.artifacts?.when, `${f} ${name}`).toBe("always");
+        // A wave job keeps chant's outcome files beside the report (#4322), since yodel passes the report to chant (#4791).
+        expect(job.artifacts?.paths, `${f} ${name}`).toContain(`${REPORT_DIR}/`);
       }
     }
   });

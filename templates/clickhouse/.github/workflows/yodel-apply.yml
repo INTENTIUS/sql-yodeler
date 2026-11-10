@@ -72,6 +72,8 @@ jobs:
           name: yodel-report-wave-1-dev
           path: yodel-report
           if-no-files-found: ignore
+          include-hidden-files: true
+          overwrite: true
   wave-2-prod:
     runs-on: ubuntu-latest
     needs:
@@ -130,3 +132,5 @@ jobs:
           name: yodel-report-wave-2-prod
           path: yodel-report
           if-no-files-found: ignore
+          include-hidden-files: true
+          overwrite: true
