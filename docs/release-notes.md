@@ -7,7 +7,9 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
-## 0.13.0
+## 0.13.1
+
+- 0.13.0 was cut and not published; 0.13.1 carries its changes.
 
 - Changed: the source directory is `sourceDir`, else the project's root; yodel no longer falls back to `src/`. The starter templates set `sourceDir: "src"`.
 - Changed: the drift tracking issue's body is chant's; each open issue is rewritten once after the upgrade.
