@@ -22,7 +22,7 @@ The drift tracking issue `yodel drift` keeps is chant's (chant issue 4790). Its 
 
 - yodel's checks for chant parts its pinned chant always has (chant issue 4792), and the part list `yodel upgrade` printed.
 
-chant is at 0.124.87, and the starter templates take `^0.13.0`.
+chant is at 0.124.87, and the starter templates take `^0.13.1`.
 
 ## 0.12.1
 
