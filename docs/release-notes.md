@@ -14,7 +14,7 @@ What each release of `@intentius/sql-yodeler` changed, newest first, in short. T
 - Changed: the source directory is `sourceDir`, else the project's root; yodel no longer falls back to `src/`. The starter templates set `sourceDir: "src"`.
 - Changed: the drift tracking issue's body is chant's; each open issue is rewritten once after the upgrade.
 - Changed: the apply waves, the drift watch, the Forgejo login, the overdue check and the CI image come from chant. Run `yodel ci` to write the pipelines again.
-- chant 0.124.87. The starter templates take `^0.13.0`.
+- chant 0.124.87. The starter templates take `^0.13.1`.
 
 ## 0.12.1
 
