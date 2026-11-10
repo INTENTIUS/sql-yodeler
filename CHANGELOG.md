@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.13.0
+## 0.13.1
+
+0.13.0 was cut and never published: its package took in the release's image archive, which npm refused as too large. The package now leaves `dist/images` out. 0.13.1 carries everything below.
 
 ### Changed: where the source is, and the tracking issue's body
 
