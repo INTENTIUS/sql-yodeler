@@ -1,0 +1,37 @@
+# Rendered from .github/src/templates.ts by `npm run workflows`. Edit that file, not this one.
+#
+# Each starter template, made into a project with the yodel its range
+# resolves to on npm (scripts/templates-check.ts), once a day. ci.yml runs
+# the same check on a pull request only when the templates or what they
+# install changed; a template's result also depends on what npm serves, so
+# this catches a release of yodel or chant that breaks one.
+
+name: templates
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch: null
+
+permissions:
+  contents: read
+
+jobs:
+  templates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        template:
+          - clickhouse
+          - postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: The template works with the published yodel
+        run: npm run templates:check -- ${{ matrix.template }}
