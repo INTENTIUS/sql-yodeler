@@ -10,7 +10,7 @@ import { findApplyOp } from "../chant/apply.js";
 import { cleanupDigest, cleanupGate, describeRetained, findRetained, retainedServer } from "../cleanup/index.js";
 import { gatedRequests } from "../chant/gated-request.js";
 import { storedPlanText } from "../chant/stored-plan.js";
-import { chantConfirm, confirmApproval } from "../chant/confirm.js";
+import { chantConfirms, confirmApproval } from "../chant/confirm.js";
 import { baselineGate } from "../init/index.js";
 import { gateAtBase } from "../waves/index.js";
 import { waveApproval } from "../approval-mode/index.js";
@@ -54,8 +54,7 @@ yodel apply <env>.
 
 It never approves on its own. With no terminal to ask (a script, CI, an
 agent) it approves nothing and exits 1, and no flag skips the question.
-With a chant that confirms at a terminal (chant#4575), chant asks the
-question: it shows the gate, its pending fact and the stored plan the fact
+chant asks the question (chant#4575): it shows the gate, its pending fact and the stored plan the fact
 cites, and asks for the environment's name. YODEL_OWN_CONFIRM=1 keeps
 yodel's own question.
 
@@ -295,7 +294,7 @@ export const approve: Command = {
             io.out(`${describeWave(view)}\n`);
             if (!view.waits) return 0;
             // The plan the wave's pending fact cites (#292, chant#4551), as chant stored it; chant's confirmation (#295) shows it itself.
-            if (!(await chantConfirm())) {
+            if (!chantConfirms()) {
               const { waveGateName } = await import("@intentius/chant/gated-waves");
               const stored = await storedPlanText(project.dir, await gitLedger(project.dir), WAVES_PIPELINE, waveGateName(WAVES_PIPELINE, view.wave), view.digest);
               if (stored) io.out(`\n${stored}`);
@@ -470,7 +469,7 @@ async function approveStanding(c: OtherContext, found: { standing: StandingGate;
   const s = found.standing;
   io.out(`${s.op} is waiting at gate "${s.gate}" for approval of ${s.digest}, since ${s.at}${s.description ? ` (${s.description})` : ""}.\n`);
   // The stored plan the fact cites (#292); chant's confirmation (#295) shows it itself.
-  if (!(await chantConfirm())) {
+  if (!chantConfirms()) {
     const stored = await storedPlanText(c.project.dir, await gitLedger(c.project.dir), s.op, s.gate, s.digest);
     if (stored) io.out(`\n${stored}`);
   }

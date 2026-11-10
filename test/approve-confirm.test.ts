@@ -1,9 +1,9 @@
 /**
  * yodel approve's confirmation in chant core (#295, ruling F on #285,
- * chant#4575): with chant's confirmApproval, chant asks for the target's
- * name with the digest yodel names, and yodel's own question is not asked;
- * a wrong answer or a moved plan comes back as chant's exit code; with no
- * such chant, or when chant has nothing to show, yodel asks as before.
+ * chant#4575): chant's confirmApproval asks for the target's name with the
+ * digest yodel names, and yodel's own question is not asked; a wrong answer
+ * or a moved plan comes back as chant's exit code; with YODEL_OWN_CONFIRM=1,
+ * or when chant has nothing to show, yodel asks as before.
  */
 
 import { describe, expect, it } from "vitest";
@@ -41,7 +41,7 @@ describe("yodel approve's confirmation (#295)", () => {
   it("is chant's when chant has it: the digest and the environment go to chant, and yodel asks nothing of its own", async () => {
     const calls: unknown[] = [];
     const chant: ChantConfirm = {
-      async confirmApproval(op, gate, opts) {
+      async confirmApproval(op, gate, opts = {}) {
         calls.push({ op, gate, plan: opts.plan, environment: opts.environment });
         const answer = await opts.ask?.(`Type ${opts.environment ?? gate} to approve: `);
         return answer === opts.environment ? { status: "confirmed", plan: opts.plan ?? "", target: opts.environment ?? gate } : { status: "refused", code: EXIT_DECLINED };
@@ -71,6 +71,18 @@ describe("yodel approve's confirmation (#295)", () => {
     const chant: ChantConfirm = { confirmApproval: () => Promise.reject(new Error("boom")) };
     await expect(confirmApproval(confirmation(["prod"], { dir: "/" }).c, chant)).rejects.toThrow("boom");
     expect(process.cwd()).toBe(before);
+  });
+
+  it("asks yodel's own question, and not chant's, with YODEL_OWN_CONFIRM=1", async () => {
+    const chant: ChantConfirm = { confirmApproval: () => Promise.reject(new Error("chant was asked")) };
+    const { c, asked } = confirmation(["prod"]);
+    process.env.YODEL_OWN_CONFIRM = "1";
+    try {
+      expect(await confirmApproval(c, chant)).toBeUndefined();
+    } finally {
+      delete process.env.YODEL_OWN_CONFIRM;
+    }
+    expect(asked).toEqual(["Type prod to approve: "]);
   });
 
   it("refuses a wrong answer to yodel's own question with 8", async () => {
