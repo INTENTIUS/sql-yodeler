@@ -470,16 +470,13 @@ const uploadArtifact = (forge: Actions): string => (forge === "forgejo" ? FORGEJ
  * generateOpWavesPipeline and generateOpsPipeline write take no comment, so
  * withHeader puts it above their YAML.
  */
-const HEADER = [
-  "# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.",
-  "# Edit those and render again; yodel ci --check says when this file is stale.",
-];
+/** The first line of every file yodel ci writes, by which it knows the ones it wrote (#348). */
+export const PIPELINE_HEADER = "# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.";
+
+const HEADER = [PIPELINE_HEADER, "# Edit those and render again; yodel ci --check says when this file is stale."];
 
 /** The pipeline directories yodel ci writes into, besides the root `.gitlab-ci.yml`. */
 export const PIPELINE_DIRS = [".github/workflows", ".forgejo/workflows", ".gitlab"];
-
-/** Whether a file's text is one yodel ci wrote: it opens with the header (#348). */
-export const renderedByYodel = (text: string): boolean => text.startsWith(`${HEADER[0] ?? ""}\n`);
 
 const withHeader = (header: readonly string[], yaml: string): string => `${[...header, ""].join("\n")}${yaml}`;
 
