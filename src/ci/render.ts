@@ -116,6 +116,7 @@ import {
   WorkflowRule,
 } from "@intentius/chant-lexicon-gitlab";
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
+import { sqlTypesPath } from "@intentius/chant-lexicon-sql/sql-types";
 import { chantProduct, WAVE_WORDS, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
@@ -1401,7 +1402,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(Object.keys(credentials).length > 0 ? { credentials } : {}),
     replay,
     ...(hasTests(dir) ? { tests: true } : {}),
-    ...(existsSync(join(dir, (config as { sourceDir?: string }).sourceDir ?? ".", "sql-types.d.ts")) ? { typedColumns: true } : {}),
+    ...(existsSync(sqlTypesPath(dir, config)) ? { typedColumns: true } : {}),
     waves: await withTenants(dir, await readWaves(dir, envs)),
     forges: ci?.forges ?? FORGES,
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
