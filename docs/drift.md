@@ -95,7 +95,7 @@ The starter templates render a scheduled pipeline per watch for each forge (`npm
 
 ### When the watch stops running
 
-A scheduled job can stop with no error anywhere. GitHub turns a scheduled workflow off after 60 days with no activity in the repository, and on GitLab the job runs only from a pipeline schedule someone created. `yodel plan <env> --comment` asks the forge when the environment's watch job last ran, and when the watch's cron has fired at least twice since, the comment carries a warning ([chant#4289](https://github.com/INTENTIUS/chant/issues/4289)), and the job log the same line:
+A scheduled job can stop with no error anywhere. GitHub turns a scheduled workflow off after 60 days with no activity in the repository, and on GitLab the job runs only from a pipeline schedule someone created. chant's note job, which posts the plan note, asks the forge when each environment's watch job last ran, and when the watch's cron has fired at least twice since, the note carries a warning ([chant#4289](https://github.com/INTENTIUS/chant/issues/4289)), and the job log the same line. `yodel ci` names the watches to it from `ops/`, so each environment's note warns of every environment's watch:
 
 ```
 Warning: Op `watch-dev` is overdue: its schedule `17 * * * *` has fired at least twice and its last run was on 2026-10-18. GitHub turns a scheduled workflow off after 60 days with no activity in the repository. Turn the workflow on again under Actions, or run it by hand.
@@ -103,7 +103,7 @@ Warning: Op `watch-dev` is overdue: its schedule `17 * * * *` has fired at least
 
 The watch is the `WatchOp` whose `env` is the environment, and the job is the file `npm run ci` rendered for it: `.github/workflows/watch-<env>.yml`, `.forgejo/workflows/watch-<env>.yml`, or the job in `.gitlab/yodel-watch.gitlab-ci.yml` whose rules select it. chant finds the file and gives the verdict (`checkOverdueOps` in `op/schedule-overdue.ts`), so one late or dropped run is not a warning. A watch with no rendered file is not checked. With no run on record, the count starts at the commit that added the file.
 
-The warning never fails the plan. A forge that does not answer is a line in the job log and no warning. On GitHub the plan job reads the workflow's runs with `actions: read`, which the rendered `yodel-pr.yml` asks for; run `npm run ci` to add it to pipelines rendered before.
+The warning never fails the plan. A forge that does not answer is a line in the job log and no warning. On GitHub the note job reads the workflow's runs with `actions: read`, which the rendered `yodel-pr.yml` asks for.
 
 ## The tracking issue
 
@@ -114,6 +114,6 @@ The warning never fails the plan. A forge that does not answer is a line in the 
 - no drift: it comments that the drift is gone and closes the issue. Drift found again later opens a new one;
 - the drift could not be read, or a declared object could not be (exit 1): it leaves the issue as it is, and says so.
 
-The forge, repository and token come from the CI job's environment, as for `yodel plan --comment` ([Approval](approval.md)): `GITHUB_TOKEN` on GitHub Actions, `GITLAB_TOKEN` on GitLab CI, `FORGEJO_TOKEN` or `GITHUB_TOKEN` on Forgejo Actions, each after its `CHANT_<FORGE>_TOKEN` (and `GH_TOKEN` on GitHub and Forgejo). The issue counts as current while its title is the same and its body still carries the drift's fingerprint, so a scheduled run that finds the same drift leaves it alone. chant keeps the issue (`keepDriftIssue` in `@intentius/chant/drift-issue`), and its fingerprint is chant's, not the `fingerprint` of `--json`. `--forge`, `--repo`, `--api-url` and `--token-env` set them outside CI. `yodel drift` prints what it did to the issue on stderr, and `--json` adds it as `issue` (`opened`, `updated`, `unchanged`, `closed`, `none` or `left`, with the number and link). An issue the forge refuses fails the run with exit 1 unless it found drift (exit 2).
+The forge, repository and token come from the CI job's environment: `GITHUB_TOKEN` on GitHub Actions, `GITLAB_TOKEN` on GitLab CI, `FORGEJO_TOKEN` or `GITHUB_TOKEN` on Forgejo Actions, each after its `CHANT_<FORGE>_TOKEN` (and `GH_TOKEN` on GitHub and Forgejo). The issue counts as current while its title is the same and its body still carries the drift's fingerprint, so a scheduled run that finds the same drift leaves it alone. chant keeps the issue (`keepDriftIssue` in `@intentius/chant/drift-issue`), and its fingerprint is chant's, not the `fingerprint` of `--json`. `--forge`, `--repo`, `--api-url` and `--token-env` set them outside CI. `yodel drift` prints what it did to the issue on stderr, and `--json` adds it as `issue` (`opened`, `updated`, `unchanged`, `closed`, `none` or `left`, with the number and link). An issue the forge refuses fails the run with exit 1 unless it found drift (exit 2).
 
 The Postgres example's drift and watch are in [its section 8](../examples/postgres/README.md#8-drift).

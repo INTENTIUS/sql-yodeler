@@ -91,7 +91,7 @@ describe("yodel mcp", () => {
     await expect(runVerb("approve", ["dev"])).rejects.toThrow(/not approve/);
     await expect(runVerb("lint", ["--replay", "dev"])).rejects.toThrow(/--replay: it writes/);
     await expect(runVerb("lint", ["--update-checksum=x"])).rejects.toThrow(/--update-checksum: it writes/);
-    await expect(runVerb("plan", ["dev", "--comment"])).rejects.toThrow(/--comment: it writes/);
+    await expect(runVerb("plan", ["dev", "--pr-note", "out"])).rejects.toThrow(/--pr-note: it writes/);
   });
 
   it("answers each tool with an envelope its schema validates, results included", async () => {

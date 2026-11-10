@@ -4,11 +4,17 @@ import { join } from "node:path";
 import { fixture, projectFrom, yodel } from "./helpers/run.js";
 
 describe("yodel plan's versioned flags", () => {
-  it("takes --comment on a declarative project (#249), and refuses --allow-out-of-order there", async () => {
-    // --comment resolves the forge first, before it reads the server.
-    const ran = await yodel(["plan", "e2e", "--comment", "--forge", "github", "--repo", "o/r", "--pr", "1", "--api-url", "http://127.0.0.1:9", "--token-env", "YODEL_TEST_NO_SUCH_TOKEN", "--dir", fixture("clickhouse")]);
-    expect(ran.code).toBe(1);
-    expect(ran.err).toContain("--comment on github needs a token");
+  it("takes --pr-note on a declarative project (#249), and refuses --allow-out-of-order there", async () => {
+    // --pr-note reads the pull request chant's plan job names first, before it reads the server.
+    const was = process.env.PR_NUMBER;
+    delete process.env.PR_NUMBER;
+    try {
+      const ran = await yodel(["plan", "e2e", "--pr-note", ".chant/pr", "--dir", fixture("clickhouse")]);
+      expect(ran.code).toBe(1);
+      expect(ran.err).toContain("PR_NUMBER is not set to one; chant's plan job sets it");
+    } finally {
+      if (was !== undefined) process.env.PR_NUMBER = was;
+    }
     const late = await yodel(["plan", "e2e", "--allow-out-of-order", "--dir", fixture("clickhouse")]);
     expect(late.code).toBe(1);
     expect(late.err).toContain("--allow-out-of-order is for versioned migrations");
@@ -21,15 +27,15 @@ describe("yodel plan's versioned flags", () => {
     expect(ran.err).toContain("--part is for versioned migrations");
   });
 
-  it("takes the forge flags only with --comment, and one format", async () => {
-    expect((await yodel(["plan", "e2e", "--forge", "github"])).err).toContain("--forge goes with --comment");
+  it("takes no forge flags, the note job's (sql-yodeler issue 345), and one format", async () => {
+    expect((await yodel(["plan", "e2e", "--comment"])).err).toContain("Unknown option '--comment'");
     expect((await yodel(["plan", "e2e", "--json", "--format", "markdown"])).err).toContain("--json and --format markdown cannot be combined");
     expect((await yodel(["plan", "e2e", "--format", "html"])).err).toContain("--format must be text, markdown or json");
   });
 
-  it("documents --comment and the forges in --help", async () => {
+  it("documents --pr-note and chant's note job in --help", async () => {
     const ran = await yodel(["plan", "--help"]);
-    expect(ran.out).toMatch(/--comment[\s\S]*GitHub Actions,[\s\S]*GitLab CI, Forgejo Actions/);
+    expect(ran.out).toMatch(/--pr-note <dir>[\s\S]*pr-plan-note\.json[\s\S]*chant's note job/);
   });
 });
 

@@ -1,5 +1,5 @@
 /**
- * Where `yodel plan <env> --comment` and `yodel drift <env> --issue` post:
+ * Where `yodel drift <env> --issue` posts (the plan note is chant's note job's since sql-yodeler issue 345):
  * chant's forge client (`@intentius/chant/pr-forge`, #210) for the CI job's
  * forge, repository, pull (merge) request and token, each overridden by a
  * flag. chant reads the job's environment and the flags

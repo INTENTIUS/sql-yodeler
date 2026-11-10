@@ -221,7 +221,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     },
     { run: "npx yodel lint --update-checksum {id:drop-coupon}", code: 0, expect: ["1 silenced"], quote: "lint.md#update-checksum" },
     { run: "git add -A && git commit -q -m 'feat: drop orders.coupon' && git push -q origin main", code: 0, hide: true },
-    { say: "The pull request comment (`yodel plan dev --comment` in CI) is this Markdown:" },
+    { say: "The pull request note (in CI, `yodel plan dev --pr-note` hands it to chant's note job, which posts it) is this Markdown:" },
     { run: "npx yodel plan dev --format markdown", code: 0, expect: ["destructive"] },
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },

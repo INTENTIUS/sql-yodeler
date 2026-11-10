@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { gitlabTradeLines, tradeLine } from "@intentius/chant/ci-identity";
 import { loginSteps, tradeIdTokens, tradeSpec, type Login, type TradeSpec } from "../src/ci/login.js";
-import { gitlabPipeline, type Environments } from "../src/ci/render.js";
+import { gitlabPlan, type Environments } from "../src/ci/render.js";
 import { checkYodelConfig } from "../src/config/index.js";
 
 const ROLE = "arn:aws:iam::123456789012:role/yodel";
@@ -78,8 +78,9 @@ describe("the login steps through chant's trade (#296)", () => {
       credentials: { prod: { reader: { variables: [], cloud: "entra" }, writer: { variables: [], cloud: "rds-iam" } } },
       login: { aws: { roleArn: ROLE }, azure: { clientId: CLIENT, tenantId: TENANT } },
     };
-    const doc = parseYAMLDocument(gitlabPipeline(envs).content) as Record<string, { variables?: Record<string, string>; id_tokens?: Record<string, unknown> }>;
-    const plan = doc["plan-prod"];
+    // The plan job is chant's product plan's, in the plan file (sql-yodeler issue 345).
+    const doc = parseYAMLDocument(gitlabPlan(envs).file.content) as Record<string, { variables?: Record<string, string>; id_tokens?: Record<string, unknown> }>;
+    const plan = doc["prod-plan"];
     const spec = JSON.parse(plan?.variables?.CHANT_CLOUD_TRADE ?? "{}") as TradeSpec;
     expect(Object.keys(spec)).toEqual(["azure"]);
     expect(Object.keys(plan?.id_tokens ?? {})).toEqual(["CHANT_ID_TOKEN_AZURE"]);

@@ -1,5 +1,5 @@
 /**
- * The plan note `yodel plan --comment` posts, through chant's renderer
+ * The plan note `yodel plan --pr-note` hands to chant's note job, through chant's renderer
  * (#290), from the repository's root: what the cases that read the note
  * render. yodel's own layout left in 0.12 (#303).
  */

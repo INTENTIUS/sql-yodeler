@@ -243,6 +243,6 @@ yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but 
 | `YODEL_LOCK_WAIT`, `YODEL_STAND_DOWN` | the migrations Op's steps (`yodel apply --digest`, `--execute`) | how `yodel apply` and `yodel revert` hand `--lock-wait` and `--stand-down` to the Op they run. Set on any other run they are refused (exit 1), since a pipeline rendered by yodel 0.10 sets them on its wave jobs: run `yodel upgrade` ([Upgrading the pipelines](workflows.md#upgrading-the-pipelines-to-chant-012467)) |
 | `YODEL_RELEASE` | `yodel apply` | a chant release's digest or label: as `--release`, the apply is made from that release, and its release record names it (`releaseDigest`) |
 | `YODEL_LOCK_RETRIES` | `yodel apply` on Postgres | how many more times a statement that hit `lock_timeout` is tried (default 5, the pause doubling from 250 ms) |
-| `GITHUB_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN` (each after `CHANT_<FORGE>_TOKEN`; `GH_TOKEN` on GitHub and Forgejo) | `yodel plan --comment`, `yodel drift --issue` | the forge token; see [Approval](approval.md) and [Drift](drift.md#the-tracking-issue) |
+| `GITHUB_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN` (each after `CHANT_<FORGE>_TOKEN`; `GH_TOKEN` on GitHub and Forgejo) | `yodel drift --issue`, and chant's plan note job | the forge token; see [Approval](approval.md) and [Drift](drift.md#the-tracking-issue) |
 
 `YODEL_APPROVED_PLAN` and `YODEL_ALLOW_OUT_OF_ORDER` are set by `yodel apply` for the migrations Op's own steps; you do not set them.

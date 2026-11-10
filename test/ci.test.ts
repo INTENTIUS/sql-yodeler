@@ -58,10 +58,11 @@ describe("yodel ci", () => {
     expect(existsSync(join(dir, ".forgejo/workflows/yodel-pr.yml"))).toBe(false);
 
     const pr = parseYAMLDocument(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
-    expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-prod", "unit"]);
+    // yodel's lint, chant's plan and note job per environment (sql-yodeler issue 345), then the project's own.
+    expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-note-dev", "plan-prod", "plan-note-prod", "unit"]);
     expect(pr.jobs.unit?.steps[0]?.run).toBe("echo the project's own job");
     const gitlab = parseYAMLDocument(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as Record<string, unknown> & { stages: string[] };
-    expect(gitlab.stages).toEqual(["review", "test", "wave-1-dev", "wave-2-prod", "ops"]);
+    expect(gitlab.stages).toEqual(["review", "plan", "plan-note", "test", "wave-1-dev", "wave-2-prod", "ops"]);
     expect(gitlab.unit).toMatchObject({ stage: "test", script: ["echo the project's own job"] });
 
     expect((await yodel(["ci", "--check", "--dir", dir])).code).toBe(0);
@@ -123,8 +124,8 @@ describe("yodel ci", () => {
     // yodel ci writes the files that change. The waves spec (#289) names no image, so it is written only when the
     // template's committed spec is not the one this chant gives.
     const pipelines = rendered.filter((f) => f !== WAVES_SPEC);
-    // 11, and /yodel new's and /yodel rebase's commit jobs on each forge (#312, #313).
-    expect(pipelines).toHaveLength(17);
+    // 11, /yodel new's and /yodel rebase's commit jobs on each forge (#312, #313), and GitLab's plan file (sql-yodeler issue 345).
+    expect(pipelines).toHaveLength(18);
     for (const f of pipelines) {
       const text = readFileSync(join(dir, f), "utf8");
       expect(text, f).not.toContain("npm ci");
@@ -138,7 +139,7 @@ describe("yodel ci", () => {
       const doc = parseYAMLDocument(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { container?: unknown; steps: Array<{ run?: string }> }> };
       for (const [name, job] of Object.entries(doc.jobs)) expect(job.container, `${f} ${name}`).toBe(image);
     }
-    expect(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")).toContain("; yodel report dev --json");
+    expect(readFileSync(join(dir, ".gitlab/yodel-plan.gitlab-ci.yml"), "utf8")).toContain("; yodel report dev --json");
   });
 
   it("with ci.resume, renders the scheduled resume job on each forge, with that forge's least token (#47)", async () => {
@@ -167,7 +168,7 @@ describe("yodel ci", () => {
     expect(apply["yodel-apply-resume"]).toMatchObject({ stage: "resume", rules: [{ if: '$CI_PIPELINE_SOURCE == "schedule"' }] });
     expect(apply["yodel-apply-resume"]?.script?.at(-1)).toBe(`${CHANT} run resume --op yodel-apply`);
     const main = readFileSync(join(dir, ".gitlab-ci.yml"), "utf8");
-    expect((parseYAMLDocument(main) as { stages: string[] }).stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "resume", "ops"]);
+    expect((parseYAMLDocument(main) as { stages: string[] }).stages).toEqual(["review", "plan", "plan-note", "wave-1-dev", "wave-2-prod", "resume", "ops"]);
     expect(main).toContain("GITLAB_TOKEN: a project access token with the api scope (Developer)");
 
     // The spec the wave jobs read is the same with or without it.
@@ -219,20 +220,21 @@ describe("yodel ci", () => {
       ".github/workflows/yodel-rebase.yml",
       ".gitlab-ci.yml",
       ".gitlab/yodel-commit.gitlab-ci.yml",
+      ".gitlab/yodel-plan.gitlab-ci.yml",
       ".gitlab/yodel-rebase.gitlab-ci.yml",
       ".gitlab/yodel-watch.gitlab-ci.yml",
     ]);
     // No file in the project names a writer.
     for (const f of rendered) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/WRITER|writer:/);
     const gitlab = parseYAMLDocument(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as { stages: string[]; include: Array<{ local: string }> };
-    expect(gitlab.stages).toEqual(["review", "ops"]);
-    expect(gitlab.include).toEqual([{ local: ".gitlab/yodel-watch.gitlab-ci.yml" }, { local: ".gitlab/yodel-commit.gitlab-ci.yml" }, { local: ".gitlab/yodel-rebase.gitlab-ci.yml" }]);
-    const pr = parseYAMLDocument(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
-    expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-prod"]);
-    expect(pr.jobs["plan-prod"]?.steps.some((st) => st.run === "yodel config check prod dev --write-probe")).toBe(true);
+    expect(gitlab.stages).toEqual(["review", "plan", "plan-note", "ops"]);
+    expect(gitlab.include).toEqual([{ local: ".gitlab/yodel-plan.gitlab-ci.yml" }, { local: ".gitlab/yodel-watch.gitlab-ci.yml" }, { local: ".gitlab/yodel-commit.gitlab-ci.yml" }, { local: ".gitlab/yodel-rebase.gitlab-ci.yml" }]);
+    const pr = parseYAMLDocument(readFileSync(join(dir, ".github/workflows/yodel-pr.yml"), "utf8")) as { jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }> };
+    expect(Object.keys(pr.jobs)).toEqual(["lint", "plan-dev", "plan-note-dev", "plan-prod", "plan-note-prod"]);
+    expect(pr.jobs["plan-prod"]?.steps.some((st) => st.name === "This job cannot write" && st.run?.includes("\nyodel config check prod dev --write-probe"))).toBe(true);
     const check = await yodel(["ci", "--check", "--dir", dir]);
     expect(check.code, check.err).toBe(0);
-    expect(check.out).toBe("14 CI files are up to date\n");
+    expect(check.out).toBe("15 CI files are up to date\n");
   });
 
   it("refuses ci.apply: false with a pr-review wave or with ci.resume, naming the setting (#175)", () => {

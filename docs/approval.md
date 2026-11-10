@@ -321,7 +321,7 @@ A pull request from a fork runs its pipeline without the repository's secrets an
 
 ## The pull request comment
 
-`yodel plan <env> --comment` posts the plan as one comment per environment on the pull (merge) request, and updates that comment on the next push rather than adding another. `--format markdown` prints the same Markdown without posting. From the ClickHouse example, for its rebuild:
+Each environment gets one note on the pull (merge) request, updated on the next push rather than added again. The plan runs on chant's product plan: the pipeline `yodel ci` renders has a plan job and a note job per environment. The plan job holds the environment's reader and no forge token, and runs `yodel plan <env> --pr-note <dir>`, which writes the note to `<dir>/pr-plan-note.json`, chant's plan note hand-off. The note job posts it and sets the status `yodel/plan/<env>`. `--format markdown` prints the same Markdown, with yodel's marker on the first line. From the ClickHouse example, for its rebuild:
 
 <!-- quote: clickhouse#comment -->
 ````console
@@ -368,15 +368,9 @@ What moved (as far as yodel can tell): history changed: applied since: 20261010T
 <!-- yodel:subject eyJlbnZpcm9ubWVudCI6ImRldiIsImhpc3RvcnlEYXRhYmFzZSI6InlvZGVsZXIiLCJ0b3BvbG9neSI6eyJraW5kIjoic2luZ2xlIn0sImFwcGxpZWQiOlt7ImlkIjoiMjAyNjEwMTBUMTcyMi1iYXNlbGluZSIsImNoZWNrc3VtIjoic2hhMjU2OjU3MWI2MzNjMGQ2YzRlNDYxZDc2Mjg1MzI4Y2I3MTYwMGIzYzMzYzFhNDI5ZjkwZGIxYTVmOWUxNzQyMjhkZWIifSx7ImlkIjoiMjAyNjEwMTBUMTcyMi1hZGQtY291bnRyeSIsImNoZWNrc3VtIjoic2hhMjU2OjU1NGQwMzQ5Y2QwNTA5YzkwYTc5MTA1N2M0MmRlYzI0NWMzMmQ2M2NiY2MxOGFhNDZlODk2OTY2NDg3YTE0MzgifV0sInBlbmRpbmciOlt7ImlkIjoiMjAyNjEwMTBUMTcyMi1ldmVudHMtYnktaWQiLCJjaGVja3N1bSI6InNoYTI1Njo5NTdkZGMxZTFjMzFmZjIyMmM3ZmE1NjdlOGJjYjViYzZjZWRlZjAzZjYyMWQwMjYzZGEwOTEzYTdjNGY5NTNjIiwiZG9uZSI6W119XSwibGl2ZSI6InNoYTI1NjpiYTA4MzBmYjk2NjkzNWMzYTNiNmQ1Nzg3ODIwNGJhMzMzMzQxMTg2YzJkMzk4M2E3YTMwN2IxMjk4MmFiMmY1In0 -->
 ````
 
-The hidden `yodel:subject` line at the end records the state the plan was made from; the next `--comment` run reads it from the comment it updates, to say what moved. The forge, the repository, the request and the API come from the CI job's environment:
+The transcript above is from a yodel before 0.14, which kept a hidden `yodel:subject` line at the end of the note. From 0.14 the hand-off carries the plan's subject instead: the digest, and the parts it is taken over (the environment, the history table, the topology, each applied and pending migration's checksum, the statements already done, the pending order and the live schema's fingerprint). chant's note job keeps it in the note, compares it with the previous note's on the next push, and adds a line naming what moved, such as "`20261010T1722-events-by-id` now pending" or "the live schema changed". The plan job reads no note, so it needs no forge token on any forge.
 
-| Forge | Detected by | Token |
-|---|---|---|
-| GitHub Actions | `GITHUB_ACTIONS=true` | the first set of `CHANT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`; the job's `GITHUB_TOKEN` needs `pull-requests: write` |
-| GitLab CI | `GITLAB_CI=true` | the first set of `CHANT_GITLAB_TOKEN`, `GITLAB_TOKEN`, `CI_JOB_TOKEN`: set `GITLAB_TOKEN` to a project or personal access token with `api` scope (`CI_JOB_TOKEN` cannot write merge request notes) |
-| Forgejo Actions | `FORGEJO_ACTIONS=true` or `GITEA_ACTIONS=true` (or a GitHub-style job whose API URL ends in `/api/v1`) | the first set of `CHANT_FORGEJO_TOKEN`, `FORGEJO_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
-
-Outside those, or to override them: `--forge github|gitlab|forgejo`, `--repo`, `--pr`, `--api-url`, and `--token-env <VAR>` for the one variable that holds the token. The token is never a flag and never printed. chant's forge client (`@intentius/chant/pr-forge`) reads the job's environment and posts the comment; yodel writes the body. The comment job needs only read credentials for the database; the starter templates give it the reader.
+The hand-off reads the pull request from `PR_NUMBER`, which chant's plan job sets, and the commit from git. chant's note job posts with the job's own token on GitHub (`pull-requests: write`, `statuses: write`) and on Forgejo. On GitLab a merge request's pipeline holds no token for its notes: the note jobs run in a pipeline of the default branch that a schedule starts with `CHANT_PLAN_NOTES=1`, which you create, and post every open merge request's notes with `GITLAB_TOKEN`, a project or personal access token with `api` scope. The plan job needs only read credentials for the database; the starter templates give it the reader.
 
 ## When the digest moves
 

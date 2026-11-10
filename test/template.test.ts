@@ -155,7 +155,12 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     const actionOnly = (text: string) => (staged ? text.replace(/^(\s*(?:- )?uses: *)\S*?([^/\s@]+)@\S+(?: # \S+)?$/gm, "$1$2") : text);
     // The jobs' fetch of chant/lifecycle through chant's reader (#326) reaches them with that release too; until then they keep the git line it replaced.
     const ledgerFetch = (text: string) => (staged ? text.replaceAll(fetchApprovals(), STAGED_LEDGER_FETCH) : text);
+    // The plan on chant's product plan (sql-yodeler issue 345) runs `yodel plan --pr-note`, which the templates' yodel range
+    // gets with the release that ships it: until then the template keeps the pull request pipelines that release renders.
+    const planStaged = !existsSync(join(dir, ".gitlab", "yodel-plan.gitlab-ci.yml"));
+    const PR_PIPELINES = [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml", ".gitlab/yodel-plan.gitlab-ci.yml"];
     for (const file of rendered) {
+      if (planStaged && PR_PIPELINES.includes(file.path)) continue;
       expect(actionOnly(readFileSync(join(dir, file.path), "utf8")), file.path).toBe(actionOnly(ledgerFetch(file.content)));
     }
   });

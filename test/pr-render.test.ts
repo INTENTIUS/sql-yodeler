@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import { noteLimit } from "@intentius/chant/plan-summary";
-import { commentMarker, planJsonVersioned, redact, renderPlanText, subjectIn } from "../src/pr/render.js";
+import { commentMarker, planJsonVersioned, redact, renderPlanText } from "../src/pr/render.js";
 import { planNote } from "./helpers/note.js";
 import type { VersionedPlan } from "../src/pr/model.js";
-import { decodeSubject } from "../src/versioned/explain.js";
 import { backfillFormStep } from "../src/steps/backfill.js";
 
 const DIGEST = `jcs1-sha256:${"c".repeat(64)}`;
@@ -119,14 +118,13 @@ describe("the plan comment's markdown, through chant's note (#290)", () => {
     expect(md).not.toContain("yodel approve");
   });
 
-  it("prints the digest the gate binds and the yodel approve command (#202), never chant's, and carries the subject hidden", async () => {
+  it("prints the digest the gate binds and the yodel approve command (#202), never chant's, and leaves the subject to chant's note job", async () => {
     const md = await planNote(clickhousePlan());
     expect(md).toContain(`Plan digest: \`${DIGEST}\``);
     expect(md).toContain(`yodel approve prod --plan ${DIGEST}`);
     expect(md).not.toContain("chant approve");
     expect(md).toContain("Not approved yet.");
-    const carried = subjectIn(md);
-    expect(carried && decodeSubject(carried)).toEqual(subject);
+    expect(md).not.toContain("yodel:subject");
   });
 
   it("says when the newest approval is for another digest, and what moved", async () => {
@@ -189,7 +187,6 @@ describe("the plan comment's markdown, through chant's note (#290)", () => {
     expect(md).toContain("| 0 | statement | SQLPG110 | concurrently | `app.orders_idx` |");
     expect(md).toContain("made by Op `PostgresMigrationOp` (SQLPG240 rewrite columns.total)");
     expect(md).toContain("> Postgres has no history table yet (#13)");
-    expect(subjectIn(md)).toBeUndefined();
   });
 
   it("drops the statements' SQL rather than go over the forge's limit", async () => {

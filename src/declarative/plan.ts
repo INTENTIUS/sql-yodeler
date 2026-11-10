@@ -3,8 +3,8 @@
  * from the live database to the declared schema, with the review
  * `./review.ts` gives it: the lint findings over the planned changes, the
  * policy's outcome and how the ApplyOp's gate is approved. Collected once,
- * rendered as text, as the pull request comment (`--format markdown`,
- * `--comment`) and as JSON. Nothing here writes. As on the versioned path,
+ * rendered as text, as the pull request note (`--format markdown`,
+ * `--pr-note`) and as JSON. Nothing here writes. As on the versioned path,
  * the comment names no server address.
  */
 
