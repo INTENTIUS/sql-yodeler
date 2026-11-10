@@ -12,7 +12,8 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OpStep, ManualStep, StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
-import { driftFingerprint, driftFromLifecycle } from "../src/chant/drift.js";
+import { driftFromLifecycle } from "../src/chant/drift.js";
+import { driftFingerprint } from "../src/pr/issue.js";
 import { planJson, type Plan } from "../src/chant/plan.js";
 import { applyJson, type DeclarativeOutcome, type VersionedOutcome } from "../src/commands/apply.js";
 import { driftJson } from "../src/commands/drift.js";
@@ -297,13 +298,13 @@ describe("each command's --json output validates against its schema", () => {
     for (const r of results) expectValid("lint", { ...lintJson(report), replay: replayJson(r) });
   }, 60_000);
 
-  it("drift", () => {
+  it("drift", async () => {
     // Through driftJson, which yodel drift prints with.
     const doc = {
       environment: "dev",
       lexicons: {
         sql: {
-          resources: { missing: ["ordersStatus"], unobserved: [{ name: "audit", reason: "no credentials" }] },
+          resources: { missing: ["ordersStatus"], unobserved: [{ name: "audit", reason: "no-credentials" }] },
           deep: { drifted: [{ name: "events", type: "ClickHouse::Table", changes: [{ path: "ttl", kind: "changed", declared: "ts + INTERVAL 90 DAY", live: "ts + toIntervalDay(30)" }] }], unobserved: [] },
         },
       },
@@ -312,14 +313,14 @@ describe("each command's --json output validates against its schema", () => {
     result.columns = { events: ["id", "ts"] };
     result.lockWait = "waited 5s (lockTimeoutMs) for a lock on shop.orders";
     result.against = { source: "history", migration: "20261010T0900-init" };
-    const parts = { dialect: "clickhouse" as const, server, drifted: true, fingerprint: driftFingerprint(result) };
+    const parts = { dialect: "clickhouse" as const, server, drifted: true, fingerprint: await driftFingerprint(result) };
     const issue = { number: 7, title: "drift on dev", body: "", state: "open" as const, url: "https://forge/o/r/issues/7" };
     for (const action of [undefined, { action: "none" as const }, { action: "opened" as const, issue }, { action: "left" as const, why: "the drift could not be read" }, { action: "left" as const, why: "x", issue }]) {
       expectValid("drift", driftJson(result, { ...parts, issue: action }));
     }
     expectValid("drift", driftJson(result, { ...parts, issueError: "403 from the forge" }));
     const clean = { ...driftFromLifecycle("dev", { lexicons: { sql: {} } }), against: { source: "src" as const } };
-    expectValid("drift", driftJson(clean, { dialect: "postgres", drifted: false, fingerprint: driftFingerprint(clean) }));
+    expectValid("drift", driftJson(clean, { dialect: "postgres", drifted: false, fingerprint: await driftFingerprint(clean) }));
   });
 
   it("init", () => {

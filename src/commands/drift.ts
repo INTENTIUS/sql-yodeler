@@ -9,7 +9,6 @@ import { declarativeRefusal } from "../config/settings.js";
 import {
   declaredColumns,
   driftExitCode,
-  driftFingerprint,
   readDrift,
   renderDrift,
   withClickHouseGrants,
@@ -29,7 +28,7 @@ import { DEFAULT_PG_TIMEOUTS } from "../versioned/postgres/executor.js";
 import { closeVersioned, hasMigrations, inspect, openVersioned, readChain } from "../versioned/index.js";
 import { isApplied } from "../history/index.js";
 import { describeForge, resolveForge, type ForgeFlags, type ForgeTarget } from "../pr/forge.js";
-import { driftIssueMarker, trackDrift, type IssueAction } from "../pr/issue.js";
+import { driftFingerprint, driftIssueMarker, trackDrift, type IssueAction } from "../pr/issue.js";
 import { describeUnsupported, findUnsupported } from "../init/unsupported.js";
 import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/live/client";
 
@@ -299,7 +298,7 @@ export const drift: Command = {
         const columns = await declaredColumns(project, result, build).catch(() => ({}));
         if (Object.keys(columns).length > 0) result.columns = columns;
         const code = driftExitCode(result);
-        const fingerprint = driftFingerprint(result);
+        const fingerprint = await driftFingerprint(result);
         const run = runUrl(process.env);
         let action: IssueAction | undefined;
         let issueError: string | undefined;

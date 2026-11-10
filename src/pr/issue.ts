@@ -39,18 +39,26 @@ export type IssueAction =
   | { action: "left"; why: string; issue?: TrackedIssue };
 
 /**
- * The drift as chant's records: the changed objects through chant's
- * `deepDiffDriftRecords` (declared before, live after; a column by its
- * name), laid over `liveDiffDriftRecords` for the objects gone (`pending`
- * in a read with no snapshot) and those that could not be read.
+ * The drift as chant's records, through chant's `lexiconDriftRecords`
+ * (chant issue 4896) over the sql section the drift was read from, with
+ * what yodel adds to it: the ClickHouse grants, the extra columns and a
+ * column by its name. An object gone is `missing`, the sql lexicon's
+ * `absent`.
  */
 export async function driftRecords(drift: Drift, observedAt: string): Promise<DriftIssueRecord[]> {
-  const { deepDiffDriftRecords, liveDiffDriftRecords, mergeDeepDrift } = await import("@intentius/chant/drift-record");
-  const base = { member: drift.environment, observedAt };
+  const { lexiconDriftRecords } = await import("@intentius/chant/drift-record");
   const changed = drift.changed.map((e) => ({ ...e, changes: e.changes.map((c) => ({ ...c, path: describePath(c.path, drift.columns?.[e.name]) })) }));
-  const thin = liveDiffDriftRecords({ ...base, diff: { missing: drift.missing, unobserved: drift.unobserved } as never });
-  const deep = deepDiffDriftRecords({ ...base, diff: { drifted: changed } as never });
-  return mergeDeepDrift(thin, deep);
+  return lexiconDriftRecords({
+    member: drift.environment,
+    observedAt,
+    section: { resources: { missing: drift.missing, unobserved: drift.unobserved } as never, deep: { drifted: changed } as never, absent: "missing" },
+  });
+}
+
+/** The drift's fingerprint: chant's `driftRunFingerprint` over the environment's records, the value the tracking issue keeps. */
+export async function driftFingerprint(drift: Drift): Promise<string> {
+  const { driftRunFingerprint } = await import("@intentius/chant/drift-issue");
+  return driftRunFingerprint([{ stack: drift.environment, records: await driftRecords(drift, new Date(0).toISOString()) }]);
 }
 
 /** yodel's words for chant's drift issue, for one run's drift and server. */
@@ -93,7 +101,6 @@ export async function trackDrift(
     records: await driftRecords(run.drift, observedAt),
     marker,
     observedAt,
-    statuses: ["drifted", "missing", "pending"],
     ...(run.runUrl ? { runUrl: run.runUrl } : {}),
     ...(run.unknown !== undefined ? { unknown: run.unknown } : {}),
   });

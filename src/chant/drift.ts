@@ -14,7 +14,6 @@
  * what the project declares, and only touches what carries its marker.
  */
 
-import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LiveDiffResult, UnobservedResource } from "@intentius/chant/lifecycle/live-diff";
@@ -57,25 +56,6 @@ export interface Drift {
  * records as applied (`migration` null when none is applied yet).
  */
 export type DriftAgainst = { source: "src" } | { source: "history"; migration: string | null };
-
-/**
- * A stable fingerprint of the drift: the environment and what drifted
- * (each changed object's changes, declared and live, and the objects gone),
- * order-free, so two reads of the same drift give the same one and a
- * tracking issue updated with it changes only when the drift does. Objects
- * that could not be read are not drift and are left out.
- */
-export function driftFingerprint(drift: Drift): string {
-  const changed = drift.changed
-    .map((e) => ({
-      name: e.name,
-      type: e.type,
-      changes: e.changes.map((c) => ({ path: c.path, kind: c.kind, declared: c.declared ?? null, live: c.live ?? null })).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const subject = JSON.stringify({ environment: drift.environment, changed, missing: [...drift.missing].sort() });
-  return `sha256:${createHash("sha256").update(subject, "utf8").digest("hex")}`;
-}
 
 /**
  * The recorded schema as declarations chant can build: one file, written

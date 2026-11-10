@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { driftFingerprint, type Drift } from "../src/chant/drift.js";
+import type { Drift } from "../src/chant/drift.js";
 import type { ForgeFetch, PrForge } from "@intentius/chant/pr-forge";
 import { resolveForge } from "../src/pr/forge.js";
-import { driftIssueMarker, trackDrift } from "../src/pr/issue.js";
+import { driftFingerprint, driftIssueMarker, trackDrift } from "../src/pr/issue.js";
 
 const drift = (over: Partial<Drift> = {}): Drift => ({
   environment: "dev",
@@ -42,15 +42,16 @@ async function memoryIssues(): Promise<{ forge: PrForge; all: Array<{ number: nu
 }
 
 describe("driftFingerprint", () => {
-  it("is the same for the same drift in any order, and moves when the drift does", () => {
+  it("is the same for the same drift in any order, and moves when the drift does", async () => {
     const a = drift();
-    const b = drift({ missing: ["daily"], changed: [...a.changed] });
-    expect(driftFingerprint(a)).toBe(driftFingerprint(b));
-    expect(driftFingerprint(a)).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(driftFingerprint(drift({ missing: [] }))).not.toBe(driftFingerprint(a));
-    expect(driftFingerprint(drift({ environment: "prod" }))).not.toBe(driftFingerprint(a));
+    const b = drift({ missing: ["daily"], changed: [...a.changed].reverse() });
+    const fa = await driftFingerprint(a);
+    expect(await driftFingerprint(b)).toBe(fa);
+    expect(fa).toMatch(/^[0-9a-f]{16}$/);
+    expect(await driftFingerprint(drift({ missing: [] }))).not.toBe(fa);
+    expect(await driftFingerprint(drift({ environment: "prod" }))).not.toBe(fa);
     // What could not be read is not drift.
-    expect(driftFingerprint(drift({ unobserved: [{ name: "x", reason: "no grant" }] as unknown as Drift["unobserved"] }))).toBe(driftFingerprint(a));
+    expect(await driftFingerprint(drift({ unobserved: [{ name: "x", reason: "no-credentials" }] as unknown as Drift["unobserved"] }))).toBe(fa);
   });
 });
 
@@ -71,7 +72,7 @@ describe("trackDrift", () => {
     expect(await trackDrift(c.forge, marker, found(two))).toMatchObject({ action: "updated", issue: { number: 1 } });
     expect(c.all).toHaveLength(1);
     expect(c.all[0]?.title).toBe("Drift in dev: events, daily");
-    expect(c.all[0]?.body).toContain("| `daily` | pending |");
+    expect(c.all[0]?.body).toContain("| `daily` | missing |");
     expect(await trackDrift(c.forge, marker, clean())).toMatchObject({ action: "closed", issue: { number: 1 } });
     expect(c.all[0]).toMatchObject({ state: "closed", comments: ["No drift in dev now: every declared object matches the server. Closed by yodel drift."] });
     expect((await trackDrift(c.forge, marker, clean())).action).toBe("none");
