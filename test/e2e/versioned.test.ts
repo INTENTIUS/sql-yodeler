@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { computeChecksum, createMigration, readMigrations, serializeDocument, writeMigration, type CreatedMigration, type Migration, type MigrationDocument } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
@@ -64,7 +64,7 @@ describe.skipIf(!clickhouseReachable)("the versioned path on clickhouse", () => 
 
   const approve = async (command: string | undefined) => {
     expect(command).toMatch(/^chant approve migrate-e2e approve-migrate-e2e --plan jcs1-sha256:[0-9a-f]{64}$/);
-    const ran = await runChant((command ?? "").split(" ").slice(1), { cwd: dir });
+    const ran = await runChant((command ?? "").split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
     expect(ran.code, ran.stderr).toBe(0);
   };
 

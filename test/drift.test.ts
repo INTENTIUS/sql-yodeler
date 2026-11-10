@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { driftExitCode, driftFromLifecycle, renderDrift } from "../src/chant/drift.js";
-import { lastJsonLine } from "../src/chant/process.js";
 import { projectFrom, yodel } from "./helpers/run.js";
 
 // The shape of `chant lifecycle diff <env> --live --json` (chant 0.112.0), trimmed.
@@ -97,14 +96,6 @@ describe("drift", () => {
   it("refuses a document with no lexicons", () => {
     expect(() => driftFromLifecycle("e2e", { environment: "e2e", stacks: {} })).toThrow(/per stack/);
     expect(() => driftFromLifecycle("e2e", undefined)).toThrow(/no lexicons/);
-  });
-});
-
-describe("lastJsonLine", () => {
-  it("reads the JSON document after chant's log lines", () => {
-    expect(lastJsonLine('fold: 1 file folded\n{"a":1}\n')).toEqual({ a: 1 });
-    expect(lastJsonLine('{\n  "a": 2\n}\n')).toEqual({ a: 2 });
-    expect(lastJsonLine("no json here")).toBeUndefined();
   });
 });
 

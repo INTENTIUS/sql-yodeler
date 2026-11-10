@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, MIGRATION_SQL, newestMigration, readMigrations, writeMigration, type CreatedMigration } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
@@ -93,7 +93,7 @@ describe.skipIf(!clickhouseReachable)("yodel lint on clickhouse", () => {
     expect(gated.code, gated.err).toBe(3);
     const approve = (json(gated) as { approve?: string }).approve ?? "";
     expect(approve).toMatch(/^chant approve migrate-e2e approve-migrate-e2e --plan /);
-    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir });
+    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
     expect(approved.code, approved.stderr).toBe(0);
     const applied = await yodel(at("apply", "e2e", "--json"));
     expect(applied.code, applied.err).toBe(0);
@@ -189,7 +189,7 @@ describe.skipIf(!postgresReachable)("yodel lint on postgres", () => {
     const gated = await yodel(at("apply", "e2e", "--json"));
     expect(gated.code, gated.err).toBe(3);
     const approve = (json(gated) as { approve?: string }).approve ?? "";
-    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir });
+    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
     expect(approved.code, approved.stderr).toBe(0);
     const applied = await yodel(at("apply", "e2e", "--json"));
     expect(applied.code, applied.err).toBe(0);

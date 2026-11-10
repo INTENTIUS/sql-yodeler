@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { json, yodel } from "../helpers/run.js";
 import { e2eProject } from "./names.js";
 
@@ -72,7 +72,7 @@ export function declarativeSuite(h: DialectHooks): void {
     const approve = async (command: string | undefined) => {
       expect(command).toMatch(/^chant approve /);
       const args = (command ?? "").split(" ").slice(1); // drop "chant"
-      const ran = await runChant(args, { cwd: dir });
+      const ran = await runChant(args, { cwd: dir, noColor: true, resolveFallback: true });
       expect(ran.code, ran.stderr).toBe(0);
     };
 

@@ -16,7 +16,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { yodelNewArgs, yodelRefusalReply } from "@intentius/chant-lexicon-sql/yodel-run";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { readMigrations } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
 import { postgres, postgresReachable } from "./emulator.js";
@@ -80,7 +80,7 @@ describe.skipIf(!postgresReachable)("yodel new --replace-own on postgres (#311)"
     const gated = await yodel(["apply", "e2e", "--json", "--dir", dir]);
     expect(gated.code, gated.err).toBe(3);
     const approve = (json(gated) as { chantApprove?: string }).chantApprove ?? "";
-    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir });
+    const approved = await runChant(approve.split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
     expect(approved.code, approved.stderr).toBe(0);
     const ran = await yodel(["apply", "e2e", "--json", "--dir", dir]);
     expect(ran.code, ran.err).toBe(0);

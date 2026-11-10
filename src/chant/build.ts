@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { YodelError, type Project, type SqlDialect } from "../project.js";
-import { runChant } from "./process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { checkOwnership, duplicateExport, syncSources } from "../sources/index.js";
 
 /** One declared object as the sql lexicon's build output holds it. */
@@ -53,6 +53,8 @@ export async function buildSchema(project: Project, options: { out?: string; env
     // `src` is a directory of the caller's own (yodel check's server snapshot); without it chant builds sourceDir.
     const result = await runChant(["build", ...(options.src ? [options.src] : []), "--lexicon", "sql", "--root-only", "-o", path], {
       cwd: project.dir,
+      noColor: true,
+      resolveFallback: true,
       ...(options.env ? { env: options.env } : {}),
     });
     if (result.code !== 0) {

@@ -22,7 +22,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { BuildOutput, BuiltObject } from "../src/chant/build.js";
-import { runChant } from "../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { createMigration, MIGRATION_JSON, MIGRATION_SQL, readMigrations, scanMigrations, writeMigration, type Migration } from "../src/migrations/index.js";
 import { migrationSilences } from "../src/lint/index.js";
 import { asWritten } from "../src/rebase/index.js";
@@ -263,7 +263,7 @@ for (const d of dialects) {
       expect(gated.code, gated.err).toBe(3);
       const approve = (json(gated) as { approve?: string }).approve ?? "";
       expect(approve).toMatch(/^chant approve migrate-e2e approve-migrate-e2e --plan /);
-      const approved = await runChant(approve.split(" ").slice(1), { cwd: p.dir });
+      const approved = await runChant(approve.split(" ").slice(1), { cwd: p.dir, noColor: true, resolveFallback: true });
       expect(approved.code, approved.stderr).toBe(0);
       const applied = await yodel(p.at("apply", "e2e", "--json"));
       expect(applied.code, applied.err).toBe(0);

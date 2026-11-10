@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import type { LiveDiffResult, UnobservedResource } from "@intentius/chant/lifecycle/live-diff";
 import type { DeepDiffResult, DeepEntityDrift, DeepEntityUnclaimed } from "@intentius/chant/lifecycle/deep-diff";
 import { YodelError, type Environment, type Project } from "../project.js";
-import { lastJsonLine, runChant } from "./process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { describeServer, type ServerInfo } from "../server.js";
 import type { Build, BuildOutput } from "./build.js";
 import { CH_ACCESS_TYPES } from "./access.js";
@@ -210,9 +210,11 @@ export async function readDrift(project: Project, env: Environment, options: { e
   // chant scopes the build to sourceDir (chant issue 4794); `src` is a directory the caller names.
   const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json", ...(options.src ? ["--src", options.src] : [])], {
     cwd: project.dir,
+    noColor: true,
+    resolveFallback: true,
     ...(options.env ? { env: options.env } : {}),
   });
-  const doc = lastJsonLine(result.stdout);
+  const doc = result.json;
   if (result.code !== 0 || doc === undefined) {
     const detail = (result.stderr || result.stdout).trim();
     throw new YodelError(`chant lifecycle diff ${env.name} --live failed (exit ${String(result.code)})${detail ? `:\n${detail}` : ""}`);

@@ -98,7 +98,7 @@ describe("yodel chant (#287)", () => {
   it("runs chant in a child, in chant's words, when the installed chant has no product entry", async () => {
     const ran: string[][] = [];
     const c = capture();
-    const child = (args: readonly string[], options: { onStdout?: (t: string) => void }) => {
+    const child = (args: readonly string[], options: { onStdout?: (t: string) => void } = {}) => {
       ran.push([...args]);
       options.onStdout?.("ran\n");
       return Promise.resolve({ code: 0, stdout: "ran\n", stderr: "" });

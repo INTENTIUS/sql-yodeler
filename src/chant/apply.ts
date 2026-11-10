@@ -13,7 +13,7 @@ import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { opExportName } from "./export-name.js";
 import { YodelError, type Environment, type Project, type SqlDialect } from "../project.js";
 import { approveCommand, type ApprovalMode } from "../approval-mode/index.js";
-import { runChant } from "./process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { EXIT_WAITING } from "../exit.js";
 
 /** The ApplyOp yodel runs for an environment. */
@@ -172,6 +172,8 @@ export function gatedCommands(run: Pick<ApplyRun, "chantApprove" | "planDigest">
 export async function runApplyOp(project: Project, op: ApplyOpRef, options: { env?: NodeJS.ProcessEnv; onOutput?: (text: string) => void } = {}): Promise<ApplyRun> {
   const result = await runChant(["run", op.name, "--gated-exit", String(EXIT_WAITING)], {
     cwd: project.dir,
+    noColor: true,
+    resolveFallback: true,
     ...(options.env ? { env: options.env } : {}),
     ...(options.onOutput ? { onStdout: options.onOutput, onStderr: options.onOutput } : {}),
   });

@@ -9,7 +9,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runChant } from "../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { repoRoot } from "./helpers/run.js";
 
 const example = join(repoRoot, "examples", "computed");
@@ -25,7 +25,7 @@ async function build(params: string[] = []): Promise<Built> {
     for (const f of ["chant.config.ts", "package.json", "src", "lib"]) cpSync(join(example, f), join(dir, f), { recursive: true });
     symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"), "dir");
     const out = join(dir, "schema.json");
-    const ran = await runChant(["build", "src", "--lexicon", "sql", ...params.flatMap((p) => ["--param", p]), "-o", out], { cwd: dir });
+    const ran = await runChant(["build", "src", "--lexicon", "sql", ...params.flatMap((p) => ["--param", p]), "-o", out], { cwd: dir, noColor: true, resolveFallback: true });
     expect(ran.code, ran.stderr || ran.stdout).toBe(0);
     const { objects } = JSON.parse(readFileSync(out, "utf8")) as { objects: { export: string; ddl: string }[] };
     return { exports: objects.map((o) => o.export).sort(), ddl: Object.fromEntries(objects.map((o) => [o.export, o.ddl])) };

@@ -22,7 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { join } from "node:path";
 import { clickhouseQuery, type ClickHouseEndpoint } from "@intentius/chant-lexicon-sql/clickhouse/http";
 import { dockerAvailable } from "@intentius/chant-lexicon-sql/core/container";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration, type Migration } from "../../src/migrations/index.js";
 import { json, yodel } from "../helpers/run.js";
@@ -82,7 +82,7 @@ async function approvedApply(env: string) {
   expect(gated.code, gated.err).toBe(3);
   const doc = json(gated) as StatusDoc;
   expect(doc.approve).toMatch(new RegExp(`^chant approve migrate-${env} approve-migrate-${env} --plan jcs1-sha256:`));
-  const ran = await runChant((doc.approve ?? "").split(" ").slice(1), { cwd: dir });
+  const ran = await runChant((doc.approve ?? "").split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
   expect(ran.code, ran.stderr).toBe(0);
   const applied = await yodel(at("apply", env, "--json"));
   expect(applied.code, applied.err).toBe(0);

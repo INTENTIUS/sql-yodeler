@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { YodelError, type SqlDialect } from "../project.js";
-import { runChant, type ChantResult, type RunChantOptions } from "../chant/process.js";
+import { runChant, type ChantRun, type RunChantOptions } from "@intentius/chant/chant-install";
 import { version } from "../version.js";
 
 /** The repository the templates are released from, tagged `v<version>`. */
@@ -163,7 +163,7 @@ export function nextSteps(dir: string): string {
   ].join("\n");
 }
 
-type Runner = (args: readonly string[], options: RunChantOptions) => Promise<ChantResult>;
+type Runner = (args: readonly string[], options: RunChantOptions) => Promise<ChantRun>;
 
 /** `yodel create`, running chant with `run` (tests pass their own). */
 export function createCommand(run: Runner = runChant): Command {
@@ -176,7 +176,7 @@ export function createCommand(run: Runner = runChant): Command {
         const a = parseCreateArgs(args);
         const why = occupied(resolve(a.dir));
         if (why) throw new YodelError(`refused: ${why}; nothing was made`);
-        const ran = await run(chantInitArgs(a), { cwd: process.cwd(), onStdout: io.out, onStderr: io.err });
+        const ran = await run(chantInitArgs(a), { cwd: process.cwd(), noColor: true, resolveFallback: true, onStdout: io.out, onStderr: io.err });
         if (ran.code !== 0) throw new YodelError(`chant init --from ${templateSource(a.dialect, a.from)} failed (exit ${String(ran.code)}; chant says why above); nothing was made`);
         io.out(nextSteps(a.dir));
         return 0;

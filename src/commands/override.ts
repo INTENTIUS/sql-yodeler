@@ -11,7 +11,7 @@ import { findApplyOp } from "../chant/apply.js";
 import { declarativeDigest } from "../declarative/review.js";
 import { judgeDeclarative } from "../declarative/plan.js";
 import { policyAtBase } from "../config/base.js";
-import { runChant } from "../chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import { runnableAsWriter } from "../chant/runnable.js";
 import { migrationsApprovalAtBase } from "../approval-mode/index.js";
 import {
@@ -238,7 +238,7 @@ async function recordOverride(c: {
     );
   }
   const args = ["approve", "policy-override", subject, ...denied.flatMap((r) => ["--rule", r]), "--reason", reason, ...(by ? ["--approver", by] : []), ...(approval.mode === "sealed" ? ["--sign"] : [])];
-  const ran = await runChant(args, { cwd: project.dir, onStdout: io.err, onStderr: io.err });
+  const ran = await runChant(args, { cwd: project.dir, noColor: true, resolveFallback: true, onStdout: io.err, onStderr: io.err });
   if (ran.code !== 0) throw new YodelError(`chant approve policy-override ${subject} failed (exit ${String(ran.code)}); the override was not recorded`);
   io.out(`Recorded an override of ${denied.join(", ")} for ${digest}${by ? ` by ${by}` : ""}: ${reason}\n`);
   io.out(`It counts for this plan only. ${c.verb} with:\n  ${runnableAsWriter(next, project.dir, resolveEnvironment(project, c.env).profile)}\n`);

@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import type { Command, Io } from "../command.js";
 import { guarded } from "../env-args.js";
 import { loadProject, YodelError } from "../project.js";
-import { runChant, type ChantResult, type RunChantOptions } from "../chant/process.js";
+import { runChant, type ChantRun, type RunChantOptions } from "@intentius/chant/chant-install";
 
 const SUBCOMMANDS = ["up", "down", "status"] as const;
 
@@ -71,7 +71,7 @@ export function chantEmulatorArgs(a: EmulatorArgs): string[] {
   return ["emulator", a.sub, "--lexicon", "sql", ...a.ports.flatMap((p) => ["--port", p]), ...(a.json ? ["--json"] : [])];
 }
 
-type Runner = (args: readonly string[], options: RunChantOptions) => Promise<ChantResult>;
+type Runner = (args: readonly string[], options: RunChantOptions) => Promise<ChantRun>;
 
 /** `yodel emulator`, running chant with `run` (tests pass their own). */
 export function emulatorCommand(run: Runner = runChant): Command {
@@ -84,7 +84,7 @@ export function emulatorCommand(run: Runner = runChant): Command {
         const a = parseEmulatorArgs(args);
         // chant reads the project's lexicons from its chant.config.ts, so the project is found first, from a directory inside it too.
         const project = await loadProject(a.dir);
-        const ran = await run(chantEmulatorArgs(a), { cwd: project.dir, onStdout: io.out, onStderr: io.err });
+        const ran = await run(chantEmulatorArgs(a), { cwd: project.dir, noColor: true, resolveFallback: true, onStdout: io.out, onStderr: io.err });
         return ran.code;
       }),
   };

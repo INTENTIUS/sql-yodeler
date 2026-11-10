@@ -16,7 +16,7 @@
 import type { Io } from "../command.js";
 import { EXIT_FAILED } from "../exit.js";
 import { chantProduct, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
-import { runChant } from "../chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 
 export const CHANT_VERB = "chant";
 
@@ -56,6 +56,6 @@ export async function runChantVerb(argv: string[], io: Io, deps: ChantVerbDeps =
     if (argv[0] === "commit") await setRefusalReply();
     return product.runChantInProcess(argv, YODEL_WORDS);
   }
-  const ran = await (deps.child ?? runChant)(argv, { cwd: deps.cwd ?? process.cwd(), onStdout: io.out, onStderr: io.err });
+  const ran = await (deps.child ?? runChant)(argv, { cwd: deps.cwd ?? process.cwd(), noColor: true, resolveFallback: true, onStdout: io.out, onStderr: io.err });
   return ran.code;
 }

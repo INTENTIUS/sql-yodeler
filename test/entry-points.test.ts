@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Io } from "../src/command.js";
-import type { ChantResult, RunChantOptions } from "../src/chant/process.js";
+import type { ChantRun, RunChantOptions } from "@intentius/chant/chant-install";
 import { chantInitArgs, createCommand, parseCreateArgs, templateSource } from "../src/commands/create.js";
 import { emulatorCommand } from "../src/commands/emulator.js";
 import { version } from "../src/version.js";
@@ -27,10 +27,10 @@ function temp(): string {
 }
 
 /** A runner that records each call and answers with `result`, writing `stdout` through the caller's callback. */
-function recorder(result: Partial<ChantResult> = {}) {
+function recorder(result: Partial<ChantRun> = {}) {
   const calls: Array<{ args: string[]; cwd: string }> = [];
-  const run = (args: readonly string[], options: RunChantOptions): Promise<ChantResult> => {
-    calls.push({ args: [...args], cwd: options.cwd });
+  const run = (args: readonly string[], options: RunChantOptions): Promise<ChantRun> => {
+    calls.push({ args: [...args], cwd: options.cwd ?? "" });
     if (result.stdout) options.onStdout?.(result.stdout);
     return Promise.resolve({ code: 0, stdout: "", stderr: "", ...result });
   };

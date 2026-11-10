@@ -17,7 +17,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { join } from "node:path";
-import { runChant } from "../../src/chant/process.js";
+import { runChant } from "@intentius/chant/chant-install";
 import type { BuildOutput, BuiltObject } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration, type CreatedMigration } from "../../src/migrations/index.js";
 import { json, projectFrom, yodel } from "../helpers/run.js";
@@ -93,7 +93,7 @@ describe.skipIf(!clickhouseReachable)("Op steps in a migration, on clickhouse", 
 
   const approve = async (command: string | undefined) => {
     expect(command).toMatch(new RegExp(`^chant approve migrate-${ENV} approve-migrate-${ENV} --plan jcs1-sha256:[0-9a-f]{64}$`));
-    const ran = await runChant((command ?? "").split(" ").slice(1), { cwd: dir });
+    const ran = await runChant((command ?? "").split(" ").slice(1), { cwd: dir, noColor: true, resolveFallback: true });
     expect(ran.code, ran.stderr).toBe(0);
   };
 
