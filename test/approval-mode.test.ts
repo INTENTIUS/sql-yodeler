@@ -196,7 +196,8 @@ describe("yodel ci, for approval modes", () => {
     expect(job?.rules?.[0]?.if).toBe('$CI_PIPELINE_SOURCE == "merge_request_event"');
     expect(job?.script?.slice(-2)).toEqual(["yodel config check dev prod --write-probe", "yodel chant run wave --spec yodel-waves.json --record-plans"]);
     const main = parseYAMLDocument(gitlabPipeline(envs).content) as { stages: string[] };
-    expect(main.stages.slice(0, 3)).toEqual(["review", "plans", "wave-1-dev"]);
+    // After review, chant's plan and plan-note stages (sql-yodeler issue 345), then the plans stage before the waves.
+    expect(main.stages.slice(0, 5)).toEqual(["review", "plan", "plan-note", "plans", "wave-1-dev"]);
   });
 
   it("renders no plans job when no wave is pr-review", async () => {

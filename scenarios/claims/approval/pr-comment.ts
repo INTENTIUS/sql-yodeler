@@ -7,8 +7,8 @@ import { addColumn, addTable, mainTable } from "../../lib/schema.js";
  * The pull request comment lists each pending migration with every
  * statement's rule and class, and the digest it gives is the one the
  * migrations Op's gate asks for; planning it applies nothing. The body is
- * yodel's (`yodel plan --format markdown` is what --comment posts);
- * posting it on a forge is chant's pr-forge, tested in chant.
+ * yodel's (`yodel plan --format markdown` is the note --pr-note hands to
+ * chant); posting it on a forge is chant's note job, tested in chant.
  * BREAK: another migration lands after the comment was posted, so the
  * comment no longer shows what the gate asks to approve.
  */

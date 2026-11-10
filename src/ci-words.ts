@@ -70,6 +70,18 @@ export const YODEL_WORDS: YodelWords = {
   notify: { source: "sql-yodeler", headers: "x-yodel" },
 };
 
+/**
+ * The pull request pipeline's env for chant's product plan (chant issue
+ * 4799): each environment is a target of it, so its note's marker is
+ * `<!-- chant-pr:yodel-pr:<env> -->` and its status `yodel/plan/<env>`.
+ * `yodel plan --pr-note` writes it into the hand-off, which chant's note job
+ * checks against its own.
+ */
+export const YODEL_PR_ENV = "yodel-pr";
+
+/** The name of yodel's own line in a plan note, `<!-- yodel:plan env=<env> -->` (chant's `productMarker`). */
+export const YODEL_NOTE_MARKER = "yodel:plan";
+
 /** The words without their comment commands, for a part of chant's product pipeline that renders none of their jobs (the waves). */
 export const WAVE_WORDS: YodelWords = { ...YODEL_WORDS, commands: {} };
 

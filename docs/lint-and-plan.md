@@ -34,7 +34,8 @@ This page is for a team that wants SQL Yodeler to review migrations in pull requ
 On each pull request, every job with readers or with no database credentials at all:
 
 - `lint`: `yodel ci --check`, `yodel lint`, and the replay check, which replays every migration into a throwaway server the job starts. It holds no database credentials.
-- `plan-<env>`: `yodel config check <env> --write-probe`, which tries a write and fails the job if the server allows it, then `yodel plan <env> --comment`. It holds the environment's reader, and the reader of the environment before it in the waves (`waves[].requires`), so the plan can show where each migration has run.
+- `plan-<env>`: `yodel config check <env> --write-probe`, which tries a write and fails the job if the server allows it, then `yodel plan <env> --pr-note`, which writes the note for chant's note job. It holds the environment's reader, and the reader of the environment before it in the waves (`waves[].requires`), so the plan can show where each migration has run, and no forge token.
+- `plan-note-<env>`: chant's note job, at the target branch's commit, which posts the note and sets `yodel/plan/<env>`. On GitLab it runs in a scheduled pipeline of the default branch with `CHANT_PLAN_NOTES=1` ([The pull request comment](approval.md#the-pull-request-comment)).
 
 On its schedule, `watch-<env>` compares the server with the declared schema and keeps a tracking issue open while it finds drift ([Drift](drift.md)). It holds the environment's reader.
 

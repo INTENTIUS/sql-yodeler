@@ -149,7 +149,7 @@ The run happened in a temporary copy of this directory, a git repository with a 
     { run: "npx yodel lint", code: 1, expect: ["checksum"], quote: "lint.md#checksum" },
     { run: "npx yodel lint --update-checksum {id:events-by-id}", code: 0, expect: ["1 silenced"] },
     { run: "git add -A && git commit -q -m 'feat: events sorted by id' && git push -q origin main", code: 0, hide: true },
-    { say: "The pull request comment (`yodel plan dev --comment` in CI) is this Markdown:" },
+    { say: "The pull request note (in CI, `yodel plan dev --pr-note` hands it to chant's note job, which posts it) is this Markdown:" },
     { run: "npx yodel plan dev --format markdown", code: 0, expect: ["ClickHouseRebuildOp"], quote: "approval.md#comment" },
     { run: "npx yodel apply dev", code: 3, expect: ["is waiting at gate"] },
     { run: "{approve}", code: 0 },

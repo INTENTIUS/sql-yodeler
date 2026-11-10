@@ -1,6 +1,6 @@
 /**
  * The plan note through chant's note renderer (#290, chant#4550): `yodel
- * plan <env> --comment` and `--format markdown` give chant's `renderPrNote`
+ * plan <env> --pr-note` and `--format markdown` give chant's `renderPrNote`
  * in yodel's words (../ci-words.ts), so every product's note reads the
  * same.
  *
@@ -8,15 +8,16 @@
  * digest, the approval line and the change-set summary. The SQL rows chant's
  * table does not carry (each statement with its rule and class, checks,
  * Op and manual steps, the promotion columns, each policy rule's outcome
- * with its override line, what moved since the last note, the wave) go in
- * the member detail section of chant#4573 (`PrMemberDetail`, the shape a
- * lexicon's `prNoteDetail` returns), rendered from yodel's plan, which holds
- * more than the change-set part does.
+ * with its override line, the wave) go in the member detail section of
+ * chant#4573 (`PrMemberDetail`, the shape a lexicon's `prNoteDetail`
+ * returns), rendered from yodel's plan, which holds more than the change-set
+ * part does.
  *
- * The note keeps yodel's marker, `<!-- yodel:plan env=<env> -->`, on its
- * first line, so `--comment` updates the note it posted before the switch
- * and an open pull request keeps one note. The digest's subject stays at the
- * end, hidden, as before.
+ * `--format markdown` prints yodel's marker, `<!-- yodel:plan env=<env> -->`,
+ * on the first line. Under `--pr-note` chant's note job writes its own marker
+ * and keeps yodel's as the product's line, and it says what moved since the
+ * previous note from the plan's subject ({@link noteSubject}, chant issue
+ * 4972), which yodel no longer keeps in the note itself.
  *
  * chant's note names the environment in its approve line (`{target}`) and,
  * under per-wave words, says the waves apply on merge (chant#4601). yodel's
@@ -24,8 +25,8 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chantProduct, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
-import { describeMove, encodeSubject } from "../versioned/explain.js";
 import { describeWave } from "../waves/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
 import type { VersionedPlan } from "./model.js";
@@ -175,7 +176,6 @@ export function planDetailLines(plan: VersionedPlan, withSql: boolean): string[]
   if (plan.problems.length > 0) out.push("", `#### Integrity problems (${String(plan.problems.length)})`, "", ...plan.problems.map((p) => `- ${cell(p)}`));
   if (plan.refusal) out.push("", `**\`yodel apply\` would refuse (exit ${String(plan.refusal.exitCode)})**, and applies nothing:`, "", fence(plan.refusal.message, "text"));
   if (plan.policy && plan.policy.length > 0) out.push("", ...policyMarkdown(plan.policy, plan.environment));
-  if (plan.sinceLast) out.push("", `Since the previous version of this note (\`${plan.sinceLast.approved}\`): ${describeMove(plan.sinceLast)}.`);
   if (plan.wave) {
     const promotions = plan.wave.promotions;
     if (promotions.length > 0) {
@@ -198,19 +198,54 @@ function gateOf(plan: Pick<VersionedPlan, "wave" | "approval" | "digest">): { op
   return { op: "", gate: "", digest: plan.digest ?? "" };
 }
 
-/** Yodel's marker first, chant's note, the subject last: what `--comment` posts. */
-function framed(env: string, body: string, subject: string | undefined): string {
-  return `${commentMarker(env)}\n${body.replace(/\n*$/, "\n")}${subject ? `\n<!-- yodel:subject ${subject} -->\n` : ""}`;
+/** Yodel's marker first, then chant's note: what `--format markdown` prints. */
+function framed(env: string, body: string): string {
+  return `${commentMarker(env)}\n${body.replace(/\n*$/, "\n")}`;
 }
+
+/**
+ * The plan's subject for chant's note job (chant issue 4972): the digest as
+ * its id, and the parts it is taken over, so the next note says which moved.
+ * A value that is not a plain word is kept by a short hash of it.
+ */
+export function noteSubject(plan: Pick<VersionedPlan, "digest" | "subject">): { id: string; parts: Record<string, string> } | undefined {
+  const s = plan.subject;
+  if (!s || !plan.digest) return undefined;
+  const word = (v: string): string => (/^[A-Za-z0-9_.,:+=-]{1,1024}$/.test(v) ? v : `h:${createHash("sha256").update(v).digest("hex").slice(0, 16)}`);
+  const parts: Record<string, string> = {
+    environment: word(s.environment),
+    history: word(s.historyDatabase),
+    topology: word(JSON.stringify(Object.entries(s.topology ?? { kind: "single" }).sort(([a], [b]) => a.localeCompare(b)))),
+    live: word(s.live),
+  };
+  for (const a of s.applied) parts[`applied/${a.id}`] = word(a.checksum);
+  for (const p of s.pending) {
+    parts[`pending/${p.id}`] = word(p.checksum);
+    if (p.done.length > 0) parts[`done/${p.id}`] = word(p.done.join(","));
+  }
+  parts.order = word(s.pending.map((p) => p.id).join(","));
+  return { id: plan.digest, parts };
+}
+
+/** How chant's note job names what moved in yodel's subject parts (chant issue 4972). */
+export const SUBJECT_PART_WORDS: Record<string, { added?: string; gone?: string; changed?: string }> = {
+  applied: { added: "{items} applied", gone: "{items} no longer applied", changed: "{items} recorded with another checksum" },
+  pending: { added: "{items} now pending", gone: "{items} no longer pending", changed: "{items} edited" },
+  done: { added: "statements of {items} done", gone: "{items} started over", changed: "more of {items} done" },
+  order: { changed: "the pending order changed" },
+  live: { changed: "the live schema changed" },
+  history: { changed: "the history table changed" },
+  topology: { changed: "the topology changed" },
+  environment: { changed: "the environment changed" },
+};
 
 /** One environment's note through chant, cut to `limit` (chant's `noteLimit` for the forge; GitHub's when none is named). */
 export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote; limit?: number }): Promise<string> {
   const note = options.note ?? (await chantNote());
   const { op, gate, digest } = gateOf(plan);
-  const subject = plan.subject ? encodeSubject(plan.subject) : undefined;
   const limit = options.limit ?? noteLimit();
-  // chant cuts its note to what is left once yodel's marker and subject are around it.
-  const room = limit - framed(plan.environment, "", subject).length;
+  // chant cuts its note to what is left once yodel's marker is above it.
+  const room = limit - framed(plan.environment, "").length;
   const render = (withSql: boolean) =>
     framed(
       plan.environment,
@@ -227,7 +262,6 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
         }),
         { words: note.words, limit: room },
       ),
-      subject,
     );
   const body = render(true);
   return body.length > limit ? render(false) : body;
@@ -243,7 +277,7 @@ export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: s
   const note = options.note ?? (await chantNote());
   if (!tenantSetNoteFits(note)) return undefined;
   const limit = options.limit ?? noteLimit();
-  const room = limit - framed(plan.environment, "", undefined).length;
+  const room = limit - framed(plan.environment, "").length;
   const members = plan.tenants.map((t) => ({ environment: t.environment, digest: t.digest, pending: t.pending.length, refused: t.refusal !== undefined, part: planPart(t, t.environment) }));
   const wave = plan.wave;
   const render = (withSql: boolean) =>
@@ -265,7 +299,6 @@ export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: s
         }),
         { words: note.words, limit: room },
       ),
-      undefined,
     );
   const body = render(true);
   return body.length > limit ? render(false) : body;

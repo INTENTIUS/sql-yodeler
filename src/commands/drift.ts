@@ -147,8 +147,7 @@ Options:
                         updated while it changes, closed when it is gone. A run
                         that cannot read a declared object leaves the issue as
                         it is, and says so. The forge, repository and token
-                        come from the CI job's environment, as for yodel plan
-                        --comment:
+                        come from the CI job's environment unless given:
     --forge <f>         github, gitlab or forgejo
     --repo <repo>       owner/name (GitHub, Forgejo), or the project id or path (GitLab)
     --api-url <url>     the REST API base

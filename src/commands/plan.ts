@@ -1,5 +1,6 @@
-import { writeFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { noteLimit } from "@intentius/chant/plan-summary";
 import { eventFromRun, sendEvent } from "../notify/index.js";
@@ -12,13 +13,11 @@ import { planEnvironment } from "../chant/plan.js";
 import { hasMigrations } from "../versioned/index.js";
 import { collectDeclarativePlan, declarativePlanExitCode, declarativePlanJson, renderDeclarativeMarkdown, renderDeclarativeText } from "../declarative/plan.js";
 import { runnable } from "../chant/runnable.js";
-import { decodeSubject } from "../versioned/explain.js";
 import { collectVersionedPlan } from "../pr/model.js";
-import { overdueNotes } from "../pr/overdue.js";
-import { commentMarker, planJsonVersioned, renderPlanText, subjectIn } from "../pr/render.js";
+import { planJsonVersioned, renderPlanText } from "../pr/render.js";
 import { planPart, slotPart } from "../pr/part.js";
-import { describeForge, resolveForge, type Forge, type ForgeFlags } from "../pr/forge.js";
-import { renderPlanNote, renderTenantSetNote } from "../pr/note.js";
+import { noteSubject, renderPlanNote, renderTenantSetNote } from "../pr/note.js";
+import { YODEL_PR_ENV } from "../ci-words.js";
 import { baseRef } from "../config/base.js";
 import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
@@ -29,8 +28,7 @@ import type { VersionedPlan } from "../pr/model.js";
 const usage =
   "usage: yodel plan <env> [--json] [--dir <project>] [--format text|markdown|json]\n" +
   "                        [--allow-out-of-order] [--op <name>] [--part <file>]\n" +
-  "                        [--comment [--forge github|gitlab|forgejo]\n" +
-  "                         [--repo <repo>] [--pr <n>] [--api-url <url>] [--token-env <VAR>]]";
+  "                        [--pr-note <dir>]";
 
 const help = `${usage}
 
@@ -38,8 +36,7 @@ Declarative project (no migrations/ directory): shows the classified change
 from the environment's live database (sql.profiles.<env>) to the declared
 schema, as chant sql plan reports it, with the lint findings over the
 planned changes, each policy rule's outcome (yodel.config.ts policy, at the
-base commit) and how the ApplyOp's gate is approved. --comment posts it.
---allow-out-of-order is for versioned migrations: the declarative path has
+base commit) and how the ApplyOp's gate is approved. --allow-out-of-order is for versioned migrations: the declarative path has
 no history of migrations to be out of order with.
 
 Versioned project (a migrations/ directory): shows the pending migrations,
@@ -55,8 +52,8 @@ member's plan. Reads only.
 An environment with a tenant set (yodel.config.ts environments.<env>.tenants)
 is planned tenant by tenant, each against its own history, and shown as one
 plan: tenants with the same migrations pending once, as a group, then the
-wave's one approval of the set digest over every tenant. --comment posts it
-as one comment for the set. <env>/<tenant> plans one tenant. For a set
+wave's one approval of the set digest over every tenant, as one note for the
+set. <env>/<tenant> plans one tenant. For a set
 read by a query, <env>/@<i>of<n> plans one slot of its wave as the apply
 pipeline runs it: every tenant the query lists now whose name hashes to
 the slot; with --part, one part for the slot.
@@ -75,22 +72,13 @@ Options:
                         change-set part (planner sql), one entry per object,
                         with the plan digest yodel apply binds; a chant Op
                         reads it with readChangeSetPart and composeChangeSet
-  --comment             post the markdown as one comment on the
-                        pull (merge) request, updating the one posted before;
-                        prints the text plan. The forge, repository, request
-                        and API come from the CI job's environment
-                        (GitHub Actions, GitLab CI, Forgejo Actions) unless
-                        given:
-    --forge <f>         github, gitlab or forgejo
-    --repo <repo>       owner/name (GitHub, Forgejo) or the project id (GitLab)
-    --pr <n>            the pull request number or merge request iid
-    --api-url <url>     the REST API base (https://api.github.com,
-                        https://gitlab.example/api/v4,
-                        https://forgejo.example/api/v1)
-    --token-env <VAR>   the variable holding the token (default the first
-                        set of CHANT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN;
-                        CHANT_GITLAB_TOKEN, GITLAB_TOKEN; CHANT_FORGEJO_TOKEN,
-                        FORGEJO_TOKEN, GH_TOKEN, GITHUB_TOKEN)
+  --pr-note <dir>       write the note for the pull (merge) request to
+                        <dir>/pr-plan-note.json, chant's plan note hand-off,
+                        which chant's note job posts with the plan status
+                        yodel/plan/<env>; prints the text plan. It reads
+                        PR_NUMBER, which chant's plan job sets, and needs no
+                        forge token: the note job says what moved since the
+                        previous note
   -C, --dir <dir>       the project directory (default: the working directory)
 
 Exit codes:
@@ -103,7 +91,7 @@ Exit codes:
      manual step apply does not run yet
   1  no plan could be made: a bad config, an unknown environment, a
      declaration chant cannot build, a server it cannot read, a live object
-     it cannot read, a comment the forge refused; versioned: apply would
+     it cannot read, a note that could not be written; versioned: apply would
      refuse: a checksum mismatch, an applied migration gone from the
      directory, an out-of-order migration, a fork or another problem in the
      migrations directory
@@ -113,11 +101,11 @@ interface PlanArgs {
   env: string;
   dir: string;
   format: "text" | "markdown" | "json";
-  comment: boolean;
+  /** Where `--pr-note` writes the plan note hand-off. */
+  prNote: string | undefined;
   allowOutOfOrder: boolean;
   op: string | undefined;
   part: string | undefined;
-  forge: ForgeFlags;
   /** The flags only a versioned project takes. */
   versionedOnly: string[];
 }
@@ -133,15 +121,10 @@ function parsePlanArgs(args: string[]): PlanArgs {
         json: { type: "boolean" },
         dir: { type: "string", short: "C" },
         format: { type: "string" },
-        comment: { type: "boolean" },
+        "pr-note": { type: "string" },
         "allow-out-of-order": { type: "boolean" },
         op: { type: "string" },
         part: { type: "string" },
-        forge: { type: "string" },
-        repo: { type: "string" },
-        pr: { type: "string" },
-        "api-url": { type: "string" },
-        "token-env": { type: "string" },
       },
     });
   } catch (e) {
@@ -154,18 +137,14 @@ function parsePlanArgs(args: string[]): PlanArgs {
   const format = str("format") ?? (v.json === true ? "json" : "text");
   if (format !== "text" && format !== "markdown" && format !== "json") throw new YodelError(`--format must be text, markdown or json, got ${JSON.stringify(format)}\n${usage}`);
   if (v.json === true && format !== "json") throw new YodelError(`--json and --format ${format} cannot be combined\n${usage}`);
-  const forgeFlags = ["forge", "repo", "pr", "api-url", "token-env"].filter((k) => str(k) !== undefined);
-  if (forgeFlags.length > 0 && v.comment !== true) throw new YodelError(`--${forgeFlags.join(", --")} ${forgeFlags.length === 1 ? "goes" : "go"} with --comment\n${usage}`);
-  const forge: ForgeFlags = { forge: str("forge"), repo: str("repo"), pr: str("pr"), apiUrl: str("api-url"), tokenEnv: str("token-env") };
   return {
     env,
     dir: str("dir") ?? process.cwd(),
     format,
-    comment: v.comment === true,
+    prNote: str("pr-note"),
     allowOutOfOrder: v["allow-out-of-order"] === true,
     op: str("op"),
     part: str("part"),
-    forge,
     versionedOnly: [...(v["allow-out-of-order"] === true ? ["--allow-out-of-order"] : []), ...(str("part") !== undefined ? ["--part"] : [])],
   };
 }
@@ -192,19 +171,21 @@ export const plan: Command = {
 async function declarativePlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
   const refusal = declarativeRefusal(project, env.name);
   if (refusal) throw refusal;
-  const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
+  const pr = a.prNote !== undefined ? prNoteTarget(project) : undefined;
   const build = await buildSchema(project);
   try {
     const result = await collectDeclarativePlan(project, env, build, await planEnvironment(project, env, build), { opName: a.op });
-    if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-    // #56: chant's note would ask for an approval per tenant, so the set keeps yodel's own note until chant can name the set once.
-  if (forge) await postComment(forge, commentMarker(env.name), renderDeclarativeMarkdown(result, { limit: noteLimit(forge.target.kind) }), io);
+    const code = declarativePlanExitCode(result);
+    if (pr && a.prNote !== undefined) {
+      const body = renderDeclarativeMarkdown(result, { limit: noteLimit(noteForge()) });
+      await writeNote(a.prNote, env.name, pr, body, code === 0 ? "success" : "failure", code === 0 ? "planned" : `a change needs its own Op (exit ${String(code)})`, undefined, io);
+    }
     const doc = declarativePlanJson(result);
     if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
     else if (a.format === "markdown") io.out(renderDeclarativeMarkdown(result));
     else io.out(renderDeclarativeText(result));
     await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
-    return declarativePlanExitCode(result);
+    return code;
   } finally {
     build.dispose();
   }
@@ -215,19 +196,17 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
     if (a.part !== undefined) throw new YodelError(`--part writes one environment's plan, and ${env.name} is a tenant set: plan one tenant, yodel plan ${env.name}/<tenant> --part <file>`);
     return tenantSetPlan(project, env, a, io);
   }
-  const marker = commentMarker(env.name);
-  // Resolve the forge first: a job missing its token fails before it reads the server.
-  const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
-  const existing = forge ? await forge.client.findComment(prOf(forge), marker) : undefined;
-  const carried = existing ? subjectIn(existing.body) : undefined;
-  const previous = carried ? decodeSubject(carried) : undefined;
-
-  const result = await collectVersionedPlan(project, env, { allowOutOfOrder: a.allowOutOfOrder, opName: a.op, previous });
+  // The pull request first: a job that does not name one fails before it reads the server.
+  const pr = a.prNote !== undefined ? prNoteTarget(project) : undefined;
+  const result = await collectVersionedPlan(project, env, { allowOutOfOrder: a.allowOutOfOrder, opName: a.op });
   const code = result.refusal?.exitCode ?? 0;
 
-  if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  // chant's note in yodel's words (#290).
-  if (forge) await postComment(forge, marker, await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref, limit: noteLimit(forge.target.kind) }), io);
+  // chant's note in yodel's words (#290), handed to chant's note job with the plan's subject (chant issues 4963, 4972).
+  if (pr && a.prNote !== undefined) {
+    const body = await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref, limit: noteLimit(noteForge()) });
+    const description = result.refusal ? `yodel apply would refuse (exit ${String(result.refusal.exitCode)})` : `${String(result.pending.length)} pending`;
+    await writeNote(a.prNote, env.name, pr, body, result.refusal ? "failure" : "success", description, noteSubject(result), io);
+  }
   if (a.part !== undefined) {
     const file = resolve(a.part);
     writeFileSync(file, `${JSON.stringify(planPart(result, basename(project.dir)), null, 2)}\n`);
@@ -256,7 +235,7 @@ async function slotPlan(project: Project, slot: { env: string; index: number; co
     throw new YodelError(`${a.env} is a slot of a tenant set's wave, and ${slot.env}'s tenant set is not read by a query (yodel.config.ts environments.${slot.env}.tenants.query): plan a tenant with yodel plan ${slot.env}/<tenant>, or the set with yodel plan ${slot.env}`);
   }
   if (!hasMigrations(project)) throw new YodelError(`${a.env} is a slot of a tenant set's wave, for versioned migrations, and ${project.dir} has no migrations/ directory with a migration`);
-  if (a.comment || a.format === "markdown") throw new YodelError(`${a.env} is a run of the apply pipeline, not something a pull request shows: plan the set with yodel plan ${slot.env}${a.comment ? " --comment" : " --format markdown"}`);
+  if (a.prNote !== undefined || a.format === "markdown") throw new YodelError(`${a.env} is a run of the apply pipeline, not something a pull request shows: plan the set with yodel plan ${slot.env}${a.prNote !== undefined ? " --pr-note <dir>" : " --format markdown"}`);
   const tenants: VersionedPlan[] = [];
   for (const t of await slotTenants(project, slot)) {
     tenants.push(await collectVersionedPlan(project, resolveEnvironment(project, tenantTarget(slot.env, t)), { allowOutOfOrder: a.allowOutOfOrder, opName: a.op, ledger: null }));
@@ -274,31 +253,53 @@ async function slotPlan(project: Project, slot: { env: string; index: number; co
   return tenants.find((t) => t.refusal)?.refusal?.exitCode ?? 0;
 }
 
-/** `yodel plan <set>` (#56): every tenant, grouped, and one comment for the set. */
+/** `yodel plan <set>` (#56): every tenant, grouped, and one note for the set. */
 async function tenantSetPlan(project: Project, env: Environment, a: PlanArgs, io: Io): Promise<number> {
-  const forge = a.comment ? await resolveForge(a.forge, process.env, "--comment") : undefined;
+  const pr = a.prNote !== undefined ? prNoteTarget(project) : undefined;
   const result = await collectTenantSetPlan(project, env.name, { allowOutOfOrder: a.allowOutOfOrder });
-  if (forge) result.notes.push(...(await watchNotes(project, env, forge, io)));
-  if (forge) {
-    const limit = noteLimit(forge.target.kind);
-    await postComment(forge, commentMarker(env.name), (await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref, limit })) ?? renderTenantSetMarkdown(result, { limit }), io);
+  const code = tenantSetExitCode(result);
+  if (pr && a.prNote !== undefined) {
+    const limit = noteLimit(noteForge());
+    // #56: chant's note would ask for an approval per tenant, so the set may keep yodel's own note, handed over as text (chant issue 4963).
+    const body = (await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref, limit })) ?? renderTenantSetMarkdown(result, { limit });
+    await writeNote(a.prNote, env.name, pr, body, code === 0 ? "success" : "failure", code === 0 ? `${String(result.tenants.length)} tenants planned` : `a tenant's apply would refuse (exit ${String(code)})`, undefined, io);
   }
   if (a.format === "json") io.out(`${JSON.stringify(tenantSetJson(result), null, 2)}\n`);
   else if (a.format === "markdown") io.out(((await renderTenantSetNote(result, { dir: project.dir, base: baseRef(project.dir).ref })) ?? renderTenantSetMarkdown(result)));
   else io.out(renderTenantSetText(result, { runnable: (c) => runnable(c, project.dir) }));
-  return tenantSetExitCode(result);
+  return code;
 }
 
-/** A warning per overdue drift watch of the environment (chant#4289), for the comment; the job log gets the same lines. */
-async function watchNotes(project: Project, env: Environment, forge: Forge, io: Io): Promise<string[]> {
-  return overdueNotes(project.dir, env.tenant?.env ?? env.name, forge.client, (line) => { io.err(`${line}\n`); });
+/** The pull request and commit chant's plan job plans: `PR_NUMBER` from the job, the head from git. */
+function prNoteTarget(project: Project): { pr: number; head: string } {
+  const pr = Number(process.env.PR_NUMBER);
+  if (!Number.isInteger(pr) || pr <= 0) throw new YodelError("--pr-note writes the note for the pull request PR_NUMBER names, and PR_NUMBER is not set to one; chant's plan job sets it");
+  let head = "";
+  try {
+    head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: project.dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    // Refused below.
+  }
+  if (!/^[0-9a-f]{40,64}$/.test(head)) throw new YodelError(`--pr-note names the commit planned, and ${project.dir} is not in a git checkout`);
+  return { pr, head };
 }
 
-/** The pull request `--comment` posts on: resolveForge refuses a target without one. */
-const prOf = (forge: Forge): number => forge.target.pr ?? 0;
+/** The forge whose note limit the note is cut to: GitLab's in a GitLab job, else GitHub's (Forgejo's is the same). */
+const noteForge = (): "gitlab" | "github" => (process.env.GITLAB_CI === "true" ? "gitlab" : "github");
 
-/** Keeps the environment's plan comment on the pull request up to date, through chant's forge client. */
-async function postComment(forge: Forge, marker: string, body: string, io: Io): Promise<void> {
-  const posted = await forge.client.upsertComment(prOf(forge), marker, body);
-  io.err(`yodel plan: ${posted.action} the plan comment on ${describeForge(forge.target)}#${String(prOf(forge))}${posted.url ? ` (${posted.url})` : ` (comment ${String(posted.id)})`}\n`);
+/**
+ * Writes the plan note hand-off chant's note job posts (chant issue 4963):
+ * yodel's note as text, under chant's marker and yodel's own line
+ * `<!-- yodel:plan env=<env> -->`, with the plan's subject for the next
+ * note to compare with (chant issue 4972).
+ */
+async function writeNote(dir: string, env: string, at: { pr: number; head: string }, markdown: string, state: "success" | "failure", description: string, subject: ReturnType<typeof noteSubject>, io: Io): Promise<void> {
+  const { planBodyHandoff, PR_PLAN_NOTE_FILE } = await import("@intentius/chant/pr-plan-note");
+  // chant writes its own marker and yodel's line above the body, so the body carries no marker of its own.
+  const body = markdown.replace(/^(<!--[^\n]*-->\n)+/, "");
+  const handoff = planBodyHandoff(body, { pr: at.pr, head: at.head, env: YODEL_PR_ENV, member: env, state, description, marker: `env=${env}`, ...(subject ? { subject } : {}) });
+  const file = join(resolve(dir), PR_PLAN_NOTE_FILE);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(handoff, null, 2)}\n`);
+  io.err(`yodel plan: wrote the plan note for pull request #${String(at.pr)} to ${file}\n`);
 }

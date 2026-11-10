@@ -1,20 +1,25 @@
 /**
  * #16 end to end against the emulator's ClickHouse: when the plan moved after
  * approval (a migration added), the apply applies nothing and `yodel plan`
- * says what moved. The comment carrying the digest the gate asks for, and the
+ * says what moved. The note carrying the digest the gate asks for, and the
  * approval and apply after it, are the sy-approval and sy-forge scenarios on
  * chant's e2e harness (scenarios/harness/, #302). Objects in database <prefix>_pr_comment, the
- * history in <prefix>_pr_comment_history (./names.ts). The comment goes to a local GitHub-shaped fake.
+ * history in <prefix>_pr_comment_history (./names.ts). `yodel plan --pr-note`
+ * writes chant's plan note hand-off (sql-yodeler issue 345); chant's note job,
+ * which posts it, compares its subject with the previous note's (chant issue
+ * 4972), as `sinceLastLine` does here.
  */
 
 import { execFileSync } from "node:child_process";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runChant } from "@intentius/chant/chant-install";
+import { sinceLastLine, type PrPlanBodyHandoff } from "@intentius/chant/pr-plan-note";
 import type { BuildOutput } from "../../src/chant/build.js";
 import { createMigration, readMigrations, writeMigration } from "../../src/migrations/index.js";
+import { SUBJECT_PART_WORDS } from "../../src/pr/note.js";
 import { json, yodel } from "../helpers/run.js";
 import { clickhouse, clickhouseReachable } from "./emulator.js";
 import { e2eProject, suiteName } from "./names.js";
@@ -37,10 +42,12 @@ interface PlanDoc {
   approval?: { holds: boolean; digest: string; moved?: { confirmed: boolean; changes: Array<{ part: string; message: string }> } };
 }
 
-describe.skipIf(!clickhouseReachable)("the pull request comment and the digest on clickhouse", () => {
+describe.skipIf(!clickhouseReachable)("the pull request note and the digest on clickhouse", () => {
   let dir = "";
   let dispose = (): void => undefined;
   const saved = process.env.YODEL_HISTORY_DATABASE;
+  const savedPr = process.env.PR_NUMBER;
+  const notes = mkdtempSync(join(tmpdir(), "yodel-pr-note-"));
   const at = (...args: string[]) => [...args, "--dir", dir];
   const migrations = () => join(dir, "migrations");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
@@ -54,56 +61,30 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
     return made.id;
   };
 
-  // A GitHub-shaped fake for PR #16 of acme/db.
-  let server: Server;
-  let api = "";
-  const comments: Array<{ id: number; body: string }> = [];
-
   beforeAll(async () => {
     process.env.YODEL_HISTORY_DATABASE = HISTORY;
-    process.env.YODEL_E2E_PR_TOKEN = "fake-token";
+    process.env.PR_NUMBER = "16";
     await clickhouse(`DROP DATABASE IF EXISTS ${DB}`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY}`);
     ({ dir, dispose } = e2eProject("clickhouse-pr", DB));
-    server = createServer((req, res) => {
-      let body = "";
-      req.on("data", (c) => (body += String(c)));
-      req.on("end", () => {
-        const send = (s: number, v: unknown) => {
-          res.writeHead(s, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(v));
-        };
-        if (req.headers.authorization !== "Bearer fake-token") { send(401, {}); return; }
-        const path = (req.url ?? "").split("?")[0];
-        if (path === "/repos/acme/db/issues/16/comments" && req.method === "GET") { send(200, comments); return; }
-        if (path === "/repos/acme/db/issues/16/comments" && req.method === "POST") {
-          const c = { id: comments.length + 1, body: (JSON.parse(body) as { body: string }).body };
-          comments.push(c);
-          send(201, c); return;
-        }
-        const m = /^\/repos\/acme\/db\/issues\/comments\/(\d+)$/.exec(path ?? "");
-        const c = m ? comments.find((x) => x.id === Number(m[1])) : undefined;
-        if (c && req.method === "PATCH") {
-          c.body = (JSON.parse(body) as { body: string }).body;
-          send(200, c); return;
-        }
-        send(404, {});
-      });
-    });
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    api = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
   });
   afterAll(async () => {
-    server.close();
     dispose();
-    delete process.env.YODEL_E2E_PR_TOKEN;
+    rmSync(notes, { recursive: true, force: true });
+    if (savedPr === undefined) delete process.env.PR_NUMBER;
+    else process.env.PR_NUMBER = savedPr;
     if (saved === undefined) delete process.env.YODEL_HISTORY_DATABASE;
     else process.env.YODEL_HISTORY_DATABASE = saved;
     await clickhouse(`DROP DATABASE IF EXISTS ${DB}`);
     await clickhouse(`DROP DATABASE IF EXISTS ${HISTORY}`);
   });
 
-  const comment = (...extra: string[]) => yodel(at("plan", "e2e", "--comment", "--forge", "github", "--repo", "acme/db", "--pr", "16", "--api-url", api, "--token-env", "YODEL_E2E_PR_TOKEN", ...extra));
+  /** `yodel plan e2e --pr-note`, as chant's plan job runs it, and the hand-off it wrote. */
+  const note = async (): Promise<PrPlanBodyHandoff> => {
+    const ran = await yodel(at("plan", "e2e", "--pr-note", notes));
+    expect(ran.code, ran.err).toBe(0);
+    return JSON.parse(readFileSync(join(notes, "pr-plan-note.json"), "utf8")) as PrPlanBodyHandoff;
+  };
   const plan = async () => {
     const ran = await yodel(at("plan", "e2e", "--json"));
     expect(ran.code, ran.err).toBe(0);
@@ -116,9 +97,10 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
 
   it("a different digest at merge applies nothing, and says what moved", async () => {
     next("two", "id UInt64, y String DEFAULT ''");
-    const posted = await comment();
-    expect(posted.code, posted.err).toBe(0);
+    const first = await note();
+    expect(first).toMatchObject({ kind: "plan-note-handoff", pr: 16, env: "yodel-pr", member: "e2e", marker: "env=e2e", state: "success" });
     const approvedPlan = await plan();
+    expect(first.subject?.id).toBe(approvedPlan.planDigest);
     await approve(approvedPlan.approve ?? "");
 
     // A migration lands after the approval, before the apply runs.
@@ -149,14 +131,14 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
     const text = await yodel(at("plan", "e2e"));
     expect(text.out).toContain(`What moved: pending migrations changed: new pending migration: ${three}.`);
 
-    // And the comment, updated, says it too.
-    await comment();
-    expect(comments[0]?.body).toContain(`new pending migration: ${three}`);
+    // And the next note says it too, in its body and from its subject.
+    const second = await note();
+    expect(second.body).toContain(`new pending migration: ${three}`);
+    expect(first.subject && second.subject ? sinceLastLine(first.subject, second.subject, { subjectParts: SUBJECT_PART_WORDS }) : "").toContain(`${three} now pending`);
   }, 300_000);
 
   it("says the live schema moved when a table changed after approval", async () => {
-    const posted = await comment();
-    expect(posted.code, posted.err).toBe(0);
+    const before = await note();
     const approvedPlan = await plan();
     await approve(approvedPlan.approve ?? "");
     await clickhouse(`CREATE TABLE ${DB}.handmade (x UInt8) ENGINE = MergeTree ORDER BY x`);
@@ -164,16 +146,14 @@ describe.skipIf(!clickhouseReachable)("the pull request comment and the digest o
     expect(applied.code, applied.err).toBe(3);
     expect(Number((await clickhouse(`SELECT count() FROM system.columns WHERE database = '${DB}' AND table = 'a' AND name = 'y'`)).trim())).toBe(0);
 
-    // Without the comment, yodel rebuilds what it can and concludes the live schema moved.
+    // yodel rebuilds what it can and concludes the live schema moved.
     const now = await plan();
     expect(now.approval?.moved?.confirmed).toBe(false);
     expect(now.approval?.moved?.changes.at(-1)?.part).toBe("live");
 
-    // The comment carried the approved plan's subject, so the updated comment says it exactly.
-    const updated = await comment("--format", "json");
-    const doc = json(updated) as PlanDoc;
-    expect(doc.approval?.moved).toEqual({ confirmed: true, changes: [{ part: "live", message: expect.stringContaining("not as it was") as unknown }] });
-    expect(comments[0]?.body).toContain("What moved: live schema changed:");
+    // The previous note kept the approved plan's subject, so chant's note job says exactly that the live schema changed.
+    const after = await note();
+    expect(before.subject && after.subject ? sinceLastLine(before.subject, after.subject, { subjectParts: SUBJECT_PART_WORDS }) : "").toContain("the live schema changed");
     await clickhouse(`DROP TABLE ${DB}.handmade`);
   }, 300_000);
 });

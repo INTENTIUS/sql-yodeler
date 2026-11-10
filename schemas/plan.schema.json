@@ -534,7 +534,7 @@
           }
         },
         "sinceLast": {
-          "description": "The pull request comment this plan replaces showed another digest: what moved since.",
+          "description": "The pull request comment this plan replaces showed another digest: what moved since. Not set from 0.14: yodel plan reads no note, and chant's note job says what moved in the note itself.",
           "type": "object",
           "additionalProperties": false,
           "required": [

@@ -33,9 +33,10 @@
  * - yodel-pr: on a pull (merge) request, `yodel ci --check` (these files are
  *   what yodel ci renders), `yodel lint`, and the replay check into a
  *   throwaway server the job starts (the `replay` profile), then for each
- *   environment `yodel plan <env> --comment`, which posts the pending
- *   migrations and the digest to approve. One job per environment, holding
- *   that environment's reader credentials and nothing else.
+ *   environment chant's product plan ({@link productPlanOptions}): a plan
+ *   job, holding that environment's reader credentials and no forge token,
+ *   that runs `yodel plan <env> --pr-note`, and a note job that posts the
+ *   pending migrations and the digest to approve.
  * - yodel-apply: on a push to main, one job per wave, each needing the one
  *   before, running `yodel chant run wave`: through the sql lexicon's
  *   `sql-migrate` capability it plans the environment (`yodel apply <env>
@@ -84,7 +85,7 @@ import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js"
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
 import type { OpWaveJobInputs, OpWaveRunStep, OpWavesPipelineOptions, OpWavesRecordPlansInputs } from "@intentius/chant/lexicon";
-import { CLOUD_OF, jobLogins, loginSteps, tradeIdTokens, type Login, type LoginSteps } from "./login.js";
+import { CLOUD_OF, forgejoLoginSpec, jobLogins, loginSteps, tradeIdTokens, tradeSpec, type Login } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
@@ -117,7 +118,16 @@ import {
 } from "@intentius/chant-lexicon-gitlab";
 import { gitlabSerializer } from "@intentius/chant-lexicon-gitlab/serializer";
 import { sqlTypesPath } from "@intentius/chant-lexicon-sql/sql-types";
-import { chantProduct, WAVE_WORDS, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
+import { generateProductPlanPipeline, type ProductPlanPipelineOptions } from "@intentius/chant-lexicon-github/components/product-plan-pipeline";
+import { emitWorkflowYAML, type GithubWorkflowDoc } from "@intentius/chant-lexicon-github/components/ci-jobs";
+import { generateForgejoProductPlanPipeline } from "@intentius/chant-lexicon-forgejo/components/product-plan-pipeline";
+import { generateGitlabProductPlanPipeline } from "@intentius/chant-lexicon-gitlab/components/product-plan-pipeline";
+import { emitGitlabFile } from "@intentius/chant-lexicon-gitlab/components/ci-jobs";
+import type { ProductPlanTarget } from "@intentius/chant/components/product-plan";
+import type { ScheduledWatch } from "@intentius/chant/op/schedule-overdue";
+import { parseYAML } from "@intentius/chant/yaml";
+import { chantProduct, WAVE_WORDS, YODEL_NOTE_MARKER, YODEL_PR_ENV, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
+import { SUBJECT_PART_WORDS } from "../pr/note.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
 export const FORGES: readonly Forge[] = ["github", "gitlab", "forgejo"];
@@ -298,14 +308,6 @@ const idTokens = (clouds: readonly CloudToken[], logins: readonly Login[] = []):
 const loginsOf = (envs: Pick<Environments, "credentials" | "login">, held: ReadonlyArray<readonly [string, Role]>): Login[] =>
   jobLogins(envs.login, held, (env, role) => envs.credentials?.[env]?.[role].cloud);
 
-/** A job's login steps as the github lexicon's Steps. */
-const actionsLogin = (forge: Actions, logins: readonly Login[]): AStep[] => loginSteps(forge, logins).steps.map((st) => new Step({ name: st.name, run: st.lines.join("\n") }));
-
-/** A GitLab job's login: its script lines and its variables. */
-const gitlabLogin = (logins: readonly Login[]): { lines: string[]; variables: LoginSteps["variables"] } => {
-  const out = loginSteps("gitlab", logins);
-  return { lines: out.steps.flatMap((st) => st.lines), variables: out.variables };
-};
 
 /** The roles a pull request's plan job for `env` holds: the environment's reader and the reader of the one it requires. */
 const planRoles = (waves: readonly Wave[], env: string): Array<[string, Role]> => [env, ...requiredOf(waves, env)].map((e) => [e, "reader"]);
@@ -461,7 +463,6 @@ export const reportArtifact = (job: string): string => `yodel-report-${job}`;
 /** upload-artifact v4 on GitHub, and v3 from code.forgejo.org on Forgejo, where v4 refuses any server but github.com's (chant#4008), as chant's own Forgejo jobs have it. */
 export const UPLOAD_ARTIFACT = usesRef(ACTION_PINS.uploadArtifact4);
 export const FORGEJO_UPLOAD_ARTIFACT = `https://code.forgejo.org/${usesRef(ACTION_PINS.uploadArtifact3)}`;
-const uploadArtifact = (forge: Actions): string => (forge === "forgejo" ? FORGEJO_UPLOAD_ARTIFACT : UPLOAD_ARTIFACT);
 
 /**
  * The comment at the top of every file, as `#` lines. The files declared here
@@ -511,14 +512,6 @@ function renderActions(forge: Actions, workflow: AWorkflow): string {
   return oneFile(forge, serializer.serialize(new Map([["workflow", workflow]])));
 }
 
-/** The report steps of a job: `yodel report` into REPORT_DIR and the artifact, whatever the job's outcome. */
-function reportSteps(forge: Actions, env: string, job: string, tc: Toolchain): AStep[] {
-  return [
-    new Step({ name: `yodel report ${env}`, if: "always()", run: reportCommand(env, tc) }),
-    new Step({ name: "Keep the report", if: "always()", uses: uploadArtifact(forge), with: { name: reportArtifact(job), path: REPORT_DIR, "if-no-files-found": "ignore" } }),
-  ];
-}
-
 /** `inContainer`: the job runs in the toolchain's image, which has node, so it needs no setup-node. */
 function setupSteps(inContainer: boolean, tc: Toolchain, approvals = true): AStep[] {
   const steps = [new Step({ uses: CHECKOUT, with: { "fetch-depth": 0 } })];
@@ -532,9 +525,61 @@ function setupSteps(inContainer: boolean, tc: Toolchain, approvals = true): ASte
 const inContainer = (forge: Actions, tc: Toolchain): boolean => forge === "forgejo" || tc.yodelImage;
 const runner = (container: boolean, tc: Toolchain) => ({ "runs-on": "ubuntu-latest", ...(container ? { container: tc.image } : {}) });
 
-/** The token `yodel plan --comment` posts with: the job's own. */
-function commentToken(forge: Actions): Record<string, string> {
-  return forge === "github" ? { GITHUB_TOKEN: "${{ github.token }}" } : { FORGEJO_TOKEN: "${{ github.token }}" };
+/**
+ * The pull request plan on chant's product plan (chant issues 4799, 4963,
+ * 4972; sql-yodeler issue 345): one plan job and one note job per
+ * environment, each environment a target. The plan job holds the
+ * environment's reader (and the reader of the environment it requires) and
+ * no forge token, logs in to its cloud through chant's trade (Forgejo:
+ * chant's login from the runner's token file), runs the write probe, then
+ * `yodel plan <env> --pr-note`, which writes chant's plan note hand-off, and
+ * `yodel report` whatever the plan's exit. chant's note job posts the note,
+ * says what moved since the previous one from the plan's subject, warns of
+ * an overdue drift watch, and sets `yodel/plan/<env>`.
+ */
+export function productPlanOptions(forge: Forge, envs_: Environments, watches: readonly ScheduledWatch[] = []): ProductPlanPipelineOptions {
+  const { dialect, names: envs, waves } = envs_;
+  const tc = toolchainOf(envs_);
+  const targets = envs.map((env): ProductPlanTarget => {
+    const read = [env, ...requiredOf(waves, env)];
+    const roles = planRoles(waves, env);
+    const logins = loginsOf(envs_, roles);
+    // A cloud token source with no login reads the forge's OIDC token itself; Forgejo issues none.
+    const own = forge === "forgejo" ? [] : cloudsOf(envs_, roles).filter((c) => !logins.some((l) => l.cloud === CLOUD_OF[c]));
+    const forgejoLogin = forge === "forgejo" ? forgejoLoginSpec(logins) : {};
+    const names = [...read.flatMap((e) => readerVariables(e, dialect, envs_.credentials?.[e])), ...WEBHOOK_VARIABLES];
+    return {
+      name: env,
+      secrets: Object.fromEntries(names.map((n) => [n, n])),
+      writeProbe: writeProbe(read),
+      ...(logins.length > 0 && forge !== "forgejo" ? { trade: tradeSpec(logins) } : {}),
+      ...(Object.keys(forgejoLogin).length > 0 ? { login: forgejoLogin } : {}),
+      ...(own.length > 0 ? { idTokens: Object.fromEntries(own.map((c) => [ID_TOKENS[c].variable, ID_TOKENS[c].aud])) } : {}),
+    };
+  });
+  return {
+    words: WAVE_WORDS,
+    branch: MAIN,
+    image: tc.image,
+    // GitLab's runner clones one ref, so the plan job fetches the approvals itself; chant's checkout on GitHub and Forgejo fetches chant/lifecycle.
+    beforeScript: [...installLines(tc, forge), ...(forge === "gitlab" ? [fetchApprovals(tc)] : [])],
+    productPlan: {
+      command: "yodel plan {target} --pr-note {output}",
+      targets,
+      report: `mkdir -p {output}/report; yodel report {target} --json > {output}/report/{target}.json || true; yodel report {target} --html {output}/report/{target}.html || true`,
+      noteWords: { productMarker: YODEL_NOTE_MARKER, subjectParts: SUBJECT_PART_WORDS },
+      workflow: "yodel-pr",
+      concurrency: { group: "yodel-pr", cancelInProgress: true },
+      ...(watches.length > 0 ? { watches: [...watches] } : {}),
+    },
+  };
+}
+
+/** The jobs of a workflow yodel declares with the github lexicon, as the plain mapping chant's workflow document holds. */
+function jobsOf(forge: Actions, jobs: Record<string, AJob>): Record<string, unknown> {
+  if (Object.keys(jobs).length === 0) return {};
+  const yaml = renderActions(forge, new ActionsWorkflow({ name: "jobs", on: { pull_request: {} }, jobs }));
+  return (parseYAML(yaml).jobs ?? {}) as Record<string, unknown>;
 }
 
 /** The replay server's service and variables, for a job that replays into it. */
@@ -641,55 +686,36 @@ function checkOnlyActions(forge: Actions, envs_: Environments): RenderedFile {
   return { path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-pr.yml`, content: renderActions(forge, workflow) };
 }
 
-export function actionsReview(forge: Actions, envs_: Environments): RenderedFile {
+export function actionsReview(forge: Actions, envs_: Environments, watches: readonly ScheduledWatch[] = []): RenderedFile {
   const { dialect, names: envs, replay, waves, jobs: own } = envs_;
   const tc = toolchainOf(envs_);
   if (envs_.checkOnly) return checkOnlyActions(forge, envs_);
-  const jobs: Record<string, AJob> = { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true, envs_.checkHooks === true) };
-  for (const env of envs) {
-    const read = [env, ...requiredOf(waves, env)];
-    jobs[`plan-${env}`] = new ActionsJob({
-      ...runner(inContainer(forge, tc), tc),
-      // The plan shows where each migration has run: the required environment's reader too.
-      env: secrets([...read.flatMap((e) => readerVariables(e, dialect, envs_.credentials?.[e])), ...WEBHOOK_VARIABLES]),
-      steps: [
-        // The plan explains what moved since an approval from git's history of migrations/.
-        ...setupSteps(inContainer(forge, tc), tc),
-        // The cloud login (#132), when a reader here is cloud-minted.
-        ...actionsLogin(forge, loginsOf(envs_, planRoles(waves, env))),
-        new Step({ name: "This job cannot write", run: writeProbe(read) }),
-        new Step({ name: `yodel plan ${env} --comment`, run: `yodel plan ${env} --comment`, env: commentToken(forge) }),
-        ...reportSteps(forge, env, `plan-${env}`, tc),
-      ],
-    });
-  }
-  Object.assign(jobs, ownJobs<AJob>(own?.actions, jobs, "actions"));
   const clouds = cloudsOf(envs_, envs.flatMap((env) => planRoles(waves, env)));
   const header = [
     ...HEADER,
     "#",
     "# Pull requests: yodel lint and the replay check (into a throwaway server the",
-    "# lint job starts), and the plan comment per environment with the",
-    "# environment's reader credentials. No job here holds a writer, and each plan",
-    "# job shows it first: yodel config check --write-probe tries a write and",
-    "# fails the job when the server lets it through.",
-    ...(forge === "forgejo"
-      ? ["# The comment is posted with the job's own token (Forgejo gives a same-repository", "# pull request one that can comment)."]
-      : []),
+    "# lint job starts), and the plan per environment on chant's product plan: a",
+    "# plan job with the environment's reader credentials and no forge token,",
+    "# then a note job that posts the note and the status yodel/plan/<env>. No job",
+    "# here holds a writer, and each plan job shows it first: yodel config check",
+    "# --write-probe tries a write and fails the job when the server lets it through.",
     ...identityHeader(forge, clouds),
   ];
-  const workflow = new ActionsWorkflow({
-    comment: asComment(header),
-    name: "yodel-pr",
-    on: { pull_request: { branches: [MAIN] } },
-    // actions: read lets yodel plan --comment ask when the watch workflows last ran (chant#4289).
-    permissions: new Permissions({ contents: "read", "pull-requests": "write", ...(forge === "github" ? { actions: "read" as const } : {}), ...(clouds.length > 0 ? { "id-token": "write" as const } : {}) }),
-    concurrency: new Concurrency({ group: "yodel-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true }),
-    jobs,
-  });
+  const options = { ...productPlanOptions(forge, envs_, watches), header };
+  const { doc } = forge === "github" ? generateProductPlanPipeline(YODEL_PR_ENV, options) : generateForgejoProductPlanPipeline(YODEL_PR_ENV, options);
+  // yodel's lint job and the project's own jobs, declared with the github lexicon, beside chant's plan and note jobs.
+  const lint = jobsOf(forge, { lint: lintJob(forge, dialect, replay, tc, envs_.tests === true, envs_.typedColumns === true, envs_.check === true, envs_.checkHooks === true) });
+  const yodels = { ...lint, ...doc.jobsDoc };
+  const merged: GithubWorkflowDoc = {
+    ...doc,
+    // A job without permissions of its own (lint, the project's) reads the repository and nothing else; chant's jobs name their own. Forgejo reads no permissions.
+    ...(forge === "github" ? { permissions: { contents: "read" } } : {}),
+    jobsDoc: { ...yodels, ...jobsOf(forge, ownJobs<AJob>(own?.actions, yodels, "actions")) },
+  };
   return {
     path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-pr.yml`,
-    content: renderActions(forge, workflow),
+    content: emitWorkflowYAML(merged),
   };
 }
 
@@ -772,25 +798,9 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
     }),
   );
-  for (const env of envs) {
-    const clouds = cloudsOf(envs_, planRoles(waves, env));
-    const logins = loginsOf(envs_, planRoles(waves, env));
-    const login = gitlabLogin(logins);
-    jobs.set(
-      `plan-${env}`,
-      new GitLabJob({
-        extends: ".yodel",
-        stage: "review",
-        rules: mr(),
-        ...(Object.keys(login.variables).length > 0 ? { variables: login.variables } : {}),
-        script: [...login.lines, writeProbe([env, ...requiredOf(waves, env)]), `yodel plan ${env} --comment`],
-        ...(clouds.length > 0 ? { id_tokens: idTokens(clouds, logins) } : {}),
-        after_script: [reportCommand(env, tc)],
-        artifacts: new GitLabArtifacts({ name: reportArtifact(`plan-${env}`), when: "always", paths: [`${REPORT_DIR}/`] }),
-      }),
-    );
-  }
-  for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, Object.fromEntries(jobs), "gitlab"))) jobs.set(name, job);
+  // The plan jobs and their note jobs are chant's, in GITLAB_PLAN_FILE (sql-yodeler issue 345).
+  const plan = gitlabPlan(envs_);
+  for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, { ...Object.fromEntries(jobs), ...Object.fromEntries(plan.jobs.map((j) => [j, true])) }, "gitlab"))) jobs.set(name, job);
   const apply = rendersApply(envs_);
   const variables = envs.flatMap((env) => {
     const creds = envs_.credentials?.[env];
@@ -807,15 +817,14 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const header = [
     ...HEADER,
     "#",
+    "# Merge requests: lint (stage review), and each environment's plan on chant's",
+    `# product plan (stage plan), in ${GITLAB_PLAN_FILE}. A merge request's own`,
+    "# pipeline holds no token for its notes: a pipeline schedule of the default",
+    `# branch with ${GITLAB_PLAN_NOTES_VAR}=1, which you create, posts every open merge`,
+    "# request's notes and sets yodel/plan/<env> (stage plan-note).",
     ...(apply
-      ? [
-          "# Merge requests: lint and the plan comment (stage review). A push to the",
-          `# default branch: the apply waves, one stage each, in ${GITLAB_APPLY_FILE}.`,
-        ]
-      : [
-          "# Merge requests: lint and the plan comment (stage review). No apply",
-          "# pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI.",
-        ]),
+      ? [`# A push to the default branch: the apply waves, one stage each, in ${GITLAB_APPLY_FILE}.`]
+      : ["# No apply pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI."]),
     `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
     ...(respondsNew(envs_) ? [`# /yodel new, chant's commit job, is in ${GITLAB_COMMIT_FILES.new} (stage ops).`] : []),
     ...(rebaseRespond(envs_) !== "off" ? [`# /yodel rebase, after the merge request's check, is in ${GITLAB_COMMIT_FILES.rebase} (stage ops).`] : []),
@@ -853,12 +862,34 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const applyStages = apply ? [...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : [])] : [];
   const pipeline = new GitLabPipeline({
     comment: asComment(header),
-    include: [...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILES.new }] : []), ...(rebaseRespond(envs_) !== "off" ? [{ local: GITLAB_COMMIT_FILES.rebase }] : [])],
-    stages: [...new Set([...jobStages, ...applyStages, "ops"])],
+    include: [{ local: GITLAB_PLAN_FILE }, ...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILES.new }] : []), ...(rebaseRespond(envs_) !== "off" ? [{ local: GITLAB_COMMIT_FILES.rebase }] : [])],
+    // The plan file's stages (chant's plan and plan-note) right after review.
+    stages: [...new Set(["review", ...plan.stages, ...jobStages, ...applyStages, "ops"])],
     variables: { GIT_DEPTH: "0" },
   });
   const entities = new Map<string, Declarable>([["pipeline", pipeline], ["workflow", workflow], ...jobs]);
   return { path: ".gitlab-ci.yml", content: oneFile("gitlab", gitlabSerializer.serialize(entities)) };
+}
+
+/** The file .gitlab-ci.yml includes for the plan jobs and their note jobs, chant's product plan (sql-yodeler issue 345). */
+export const GITLAB_PLAN_FILE = ".gitlab/yodel-plan.gitlab-ci.yml";
+
+/** chant's name for the variable a plan notes pipeline sets. */
+const GITLAB_PLAN_NOTES_VAR = "CHANT_PLAN_NOTES";
+
+/**
+ * The plan on GitLab through chant's product plan: its jobs as
+ * {@link GITLAB_PLAN_FILE}, their names and their stages. chant's
+ * `workflow` and `stages` stay out of the file: .gitlab-ci.yml has the
+ * pipeline's own, with chant's stages after review, and its rules let the
+ * plan notes pipeline (a schedule of the default branch) run.
+ */
+export function gitlabPlan(envs_: Environments, watches: readonly ScheduledWatch[] = []): { file: RenderedFile; jobs: string[]; stages: string[] } {
+  const { entries } = generateGitlabProductPlanPipeline(YODEL_PR_ENV, productPlanOptions("gitlab", envs_, watches));
+  const stages = (entries.find(([k]) => k === "stages")?.[1] ?? []) as string[];
+  const kept = entries.filter(([k]) => k !== "workflow" && k !== "stages");
+  const jobs = kept.map(([k]) => k).filter((k) => k !== "variables");
+  return { file: { path: GITLAB_PLAN_FILE, content: emitGitlabFile(kept, HEADER) }, jobs, stages };
 }
 
 // ── The apply waves, through chant's generateOpWavesPipeline ───────────────
@@ -1183,8 +1214,8 @@ export async function withTenants(dir: string, waves: readonly Wave[]): Promise<
 // The forge lexicons serialize the jobs, and yodel's reports, logins and
 // readers go in as generateOpWavesPipeline's inputs (#4791).
 //
-// Still yodel's own: the plan jobs (`yodel plan <env> --comment` with the
-// write probe), which post chant's note (../pr/note.ts, #290); the lint
+// The plan jobs are chant's product plan (sql-yodeler issue 345,
+// {@link productPlanOptions}). Still yodel's own: the lint
 // job's own steps for a project with no workspace declaration, which has
 // no check hooks to run (#294); the watch until chant#4582
 // ({@link watchPipelines}).
@@ -1492,9 +1523,26 @@ function ownJobs<T>(own: Record<string, Declarable> | undefined, yodels: Record<
   return own as Record<string, T>;
 }
 
-/** The pipelines that need no Op discovery: pull requests, and GitLab's main file. */
-export function review(envs: Environments): RenderedFile[] {
-  return [actionsReview("github", envs), actionsReview("forgejo", envs), gitlabPipeline(envs)];
+/** The pull request pipelines, and GitLab's main file. `watches` are the drift watches the plan note checks for having stopped. */
+export function review(envs: Environments, watches: readonly ScheduledWatch[] = []): RenderedFile[] {
+  return [
+    actionsReview("github", envs, watches),
+    actionsReview("forgejo", envs, watches),
+    gitlabPipeline(envs),
+    ...(envs.checkOnly ? [] : [gitlabPlan(envs, watches).file]),
+  ];
+}
+
+/**
+ * The scheduled drift watches of the project's environments (chant#4289),
+ * which chant's note job checks for having stopped (chant issue 4888): each
+ * environment's WatchOp, found by its `Watch` and `Env` labels.
+ */
+async function envWatches(dir: string, envs: readonly string[]): Promise<ScheduledWatch[]> {
+  const { discoverOps } = await import("@intentius/chant/op/discover");
+  const { scheduledWatches } = await import("@intentius/chant/op/schedule-overdue");
+  const found = await discoverOps({ cwd: dir });
+  return scheduledWatches([...found.ops.values()].map((o) => o.config).filter((o) => o.labels?.Watch === "true" && envs.includes(o.labels.Env ?? "")));
 }
 
 /**
@@ -1547,7 +1595,7 @@ export async function render(dir: string, options: { declaration?: RenderedFile;
   const reviewed = hooks ? { ...envs, checkHooks: true as const } : envs;
   // ci.apply: false (#175): no waves spec and no apply pipeline on any forge.
   const files = [
-    ...review(reviewed),
+    ...review(reviewed, await envWatches(dir, envs.names)),
     ...(hooks ? [hooks] : []),
     ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []),
     ...(await watchPipelines(dir, envs)),

@@ -163,7 +163,6 @@ const versionedPlan = (approval: VersionedPlan["approval"]): VersionedPlan => ({
   problems: ["20261010T0905-x is out of order"],
   digest: "sha256:d",
   approval,
-  sinceLast: { approved: "sha256:old", now: "sha256:d", confirmed: true, changes: [{ part: "pending", message: "a migration was added" }] },
   notes: ["the history is read from the reader's credentials"],
   policy,
 });

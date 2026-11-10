@@ -294,7 +294,7 @@ const NO_DROPS = `import { defineConfig } from "@intentius/sql-yodeler";\n\nexpo
  * declares a policy that refuses destructive changes, and the change drops
  * a column (ClickHouse: events.id; Postgres: orders.amount). yodel lint,
  * offline, passes; yodel lint --env flags the drop destructive (exit 1);
- * yodel plan --format markdown, what --comment posts, carries the plan
+ * yodel plan --format markdown, the note --pr-note hands to chant, carries the plan
  * comment's marker, the finding, the denied rule and the override command;
  * and yodel apply refuses before the gate (exit 7, status denied), so the
  * column is still on the server. The schema and config are put back after.

@@ -137,18 +137,22 @@ describe("a project's reader and writer", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code, wrote.err).toBe(0);
     const yaml = (f: string) => parseYAMLDocument(readFileSync(join(dir, f), "utf8")) as Record<string, unknown>;
-    type Job = { env?: Record<string, string>; steps: Array<{ name?: string; run?: string }>; id_tokens?: unknown; script?: string[]; permissions?: Record<string, string> };
+    type Job = { env?: Record<string, string>; steps: Array<{ name?: string; run?: string; env?: Record<string, string> }>; id_tokens?: unknown; script?: string[]; permissions?: Record<string, string> };
 
-    // The pull request: no password variable for a token-minted reader; prod's reader is entra, so an OIDC token.
+    // The pull request, on chant's product plan (sql-yodeler issue 345): the plan step holds the target's readers alone,
+    // no password variable for a token-minted reader; prod's reader is entra, so its plan job asks for an OIDC token.
     const pr = yaml(".github/workflows/yodel-pr.yml");
     const jobs = pr.jobs as Record<string, Job>;
-    expect(Object.keys(jobs["plan-dev"]?.env ?? {})).toEqual(["DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "YODEL_WEBHOOK_URL", "YODEL_WEBHOOK_KEY"]);
-    expect(pr.permissions).toEqual({ contents: "read", "pull-requests": "write", actions: "read", "id-token": "write" });
+    const planStep = (job: string) => jobs[job]?.steps.find((s) => s.name?.startsWith("Plan "));
+    expect(Object.keys(planStep("plan-dev")?.env ?? {})).toEqual(["BASE_SHA", "PR_NUMBER", "DEV_POSTGRES_URL", "DEV_POSTGRES_READER_USER", "YODEL_WEBHOOK_URL", "YODEL_WEBHOOK_KEY"]);
+    expect(pr.permissions).toEqual({ contents: "read" });
+    expect(jobs["plan-prod"]?.permissions).toEqual({ contents: "read", "id-token": "write" });
+    expect(jobs["plan-dev"]?.permissions).toEqual({ contents: "read" });
     // Every plan job tries a write first, with each reader it holds.
-    expect(jobs["plan-dev"]?.steps.map((s) => s.run)).toContain("yodel config check dev --write-probe");
-    const prodSteps = (jobs["plan-prod"]?.steps ?? []).map((s) => s.run);
-    expect(prodSteps.indexOf("yodel config check prod dev --write-probe")).toBeLessThan(prodSteps.indexOf("yodel plan prod --comment"));
-    expect(prodSteps.indexOf("yodel config check prod dev --write-probe")).toBeGreaterThan(-1);
+    const probe = (job: string) => jobs[job]?.steps.findIndex((s) => s.name === "This job cannot write" && s.run?.trimEnd().endsWith(`\nyodel config check ${job === "plan-dev" ? "dev" : "prod dev"} --write-probe`)) ?? -1;
+    expect(probe("plan-dev")).toBeGreaterThan(-1);
+    expect(probe("plan-prod")).toBeGreaterThan(-1);
+    expect(probe("plan-prod")).toBeLessThan(jobs["plan-prod"]?.steps.findIndex((s) => s.name === "Plan prod") ?? -1);
 
     // The apply: prod's writer is rds-iam.
     const apply = yaml(".github/workflows/yodel-apply.yml");
@@ -168,10 +172,10 @@ describe("a project's reader and writer", () => {
     const gitlabApply = yaml(".gitlab/yodel-apply.gitlab-ci.yml") as Record<string, Job>;
     expect(gitlabApply["wave-2-prod"]?.id_tokens).toEqual({ AWS_ID_TOKEN: { aud: "sts.amazonaws.com" }, AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });
     expect(gitlabApply["wave-1-dev"]?.id_tokens).toBeUndefined();
-    const gitlab = yaml(".gitlab-ci.yml") as Record<string, Job>;
-    expect(gitlab["plan-prod"]?.id_tokens).toEqual({ AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });
-    expect(gitlab["plan-prod"]?.script?.[0]).toBe("yodel config check prod dev --write-probe");
-    expect(gitlab["plan-dev"]?.id_tokens).toBeUndefined();
+    const gitlab = yaml(".gitlab/yodel-plan.gitlab-ci.yml") as Record<string, Job>;
+    expect(gitlab["prod-plan"]?.id_tokens).toEqual({ AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });
+    expect(gitlab["prod-plan"]?.script).toContain("yodel config check prod dev --write-probe");
+    expect(gitlab["dev-plan"]?.id_tokens).toBeUndefined();
     const watch = yaml(".gitlab/yodel-watch.gitlab-ci.yml") as Record<string, Job>;
     expect(watch["watch-prod"]?.id_tokens).toEqual({ AZURE_ID_TOKEN: { aud: "api://AzureADTokenExchange" } });
     expect(watch["watch-dev"]?.id_tokens).toBeUndefined();

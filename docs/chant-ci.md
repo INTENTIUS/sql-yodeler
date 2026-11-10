@@ -28,7 +28,7 @@ chant 0.124.67 has the product pipeline terragucci and plywood use, and more of 
 
 ### The pipelines
 
-Each job that runs chant runs `yodel chant <args>` in its place. `yodel chant` runs that chant command in the same process with yodel's words, so the lines chant prints for a person name yodel's commands: an approval is `yodel approve <env> --plan <digest>`, and an override `yodel override <env> --rule <rule> --reason <text>`. People keep typing yodel's own commands; `yodel chant` is for the jobs, and `yodel --help` does not list it. `yodel-waves.json` names the gate pattern, `"gateName": "yodel-apply-wave-{k}"`. The plan jobs stay `yodel plan <env> --comment`, with the write probe before them.
+Each job that runs chant runs `yodel chant <args>` in its place. `yodel chant` runs that chant command in the same process with yodel's words, so the lines chant prints for a person name yodel's commands: an approval is `yodel approve <env> --plan <digest>`, and an override `yodel override <env> --rule <rule> --reason <text>`. People keep typing yodel's own commands; `yodel chant` is for the jobs, and `yodel --help` does not list it. `yodel-waves.json` names the gate pattern, `"gateName": "yodel-apply-wave-{k}"`. The plan jobs are chant's product plan: one plan job per environment, which runs the write probe and `yodel plan <env> --pr-note`, and one note job, which posts the note and sets `yodel/plan/<env>`.
 
 ### Exit codes
 

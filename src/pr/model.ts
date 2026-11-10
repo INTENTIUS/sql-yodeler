@@ -41,7 +41,7 @@ import {
   type RuleResult,
   type VersionedEnv,
 } from "../versioned/index.js";
-import { currentSubject, explainAgainst, explainMove, latestApproval, type LatestApproval, type MoveExplanation } from "../versioned/explain.js";
+import { currentSubject, explainAgainst, latestApproval, type LatestApproval, type MoveExplanation } from "../versioned/explain.js";
 import type { DigestSubject } from "../versioned/digest.js";
 import type { ServerInfo } from "../server.js";
 import { waveView, type WaveView } from "../waves/index.js";
@@ -101,13 +101,11 @@ export interface VersionedPlan {
   refusal?: { exitCode: number; message: string } | undefined;
   /** The digest the gate binds; absent when apply would refuse or has nothing to do. */
   digest?: string | undefined;
-  /** What the digest is taken over, carried in the comment so a later one can say what moved. */
+  /** What the digest is taken over, handed to chant's note job as the plan's subject, which says what moved since the previous note (chant issue 4972). */
   subject?: DigestSubject | undefined;
   approval?: ApprovalView | undefined;
   /** Each policy rule's outcome over the plan (#53), with any override recorded for its digest; absent when yodel.config.ts declares no policy. */
   policy?: RuleResult[] | undefined;
-  /** The comment this one replaces showed another digest: what moved since. */
-  sinceLast?: MoveExplanation | undefined;
   /** The environment's wave in the apply pipeline, when yodel.config.ts declares waves. */
   wave?: WaveView | undefined;
   notes: string[];
@@ -115,8 +113,6 @@ export interface VersionedPlan {
 
 export interface CollectOptions {
   allowOutOfOrder?: boolean;
-  /** The subject the previous comment carried, when updating one. */
-  previous?: DigestSubject | undefined;
   /** The gate ledger; default chant's, in the project's git checkout. `null` skips it. */
   ledger?: GateLedgerPort | null;
   /** The migrations Op; default discovered in the project. */
@@ -193,10 +189,6 @@ async function collectWith(
     subject,
   };
 
-  if (options.previous && subject) {
-    const prev = await planDigest(options.previous);
-    if (!(await sameDigest(prev, report.digest))) plan.sinceLast = await explainMove({ approvedDigest: prev, now: subject, previous: options.previous, ordered, applied: status.applied });
-  }
 
   const kept = await retainedNote(venv);
   if (kept) plan.notes.push(kept);
@@ -259,7 +251,7 @@ async function approvalView(project: Project, env: Environment, venv: VersionedE
     if (!latest) return view;
     view.latest = latest;
     if (!latest.holds && !latest.sameDigest && latest.digest && plan.subject) {
-      view.latest.moved = await explainAgainst(venv, ordered, { approvedDigest: latest.digest, approvedAt: latest.at, now: plan.subject, previous: options.previous });
+      view.latest.moved = await explainAgainst(venv, ordered, { approvedDigest: latest.digest, approvedAt: latest.at, now: plan.subject });
     }
   } catch (e) {
     view.ledgerNote = `chant's gate ledger could not be read (${e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e)}); fetch the chant/lifecycle branch to see approvals here`;

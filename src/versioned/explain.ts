@@ -7,9 +7,7 @@
  * done, and the live schema's fingerprint. A hash says nothing about which
  * of those changed, so yodel works back to the subject it was taken over:
  *
- * - When the older subject is known (the pull request comment carries it,
- *   hidden), the two subjects are compared part by part.
- * - Otherwise it rebuilds candidates from what it can read: the history as
+ * - It rebuilds candidates from what it can read: the history as
  *   it stood at the approval's time (the rows recorded up to then), each
  *   ordered subset of today's pending migrations (one added after approval
  *   is missing from the older plan), and each pending migration's files as
@@ -51,19 +49,6 @@ export interface MoveExplanation {
 export async function currentSubject(venv: VersionedEnv, status: VersionedStatus, toApply: readonly PendingMigration[]): Promise<DigestSubject> {
   const live = await venv.driver.liveFingerprint();
   return digestSubject({ environment: venv.environment, historyDatabase: venv.location.database, topology: venv.topology, applied: status.applied, toApply, live });
-}
-
-/** A subject as text safe to carry in an HTML comment: base64url of its JSON. */
-export const encodeSubject = (s: DigestSubject): string => Buffer.from(JSON.stringify(s), "utf8").toString("base64url");
-
-export function decodeSubject(text: string): DigestSubject | undefined {
-  try {
-    const s = JSON.parse(Buffer.from(text, "base64url").toString("utf8")) as Partial<DigestSubject>;
-    if (typeof s.environment !== "string" || typeof s.historyDatabase !== "string" || typeof s.live !== "string" || !Array.isArray(s.applied) || !Array.isArray(s.pending)) return undefined;
-    return s as DigestSubject;
-  } catch {
-    return undefined;
-  }
 }
 
 const list = (ids: readonly string[]) => ids.join(", ");
@@ -184,8 +169,6 @@ export interface ExplainInput {
   /** When the approval was recorded (ISO); lets yodel read the history as it stood then. */
   approvedAt?: string | undefined;
   now: DigestSubject;
-  /** The subject the approved digest was shown with, when something kept it (the PR comment). */
-  previous?: DigestSubject | undefined;
   /** The chain, as the directory has it today. */
   ordered: readonly Migration[];
   /** Today's applied migrations, for who applied what. */
@@ -205,9 +188,6 @@ export async function explainMove(input: ExplainInput): Promise<MoveExplanation>
   const now = await planDigest(input.now);
   const done = (confirmed: boolean, changes: Moved[]): MoveExplanation => ({ approved: input.approvedDigest, now, confirmed, changes });
   if (await sameDigest(now, input.approvedDigest)) return done(true, []);
-  if (input.previous && (await sameDigest(await planDigest(input.previous), input.approvedDigest))) {
-    return done(true, diffSubjects(input.previous, input.now, input.applied));
-  }
 
   // The history as it stood at approval, and as it is.
   const states = [];
@@ -329,7 +309,7 @@ export function askedAgainLine(a: Pick<LatestApproval, "askedAgain">, code: (s: 
 export async function explainAgainst(
   venv: VersionedEnv,
   ordered: readonly Migration[],
-  input: { approvedDigest: string; approvedAt?: string | undefined; now?: DigestSubject | undefined; previous?: DigestSubject | undefined },
+  input: { approvedDigest: string; approvedAt?: string | undefined; now?: DigestSubject | undefined },
 ): Promise<MoveExplanation> {
   const rows = await venv.store.rows({ sync: false });
   const status = compareHistory(ordered, deriveState(rows));
@@ -339,7 +319,6 @@ export async function explainAgainst(
     approvedDigest: input.approvedDigest,
     approvedAt: input.approvedAt,
     now,
-    previous: input.previous,
     ordered,
     applied: status.applied,
     rows,

@@ -1,11 +1,11 @@
 /**
  * The versioned plan as text (`yodel plan <env>`), as the pull request
- * comment's markdown (`--format markdown`, `--comment`) and as JSON.
+ * comment's markdown (`--format markdown`, and `--pr-note` for chant's note
+ * job) and as JSON.
  *
  * The comment starts with a hidden marker, `<!-- yodel:plan env=<env> -->`,
- * by which `--comment` finds the comment it posted before and updates it,
- * and ends with the digest's subject, hidden, so the next comment can say
- * what moved. Neither holds a secret: migration ids, checksums, a hash of
+ * which chant's note job keeps as yodel's own line under its marker. It
+ * holds no secret: migration ids, checksums, a hash of
  * the live catalog. Server addresses and tokens are never rendered.
  */
 
@@ -25,10 +25,6 @@ export const ranOn = (p: Promotion, id: string): string => p.migrations.find((m)
 
 /** The marker that identifies one environment's plan comment. */
 export const commentMarker = (env: string): string => `<!-- yodel:plan env=${env} -->`;
-const SUBJECT = /<!-- yodel:subject ([A-Za-z0-9_-]+) -->/;
-
-/** The subject a comment body carries, encoded. */
-export const subjectIn = (body: string): string | undefined => SUBJECT.exec(body)?.[1];
 
 /** Values a statement may quote that do not belong in a comment, though the file is in the repo. */
 export function redact(sql: string): string {
@@ -94,7 +90,6 @@ export function renderPlanText(plan: VersionedPlan, options: { runnable?: (comma
   if (plan.problems.length > 0) lines.push("", `Integrity problems (${String(plan.problems.length)}):`, ...plan.problems.map((p) => `  ${p}`));
   if (plan.refusal) lines.push("", `yodel apply would refuse (exit ${String(plan.refusal.exitCode)}): ${plan.refusal.message}`);
   if (plan.policy && plan.policy.length > 0) lines.push("", "Policy:", ...describeResults(plan.policy).map((l) => `  ${l.replace(/^policy /, "")}`));
-  if (plan.sinceLast) lines.push("", `Since the last comment's plan (${plan.sinceLast.approved}): ${describeMove(plan.sinceLast)}`);
   if (plan.wave && plan.wave.promotions.length > 0) {
     lines.push("", "Where each pending migration has run:");
     for (const m of plan.pending) lines.push(`  ${m.id}: ${plan.wave.promotions.map((p) => `${p.env} ${ranOn(p, m.id)}`).join(", ")}`);
@@ -240,7 +235,6 @@ export function planJsonVersioned(plan: VersionedPlan): Record<string, unknown> 
         : {}),
     ...(plan.policy ? { policy: plan.policy } : {}),
     ...(plan.wave ? { wave: plan.wave } : {}),
-    ...(plan.sinceLast ? { sinceLast: { digest: plan.sinceLast.approved, confirmed: plan.sinceLast.confirmed, changes: plan.sinceLast.changes } } : {}),
     notes: plan.notes,
   };
 }

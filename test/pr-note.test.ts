@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { planDetailLines, renderPlanNote, renderTenantSetNote, tenantSetNoteFits, type ChantNote } from "../src/pr/note.js";
+import { noteSubject, planDetailLines, renderPlanNote, renderTenantSetNote, tenantSetNoteFits, type ChantNote } from "../src/pr/note.js";
 import { commentMarker } from "../src/pr/render.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { renderTenantSetMarkdown, type TenantSetPlan } from "../src/pr/tenants.js";
@@ -64,9 +64,18 @@ describe("the note through chant (#290)", () => {
     expect(body).toContain("**denied**");
   });
 
-  it("keeps the digest's subject at the end, hidden, so the next note can say what moved", async () => {
-    const body = await renderPlanNote(plan("prod", { subject: { migrations: [] } as never }), { dir: repoRoot });
-    expect(body.trimEnd().split("\n").at(-1)).toMatch(/^<!-- yodel:subject [A-Za-z0-9_-]+ -->$/);
+  it("hands the digest's subject to chant's note job as parts (chant issue 4972), and keeps no subject line itself", async () => {
+    const subject = { environment: "prod", historyDatabase: "app_history", topology: { kind: "single" as const }, applied: [{ id: "20261001_init", checksum: "sha256:aa" }], pending: [{ id: "20261027_add_col", checksum: "sha256:bb", done: [0, 1] }], live: "sha256:cc" };
+    const body = await renderPlanNote(plan("prod", { subject }), { dir: repoRoot });
+    expect(body).not.toContain("yodel:subject");
+    const handed = noteSubject(plan("prod", { subject }));
+    expect(handed?.id).toBe("jcs1-sha256:abc");
+    expect(handed?.parts).toMatchObject({ environment: "prod", history: "app_history", live: "sha256:cc", "applied/20261001_init": "sha256:aa", "pending/20261027_add_col": "sha256:bb", "done/20261027_add_col": "0,1", order: "20261027_add_col" });
+    // A value that is not a plain word (the topology's JSON) is kept by a hash, so chant takes the subject.
+    expect(handed?.parts.topology).toMatch(/^h:[0-9a-f]{16}$/);
+    const { planSubjectProblem } = await import("@intentius/chant/pr-plan-note");
+    expect(planSubjectProblem(handed)).toBeUndefined();
+    expect(noteSubject(plan("prod", { subject: undefined }))).toBeUndefined();
   });
 
   it("gives yodel plan <set> --format markdown one comment naming every tenant and the one digest the wave waits on (the waves claim's tenants part)", async () => {

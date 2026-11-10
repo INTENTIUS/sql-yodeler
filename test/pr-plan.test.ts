@@ -8,9 +8,10 @@ import { memoryGateLedgerPort } from "@intentius/chant/op/gate";
 import { projectFromConfig, type Project } from "../src/project.js";
 import { writeMigration, type Migration } from "../src/migrations/index.js";
 import { currentDigest, executeApply, inspect, openVersioned, verifyApproval, type MigrateOpRef, type VersionedEnv } from "../src/versioned/index.js";
-import { currentSubject, decodeSubject, diffSubjects, explainMove } from "../src/versioned/explain.js";
+import { diffSubjects, explainMove } from "../src/versioned/explain.js";
 import { collectVersionedPlan } from "../src/pr/model.js";
-import { renderPlanText, subjectIn } from "../src/pr/render.js";
+import { renderPlanText } from "../src/pr/render.js";
+import { noteSubject, SUBJECT_PART_WORDS } from "../src/pr/note.js";
 import { planNote } from "./helpers/note.js";
 import { FakeClickHouse, migration } from "./helpers/fake-clickhouse.js";
 import { computeChecksum, serializeDocument } from "../src/migrations/index.js";
@@ -61,10 +62,10 @@ describe("the versioned plan", () => {
     expect(plan.approval).toEqual({ kind: "op", op: OP.name, gate: OP.gate, command: `yodel approve e2e --plan ${gate}`, chantCommand: `chant approve migrate-e2e approve-migrate-e2e --plan ${gate}` });
     expect(plan.pending.map((p) => p.id)).toEqual([m1.id, m2.id]);
     expect(plan.pending[0]?.steps.map((s) => s.step.kind)).toEqual(["statement", "statement"]);
-    const carried = subjectIn(await planNote(plan));
-    expect(carried).toBeDefined();
+    // The subject handed to chant's note job (chant issue 4972) is the one the gate's digest is taken over.
     const { planDigest } = await import("../src/versioned/digest.js");
-    expect(await planDigest(decodeSubject(carried ?? "") as never)).toBe(gate);
+    expect(plan.subject && (await planDigest(plan.subject))).toBe(gate);
+    expect(noteSubject(plan)?.id).toBe(gate);
   });
 
   it("lists a backfill step apply runs under Op steps, with its module's name and text", async () => {
@@ -141,16 +142,19 @@ describe("the versioned plan", () => {
     expect(moved?.changes.at(-1)).toMatchObject({ part: "live" });
   });
 
-  it("compares with the previous comment's subject exactly, the live schema included", async () => {
+  it("hands chant's note job a subject whose parts name what moved since the previous plan, the live schema included (chant issue 4972)", async () => {
     const { ch, venv, project } = await setup([m1]);
-    const { status } = await inspect(venv, [m1]);
-    const previous = await currentSubject(venv, status, status.pending);
+    const before = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort() });
     ch.tables.push({ database: "yodel_8", name: "handmade", engine: "MergeTree", create: "CREATE TABLE yodel_8.handmade (x UInt8) ENGINE = MergeTree ORDER BY x" });
     writeMigration(join(project.dir, "migrations"), m2);
-    const plan = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort(), previous });
-    expect(plan.sinceLast?.confirmed).toBe(true);
-    expect(plan.sinceLast?.changes.map((c) => c.part)).toEqual(["pending", "live"]);
-    expect(await planNote(plan)).toContain("Since the previous version of this note");
+    const after = await collectVersionedPlan(project, env, { venv, op: OP, ledger: memoryGateLedgerPort() });
+    const { sinceLastLine } = await import("@intentius/chant/pr-plan-note");
+    const prev = noteSubject(before);
+    const now = noteSubject(after);
+    expect(prev && now).toBeTruthy();
+    const line = prev && now ? sinceLastLine(prev, now, { subjectParts: SUBJECT_PART_WORDS }) : undefined;
+    expect(line).toContain(`${m2.id} now pending`);
+    expect(line).toContain("the live schema changed");
   });
 
   it("lists checksum mismatches as integrity problems and shows apply's refusal, with no digest", async () => {

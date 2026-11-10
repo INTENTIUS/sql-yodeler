@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { ForgeFetch } from "@intentius/chant/pr-forge";
 import { resolveForge } from "../src/pr/forge.js";
-import { commentMarker, subjectIn } from "../src/pr/render.js";
+import { commentMarker } from "../src/pr/render.js";
 
 const dir = mkdtempSync(join(tmpdir(), "yodel-forge-"));
 afterAll(() => {
@@ -102,12 +102,11 @@ describe("the plan comment through chant's client", () => {
   const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "acme/db", GITHUB_REF: "refs/pull/42/merge", GITHUB_TOKEN: "secret" };
   const marker = commentMarker("prod");
 
-  it("reads back the subject the last plan comment carries, and updates that comment", async () => {
-    const f = fake([{ id: 1, body: "LGTM" }, { id: 7, body: `${marker}\n<!-- yodel:subject abc_1 -->\nplan one` }]);
+  it("finds the last plan comment by its marker, and updates that comment", async () => {
+    const f = fake([{ id: 1, body: "LGTM" }, { id: 7, body: `${marker}\nplan one` }]);
     const { client, target } = await resolveForge({}, env, "--comment", f.fetch);
     const found = await client.findComment(target.pr ?? 0, marker);
     expect(found?.id).toBe(7);
-    expect(subjectIn(found?.body ?? "")).toBe("abc_1");
     expect(await client.upsertComment(target.pr ?? 0, marker, `${marker}\nplan two`)).toMatchObject({ action: "updated", id: 7 });
     expect(f.calls.filter((c) => !c.startsWith("GET"))).toEqual(["PATCH https://api.github.com/repos/acme/db/issues/comments/7"]);
   });
