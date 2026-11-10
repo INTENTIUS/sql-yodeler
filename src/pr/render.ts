@@ -30,9 +30,6 @@ const SUBJECT = /<!-- yodel:subject ([A-Za-z0-9_-]+) -->/;
 /** The subject a comment body carries, encoded. */
 export const subjectIn = (body: string): string | undefined => SUBJECT.exec(body)?.[1];
 
-/** GitHub refuses a comment over 65536 characters; GitLab and Forgejo allow more. */
-export const COMMENT_LIMIT = 65_000;
-
 /** Values a statement may quote that do not belong in a comment, though the file is in the repo. */
 export function redact(sql: string): string {
   return sql.replace(/\b(PASSWORD|SECRET|SECRET_ACCESS_KEY|ACCESS_KEY_ID|TOKEN)(\s*=?\s*)'(?:[^'\\]|\\.)*'/gi, "$1$2'[redacted]'");

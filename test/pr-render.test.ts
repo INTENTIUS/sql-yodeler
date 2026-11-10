@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-statements";
-import { commentMarker, COMMENT_LIMIT, planJsonVersioned, redact, renderPlanText, subjectIn } from "../src/pr/render.js";
+import { noteLimit } from "@intentius/chant/plan-summary";
+import { commentMarker, planJsonVersioned, redact, renderPlanText, subjectIn } from "../src/pr/render.js";
 import { planNote } from "./helpers/note.js";
 import type { VersionedPlan } from "../src/pr/model.js";
 import { decodeSubject } from "../src/versioned/explain.js";
@@ -192,9 +193,9 @@ describe("the plan comment's markdown, through chant's note (#290)", () => {
   });
 
   it("drops the statements' SQL rather than go over the forge's limit", async () => {
-    const big = "x".repeat(COMMENT_LIMIT);
+    const big = "x".repeat(noteLimit("github"));
     const md = await planNote(clickhousePlan({ pending: [{ id: "20261009T1000-one", outOfOrder: false, steps: [{ index: 0, step: chStatement(`SELECT '${big}'`), done: false }] }] }));
-    expect(md.length).toBeLessThan(COMMENT_LIMIT);
+    expect(md.length).toBeLessThanOrEqual(noteLimit("github"));
     expect(md).toContain("Left out to keep this note within the comment limit");
     expect(md).toContain(DIGEST);
   });

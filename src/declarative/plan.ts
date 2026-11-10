@@ -23,7 +23,8 @@ import { loadPolicies, policyRules } from "../lint/policies.js";
 import { describeResults, judgePolicyPlan, overrideCommand, overrideSourceAt, overrideSubject, policyRefusal, type OverrideSource, type RuleResult } from "../versioned/policy.js";
 import type { PolicyConfig } from "../config/define.js";
 import type { StandingOverride } from "@intentius/chant/override-gate";
-import { cell, commentMarker, COMMENT_LIMIT, fence } from "../pr/render.js";
+import { noteLimit } from "@intentius/chant/plan-summary";
+import { cell, commentMarker, fence } from "../pr/render.js";
 import { changeFindings, declarativeDigest, declarativeLint, declarativePolicyPlan } from "./review.js";
 
 export type DeclarativeApproval = { kind: "op"; op: string; gate: string } | { kind: "no-op"; message: string };
@@ -183,8 +184,9 @@ export function approvalHeld(p: DeclarativePlan): string | undefined {
 }
 
 /** The pull request comment body; the same marker as the versioned comment, so a project that adopts migrations updates the same comment. */
-export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?: boolean } = {}): string {
+export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?: boolean; limit?: number } = {}): string {
   const withReport = options.report !== false;
+  const limit = options.limit ?? noteLimit();
   const n = p.changes.length;
   const out = [
     commentMarker(p.environment),
@@ -227,7 +229,7 @@ export function renderDeclarativeMarkdown(p: DeclarativePlan, options: { report?
   }
   if (!withReport) out.push("", "_chant's report is left out: the comment would be too long. `yodel plan` prints it._");
   const body = `${out.join("\n")}\n`;
-  if (withReport && body.length > COMMENT_LIMIT) return renderDeclarativeMarkdown(p, { report: false });
+  if (withReport && body.length > limit) return renderDeclarativeMarkdown(p, { report: false, limit });
   return body;
 }
 

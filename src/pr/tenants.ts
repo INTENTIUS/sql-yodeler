@@ -14,7 +14,8 @@ import { scanMigrations } from "../migrations/index.js";
 import { migrationsDir } from "../versioned/index.js";
 import { viewWavePlan } from "../waves/index.js";
 import { collectVersionedPlan, type VersionedPlan } from "./model.js";
-import { COMMENT_LIMIT, commentMarker, fence, pendingMarkdown, planJsonVersioned, redact } from "./render.js";
+import { noteLimit } from "@intentius/chant/plan-summary";
+import { commentMarker, fence, pendingMarkdown, planJsonVersioned, redact } from "./render.js";
 
 export interface TenantSetPlan {
   environment: string;
@@ -114,8 +115,9 @@ export function tenantSetDetailLines(plan: TenantSetPlan, max = 30): string[] {
 }
 
 /** The pull request comment for the whole set: one per tenant set, updated on the next push. */
-export function renderTenantSetMarkdown(plan: TenantSetPlan, options: { sql?: boolean; max?: number } = {}): string {
+export function renderTenantSetMarkdown(plan: TenantSetPlan, options: { sql?: boolean; max?: number; limit?: number } = {}): string {
   const withSql = options.sql !== false;
+  const limit = options.limit ?? noteLimit();
   const max = options.max ?? 30;
   const code = (s: string) => `\`${s}\``;
   const out = [
@@ -143,9 +145,9 @@ export function renderTenantSetMarkdown(plan: TenantSetPlan, options: { sql?: bo
   }
   if (!withSql) out.push("", "_The statements are left out: the comment would be too long. `yodel plan` prints them._");
   const body = `${out.join("\n")}\n`;
-  if (body.length > COMMENT_LIMIT) {
-    if (withSql) return renderTenantSetMarkdown(plan, { sql: false, max });
-    if (max > 5) return renderTenantSetMarkdown(plan, { sql: false, max: 5 });
+  if (body.length > limit) {
+    if (withSql) return renderTenantSetMarkdown(plan, { sql: false, max, limit });
+    if (max > 5) return renderTenantSetMarkdown(plan, { sql: false, max: 5, limit });
   }
   return body;
 }
