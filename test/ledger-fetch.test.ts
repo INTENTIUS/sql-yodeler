@@ -72,11 +72,14 @@ describe("yodel ci --fetch-ledger (#326)", () => {
   });
 
   it("is the only fetch of the ledger yodel renders: nothing under src/ writes chant/lifecycle or its remote-tracking ref", () => {
+    // src/chant/ledger-fetch.ts is the fetch itself, and its messages and doc comment name the ref (sql-yodeler issue 333).
     const out = (() => {
       try {
-        return execFileSync("git", ["grep", "-n", "-E", "chant/lifecycle:|branch -f chant/lifecycle|refs/remotes/[^ ]*chant/lifecycle", "--", "src"], { cwd: repoRoot, encoding: "utf8" });
-      } catch {
-        return "";
+        return execFileSync("git", ["grep", "-n", "-E", "chant/lifecycle:|branch -f chant/lifecycle|refs/remotes/[^ ]*chant/lifecycle", "--", "src", ":(exclude)src/chant/ledger-fetch.ts"], { cwd: repoRoot, encoding: "utf8" });
+      } catch (e) {
+        // git grep exits 1 when nothing matches; anything else is a scan that did not run, and fails.
+        if ((e as { status?: unknown }).status === 1) return "";
+        throw e;
       }
     })();
     expect(out.split("\n").filter((l) => l.trim() !== "")).toEqual([]);
