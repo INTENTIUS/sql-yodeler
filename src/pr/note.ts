@@ -29,7 +29,8 @@ import { describeMove, encodeSubject } from "../versioned/explain.js";
 import { describeWave } from "../waves/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
 import type { VersionedPlan } from "./model.js";
-import { cell, commentMarker, COMMENT_LIMIT, fence, pendingMarkdown, policyMarkdown, ranOn } from "./render.js";
+import { noteLimit } from "@intentius/chant/plan-summary";
+import { cell, commentMarker, fence, pendingMarkdown, policyMarkdown, ranOn } from "./render.js";
 import { planPart } from "./part.js";
 import { tenantSetDetailLines, type TenantSetPlan } from "./tenants.js";
 
@@ -202,11 +203,14 @@ function framed(env: string, body: string, subject: string | undefined): string 
   return `${commentMarker(env)}\n${body.replace(/\n*$/, "\n")}${subject ? `\n<!-- yodel:subject ${subject} -->\n` : ""}`;
 }
 
-/** One environment's note through chant. */
-export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote }): Promise<string> {
+/** One environment's note through chant, cut to `limit` (chant's `noteLimit` for the forge; GitHub's when none is named). */
+export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote; limit?: number }): Promise<string> {
   const note = options.note ?? (await chantNote());
   const { op, gate, digest } = gateOf(plan);
   const subject = plan.subject ? encodeSubject(plan.subject) : undefined;
+  const limit = options.limit ?? noteLimit();
+  // chant cuts its note to what is left once yodel's marker and subject are around it.
+  const room = limit - framed(plan.environment, "", subject).length;
   const render = (withSql: boolean) =>
     framed(
       plan.environment,
@@ -221,12 +225,12 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
           details: [{ member: plan.environment, title: `The SQL plan for \`${plan.environment}\``, lines: planDetailLines(plan, withSql) }],
           ...(plan.refusal ? { message: plan.refusal.message } : {}),
         }),
-        { words: note.words, limit: COMMENT_LIMIT },
+        { words: note.words, limit: room },
       ),
       subject,
     );
   const body = render(true);
-  return body.length > COMMENT_LIMIT ? render(false) : body;
+  return body.length > limit ? render(false) : body;
 }
 
 /**
@@ -235,9 +239,11 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
  * digest), a detail section per tenant. Undefined, so yodel posts its own
  * note, while chant's would ask for an approval per tenant.
  */
-export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: string; base?: string; note?: ChantNote }): Promise<string | undefined> {
+export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: string; base?: string; note?: ChantNote; limit?: number }): Promise<string | undefined> {
   const note = options.note ?? (await chantNote());
   if (!tenantSetNoteFits(note)) return undefined;
+  const limit = options.limit ?? noteLimit();
+  const room = limit - framed(plan.environment, "", undefined).length;
   const members = plan.tenants.map((t) => ({ environment: t.environment, digest: t.digest, pending: t.pending.length, refused: t.refusal !== undefined, part: planPart(t, t.environment) }));
   const wave = plan.wave;
   const render = (withSql: boolean) =>
@@ -257,10 +263,10 @@ export async function renderTenantSetNote(plan: TenantSetPlan, options: { dir: s
             ...plan.tenants.map((t) => ({ member: t.environment, lines: planDetailLines(t, withSql) })),
           ],
         }),
-        { words: note.words, limit: COMMENT_LIMIT },
+        { words: note.words, limit: room },
       ),
       undefined,
     );
   const body = render(true);
-  return body.length > COMMENT_LIMIT ? render(false) : body;
+  return body.length > limit ? render(false) : body;
 }

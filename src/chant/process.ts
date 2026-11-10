@@ -2,12 +2,12 @@
  * Running the `chant` CLI that yodel depends on, for the commands that have
  * no library surface (`build`, `run`, `lifecycle diff`).
  *
- * Published chant ships TypeScript source, and its own bin runs
- * `node --import <tsx loader> src/cli/main.ts`. yodel does the same with its
- * own copy of tsx, so the chant it runs is the one in its own dependencies,
- * not whatever `chant` is first on PATH. That chant's `bin/` goes first on the
- * child's PATH, because chant's Op activities shell out to `chant` themselves
- * (`lifecycleDiff` runs `chant lifecycle diff`).
+ * The chant it runs is the one in yodel's own dependencies, not whatever
+ * `chant` is first on PATH: chant's `bundledChant`, spawned with
+ * `chantArgv` and `chantEnv` from `@intentius/chant/chant-install` (chant
+ * issue 4800), which put that chant's bin first on the child's PATH, because
+ * chant's Op activities shell out to `chant` themselves (`lifecycleDiff`
+ * runs `chant lifecycle diff`).
  *
  * A child runs in chant's own words, not yodel's (#287): ../chant/apply.ts
  * reads chant's `approve: chant approve ...` line from its output for the
@@ -16,38 +16,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
-import { dirname, delimiter, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { chantArgv, chantEnv as chantInstallEnv } from "@intentius/chant/chant-install";
 import { fallbackImportArgs } from "./resolve-fallback.js";
-
-export interface ChantInstall {
-  /** The `@intentius/chant` package directory. */
-  root: string;
-  /** Its CLI entry, `src/cli/main.ts`. */
-  main: string;
-  /** Its `bin/`, which holds the `chant` script. */
-  bin: string;
-  /** The tsx loader to run it under, as a file URL. */
-  loader: string;
-}
-
-let install: ChantInstall | undefined;
-
-/** Where yodel's chant and tsx are installed. */
-export function chantInstall(): ChantInstall {
-  if (install) return install;
-  const require = createRequire(import.meta.url);
-  // "." resolves to <root>/src/index.ts; package.json is not an export.
-  const root = dirname(dirname(require.resolve("@intentius/chant")));
-  install = {
-    root,
-    main: join(root, "src", "cli", "main.ts"),
-    bin: join(root, "bin"),
-    loader: pathToFileURL(require.resolve("tsx")).href,
-  };
-  return install;
-}
 
 export interface ChantResult {
   code: number;
@@ -63,17 +33,16 @@ export interface RunChantOptions {
   onStderr?: (text: string) => void;
 }
 
-/** The environment a chant child runs with: the caller's, with chant's bin first on PATH. */
+/** The environment a chant child runs with: the caller's, with chant's bin first on PATH, and no colour. */
 export function chantEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const { bin } = chantInstall();
-  return { ...base, PATH: [bin, base.PATH ?? ""].filter(Boolean).join(delimiter), FORCE_COLOR: "0", NO_COLOR: "1" };
+  return { ...chantInstallEnv(base), FORCE_COLOR: "0", NO_COLOR: "1" };
 }
 
 /** Runs `chant <args>` in `cwd` and resolves with its exit code and output. Never rejects on a non-zero exit. */
 export function runChant(args: readonly string[], options: RunChantOptions): Promise<ChantResult> {
-  const { main, loader } = chantInstall();
+  const [node = process.execPath, ...argv] = chantArgv(args, { nodeArgs: fallbackImportArgs() });
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [...fallbackImportArgs(), "--import", loader, main, ...args], {
+    const child = spawn(node, argv, {
       cwd: options.cwd,
       env: chantEnv(options.env),
       stdio: ["ignore", "pipe", "pipe"],

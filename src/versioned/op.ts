@@ -29,10 +29,11 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { opExportName } from "../chant/export-name.js";
 import { tmpdir } from "node:os";
 import { delimiter, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { OpConfig, StepDefinition } from "@intentius/chant/op/types";
 import { YodelError, type Environment, type Project } from "../project.js";
-import { chantInstall, runChant } from "../chant/process.js";
+import { runChant } from "../chant/process.js";
 import { discoveryError, readApplyRun, type ApplyRun } from "../chant/apply.js";
 import { REVERT_ENV, REVERT_STEP_ENV } from "./revert.js";
 import { EXIT_WAITING } from "../exit.js";
@@ -155,11 +156,14 @@ function selfEntry(): string {
   return fileURLToPath(new URL(`../bin${extname(here)}`, import.meta.url));
 }
 
+/** The tsx loader yodel's own entry runs under from source, as a file URL. */
+const tsxLoader = (): string => pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+
 /** A directory holding a `yodel` that runs this yodel, for a child's PATH. */
 export function yodelShim(): { dir: string; dispose: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "yodel-shim-"));
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  const script = `#!/bin/sh\nexec ${q(process.execPath)} --import ${q(chantInstall().loader)} ${q(selfEntry())} "$@"\n`;
+  const script = `#!/bin/sh\nexec ${q(process.execPath)} --import ${q(tsxLoader())} ${q(selfEntry())} "$@"\n`;
   const path = join(dir, "yodel");
   writeFileSync(path, script);
   chmodSync(path, 0o755);
