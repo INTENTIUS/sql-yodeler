@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { driftFingerprint, renderDriftMarkdown, type Drift } from "../src/chant/drift.js";
+import { driftFingerprint, type Drift } from "../src/chant/drift.js";
 import type { ForgeFetch, PrForge } from "@intentius/chant/pr-forge";
 import { resolveForge } from "../src/pr/forge.js";
 import { driftIssueMarker, trackDrift } from "../src/pr/issue.js";
@@ -56,48 +56,52 @@ describe("driftFingerprint", () => {
 
 describe("trackDrift", () => {
   const marker = driftIssueMarker(".", "dev");
-  const found = (d: Drift) => ({ kind: "drift" as const, title: `Drift in dev: ${[...d.changed.map((c) => c.name), ...d.missing].join(", ")}`, body: renderDriftMarkdown(d, undefined, { fingerprint: driftFingerprint(d) }), fingerprint: driftFingerprint(d) });
+  const found = (d: Drift, runUrl?: string) => ({ drift: d, ...(runUrl ? { runUrl } : {}), now: "2026-11-01T00:00:00Z" });
+  const clean = (env = "dev") => ({ drift: drift({ environment: env, changed: [], missing: [] }) });
 
   it("opens one issue on drift, updates it when the drift changes, and closes it when it is gone", async () => {
     const c = await memoryIssues();
     const one = drift({ missing: [] });
     expect((await trackDrift(c.forge, marker, found(one))).action).toBe("opened");
-    expect(c.all[0]?.body).toContain(marker);
-    expect(c.all[0]?.body).toContain("`events` (ClickHouse::Table)");
+    expect(c.all[0]?.body.startsWith(marker)).toBe(true);
+    expect(c.all[0]?.body).toContain("| `events` | drifted | `ttl`: declared `ts + 90`, live `ts + 30` |");
+    expect(c.all[0]?.body).toContain("Run `yodel drift dev` to see it again.");
     expect((await trackDrift(c.forge, marker, found(one))).action).toBe("unchanged");
     const two = drift();
     expect(await trackDrift(c.forge, marker, found(two))).toMatchObject({ action: "updated", issue: { number: 1 } });
     expect(c.all).toHaveLength(1);
     expect(c.all[0]?.title).toBe("Drift in dev: events, daily");
-    expect(c.all[0]?.body).toContain("`daily`");
-    expect(await trackDrift(c.forge, marker, { kind: "clean", comment: "gone" })).toMatchObject({ action: "closed", issue: { number: 1 } });
-    expect(c.all[0]).toMatchObject({ state: "closed", comments: ["gone"] });
-    expect((await trackDrift(c.forge, marker, { kind: "clean", comment: "gone" })).action).toBe("none");
+    expect(c.all[0]?.body).toContain("| `daily` | pending |");
+    expect(await trackDrift(c.forge, marker, clean())).toMatchObject({ action: "closed", issue: { number: 1 } });
+    expect(c.all[0]).toMatchObject({ state: "closed", comments: ["No drift in dev now: every declared object matches the server. Closed by yodel drift."] });
+    expect((await trackDrift(c.forge, marker, clean())).action).toBe("none");
     // Drift again after the close: a new issue, the closed one left closed.
     expect(await trackDrift(c.forge, marker, found(one))).toMatchObject({ action: "opened", issue: { number: 2 } });
   });
 
-  it("leaves the issue as it is when the drift could not be read", async () => {
+  it("leaves the issue as it is when the drift could not be read, or part of it", async () => {
     const c = await memoryIssues();
     await trackDrift(c.forge, marker, found(drift()));
-    expect(await trackDrift(c.forge, marker, { kind: "unknown", why: "no grant" })).toMatchObject({ action: "left", why: "no grant", issue: { number: 1 } });
+    expect(await trackDrift(c.forge, marker, { ...clean(), unknown: "no grant" })).toMatchObject({ action: "left", why: "no grant", issue: { number: 1 } });
+    const unread = drift({ changed: [], missing: [], unobserved: [{ name: "x", reason: "read-failed" }] as unknown as Drift["unobserved"] });
+    expect(await trackDrift(c.forge, marker, { drift: unread })).toMatchObject({ action: "left", issue: { number: 1 } });
     expect(c.all[0]?.state).toBe("open");
   });
 
   it("does not edit the issue when only the run it names has changed", async () => {
     const c = await memoryIssues();
     const d = drift();
-    const run = (n: number) => ({ ...found(d), body: renderDriftMarkdown(d, undefined, { fingerprint: driftFingerprint(d), run: `https://ci/run/${String(n)}` }) });
-    expect((await trackDrift(c.forge, marker, run(1))).action).toBe("opened");
-    expect(await trackDrift(c.forge, marker, run(2))).toMatchObject({ action: "unchanged", issue: { number: 1, url: "https://gh/i/1" } });
+    expect((await trackDrift(c.forge, marker, found(d, "https://ci/run/1"))).action).toBe("opened");
+    expect(c.all[0]?.body).toContain("Found by https://ci/run/1");
+    expect(await trackDrift(c.forge, marker, found(d, "https://ci/run/2"))).toMatchObject({ action: "unchanged", issue: { number: 1, url: "https://gh/i/1" } });
     expect(c.writes).toEqual(["POST /issues"]);
   });
 
   it("keeps another environment's and another project's issues apart", async () => {
     const c = await memoryIssues();
     await trackDrift(c.forge, marker, found(drift()));
-    expect((await trackDrift(c.forge, driftIssueMarker(".", "prod"), { kind: "clean", comment: "x" })).action).toBe("none");
-    expect((await trackDrift(c.forge, driftIssueMarker("db", "dev"), { kind: "clean", comment: "x" })).action).toBe("none");
+    expect((await trackDrift(c.forge, driftIssueMarker(".", "prod"), clean("prod"))).action).toBe("none");
+    expect((await trackDrift(c.forge, driftIssueMarker("db", "dev"), clean())).action).toBe("none");
     expect(c.all[0]?.state).toBe("open");
   });
 });

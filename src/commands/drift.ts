@@ -12,7 +12,6 @@ import {
   driftFingerprint,
   readDrift,
   renderDrift,
-  renderDriftMarkdown,
   withClickHouseGrants,
   writeRecordedSource,
   type Drift,
@@ -30,7 +29,7 @@ import { DEFAULT_PG_TIMEOUTS } from "../versioned/postgres/executor.js";
 import { closeVersioned, hasMigrations, inspect, openVersioned, readChain } from "../versioned/index.js";
 import { isApplied } from "../history/index.js";
 import { describeForge, resolveForge, type ForgeFlags, type ForgeTarget } from "../pr/forge.js";
-import { driftIssueMarker, trackDrift, type DriftOutcome, type IssueAction } from "../pr/issue.js";
+import { driftIssueMarker, trackDrift, type IssueAction } from "../pr/issue.js";
 import { describeUnsupported, findUnsupported } from "../init/unsupported.js";
 import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/live/client";
 
@@ -213,17 +212,6 @@ function parseDriftArgs(args: string[]): DriftArgs {
   };
 }
 
-/** What the tracking issue should do with a run's result. */
-function outcomeOf(drift: Drift, code: number, body: string): DriftOutcome {
-  if (code === 2) {
-    const names = [...drift.changed.map((e) => e.name), ...drift.missing];
-    const shown = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${String(names.length - 3)} more` : names.join(", ");
-    return { kind: "drift", title: `Drift in ${drift.environment}: ${shown}`, body, fingerprint: driftFingerprint(drift) };
-  }
-  if (code === 0) return { kind: "clean", comment: `No drift in ${drift.environment} now: every declared object matches the server. Closed by yodel drift.` };
-  return { kind: "unknown", why: `${String(drift.unobserved.length)} declared object(s) could not be read, so whether ${drift.environment} drifted is unknown` };
-}
-
 function describeAction(a: IssueAction, target: ForgeTarget): string {
   const where = describeForge(target);
   if (a.action === "none") return `no drift, and no tracking issue open on ${where}`;
@@ -268,9 +256,9 @@ export const drift: Command = {
       if (source === "history" && !versioned) throw new YodelError(`--against history compares with the schema the newest applied migration records, and ${project.dir} has no migrations/ directory with a migration`);
       // The forge first: a job missing its token fails before it reads the server.
       const forge = a.issue ? await resolveForge(a.forge, process.env, "--issue") : undefined;
-      const track = async (outcome: DriftOutcome): Promise<IssueAction | undefined> => {
+      const track = async (run: Parameters<typeof trackDrift>[2]): Promise<IssueAction | undefined> => {
         if (!forge) return undefined;
-        const action = await trackDrift(forge.client, driftIssueMarker(await projectPath(project.dir), env.name), outcome);
+        const action = await trackDrift(forge.client, driftIssueMarker(await projectPath(project.dir), env.name), run);
         io.err(`yodel drift: ${describeAction(action, forge.target)}\n`);
         return action;
       };
@@ -316,7 +304,7 @@ export const drift: Command = {
         let action: IssueAction | undefined;
         let issueError: string | undefined;
         try {
-          action = await track(outcomeOf(result, code, renderDriftMarkdown(result, server, { fingerprint, ...(run ? { run } : {}) })));
+          action = await track({ drift: result, server, runUrl: run });
         } catch (e) {
           issueError = e instanceof Error ? e.message : String(e);
           io.err(`yodel drift: the tracking issue could not be written: ${issueError}\n`);
@@ -328,7 +316,8 @@ export const drift: Command = {
         return issueError && code !== 2 ? 1 : code;
       } catch (e) {
         // The drift could not be read: the tracking issue stays as it is.
-        await track({ kind: "unknown", why: `the drift could not be read (${e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e)})` }).catch(() => undefined);
+        const why = `the drift could not be read (${e instanceof Error ? (e.message.split("\n")[0] ?? "") : String(e)})`;
+        await track({ drift: { environment: env.name, changed: [], missing: [], unobserved: [] }, unknown: why }).catch(() => undefined);
         throw e;
       }
     }),
