@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { ChantConfig } from "@intentius/chant";
 
 /**
@@ -22,6 +23,23 @@ import type { ChantConfig } from "@intentius/chant";
 
 const IMAGE = "ghcr.io/intentius/sql-yodeler";
 
+const read = (file: string): unknown => JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8"));
+
+/** The package version, which is the release's label. */
+const VERSION = (read("./package.json") as { version: string }).version;
+
+/** The CI image's build context: the npm pack of the commit and nothing else. */
+const IMAGE_CONTEXT = "dist/images/context";
+
+/** The @intentius/chant packages yodel runs with, at package-lock.json's versions, installed in the image beside yodel. */
+function chantPins(): string {
+  const lock = read("./package-lock.json") as { packages: Record<string, { version: string; dev?: boolean }> };
+  return Object.entries(lock.packages)
+    .filter(([k, v]) => /^node_modules\/@intentius\/chant[^/]*$/.test(k) && !v.dev)
+    .map(([k, v]) => `${k.slice("node_modules/".length)}@${v.version}`)
+    .join(" ");
+}
+
 export default {
   lexicons: ["github"],
   // chant.workspace.json declares no members; it is there for ci.green, so chant builds this root project alone.
@@ -38,11 +56,7 @@ export default {
       build: "npm run build",
       chant: "npx chant",
       // chant adds packages: write and this run's token for the GHCR oci target, and npm 11.5.1 or later for
-      // trusted publishing, from the targets (chant issue 4786).
-      setup: [
-        // QEMU, so an amd64 runner builds the arm64 half of the image.
-        { uses: "docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0", with: { platforms: "arm64" } },
-      ],
+      // trusted publishing, from the targets (chant issue 4786), and QEMU for the image's arm64 half (chant issue 4876).
       after: [
         // The v<version> tag yodel create takes a release's templates from (src/commands/create.ts), on the commit the cut tagged.
         `git tag "v$CHANT_RELEASE_LABEL" && git push origin "refs/tags/v$CHANT_RELEASE_LABEL"`,
@@ -54,7 +68,22 @@ export default {
       // npm's trusted publisher for this package names publish.yml.
       file: ".github/workflows/publish.yml",
     },
-    images: [{ name: "sql-yodeler", build: "bash scripts/release-image.sh", archive: "dist/images/sql-yodeler.tar" }],
+    images: [
+      {
+        name: "sql-yodeler",
+        dockerfile: ".github/image/Dockerfile",
+        // The image installs yodel from npm pack of the commit being cut, not from npm, since the cut runs
+        // before the publish. The context holds only the tarball, under dist/images, which the package leaves out.
+        prepare: `mkdir -p ${IMAGE_CONTEXT} && npm pack --silent --pack-destination ${IMAGE_CONTEXT} >/dev/null`,
+        context: IMAGE_CONTEXT,
+        archive: "dist/images/sql-yodeler.tar",
+        args: {
+          YODEL_VERSION: VERSION,
+          YODEL_PACKAGE: `/ctx/intentius-sql-yodeler-${VERSION}.tgz`,
+          CHANT_PINS: chantPins(),
+        },
+      },
+    ],
     publish: [
       // The image's SBOM is not the repository's lockfile, so none is attached; chant attaches the provenance.
       { type: "oci" as const, image: "dist/images/sql-yodeler.tar", repository: IMAGE, tags: ["{label}"], sbom: false as const },
