@@ -78,7 +78,7 @@ Make the directory a git repository and commit (`yodel apply` finds the migratio
 
 `yodel init --from <env>` takes a database that already exists into versioned migrations in one command:
 
-1. It reads the live database the profile names (chant's import, as `chant import --from <env>` runs it) and writes the declarations to the source directory (`sourceDir`, else `src/`).
+1. It reads the live database the profile names (chant's import, as `chant import --from <env>` runs it) and writes the declarations to the source directory (`sourceDir`, else the project root).
 2. It builds them and plans them against the same database. The plan must show no change; if it does not, everything it wrote is taken back.
 3. It writes the baseline migration, `migrations/<timestamp>-baseline/`: the first migration, whose statements create everything.
 4. It records the baseline applied in the environment's history, without running any of its statements.

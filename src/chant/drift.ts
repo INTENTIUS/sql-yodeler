@@ -227,8 +227,8 @@ export function extraColumns(unclaimed: readonly DeepEntityUnclaimed[]): DeepEnt
 
 /** Runs `chant lifecycle diff <env> --live --json` in the project and reads the drift from it. */
 export async function readDrift(project: Project, env: Environment, options: { env?: NodeJS.ProcessEnv; src?: string } = {}): Promise<Drift> {
-  // Always scoped to the declared schema: a build of the project root reads every .sql file in it, migrations and ORM DDL included.
-  const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json", "--src", options.src ?? project.sourceDir], {
+  // chant scopes the build to sourceDir (chant issue 4794); `src` is a directory the caller names.
+  const result = await runChant(["lifecycle", "diff", env.name, "--live", "--json", ...(options.src ? ["--src", options.src] : [])], {
     cwd: project.dir,
     ...(options.env ? { env: options.env } : {}),
   });

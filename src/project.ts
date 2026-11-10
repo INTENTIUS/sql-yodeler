@@ -7,7 +7,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { resolveSourceDir } from "@intentius/chant/config";
 import type { SqlConfig, SqlProfile } from "@intentius/chant-lexicon-sql/config";
 import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
 import type { YodelConfig } from "./config/define.js";
@@ -53,7 +54,7 @@ export interface Project {
   config: ProjectConfig;
   /** `sql.dialect`, `clickhouse` when the config names none (chant's default). */
   dialect: SqlDialect;
-  /** Where the declared schema lives, relative to `dir`: `sourceDir`, else `src` when it exists, else `.`. */
+  /** Where the declared schema lives, relative to `dir`: chant's `resolveSourceDir` (chant issue 4794), the config's `sourceDir`, else `.`. */
   sourceDir: string;
   /** `yodel.config.ts`, checked, when the project has one (`./config/`). */
   yodel?: { path: string; config: YodelConfig } | undefined;
@@ -112,7 +113,7 @@ export function projectFromConfig(dir: string, configPath: string, config: Proje
   if (!(config.lexicons ?? []).includes("sql")) {
     throw new YodelError(`${configPath}: lexicons does not include "sql"; add lexicons: ["sql"] and import "@intentius/chant-lexicon-sql"`);
   }
-  const sourceDir = config.sourceDir ?? (existsSync(join(dir, "src")) ? "src" : ".");
+  const sourceDir = relative(dir, resolveSourceDir(dir, config)) || ".";
   const { config: withAccess, profileAccess } = accessInProfiles(config, yodel?.config);
   return { dir, configPath, config: withAccess, dialect: projectDialect(config, configPath), sourceDir, ...(yodel ? { yodel } : {}), profileAccess };
 }

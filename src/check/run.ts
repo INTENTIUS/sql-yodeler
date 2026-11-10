@@ -115,7 +115,7 @@ export async function snapshot(project: Project, env: Environment, processEnv: N
     const yodel = project.yodel ? { ...project.yodel, config: { ...project.yodel.config } } : undefined;
     if (yodel) delete yodel.config.sources;
     const scratch: Project = { ...project, sourceDir: relative(project.dir, dir), yodel };
-    const build = await buildSchema(scratch, { env: processEnv });
+    const build = await buildSchema(scratch, { env: processEnv, src: scratch.sourceDir });
     try {
       return build.output;
     } finally {

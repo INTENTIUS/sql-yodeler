@@ -27,6 +27,7 @@
  */
 
 import { join, relative } from "node:path";
+import { resolveSourceDir } from "@intentius/chant/config";
 import { loadProject, YodelError, type Environment, type Project, yodelRefusal } from "../project.js";
 import { buildSchema } from "../chant/build.js";
 import { planEnvironment, renderPlan, type Plan } from "../chant/plan.js";
@@ -68,8 +69,8 @@ export interface Adopted {
   warnings: string[];
 }
 
-/** Where the declarations go: `sourceDir` when the config names one, else `src`. */
-export const schemaDir = (project: Project): string => join(project.dir, project.config.sourceDir ?? "src");
+/** Where the declarations go: the directory chant builds, by its `resolveSourceDir` (chant issue 4794). */
+export const schemaDir = (project: Project): string => resolveSourceDir(project.dir, project.config);
 
 /** The refusals that need no server: a schema already declared, migrations already there, a ClickHouse scope that would take in the history. */
 export function preflight(project: Project, env: Environment, options: { force?: boolean; processEnv?: NodeJS.ProcessEnv } = {}): void {
