@@ -1,0 +1,84 @@
+# Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
+# Edit those and render again; yodel ci --check says when this file is stale.
+
+variables:
+  CHANT_ENV: yodel-pr
+  GIT_DEPTH: '0'
+
+dev-plan:
+  stage: plan
+  image: node:22-bookworm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  interruptible: true
+  variables:
+    BASE_SHA: '$CI_MERGE_REQUEST_DIFF_BASE_SHA'
+    PR_NUMBER: '$CI_MERGE_REQUEST_IID'
+  script:
+    - unset CHANT_FORGE_TOKEN CHANT_GITHUB_TOKEN CHANT_FORGEJO_TOKEN CHANT_GITLAB_TOKEN CHANT_CHECKOUT_TOKEN GITHUB_TOKEN GH_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITLAB_TOKEN CI_JOB_TOKEN ACTIONS_RUNTIME_TOKEN
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - ./node_modules/.bin/yodel ci --fetch-ledger
+    - yodel config check dev --write-probe
+    - chant_plan_exit=0
+    - yodel plan dev --pr-note .chant/pr || chant_plan_exit=$?
+    - 'mkdir -p .chant/pr/report; yodel report dev --json > .chant/pr/report/dev.json || true; yodel report dev --html .chant/pr/report/dev.html || true || echo "chant: the report line exited $?" >&2'
+    - '[ "$chant_plan_exit" -eq 0 ] || exit "$chant_plan_exit"'
+  artifacts:
+    name: chant-pr-plan-dev
+    when: always
+    paths:
+      - .chant/pr
+
+prod-plan:
+  stage: plan
+  image: node:22-bookworm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  interruptible: true
+  variables:
+    BASE_SHA: '$CI_MERGE_REQUEST_DIFF_BASE_SHA'
+    PR_NUMBER: '$CI_MERGE_REQUEST_IID'
+  script:
+    - unset CHANT_FORGE_TOKEN CHANT_GITHUB_TOKEN CHANT_FORGEJO_TOKEN CHANT_GITLAB_TOKEN CHANT_CHECKOUT_TOKEN GITHUB_TOKEN GH_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITLAB_TOKEN CI_JOB_TOKEN ACTIONS_RUNTIME_TOKEN
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - ./node_modules/.bin/yodel ci --fetch-ledger
+    - yodel config check prod dev --write-probe
+    - chant_plan_exit=0
+    - yodel plan prod --pr-note .chant/pr || chant_plan_exit=$?
+    - 'mkdir -p .chant/pr/report; yodel report prod --json > .chant/pr/report/prod.json || true; yodel report prod --html .chant/pr/report/prod.html || true || echo "chant: the report line exited $?" >&2'
+    - '[ "$chant_plan_exit" -eq 0 ] || exit "$chant_plan_exit"'
+  artifacts:
+    name: chant-pr-plan-prod
+    when: always
+    paths:
+      - .chant/pr
+
+dev-plan-note:
+  stage: plan-note
+  image: node:22-bookworm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|web|api|trigger)$/ && $CHANT_PLAN_NOTES == "1" && $CI_COMMIT_BRANCH == "main"'
+  variables:
+    CHANT_PLAN_NOTE_WORDS: '{"productMarker":"yodel:plan","subjectParts":{"applied":{"added":"{items} applied","gone":"{items} no longer applied","changed":"{items} recorded with another checksum"},"pending":{"added":"{items} now pending","gone":"{items} no longer pending","changed":"{items} edited"},"done":{"added":"statements of {items} done","gone":"{items} started over","changed":"more of {items} done"},"order":{"changed":"the pending order changed"},"live":{"changed":"the live schema changed"},"history":{"changed":"the history table changed"},"topology":{"changed":"the topology changed"},"environment":{"changed":"the environment changed"}}}'
+    CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *"},{"op":"watch-prod","cron":"47 * * * *"}]'
+  script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - ./node_modules/.bin/yodel ci --fetch-ledger
+    - yodel chant components pr-post --open --env yodel-pr --output .chant/pr --forge gitlab --member dev
+
+prod-plan-note:
+  stage: plan-note
+  image: node:22-bookworm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|web|api|trigger)$/ && $CHANT_PLAN_NOTES == "1" && $CI_COMMIT_BRANCH == "main"'
+  variables:
+    CHANT_PLAN_NOTE_WORDS: '{"productMarker":"yodel:plan","subjectParts":{"applied":{"added":"{items} applied","gone":"{items} no longer applied","changed":"{items} recorded with another checksum"},"pending":{"added":"{items} now pending","gone":"{items} no longer pending","changed":"{items} edited"},"done":{"added":"statements of {items} done","gone":"{items} started over","changed":"more of {items} done"},"order":{"changed":"the pending order changed"},"live":{"changed":"the live schema changed"},"history":{"changed":"the history table changed"},"topology":{"changed":"the topology changed"},"environment":{"changed":"the environment changed"}}}'
+    CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *"},{"op":"watch-prod","cron":"47 * * * *"}]'
+  script:
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - ./node_modules/.bin/yodel ci --fetch-ledger
+    - yodel chant components pr-post --open --env yodel-pr --output .chant/pr --forge gitlab --member prod

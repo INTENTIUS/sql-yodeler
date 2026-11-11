@@ -7,7 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { opExportName } from "../src/chant/export-name.js";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -145,23 +145,12 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("commits the pull request and apply pipelines yodel ci renders", async () => {
     // Every file yodel ci renders, the workspace declaration with its check hooks among them (#298).
-    // /yodel new (#312) reaches the templates with the release that ships it (AGENTS.md, Releasing): until
-    // npm run templates:render writes its workflow there, the committed template is what yodel ci renders without it.
-    const staged = !existsSync(join(dir, ".github", "workflows", "yodel-new.yml"));
-    const rendered = await render(dir, staged ? { respondNew: "off", respondRebase: "off" } : {});
+    // A template change that needs unreleased yodel ships with the release that has it (AGENTS.md, Releasing).
+    const rendered = await render(dir);
     expect(rendered.map((f) => f.path)).toContain("chant.workspace.json");
     expect(manifest.files).toContain("chant.workspace.json");
-    // The actions pinned by SHA from chant's ACTION_PINS (#319) reach the templates with the same release, so until then a uses: line compares by its action alone.
-    const actionOnly = (text: string) => (staged ? text.replace(/^(\s*(?:- )?uses: *)\S*?([^/\s@]+)@\S+(?: # \S+)?$/gm, "$1$2") : text);
-    // The jobs' fetch of chant/lifecycle through chant's reader (#326) reaches them with that release too; until then they keep the git line it replaced.
-    const ledgerFetch = (text: string) => (staged ? text.replaceAll(fetchApprovals(), STAGED_LEDGER_FETCH) : text);
-    // The plan on chant's product plan (sql-yodeler issue 345) runs `yodel plan --pr-note`, which the templates' yodel range
-    // gets with the release that ships it: until then the template keeps the pull request pipelines that release renders.
-    const planStaged = !existsSync(join(dir, ".gitlab", "yodel-plan.gitlab-ci.yml"));
-    const PR_PIPELINES = [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml", ".gitlab/yodel-plan.gitlab-ci.yml"];
     for (const file of rendered) {
-      if (planStaged && PR_PIPELINES.includes(file.path)) continue;
-      expect(actionOnly(readFileSync(join(dir, file.path), "utf8")), file.path).toBe(actionOnly(ledgerFetch(file.content)));
+      expect(readFileSync(join(dir, file.path), "utf8"), file.path).toBe(file.content);
     }
   });
 
@@ -184,7 +173,8 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     const gitlab = load(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { needs?: string[]; stage?: string }>;
     expect(gitlab["wave-2-prod"]?.needs).toEqual(["wave-1-dev"]);
     const main = load(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as { stages: string[] };
-    expect(main.stages).toEqual(["review", "wave-1-dev", "wave-2-prod", "ops"]);
+    // chant's plan and plan-note stages (the product plan, sql-yodeler issue 345) right after review.
+    expect(main.stages).toEqual(["review", "plan", "plan-note", "wave-1-dev", "wave-2-prod", "ops"]);
   });
 
   it("gives an environment's writer to its wave job only, with its own reader and the reader of the wave before, and the reader to the rest", () => {
@@ -216,16 +206,23 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
 
   it("tries a write in each plan job before the plan, with every reader the job holds (#50)", () => {
     const probe = { dev: "yodel config check dev --write-probe", prod: "yodel config check prod dev --write-probe" };
+    // chant's product plan (sql-yodeler issue 345): the probe is the target's writeProbe, before `yodel plan <env> --pr-note`.
+    const plan = (env: string) => `yodel plan ${env} --pr-note .chant/pr`;
     for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml"]) {
       const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { steps: Array<{ run?: string }> }> };
       for (const env of ["dev", "prod"] as const) {
-        const runs = (doc.jobs[`plan-${env}`]?.steps ?? []).map((s) => s.run);
-        expect(runs.indexOf(probe[env]), `${f} plan-${env}`).toBeGreaterThan(-1);
-        expect(runs.indexOf(probe[env]), `${f} plan-${env}`).toBeLessThan(runs.indexOf(`yodel plan ${env} --comment`));
+        const runs = (doc.jobs[`plan-${env}`]?.steps ?? []).map((s) => s.run ?? "");
+        const probeAt = runs.findIndex((r) => r.split("\n").some((l) => l.trim() === probe[env]));
+        expect(probeAt, `${f} plan-${env}`).toBeGreaterThan(-1);
+        expect(probeAt, `${f} plan-${env}`).toBeLessThan(runs.findIndex((r) => r.includes(plan(env))));
       }
     }
-    const gitlab = load(readFileSync(join(dir, ".gitlab-ci.yml"), "utf8")) as Record<string, { script?: string[] }>;
-    for (const env of ["dev", "prod"] as const) expect(gitlab[`plan-${env}`]?.script).toEqual([probe[env], `yodel plan ${env} --comment`]);
+    const gitlab = load(readFileSync(join(dir, ".gitlab/yodel-plan.gitlab-ci.yml"), "utf8")) as Record<string, { script?: string[] }>;
+    for (const env of ["dev", "prod"] as const) {
+      const script = gitlab[`${env}-plan`]?.script ?? [];
+      expect(script.indexOf(probe[env]), `${env}-plan`).toBeGreaterThan(-1);
+      expect(script.indexOf(probe[env]), `${env}-plan`).toBeLessThan(script.findIndex((l) => l.startsWith(plan(env))));
+    }
   });
 
   it("never points the replay profile at another profile's server, and gives it the history's database", async () => {
@@ -252,27 +249,41 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
   });
 
   it("keeps yodel report as an artifact of every plan and wave job, and passes the webhook's variables", () => {
-    for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
+    // The plan jobs are chant's product plan (sql-yodeler issue 345): the report goes into chant's plan report, which the plan job keeps (GitLab) or hands to its note job (GitHub, Forgejo).
+    const report = (env: string) => `mkdir -p .chant/pr/report; yodel report ${env} --json > .chant/pr/report/${env}.json || true; yodel report ${env} --html .chant/pr/report/${env}.html || true`;
+    for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml"]) {
+      const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { steps: Array<{ id?: string; run?: string; env?: Record<string, string> }> }> };
+      for (const env of ["dev", "prod"]) {
+        const step = doc.jobs[`plan-${env}`]?.steps.find((s) => s.id === "plan");
+        expect(step?.run, `${f} plan-${env}`).toContain(report(env));
+        for (const v of WEBHOOK_VARIABLES) expect(step?.env?.[v], `${f} plan-${env}`).toBe(`\${{ secrets.${v} }}`);
+      }
+    }
+    const plans = load(readFileSync(join(dir, ".gitlab/yodel-plan.gitlab-ci.yml"), "utf8")) as Record<string, { script?: string[]; artifacts?: { when?: string; paths?: string[] } }>;
+    for (const env of ["dev", "prod"]) {
+      expect(plans[`${env}-plan`]?.script?.some((l) => l.includes(report(env))), `${env}-plan`).toBe(true);
+      expect(plans[`${env}-plan`]?.artifacts).toMatchObject({ when: "always", paths: [".chant/pr"] });
+    }
+    for (const f of [".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
       const doc = load(readFileSync(join(dir, f), "utf8")) as { jobs: Record<string, { env?: Record<string, string>; steps: Array<{ if?: string; run?: string; uses?: string; with?: Record<string, string> }> }> };
-      for (const [name, job] of Object.entries(doc.jobs).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
-        const env = name.replace(/^plan-|^wave-\d+-/, "");
+      for (const [name, job] of Object.entries(doc.jobs).filter(([n]) => n.startsWith("wave-"))) {
+        const env = name.replace(/^wave-\d+-/, "");
         expect(job.steps.find((s) => s.run === reportCommand(env))?.if, `${f} ${name}`).toBe("always()");
-        // On Forgejo, upload-artifact v3: v4 refuses any server but github.com's. The templates take the pins with the release that has them (#319).
-        const pinned = existsSync(join(dir, ".github", "workflows", "yodel-new.yml"));
-        const upload = f.startsWith(".forgejo") ? (pinned ? FORGEJO_UPLOAD_ARTIFACT : "https://code.forgejo.org/forgejo/upload-artifact@v4") : pinned ? UPLOAD_ARTIFACT : "actions/upload-artifact@v4";
+        // On Forgejo, upload-artifact v3: v4 refuses any server but github.com's.
+        const upload = f.startsWith(".forgejo") ? FORGEJO_UPLOAD_ARTIFACT : UPLOAD_ARTIFACT;
         // A wave job also uploads its outcome file (#4322), so pick the report's upload by name.
         expect(job.steps.find((s) => s.uses === upload && s.with?.name === reportArtifact(name))?.with, `${f} ${name}`).toMatchObject({ name: reportArtifact(name), path: REPORT_DIR });
         for (const v of WEBHOOK_VARIABLES) expect(job.env?.[v], `${f} ${name}`).toBe(`\${{ secrets.${v} }}`);
       }
     }
-    for (const f of [".gitlab-ci.yml", ".gitlab/yodel-apply.gitlab-ci.yml"]) {
-      const doc = load(readFileSync(join(dir, f), "utf8")) as Record<string, { after_script?: string[]; artifacts?: { when?: string; paths?: string[] } }>;
-      for (const [name, job] of Object.entries(doc).filter(([n]) => n.startsWith("plan-") || n.startsWith("wave-"))) {
-        expect(job.after_script, `${f} ${name}`).toEqual([reportCommand(name.replace(/^plan-|^wave-\d+-/, ""))]);
-        expect(job.artifacts?.when, `${f} ${name}`).toBe("always");
-        // A wave job keeps chant's outcome files beside the report (#4322), since yodel passes the report to chant (#4791).
-        expect(job.artifacts?.paths, `${f} ${name}`).toContain(`${REPORT_DIR}/`);
-      }
+    const apply = load(readFileSync(join(dir, ".gitlab/yodel-apply.gitlab-ci.yml"), "utf8")) as Record<string, { after_script?: string[]; artifacts?: { when?: string; paths?: string[] } }>;
+    const waves = Object.entries(apply).filter(([n]) => n.startsWith("wave-"));
+    expect(waves.map(([n]) => n)).toEqual(["wave-1-dev", "wave-2-prod"]);
+    for (const [name, job] of waves) {
+      expect(job.after_script, name).toEqual([reportCommand(name.replace(/^wave-\d+-/, ""))]);
+      expect(job.artifacts?.when, name).toBe("always");
+      // A wave job keeps chant's outcome files beside the report (#4322), since yodel passes the report to chant (#4791).
+      expect(job.artifacts?.paths, name).toContain(`${REPORT_DIR}/`);
     }
   });
 
@@ -285,14 +296,17 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     for (const f of [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml"]) {
       const text = readFileSync(join(dir, f), "utf8");
       expect(text, f).toContain("yodel chant ci check --base ");
-      expect(text, f).toContain("yodel plan dev --comment");
     }
   });
-});
 
-/** The templates' fetch of chant/lifecycle until the release that renders `yodel ci --fetch-ledger` there (#326). */
-const STAGED_LEDGER_FETCH =
-  "git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle || echo 'no chant/lifecycle branch yet, so nothing is approved'";
+  it("never moves chant's lease ref itself (#326): yodel's jobs read the ledger through yodel ci --fetch-ledger", () => {
+    for (const f of files(dir).filter(PIPELINES)) {
+      const text = readFileSync(join(dir, f), "utf8");
+      expect(text, f).not.toMatch(/refs\/remotes\/[^ ']*chant\/lifecycle|branch -f chant\/lifecycle/);
+    }
+    expect(readFileSync(join(dir, ".gitlab/yodel-plan.gitlab-ci.yml"), "utf8")).toContain(fetchApprovals());
+  });
+});
 
 describe("yodel ci and the templates' scripts", () => {
   it("read yodel.config.ts waves, refusing an environment that is not one and a gate that is not a policy", async () => {
