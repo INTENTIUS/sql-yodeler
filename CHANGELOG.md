@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.4
+
+### Changed
+
+- On GitLab, chant's check job replaces yodel's lint job when the project has a workspace declaration, as it already did on GitHub and Forgejo (chant issue 4988, issue 346). The job is `check` in `.gitlab/yodel-plan.gitlab-ci.yml` and keeps the merge request's code quality report as `artifacts: { reports: { codequality } }`. With `ci.evidence`, chant's `check-evidence` job signs each hook that passed, so GitLab's checks are signed too. A project with no workspace declaration keeps yodel's lint job. Run `yodel ci` to write the pipelines again.
+- Each environment's drift watch targets only that environment, so an environment's plan note warns of its own overdue watch and no other.
+
+### Fixed
+
+- `yodel new` refreshes `src/sql-types.d.ts` before the build, which failed on a stale file, so after a schema edit it wrote the migration where it used to exit 1 (issue 328). The "Updated src/sql-types.d.ts" line now comes before the migration's report. In chant's commit job yodel still leaves `src/` alone.
+- The starter templates are rendered on chant's product plan, and no template file fetches yodel's old ledger ref (issue 326). The ledger-fetch test shows that its scan can fail (issue 333).
+
+chant is at 0.124.91, and the starter templates take `^0.13.4`. Their pull request pipelines are rendered again with GitLab's check on chant's check job.
+
 ## 0.13.3
 
 ### Changed

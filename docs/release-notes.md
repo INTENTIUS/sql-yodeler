@@ -7,6 +7,14 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.13.4
+
+- Changed: on GitLab, chant's check job replaces yodel's lint job when the project has a workspace declaration, and keeps the code quality report as `artifacts: { reports: { codequality } }`. With `ci.evidence`, `check-evidence` signs the checks on GitLab too. Run `yodel ci` to write the pipelines again.
+- Changed: each environment's drift watch targets only that environment.
+- Fixed: `yodel new` refreshes `sql-types.d.ts` before the build, so it no longer fails after a schema edit.
+- Fixed: the starter templates are rendered again on chant's product plan, and the ledger-fetch test can fail.
+- chant 0.124.91. The starter templates take `^0.13.4`.
+
 ## 0.13.3
 
 - Changed: the pull request plan is chant's product plan. `yodel plan --pr-note` replaces `--comment`, and chant's note job posts the note. On GitLab the notes come from a scheduled pipeline with `CHANT_PLAN_NOTES=1`. Run `yodel ci` to write the pipelines again.

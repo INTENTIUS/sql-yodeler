@@ -149,12 +149,7 @@ describe.each(DIALECTS)("templates/%s", (dialect) => {
     const rendered = await render(dir);
     expect(rendered.map((f) => f.path)).toContain("chant.workspace.json");
     expect(manifest.files).toContain("chant.workspace.json");
-    // GitLab's check on chant's check job and the watches scoped to their environment (sql-yodeler issue 346) reach the
-    // templates with the release that ships them: until then the template keeps the pull request pipelines 0.13.3 renders.
-    const checkStaged = !readFileSync(join(dir, ".gitlab", "yodel-plan.gitlab-ci.yml"), "utf8").includes("codequality");
-    const PR_PIPELINES = [".github/workflows/yodel-pr.yml", ".forgejo/workflows/yodel-pr.yml", ".gitlab-ci.yml", ".gitlab/yodel-plan.gitlab-ci.yml"];
     for (const file of rendered) {
-      if (checkStaged && PR_PIPELINES.includes(file.path)) continue;
       expect(readFileSync(join(dir, file.path), "utf8"), file.path).toBe(file.content);
     }
   });
