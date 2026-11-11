@@ -232,7 +232,7 @@ describe("yodel rebase's refusal, read by chant's reply (#313)", () => {
     expect(refused.code).toBe(1);
     // The wording stays as it is (#311): the other side is the range of migrations it moves onto.
     expect(refused.err).toContain(`yodel rebase: refused: ${ids[1] ?? ""} and the migrations after ${init.id} up to ${ids[0] ?? ""} both change orders, differently;`);
-    // chant's reply names both sides and the object, from yodel's refusal line as it prints it (chant 0.124.90).
+    // chant's reply names both sides and the object, from yodel's refusal line as it prints it (chant 0.124.91).
     expect(yodelRefusalReply({ command: ["yodel", ...argv], rc: "1", output: refused.err })).toBe(
       `\`yodel rebase\` refused: \`${ids[1] ?? ""}\` and the migrations after \`${init.id}\` up to \`${ids[0] ?? ""}\` both change \`orders\`, differently, and a rebase does not merge two changes to one object. ` +
         `Resolve it on the branch: delete \`${ids[1] ?? ""}\`'s directory, declare both changes, then run \`yodel new\` (or comment \`/yodel new\`).`,
