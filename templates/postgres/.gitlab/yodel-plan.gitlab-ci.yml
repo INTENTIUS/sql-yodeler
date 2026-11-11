@@ -62,7 +62,7 @@ dev-plan-note:
     - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|web|api|trigger)$/ && $CHANT_PLAN_NOTES == "1" && $CI_COMMIT_BRANCH == "main"'
   variables:
     CHANT_PLAN_NOTE_WORDS: '{"productMarker":"yodel:plan","subjectParts":{"applied":{"added":"{items} applied","gone":"{items} no longer applied","changed":"{items} recorded with another checksum"},"pending":{"added":"{items} now pending","gone":"{items} no longer pending","changed":"{items} edited"},"done":{"added":"statements of {items} done","gone":"{items} started over","changed":"more of {items} done"},"order":{"changed":"the pending order changed"},"live":{"changed":"the live schema changed"},"history":{"changed":"the history table changed"},"topology":{"changed":"the topology changed"},"environment":{"changed":"the environment changed"}}}'
-    CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *"},{"op":"watch-prod","cron":"47 * * * *"}]'
+    CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *","targets":["dev"]},{"op":"watch-prod","cron":"47 * * * *","targets":["prod"]}]'
   script:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
@@ -76,9 +76,39 @@ prod-plan-note:
     - if: '$CI_PIPELINE_SOURCE =~ /^(schedule|web|api|trigger)$/ && $CHANT_PLAN_NOTES == "1" && $CI_COMMIT_BRANCH == "main"'
   variables:
     CHANT_PLAN_NOTE_WORDS: '{"productMarker":"yodel:plan","subjectParts":{"applied":{"added":"{items} applied","gone":"{items} no longer applied","changed":"{items} recorded with another checksum"},"pending":{"added":"{items} now pending","gone":"{items} no longer pending","changed":"{items} edited"},"done":{"added":"statements of {items} done","gone":"{items} started over","changed":"more of {items} done"},"order":{"changed":"the pending order changed"},"live":{"changed":"the live schema changed"},"history":{"changed":"the history table changed"},"topology":{"changed":"the topology changed"},"environment":{"changed":"the environment changed"}}}'
-    CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *"},{"op":"watch-prod","cron":"47 * * * *"}]'
+    CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *","targets":["dev"]},{"op":"watch-prod","cron":"47 * * * *","targets":["prod"]}]'
   script:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - ./node_modules/.bin/yodel ci --fetch-ledger
     - yodel chant components pr-post --open --env yodel-pr --output .chant/pr --forge gitlab --member prod
+
+check:
+  stage: plan
+  image: node:22-bookworm
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  services:
+    - name: postgres:18.6
+      alias: replay-postgres
+      variables:
+        POSTGRES_PASSWORD: replay
+  variables:
+    BASE_SHA: '$CI_MERGE_REQUEST_DIFF_BASE_SHA'
+    REPLAY_POSTGRES_URL: postgres://replay-postgres:5432/postgres
+    REPLAY_POSTGRES_USER: postgres
+    REPLAY_POSTGRES_PASSWORD: replay
+  script:
+    - unset CHANT_FORGE_TOKEN CHANT_GITHUB_TOKEN CHANT_FORGEJO_TOKEN CHANT_GITLAB_TOKEN CHANT_CHECKOUT_TOKEN GITHUB_TOKEN GH_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITLAB_TOKEN CI_JOB_TOKEN ACTIONS_RUNTIME_TOKEN
+    - npm ci
+    - export PATH="$PWD/node_modules/.bin:$PATH"
+    - ./node_modules/.bin/yodel ci --fetch-ledger
+    - node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(5432, "replay-postgres", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-postgres:5432 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
+    - yodel chant ci check --base "$BASE_SHA"
+  artifacts:
+    name: chant-pr-check
+    when: always
+    paths:
+      - .chant/check
+    reports:
+      codequality: gl-code-quality-report.json

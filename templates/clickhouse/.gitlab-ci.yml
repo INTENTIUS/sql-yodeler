@@ -1,7 +1,7 @@
 # Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
 # Edit those and render again; yodel ci --check says when this file is stale.
 #
-# Merge requests: lint (stage review), and each environment's plan on chant's
+# Merge requests: chant's check job and each environment's plan on chant's
 # product plan (stage plan), in .gitlab/yodel-plan.gitlab-ci.yml. A merge request's own
 # pipeline holds no token for its notes: a pipeline schedule of the default
 # branch with CHANT_PLAN_NOTES=1, which you create, posts every open merge
@@ -61,23 +61,3 @@ workflow:
     - npm ci
     - export PATH="$PWD/node_modules/.bin:$PATH"
     - ./node_modules/.bin/yodel ci --fetch-ledger
-
-lint:
-  extends: .yodel
-  stage: review
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - node -e 'const net = require("net"); let n = 0; (function t() { const s = net.connect(8123, "replay-clickhouse", () => { s.end(); process.exit(0); }); s.on("error", () => { if (++n > 90) { console.error("replay-clickhouse:8123 did not answer"); process.exit(1); } setTimeout(t, 1000); }); })()'
-    - yodel chant ci check --base $CI_MERGE_REQUEST_DIFF_BASE_SHA
-  services:
-    - name: clickhouse/clickhouse-server:26.8.15.10
-      alias: replay-clickhouse
-      variables:
-        CLICKHOUSE_SKIP_USER_SETUP: '1'
-  variables:
-    REPLAY_CLICKHOUSE_URL: http://replay-clickhouse:8123
-  artifacts:
-    when: always
-    reports:
-      codequality: gl-code-quality-report.json

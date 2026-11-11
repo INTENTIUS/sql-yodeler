@@ -135,7 +135,7 @@ jobs:
           PLAN_RESULT: '${{ needs.plan-dev.result }}'
           GITHUB_TOKEN: '${{ github.token }}'
           CHANT_PLAN_NOTE_WORDS: '{"productMarker":"yodel:plan","subjectParts":{"applied":{"added":"{items} applied","gone":"{items} no longer applied","changed":"{items} recorded with another checksum"},"pending":{"added":"{items} now pending","gone":"{items} no longer pending","changed":"{items} edited"},"done":{"added":"statements of {items} done","gone":"{items} started over","changed":"more of {items} done"},"order":{"changed":"the pending order changed"},"live":{"changed":"the live schema changed"},"history":{"changed":"the history table changed"},"topology":{"changed":"the topology changed"},"environment":{"changed":"the environment changed"}}}'
-          CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *"},{"op":"watch-prod","cron":"47 * * * *"}]'
+          CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *","targets":["dev"]},{"op":"watch-prod","cron":"47 * * * *","targets":["prod"]}]'
         run: yodel chant components pr-post --pr "$PR_NUMBER" --head "$HEAD_SHA" --env yodel-pr --output .chant/pr --forge forgejo --member dev --result "$PLAN_RESULT"
   plan-prod:
     if: github.event_name == 'pull_request'
@@ -255,7 +255,7 @@ jobs:
           PLAN_RESULT: '${{ needs.plan-prod.result }}'
           GITHUB_TOKEN: '${{ github.token }}'
           CHANT_PLAN_NOTE_WORDS: '{"productMarker":"yodel:plan","subjectParts":{"applied":{"added":"{items} applied","gone":"{items} no longer applied","changed":"{items} recorded with another checksum"},"pending":{"added":"{items} now pending","gone":"{items} no longer pending","changed":"{items} edited"},"done":{"added":"statements of {items} done","gone":"{items} started over","changed":"more of {items} done"},"order":{"changed":"the pending order changed"},"live":{"changed":"the live schema changed"},"history":{"changed":"the history table changed"},"topology":{"changed":"the topology changed"},"environment":{"changed":"the environment changed"}}}'
-          CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *"},{"op":"watch-prod","cron":"47 * * * *"}]'
+          CHANT_PLAN_WATCHES: '[{"op":"watch-dev","cron":"17 * * * *","targets":["dev"]},{"op":"watch-prod","cron":"47 * * * *","targets":["prod"]}]'
         run: yodel chant components pr-post --pr "$PR_NUMBER" --head "$HEAD_SHA" --env yodel-pr --output .chant/pr --forge forgejo --member prod --result "$PLAN_RESULT"
   check:
     if: github.event_name == 'pull_request'
