@@ -247,7 +247,7 @@ The files that change, for each forge the project renders:
 | `chant.workspace.json` | new, when the project had no workspace declaration: the project as the workspace, with yodel's checks in `ci.hooks.check` |
 | `yodel-waves.json` | `gateName`, the `sql-migrate` step in place of the `plan` and `apply` command lines, `standDown: true`, and, when the project has steps, only the `before.plan` SQL checks in its hooks |
 | `.github/workflows/yodel-apply.yml`, `.forgejo/workflows/yodel-apply.yml`, `.gitlab/yodel-apply.gitlab-ci.yml` | each wave job runs `yodel chant run wave`, with no `YODEL_LOCK_WAIT` or `YODEL_STAND_DOWN`; on GitHub and GitLab a wave job whose writer a cloud token source mints logs in through chant |
-| `.github/workflows/yodel-pr.yml`, `.forgejo/workflows/yodel-pr.yml`, `.gitlab-ci.yml` | the lint job runs `yodel chant ci check --base <base>` in place of its own steps; on GitHub and GitLab a plan job whose reader a cloud token source mints logs in through chant |
+| `.github/workflows/yodel-pr.yml`, `.forgejo/workflows/yodel-pr.yml`, `.gitlab-ci.yml` and `.gitlab/yodel-plan.gitlab-ci.yml` | chant's check job runs `yodel chant ci check --base <base>` in place of the lint job (on GitLab in the plan file, keeping the code quality report); on GitHub and GitLab a plan job whose reader a cloud token source mints logs in through chant |
 | `watch-<env>.yml` on GitHub and Forgejo, `.gitlab/yodel-watch.gitlab-ci.yml` | `yodel chant run watch-<env>` |
 | `yodel-apply-plans.yml`, `yodel-apply-resume.yml` (GitHub and Forgejo, when the project has them) | `yodel chant` in place of `chant` |
 

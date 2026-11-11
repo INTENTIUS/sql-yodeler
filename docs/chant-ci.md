@@ -44,7 +44,7 @@ The waves take chant's lock grain. The sql lexicon gives a SQL member the `targe
 
 ### The check on chant's check hooks
 
-`yodel ci` writes yodel's checks into the workspace declaration's `ci.hooks.check` as presets (`yodel upgrade` adds `chant.workspace.json` when the project has none). On GitHub and Forgejo they run in chant's check job, `check`, which takes the lint job's place: it starts the replay server beside it, waits for it, and runs `yodel chant ci check --base <the pull request's base>` with no forge token. On GitLab the lint job runs the same line, since chant's GitLab check job does not keep the code quality report yet. The presets, in the order the job runs them:
+`yodel ci` writes yodel's checks into the workspace declaration's `ci.hooks.check` as presets (`yodel upgrade` adds `chant.workspace.json` when the project has none). They run in chant's check job, `check`, which takes the lint job's place on every forge: it starts the replay server beside it, waits for it, and runs `yodel chant ci check --base <the pull request's base>` with no forge token. On GitLab the job is in `.gitlab/yodel-plan.gitlab-ci.yml` (stage `plan`) and keeps the lint hook's `gl-code-quality-report.json` as `artifacts:reports:codequality`, so the merge request still shows the findings. The presets, in the order the job runs them:
 
 | Hook | Runs | When |
 |---|---|---|
@@ -70,7 +70,7 @@ chant reads the hooks from the declaration at the pull request's base, so a pull
 `ci.evidence` in `yodel.config.ts` names the pipeline's runner identity, and the pipelines sign what passed:
 
 - each environment's note job signs `plan:<env>` and `policy:<env>` from its plan job's report (on GitLab, `<env>-plan-evidence` in the plan notes pipeline);
-- on GitHub and Forgejo the `check-evidence` job signs each check hook that passed, by its name;
+- the `check-evidence` job signs each check hook that passed, by its name (on GitLab, in the plan notes pipeline);
 - each deciding apply wave signs `plan:<wave>` and `policy:<wave>` (on GitLab, its `<wave job>-evidence` job).
 
 ```ts
