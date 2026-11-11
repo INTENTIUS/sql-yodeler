@@ -378,7 +378,8 @@ export const newCommand: Command = {
       const ordered = readMigrations(migrationsDir);
       const newest = newestMigration(ordered);
       let replaced = replace ? await replaceable(project, ordered, name, envs, io) : undefined;
-      const build = await buildSchema(project);
+      // Before the build, after the DDL sources: chant's SQL102 fails a build whose sql-types.d.ts is stale, as a declaration change leaves it (#328).
+      const build = await buildSchema(project, { beforeBuild: () => sqlTypes(io, project, json) });
       let made: ReturnType<typeof createMigration>;
       let previous: Migration | undefined;
       try {
@@ -430,17 +431,18 @@ export const newCommand: Command = {
         rmSync(aside, { recursive: true, force: true });
         if (!json) io.out(`Replaced ${replaced.id}.\n`);
         report(io, json, made, path, project.dir);
-        await sqlTypes(io, project, json);
         return 0;
       }
       const path = writeMigration(migrationsDir, made);
       report(io, json, made, path, project.dir);
-      await sqlTypes(io, project, json);
       return 0;
     }),
 };
 
-/** Refreshes src/sql-types.d.ts after a migration from src/ (#273), and says so; under --json only a warning, on stderr. */
+/**
+ * Refreshes src/sql-types.d.ts from src/ (#273) before the build reads it, and says so; under --json only a warning, on stderr.
+ * Before the build, since chant's SQL102 fails a build against a stale file (#328).
+ */
 async function sqlTypes(io: Io, project: Project, json: boolean): Promise<void> {
   // chant's commit job (#312) pushes a change to migrations/ only, and refuses one that touches src/.
   if (process.env.CHANT_COMMIT_PR !== undefined) return;

@@ -19,9 +19,9 @@ const addNote = (dir: string) => {
 };
 
 describe("yodel new and src/sql-types.d.ts (#273)", () => {
-  // The fixture sets sourceDir: "src" now that chant has no src fallback (chant issue 4794), so chant's SQL102
-  // checks src/sql-types.d.ts and fails the build before yodel refreshes it: sql-yodeler issue 328, as on the templates.
-  it.fails("refreshes the file after a declaration change, and says so", async () => {
+  // The fixture sets sourceDir: "src" (chant issue 4794), so chant's SQL102 checks src/sql-types.d.ts in the build:
+  // yodel refreshes the file before the build, or the stale file fails it (#328).
+  it("refreshes the file after a declaration change, and says so", async () => {
     const p = projectFrom("postgres");
     try {
       execFileSync(join(repoRoot, "node_modules", ".bin", "chant"), ["sql", "types", "--output", "src/sql-types.d.ts"], { cwd: p.dir, stdio: "ignore" });
