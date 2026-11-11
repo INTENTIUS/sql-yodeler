@@ -1,8 +1,12 @@
 # Rendered by yodel ci from chant.config.ts, yodel.config.ts and ops/.
 # Edit those and render again; yodel ci --check says when this file is stale.
 #
-# Merge requests: lint and the plan comment (stage review). A push to the
-# default branch: the apply waves, one stage each, in .gitlab/yodel-apply.gitlab-ci.yml.
+# Merge requests: lint (stage review), and each environment's plan on chant's
+# product plan (stage plan), in .gitlab/yodel-plan.gitlab-ci.yml. A merge request's own
+# pipeline holds no token for its notes: a pipeline schedule of the default
+# branch with CHANT_PLAN_NOTES=1, which you create, posts every open merge
+# request's notes and sets yodel/plan/<env> (stage plan-note).
+# A push to the default branch: the apply waves, one stage each, in .gitlab/yodel-apply.gitlab-ci.yml.
 # The drift watches are in .gitlab/yodel-watch.gitlab-ci.yml (stage ops).
 # /yodel new, chant's commit job, is in .gitlab/yodel-commit.gitlab-ci.yml (stage ops).
 # /yodel rebase, after the merge request's check, is in .gitlab/yodel-rebase.gitlab-ci.yml (stage ops).
@@ -26,6 +30,7 @@
 # that environment's wave job sets.
 
 include:
+  - local: .gitlab/yodel-plan.gitlab-ci.yml
   - local: .gitlab/yodel-apply.gitlab-ci.yml
   - local: .gitlab/yodel-watch.gitlab-ci.yml
   - local: .gitlab/yodel-commit.gitlab-ci.yml
@@ -33,6 +38,8 @@ include:
 
 stages:
   - review
+  - plan
+  - plan-note
   - wave-1-dev
   - wave-2-prod
   - ops
@@ -74,35 +81,3 @@ lint:
     when: always
     reports:
       codequality: gl-code-quality-report.json
-
-plan-dev:
-  extends: .yodel
-  stage: review
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - yodel config check dev --write-probe
-    - yodel plan dev --comment
-  after_script:
-    - mkdir -p yodel-report; ./node_modules/.bin/yodel report dev --json > yodel-report/dev.json || true; ./node_modules/.bin/yodel report dev --html yodel-report/dev.html || true
-  artifacts:
-    name: yodel-report-plan-dev
-    when: always
-    paths:
-      - yodel-report/
-
-plan-prod:
-  extends: .yodel
-  stage: review
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-  script:
-    - yodel config check prod dev --write-probe
-    - yodel plan prod --comment
-  after_script:
-    - mkdir -p yodel-report; ./node_modules/.bin/yodel report prod --json > yodel-report/prod.json || true; ./node_modules/.bin/yodel report prod --html yodel-report/prod.html || true
-  artifacts:
-    name: yodel-report-plan-prod
-    when: always
-    paths:
-      - yodel-report/

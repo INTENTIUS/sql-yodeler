@@ -96,11 +96,11 @@ On your machine, put an environment's variables in `.env` (or export them) to ru
 | When | Job | Runs | Credentials |
 |---|---|---|---|
 | a pull request to main | `lint` | `npm run ci:check`, `yodel lint`, and `yodel lint --replay replay --reset`: every migration replayed into a throwaway server the job starts as a service (profile `replay`) and compared with the schema it recorded | none (the service's own) |
-| | `plan-<env>` | `yodel plan <env> --comment`: one comment per environment with the pending migrations and the plan digest | reader, and a forge token that can comment |
+| | `plan-<env>` (GitLab: `<env>-plan`) | `yodel plan <env> --pr-note .chant/pr`: the environment's note with the pending migrations and the plan digest, which chant's `plan-note-<env>` job posts with the status `yodel/plan/<env>` (on GitLab the `<env>-plan-note` job, in a pipeline schedule of main with `CHANT_PLAN_NOTES=1`) | reader in the plan job, no forge token; the note job holds the token |
 | a push to main | `wave-<k>-<env>`, one per wave of `yodel.config.ts` `waves`, each needing the one before | chant runs the wave: `yodel apply <env> --wave-plan`, the wave's gate, `yodel apply <env> --wave-apply` | writer |
 | on each watch's schedule (and by hand) | `watch-<env>` | chant runs the `watch-<env>` Op, then `yodel drift <env> --issue`: drift against the newest applied migration, and the environment's tracking issue | reader |
 
-Each plan and wave job also runs `yodel report <env>` (JSON and the HTML run view) into `yodel-report/`, whatever the job's outcome, and keeps it as the job's artifact (`yodel-report-<job>`). The wave, plan and watch jobs pass `YODEL_WEBHOOK_URL` and `YODEL_WEBHOOK_KEY` from the forge's secrets for webhook events (`notify` in `yodel.config.ts`); while they are unset, yodel sends nothing.
+Each wave job also runs `yodel report <env>` (JSON and the HTML run view) into `yodel-report/`, whatever the job's outcome, and keeps it as the job's artifact (`yodel-report-<job>`). A plan job writes the same report into `.chant/pr/report/`, kept with the note as `chant-pr-plan-<env>`. The wave, plan and watch jobs pass `YODEL_WEBHOOK_URL` and `YODEL_WEBHOOK_KEY` from the forge's secrets for webhook events (`notify` in `yodel.config.ts`); while they are unset, yodel sends nothing.
 
 ### Approving
 

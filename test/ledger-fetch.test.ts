@@ -72,16 +72,28 @@ describe("yodel ci --fetch-ledger (#326)", () => {
   });
 
   it("is the only fetch of the ledger yodel renders: nothing under src/ writes chant/lifecycle or its remote-tracking ref", () => {
-    // src/chant/ledger-fetch.ts is the fetch itself, and its messages and doc comment name the ref (sql-yodeler issue 333).
-    const out = (() => {
+    /** The files under `paths` in `cwd`'s repository with a line that writes the ledger branch or its remote-tracking ref. */
+    const scan = (cwd: string, ...paths: string[]): string[] => {
       try {
-        return execFileSync("git", ["grep", "-n", "-E", "chant/lifecycle:|branch -f chant/lifecycle|refs/remotes/[^ ]*chant/lifecycle", "--", "src", ":(exclude)src/chant/ledger-fetch.ts"], { cwd: repoRoot, encoding: "utf8" });
+        const out = execFileSync("git", ["grep", "-l", "-E", "chant/lifecycle:|branch -f chant/lifecycle|refs/remotes/[^ ]*chant/lifecycle", "--", ...paths], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        return out.split("\n").filter((l) => l.trim() !== "");
       } catch (e) {
         // git grep exits 1 when nothing matches; anything else is a scan that did not run, and fails.
-        if ((e as { status?: unknown }).status === 1) return "";
+        if ((e as { status?: unknown }).status === 1) return [];
         throw e;
       }
-    })();
-    expect(out.split("\n").filter((l) => l.trim() !== "")).toEqual([]);
-  });
+    };
+    // The scan finds the lines it is for (sql-yodeler issue 333): the git line yodel rendered before #326, and the fetch's own words.
+    const { checkout } = remoteAndCheckout(false);
+    writeFileSync(join(checkout, "old.ts"), "const line = \"git fetch --no-tags origin '+refs/heads/chant/lifecycle:refs/remotes/origin/chant/lifecycle' && git branch -f chant/lifecycle origin/chant/lifecycle\";\n");
+    git(checkout, "add", "old.ts");
+    expect(scan(checkout, ".")).toEqual(["old.ts"]);
+    expect(scan(repoRoot, "src")).toEqual(["src/chant/ledger-fetch.ts"]);
+    // A scan that cannot run fails, so it never passes by checking nothing.
+    const plain = mkdtempSync(join(tmpdir(), "yodel-ledger-scan-"));
+    temps.push(plain);
+    expect(() => scan(plain, ".")).toThrow();
+    // src/chant/ledger-fetch.ts is the fetch itself, and its messages and doc comment name the ref.
+    expect(scan(repoRoot, "src", ":(exclude)src/chant/ledger-fetch.ts")).toEqual([]);
+  }, 60_000);
 });

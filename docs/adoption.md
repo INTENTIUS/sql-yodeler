@@ -42,6 +42,7 @@ Created:
   .gitlab-ci.yml
   .gitlab/yodel-apply.gitlab-ci.yml
   .gitlab/yodel-commit.gitlab-ci.yml
+  .gitlab/yodel-plan.gitlab-ci.yml
   .gitlab/yodel-rebase.gitlab-ci.yml
   .gitlab/yodel-watch.gitlab-ci.yml
   chant.config.ts
