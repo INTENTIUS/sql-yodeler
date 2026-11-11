@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.3
+
+### Changed
+
+- The pull request plan is chant's product plan (chant issues 4799, 4963 and 4972, issue 345). `yodel plan <env> --pr-note <dir>` writes the note for chant's note job, which posts it, so the plan job holds no forge token; `--comment` and its forge flags are gone. The note's first line is chant's marker, with `<!-- yodel:plan env=<env> -->` second, and each environment gets the status `yodel/plan/<env>`. On GitLab the plan jobs are in `.gitlab/yodel-plan.gitlab-ci.yml`, and the notes come from a scheduled pipeline of the default branch with `CHANT_PLAN_NOTES=1`, which you create (docs/approval.md). Run `yodel ci` to write the pipelines again.
+- `ci.evidence` in `yodel.config.ts` signs each environment's plan and policy checks, and each deciding wave's plan, with chant's evidence (chant issues 4869, 4870 and 4978). On GitHub and Forgejo chant's check job replaces yodel's lint job and signs each hook that passed; GitLab's hooks are not signed yet. `ci.refGate: true` adds chant's ref gate for main, which refuses a push until every environment's plan and policy checks are signed. It is off by default and needs `ci.evidence` (issue 346).
+- `yodel drift` reads chant's columns by name and its pending changes (chant issue 4944). A path reads `columns[#country].default.expr` where it read `column country default.expr`. A column or privilege added on the server by hand is drift, listed under "Added on the server, which the next apply undoes", and reaches the tracking issue and the fingerprint. `yodel drift --json` has `pending` and no longer has `columns`, and a Postgres privilege granted by hand is now drift.
+- `yodel ci` writes its files and removes the ones it no longer renders through chant's planned-files (chant issue 4966). Its output and exit codes are unchanged.
+
+chant is at 0.124.90, and the starter templates take `^0.13.1`. Their apply pipelines are rendered again for chant 0.124.90's job check.
+
 ## 0.13.2
 
 ### Changed
