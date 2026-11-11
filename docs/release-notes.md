@@ -7,6 +7,14 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.13.3
+
+- Changed: the pull request plan is chant's product plan. `yodel plan --pr-note` replaces `--comment`, and chant's note job posts the note. On GitLab the notes come from a scheduled pipeline with `CHANT_PLAN_NOTES=1`. Run `yodel ci` to write the pipelines again.
+- Added: `ci.evidence` signs the plan and policy checks; `ci.refGate: true` turns on chant's ref gate for main. The gate is off by default.
+- Changed: drift paths name columns as chant does, `columns[#country]`, and a column or privilege added by hand is drift. `yodel drift --json` has `pending` in place of `columns`.
+- Changed: `yodel ci` writes and removes its files through chant; its output is unchanged.
+- chant 0.124.90. The starter templates take `^0.13.1`.
+
 ## 0.13.2
 
 - Changed: the drift fingerprint and records are chant's; a notify receiver sees one new fingerprint, and each open tracking issue is edited once.
