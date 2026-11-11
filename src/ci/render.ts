@@ -221,8 +221,8 @@ export interface Environments {
   /**
    * The pull request runs chant's check moment (#294, chant#4556): `yodel
    * chant ci check` with the hooks read from the workspace declaration at
-   * the pull request's base, in chant's check job on GitHub and Forgejo
-   * (chant issue 4964) and in the lint job on GitLab. Set by {@link render}
+   * the pull request's base, in chant's check job (chant issue 4964), which
+   * on GitLab keeps the code quality report (chant issue 4988). Set by {@link render}
    * when the project has a declaration.
    */
   checkHooks?: true;
@@ -235,15 +235,6 @@ export interface Environments {
   /** yodel.config.ts `ci.respond.rebase` (#313): what answers `/yodel rebase`. Default `comment`, or `off` when a reader's password is cloud-minted. */
   respondRebase?: RespondRebase;
 }
-
-/**
- * GitLab's lint job on chant's check moment (#294): the hooks the
- * declaration at the merge request's base names. GitHub and Forgejo run
- * them in chant's check job (chant issue 4964), which signs them; GitLab's
- * stays yodel's until chant's GitLab check job keeps the code quality report
- * as `artifacts:reports:codequality`.
- */
-const GITLAB_CHECK_HOOKS = "yodel chant ci check --base $CI_MERGE_REQUEST_DIFF_BASE_SHA";
 
 /** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
 export function checkHooksOf(envs_: Environments): CheckHook[] {
@@ -565,17 +556,18 @@ export function productPlanOptions(forge: Forge, envs_: Environments, watches: r
     };
   });
   // The check moment (#294) on chant's check job (chant issue 4964): the hooks the declaration at base names, beside the replay server.
-  // Not on GitLab yet: chant's GitLab check job keeps no artifacts:reports:codequality, which yodel's lint job keeps (#129).
+  // On GitLab the job keeps the lint hook's code quality report as artifacts:reports:codequality (#129, chant issue 4988).
   const svc = REPLAY_SERVICE[dialect];
-  const checkJob = envs_.checkHooks && forge !== "gitlab"
-    ? envs_.replay
-      ? {
-          services: [{ name: svc.name, image: svc.image, ...(Object.keys(svc.env).length > 0 ? { env: svc.env } : {}), health: svc.health }],
-          env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
-          before: [waitFor(svc.name, svc.port)],
-        }
-      : true
-    : undefined;
+  const replayServer = envs_.replay
+    ? {
+        services: [{ name: svc.name, image: svc.image, ...(Object.keys(svc.env).length > 0 ? { env: svc.env } : {}), health: svc.health }],
+        env: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+        before: [waitFor(svc.name, svc.port)],
+      }
+    : {};
+  const artifacts = forge === "gitlab" ? { artifacts: { reports: { codequality: CODE_QUALITY_FILE } } } : {};
+  const checkOptions = { ...replayServer, ...artifacts };
+  const checkJob = envs_.checkHooks ? (Object.keys(checkOptions).length > 0 ? checkOptions : true) : undefined;
   return {
     words: WAVE_WORDS,
     branch: MAIN,
@@ -785,23 +777,26 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     return { path: ".gitlab-ci.yml", content: oneFile("gitlab", gitlabSerializer.serialize(entities)) };
   }
   const check = envs_.check === true ? [checkCommand("gitlab")] : [];
-  jobs.set(
-    "lint",
-    new GitLabJob({
-      extends: ".yodel",
-      stage: "review",
-      rules: mr(),
-      ...(replay
-        ? {
-            script: envs_.checkHooks === true ? [waitFor(svc.name, svc.port), GITLAB_CHECK_HOOKS] : [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
-            services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
-            variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
-          }
-        : { script: envs_.checkHooks === true ? [GITLAB_CHECK_HOOKS] : [CI_CHECK, ...types, lintCommand("gitlab")] }),
-      // The code quality report, kept when lint fails too: that is when it has something to show.
-      artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
-    }),
-  );
+  // With the check moment (#294) the lint job is chant's check job, in GITLAB_PLAN_FILE (chant issues 4964 and 4988).
+  if (envs_.checkHooks !== true) {
+    jobs.set(
+      "lint",
+      new GitLabJob({
+        extends: ".yodel",
+        stage: "review",
+        rules: mr(),
+        ...(replay
+          ? {
+              script: [CI_CHECK, ...types, lintCommand("gitlab"), waitFor(svc.name, svc.port), REPLAY, ...(envs_.tests === true ? [TEST] : []), ...check],
+              services: [new GitLabService({ name: svc.image, alias: svc.name, variables: svc.env })],
+              variables: { [`${variablePrefix(REPLAY_PROFILE, dialect)}_URL`]: svc.url(svc.name), ...svc.jobEnv },
+            }
+          : { script: [CI_CHECK, ...types, lintCommand("gitlab")] }),
+        // The code quality report, kept when lint fails too: that is when it has something to show.
+        artifacts: new GitLabArtifacts({ when: "always", reports: { codequality: CODE_QUALITY_FILE } }),
+      }),
+    );
+  }
   // The plan jobs and their note jobs are chant's, in GITLAB_PLAN_FILE (sql-yodeler issue 345).
   const plan = gitlabPlan(envs_);
   for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, { ...Object.fromEntries(jobs), ...Object.fromEntries(plan.jobs.map((j) => [j, true])) }, "gitlab"))) jobs.set(name, job);
@@ -821,7 +816,9 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const header = [
     ...HEADER,
     "#",
-    "# Merge requests: lint (stage review), and each environment's plan on chant's",
+    ...(envs_.checkHooks === true
+      ? ["# Merge requests: chant's check job and each environment's plan on chant's"]
+      : ["# Merge requests: lint (stage review), and each environment's plan on chant's"]),
     `# product plan (stage plan), in ${GITLAB_PLAN_FILE}. A merge request's own`,
     "# pipeline holds no token for its notes: a pipeline schedule of the default",
     `# branch with ${GITLAB_PLAN_NOTES_VAR}=1, which you create, posts every open merge`,
@@ -1569,13 +1566,17 @@ export function review(envs: Environments, watches: readonly ScheduledWatch[] = 
 /**
  * The scheduled drift watches of the project's environments (chant#4289),
  * which chant's note job checks for having stopped (chant issue 4888): each
- * environment's WatchOp, found by its `Watch` and `Env` labels.
+ * environment's WatchOp, found by its `Watch` and `Env` labels. Each is
+ * scoped to its environment (`targets`, chant issue 4988), so an
+ * environment's note warns of its own watch only.
  */
 async function envWatches(dir: string, envs: readonly string[]): Promise<ScheduledWatch[]> {
   const { discoverOps } = await import("@intentius/chant/op/discover");
   const { scheduledWatches } = await import("@intentius/chant/op/schedule-overdue");
   const found = await discoverOps({ cwd: dir });
-  return scheduledWatches([...found.ops.values()].map((o) => o.config).filter((o) => o.labels?.Watch === "true" && envs.includes(o.labels.Env ?? "")));
+  const ops = [...found.ops.values()].map((o) => o.config).filter((o) => o.labels?.Watch === "true" && envs.includes(o.labels.Env ?? ""));
+  const envOf = new Map(ops.map((o) => [o.name, o.labels?.Env ?? ""]));
+  return scheduledWatches(ops).map((w) => ({ ...w, targets: [envOf.get(w.op) ?? ""] }));
 }
 
 /**

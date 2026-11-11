@@ -8,14 +8,16 @@
  * and sqlfluff, off unless yodel.config.ts `ci.tools` names them. yodel
  * holds no rule of its own that duplicates those tools.
  *
- * The lint job then runs `yodel chant ci check --base <base>`, and chant
+ * chant's check job (chant issue 4964) takes the lint job's place on every
+ * forge and runs `yodel chant ci check --base <base>`, and chant
  * reads the hooks from the declaration at the pull request's base, so a
  * pull request cannot remove a required check. chant runs each hook with no
  * forge token, OIDC request variables or cloud credentials, and writes
  * `.chant/check/check-hooks.json` with each hook's name, result and exit
  * code. A hook inherits the job's output, so `yodel lint --format github`'s
  * annotations still reach the pull request; on GitLab the lint preset
- * writes the code quality report the job keeps as its artifact.
+ * writes the code quality report the job keeps as `artifacts:reports:codequality`
+ * (chant issue 4988).
  *
  * In a project with no workspace declaration the lint job runs the
  * commands itself.

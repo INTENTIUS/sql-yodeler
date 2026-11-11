@@ -95,7 +95,7 @@ The starter templates render a scheduled pipeline per watch for each forge (`npm
 
 ### When the watch stops running
 
-A scheduled job can stop with no error anywhere. GitHub turns a scheduled workflow off after 60 days with no activity in the repository, and on GitLab the job runs only from a pipeline schedule someone created. chant's note job, which posts the plan note, asks the forge when each environment's watch job last ran, and when the watch's cron has fired at least twice since, the note carries a warning ([chant#4289](https://github.com/INTENTIUS/chant/issues/4289)), and the job log the same line. `yodel ci` names the watches to it from `ops/`, so each environment's note warns of every environment's watch:
+A scheduled job can stop with no error anywhere. GitHub turns a scheduled workflow off after 60 days with no activity in the repository, and on GitLab the job runs only from a pipeline schedule someone created. chant's note job, which posts the plan note, asks the forge when each environment's watch job last ran, and when the watch's cron has fired at least twice since, the note carries a warning ([chant#4289](https://github.com/INTENTIUS/chant/issues/4289)), and the job log the same line. `yodel ci` names the watches to it from `ops/`, each with its environment as its target (chant issue 4988), so an environment's note warns of its own watch only:
 
 ```
 Warning: Op `watch-dev` is overdue: its schedule `17 * * * *` has fired at least twice and its last run was on 2026-10-18. GitHub turns a scheduled workflow off after 60 days with no activity in the repository. Turn the workflow on again under Actions, or run it by hand.
