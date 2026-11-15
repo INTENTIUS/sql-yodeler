@@ -1,6 +1,6 @@
 # <img src="docs-site/public/brand/hat-small.png" width="22" height="20" alt=""> Contributing to SQL Yodeler
 
-This page is for working on SQL Yodeler itself. To use it, start with [Your first migration](docs/getting-started.md). The rules for commits, pull requests and releases are in [AGENTS.md](AGENTS.md); they apply to people and coding agents alike.
+This page is for working on SQL Yodeler itself. To use it, start with [Your first migration](docs/getting-started.md). The rules for commits and pull requests are in [AGENTS.md](AGENTS.md) and the workspace rules it points to, and the release runbook is under [Releasing](#releasing) below; they apply to people and coding agents alike.
 
 ## Where a feature goes
 
@@ -118,3 +118,28 @@ The forge, waves and approval claims also run as scenarios on chant's e2e harnes
 ## Benchmarks
 
 `npm run bench` measures what yodel costs as a schema and a history grow; see `bench/README.md`.
+
+## Releasing
+
+A release is one dispatched run of `.github/workflows/publish.yml`, chant's release workflow, written by `npx chant release workflow` from the `release` block of the root `chant.config.ts` (#319; terragucci releases the same way). Nobody runs `npm publish`, pushes the image or tags a release by hand, and nobody edits `publish.yml`: change `chant.config.ts` and run `npx chant release workflow` again (`test/release-config.test.ts` fails when the file is not what chant writes). The run's label is the version, and it does this:
+
+1. The gate names the newest green commit at or below the dispatched one: the `ci/green/<sha>` tags `chant-ci-green.yml` writes when a main commit's `check`, `image` and `docs-site` jobs pass (`ci.green` in the root `chant.workspace.json`; `npx chant ci workflow --token-secret CI_GREEN_TOKEN` writes that file). With no green commit, no release is cut.
+2. The cut builds the CI image (`.github/image/Dockerfile`, declared in `.github/src/image.ts`: Node 22, yodel, chant and the sql lexicon) for linux/amd64 and linux/arm64 from `npm pack` of that commit (the Dockerfile entry in `chant.config.ts`'s `release.images`, which chant builds) as an OCI archive and records its digest, builds the package, and pushes the tag `release/<version>`.
+3. The publish job checks the archive against the recorded digest, pushes it to `ghcr.io/intentius/sql-yodeler:<version>`, publishes the package to npm and makes the GitHub release with CHANGELOG.md's `## <version>` section as its notes. A version with no such section fails it. npm trusts the workflow by its file name, `publish.yml` (npm trusted publishing, so no npm token), and renaming the file breaks publishing until the trusted publisher on npmjs.com is changed too.
+4. The after job tags the commit `v<version>`, which `yodel create` takes the release's templates from. It then installs `@intentius/sql-yodeler@<version>` from the registry into an empty directory, retrying until the registry serves it, and checks that `npx yodel --version` prints the version. Last, it runs `yodel --version` in the pushed image and writes the image's digest, which `ci.image` pins, to the run's summary.
+
+To release:
+
+1. Open a release pull request, `chore: release 0.1.1`, from a branch of `origin/main`. It sets the version in `package.json` and `package-lock.json` (`npm version 0.1.1 --no-git-tag-version`), adds the release's notes to CHANGELOG.md as a `## 0.1.1` section and to docs/release-notes.md, and moves the templates' range when the release needs it (below). It follows the rules in AGENTS.md and is merged on its local gates.
+2. Once main's CI is green at that commit, start the release with `npm run release` (`gh workflow run publish.yml -f label=<package.json's version>`, which needs `gh` signed in). The gate takes the newest commit whose `check`, `image` and `docs-site` jobs passed on main, so wait for `chant-ci-green` to tag it; nothing skips the gate.
+
+The `image` job in `ci.yml` builds the same Dockerfile from `npm pack` of the pull request on every change.
+
+The templates take `@intentius/sql-yodeler` with a caret range (`^0.1.0`), which in 0.x does not reach the next minor version. A minor release moves both templates' range to it in the release pull request itself; `templates:check` takes `npm pack` of the checkout until the release is on npm, and the forge claim then installs the new release.
+
+A template change that needs unreleased yodel ships with the release that has it: in the release pull request, with the templates' range moved to that release, never before. A project made with `chant init --from INTENTIUS/sql-yodeler@main#templates/<dialect>` installs the range from npm, so main's templates must work with what is published. Inside this repository nothing shows it (tsconfig.json maps `@intentius/sql-yodeler` to `./src`, and the forge claim packs this checkout), so the `templates` job in ci.yml runs `npm run templates:check` (`scripts/templates-check.ts`), one job per template, when a pull request changes the templates or what they install, on every push to main and once a day (templates.yml): for each template it makes a project with `chant init --from`, installs the yodel the range resolves to on npm, and runs `git init`, `yodel ci --check`, `npm run typecheck`, `just up`'s `scripts/local.ts` against a throwaway server in Docker (it makes the read-only reader, and `yodel status dev` with the reader and writer it prints exits 0), `yodel new init` and `yodel lint`. When nothing on npm satisfies the range and the range's version is `package.json`'s, the pull request is the release that ships it, and the project takes `npm pack` of the checkout instead.
+
+The release that moves chant to the floor of chant's CI (`CHANT_CI_FLOOR` in `src/chant-floor-version.ts`, which docs/chant-ci.md and docs/workflows.md repeat) sets that constant to the chant version npm published, moves the repository's chant to it, and runs `npm run templates:render` (`scripts/templates-render.ts`). That pins chant and the sql lexicon in both templates and writes what `yodel upgrade` writes: the workspace declaration and every pipeline on chant's product pipeline. It refuses a chant npm does not serve, so the templates are never rendered against a packed or linked chant.
+
+Releases up to 0.12.1 were tagged `v<version>` by `scripts/release.sh` and published from a tag-triggered `publish.yml`.
+
