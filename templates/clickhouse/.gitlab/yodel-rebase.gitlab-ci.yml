@@ -60,7 +60,7 @@ yodel-rebase-check-commit:
       artifacts: true
   script:
     - if [ "${CHANT_COMMIT_FINDING:-0}" != "1" ]; then echo "the check found nothing, so yodel-rebase-check does not run"; exit 0; fi
-    - |
+    - |-
       case "$CI_MERGE_REQUEST_IID" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
       git -c protocol.version=2 fetch -q --no-tags origin "+refs/merge-requests/$CI_MERGE_REQUEST_IID/head:refs/chant/commit-head"
     - git fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
@@ -103,7 +103,7 @@ yodel-rebase-check-commit-push:
       artifacts: true
   script:
     - if [ ! -f .chant/commit/decision.json ]; then echo "yodel-rebase-check did not run"; exit 0; fi
-    - |
+    - |-
       case "$CI_MERGE_REQUEST_IID" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
       git -c protocol.version=2 fetch -q --no-tags origin "+refs/merge-requests/$CI_MERGE_REQUEST_IID/head:refs/chant/commit-head"
     - git fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true

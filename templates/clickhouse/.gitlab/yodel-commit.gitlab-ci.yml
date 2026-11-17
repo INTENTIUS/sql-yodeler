@@ -34,7 +34,7 @@ yodel-new:
   rules:
     - if: '$CI_PIPELINE_SOURCE =~ /^(web|api|trigger|chat)$/ && $CHANT_COMMIT_PR =~ /^[0-9]+$/ && $CHANT_COMMIT == "new" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
-    - |
+    - |-
       case "$CHANT_COMMIT_PR" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
       git -c protocol.version=2 fetch -q --no-tags origin "+refs/merge-requests/$CHANT_COMMIT_PR/head:refs/chant/commit-head"
     - git fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
@@ -77,7 +77,7 @@ yodel-new-push:
       artifacts: true
   script:
     - if [ ! -f .chant/commit/decision.json ]; then echo "yodel-new did not run"; exit 0; fi
-    - |
+    - |-
       case "$CHANT_COMMIT_PR" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
       git -c protocol.version=2 fetch -q --no-tags origin "+refs/merge-requests/$CHANT_COMMIT_PR/head:refs/chant/commit-head"
     - git fetch -q --no-tags origin '+refs/heads/chant/lifecycle:refs/heads/chant/lifecycle' 2>/dev/null || true
