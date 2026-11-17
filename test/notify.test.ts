@@ -251,7 +251,7 @@ describe("the event schema", () => {
   });
 
   it("is chant's notify event, from sql-yodeler, with the command in detail", () => {
-    const chant = ajv.compile(JSON.parse(readFileSync(join(repoRoot, "node_modules", "@intentius", "chant", "src", "notify.schema.json"), "utf8")) as object);
+    const chant = ajv.compile(JSON.parse(readFileSync(join(repoRoot, "node_modules", "@intentius", "chant", "dist", "notify.schema.json"), "utf8")) as object);
     expect(chant(waiting()), JSON.stringify(chant.errors)).toBe(true);
     expect(validate({ ...waiting(), source: "terragucci" })).toBe(false);
     expect(validate({ ...waiting(), detail: {} })).toBe(false);
