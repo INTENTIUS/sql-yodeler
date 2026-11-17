@@ -19,7 +19,7 @@ const setup = () => [checkout(), setupNode(22), new Step({ run: "npm ci" })];
 export const workflow = new Workflow({
   comment: rendered("ci.ts"),
   name: "ci",
-  on: { pull_request: null, push: { branches: ["main"] } },
+  on: { pull_request: null, merge_group: null, push: { branches: ["main"] } },
   permissions: { contents: "read" },
   // A new push to a pull request cancels its run still going; main's runs all finish.
   concurrency: { group: "ci-${{ github.ref }}", "cancel-in-progress": "${{ github.event_name == 'pull_request' }}" },

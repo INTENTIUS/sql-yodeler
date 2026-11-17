@@ -4,6 +4,7 @@ name: ci
 
 on:
   pull_request: null
+  merge_group: null
   push:
     branches:
       - main
