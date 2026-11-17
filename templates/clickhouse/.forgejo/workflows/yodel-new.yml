@@ -41,7 +41,7 @@ jobs:
         env:
           CHANT_CHECKOUT_TOKEN: '${{ github.token }}'
           PR_NUMBER: '${{ github.event.issue.number }}'
-        run: |
+        run: |-
           set -eu
           git config --global --add safe.directory "$PWD" 2>/dev/null || true
           [ -d .git ] || git init -q .
@@ -83,7 +83,7 @@ jobs:
           PROD_CLICKHOUSE_URL: '${{ secrets.PROD_CLICKHOUSE_URL }}'
           PROD_CLICKHOUSE_READER_USER: '${{ secrets.PROD_CLICKHOUSE_READER_USER }}'
           PROD_CLICKHOUSE_READER_PASSWORD: '${{ secrets.PROD_CLICKHOUSE_READER_PASSWORD }}'
-        run: |
+        run: |-
           if [ -z "${CHANT_NO_FORGE_TOKEN:-}" ] && [ "${0#*/}" != "$0" ] && [ -f "$0" ] && ! { [ "${0##*/}" = sh ] || [ "${0##*/}" = bash ] || [ "${0##*/}" = dash ]; } && command -v env >/dev/null 2>&1 && command -v sh >/dev/null 2>&1; then exec env -u CHANT_FORGE_TOKEN -u CHANT_GITHUB_TOKEN -u CHANT_FORGEJO_TOKEN -u CHANT_GITLAB_TOKEN -u CHANT_CHECKOUT_TOKEN -u GITHUB_TOKEN -u GH_TOKEN -u FORGEJO_TOKEN -u GITEA_TOKEN -u GITLAB_TOKEN -u CI_JOB_TOKEN -u ACTIONS_RUNTIME_TOKEN CHANT_NO_FORGE_TOKEN=1 sh -e "$0"; fi; unset CHANT_FORGE_TOKEN CHANT_GITHUB_TOKEN CHANT_FORGEJO_TOKEN CHANT_GITLAB_TOKEN CHANT_CHECKOUT_TOKEN GITHUB_TOKEN GH_TOKEN FORGEJO_TOKEN GITEA_TOKEN GITLAB_TOKEN CI_JOB_TOKEN ACTIONS_RUNTIME_TOKEN
           chant_report="$PWD/.chant/commit"
           chant_handover() { node -e 'const fs=require("fs"),p=require("path"),z=require("zlib");const [dir,out]=process.argv.slice(1);const CHUNK=1000000,PARTS=4,NOTE=["decision.json","rc","output","change.patch"];const all={};const walk=(d,r)=>{let n=[];try{n=fs.readdirSync(d).sort()}catch{return}for(const x of n){const f=p.join(d,x),k=r?r+"/"+x:x;let s;try{s=fs.lstatSync(f)}catch{continue}if(s.isDirectory())walk(f,k);else if(s.isFile())all[k]=fs.readFileSync(f).toString("base64")}};walk(dir,"");const pack=(o)=>z.gzipSync(JSON.stringify(o)).toString("base64");let b=pack(all);if(b.length>CHUNK*PARTS){b=pack(Object.fromEntries(Object.entries(all).filter(([k])=>NOTE.includes(k))));if(b.length>CHUNK*PARTS){b=pack({});console.error("chant-commit: the report is too large to hand to the next job, even cut to decision.json, rc, output, change.patch; it hands on none of it")}else console.error("chant-commit: the report is too large to hand to the next job whole; it hands on decision.json, rc, output, change.patch")}let o="";for(let i=0;i*CHUNK<b.length;i++)o+="report_"+i+"="+b.slice(i*CHUNK,(i+1)*CHUNK)+"\n";fs.appendFileSync(out,o);' "$chant_report" "${GITHUB_OUTPUT:-/dev/null}" || echo "chant-commit: the report could not be handed to the next job" >&2; }
@@ -111,7 +111,7 @@ jobs:
         env:
           CHANT_CHECKOUT_TOKEN: '${{ github.token }}'
           PR_NUMBER: '${{ github.event.issue.number }}'
-        run: |
+        run: |-
           set -eu
           git config --global --add safe.directory "$PWD" 2>/dev/null || true
           [ -d .git ] || git init -q .
@@ -139,7 +139,7 @@ jobs:
           case "$PR_NUMBER" in ''|*[!0-9]*) echo "no pull request number" >&2; exit 1 ;; esac
           git -c protocol.version=2 fetch -q --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/chant/commit-head"
       - name: Take the change from the commit job
-        run: |
+        run: |-
           set -u
           node -e 'const fs=require("fs"),p=require("path"),z=require("zlib");const dir=process.argv[1];let b="";for(const l of fs.readFileSync(0,"utf8").split("\n")){if(!l.trim())continue;let s="";try{s=JSON.parse(l)}catch{}if(typeof s==="string")b+=s}if(!b){console.log("chant: the yodel-new job handed on no report");process.exit(0)}let files;try{files=JSON.parse(z.gunzipSync(Buffer.from(b,"base64"),{maxOutputLength:268435456}).toString("utf8"))}catch(e){console.log("chant: the report the yodel-new job handed on does not read: "+e.message);process.exit(0)}if(!files||typeof files!=="object"||Array.isArray(files)){console.log("chant: the report the yodel-new job handed on is not a set of files");process.exit(0)}let n=0;for(const [k,v] of Object.entries(files)){const parts=k.split("/");if(typeof v!=="string"||k.length>1024||parts.some((x)=>!x||x==="."||x===".."||/[\\\x00-\x1f]/.test(x))){console.log("chant: left out "+JSON.stringify(k));continue}try{const f=p.join(dir,...parts);fs.mkdirSync(p.dirname(f),{recursive:true});fs.writeFileSync(f,Buffer.from(v,"base64"));n++}catch(e){console.log("chant: could not write "+JSON.stringify(k)+": "+e.message)}}console.log("chant: took "+n+" report files from the yodel-new job")' .chant/commit <<'END_OF_REPORT'
           ${{ toJSON(needs.yodel-new.outputs.report_0) }}
@@ -154,7 +154,7 @@ jobs:
           CHANT_COMMIT_TOKEN: '${{ secrets.YODEL_PUSH_TOKEN }}'
           GITHUB_TOKEN: '${{ secrets.YODEL_PUSH_TOKEN }}'
           CHANT_FORGEJO_TOKEN: '${{ secrets.YODEL_PUSH_TOKEN }}'
-        run: |
+        run: |-
           chant_auth="$(printf 'x-access-token:%s' "$CHANT_COMMIT_TOKEN" | base64 | tr -d '\n')"
           export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $chant_auth"
           unset chant_auth
