@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.5
+
+### Fixed
+
+- A project made from a starter template passes `yodel ci --check` again. The templates pinned chant 0.124.91 while yodel installed a newer chant of its own, which writes a workflow's `run:` blocks as `|-` where 0.124.91 wrote `|`, so `yodel ci --check` called the committed workflows stale. The templates now pin chant 0.124.103 and the sql lexicon 0.124.102, and their workflows are rendered on them. docs/configuration.md and docs/workspace.md show the same pins.
+
+### Changed
+
+- yodel takes `@intentius/chant` `^0.124.105` and `@intentius/chant-lexicon-sql` `^0.124.102`.
+- A release is tagged `v<version>` only. The earlier 0.13 releases also had a `release/<version>` tag. `yodel create` reads the `v<version>` tag as before.
+
+chant is at 0.124.105, and the starter templates take `^0.13.4`.
+
 ## 0.13.4
 
 ### Changed
