@@ -6,16 +6,16 @@ import type { ChantConfig } from "@intentius/chant";
  * release block, the way terragucci releases (#319).
  *
  * .github/workflows/publish.yml is `chant release workflow`'s, started by hand
- * with the version (`gh workflow run publish.yml -f label=<version>`). The gate
- * names the newest green commit at or below the dispatched one (the ci/green
- * tags chant-ci-green.yml writes, from chant.workspace.json's ci.green). The
- * cut builds the CI image as an OCI archive and records its digest, builds and
- * checks the package, and pushes the release/<version> tag. The publish job
- * pushes the image, publishes the package to npm with trusted publishing (npm
- * trusts publish.yml by its file name) and makes the GitHub release from
- * CHANGELOG.md's `## <version>` section. The after job tags the commit
- * `v<version>` for `yodel create`, installs the release from npm and runs
- * `yodel --version`, and runs it in the pushed image.
+ * with the version (`gh workflow run publish.yml -f label=<version>`). The cut
+ * releases the dispatched commit only when its checks on GitHub passed
+ * (release.green "forge-checks"), builds the CI image as an OCI archive and
+ * records its digest, builds and checks the package, and pushes the
+ * v<version> tag, which `yodel create` takes a release's templates from. The
+ * publish job pushes the image, publishes the package to npm with trusted
+ * publishing (npm trusts publish.yml by its file name) and makes the GitHub
+ * release from CHANGELOG.md's `## <version>` section. The after job installs
+ * the release from npm and runs `yodel --version`, and runs it in the pushed
+ * image.
  *
  * The label is the package version, which the release pull request sets in
  * package.json.
@@ -42,24 +42,27 @@ function chantPins(): string {
 
 export default {
   lexicons: ["github"],
-  // chant.workspace.json declares no members; it is there for ci.green, so chant builds this root project alone.
+  // chant.workspace.json declares no members, so chant builds this root project alone.
   rootOnly: true,
   // What the cut compiles: this repository's workflows, and nothing else (without it the build would load every .ts here).
   sourceDir: ".github/chant",
   environments: ["release"],
   release: {
+    // The tag yodel create takes a release's templates from (src/commands/create.ts). The 0.13 releases were also
+    // tagged release/<version>, which chant still reads as earlier releases.
+    tag: "v{version}",
+    legacyTags: ["release/"],
+    // A commit whose GitHub checks passed, the ruleset's required `check` among them.
+    green: "forge-checks",
     workflow: {
       trigger: "dispatch",
-      gate: "last-green",
       install: "npm ci",
-      // The gate cut only a commit CI passed, so the cut and the publish build and check nothing more.
+      // The cut takes only a commit CI passed, so the cut and the publish build and check nothing more.
       build: "npm run build",
       chant: "npx chant",
       // chant adds packages: write and this run's token for the GHCR oci target, and npm 11.5.1 or later for
       // trusted publishing, from the targets (chant issue 4786), and QEMU for the image's arm64 half (chant issue 4876).
       after: [
-        // The v<version> tag yodel create takes a release's templates from (src/commands/create.ts), on the commit the cut tagged.
-        `git tag "v$CHANT_RELEASE_LABEL" && git push origin "refs/tags/v$CHANT_RELEASE_LABEL"`,
         // The release as a user gets it: from the registry, into an empty directory, and run.
         `dir="$(mktemp -d)" && cd "$dir" && npm init -y >/dev/null && for attempt in $(seq 1 30); do npm install --prefer-online --no-audit --no-fund "@intentius/sql-yodeler@$CHANT_RELEASE_LABEL" && break; [ "$attempt" = 30 ] && exit 1; sleep 20; done && test "$(npx --no-install yodel --version)" = "$CHANT_RELEASE_LABEL"`,
         // The image the publish pushed, and its digest for ci.image.
