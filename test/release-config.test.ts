@@ -1,8 +1,7 @@
 /**
  * The release on chant's release block (#319): chant.config.ts declares it,
- * `chant release workflow` writes .github/workflows/publish.yml from it, and
- * `chant ci workflow` writes the tick that tags green commits for its gate.
- * Neither file is edited by hand: each is what chant writes from the
+ * and `chant release workflow` writes .github/workflows/publish.yml from it.
+ * The file is not edited by hand: it is what chant writes from the
  * committed config, and CHANGELOG.md has the section the GitHub release takes
  * its notes from.
  */
@@ -33,9 +32,11 @@ symlinkSync(join(repoRoot, "node_modules"), join(scratch, "node_modules"));
 execFileSync("git", ["init", "-q", "-b", "main"], { cwd: scratch });
 
 describe("the release (#319)", () => {
-  it("is one dispatched run of chant's release workflow, from the newest green commit, to npm, GHCR and the GitHub release", () => {
+  it("is one dispatched run of chant's release workflow, from a commit whose checks passed, to npm, GHCR and the GitHub release", () => {
     const release = config.release;
-    expect(release.workflow).toMatchObject({ trigger: "dispatch", gate: "last-green", file: ".github/workflows/publish.yml" });
+    expect(release.workflow).toMatchObject({ trigger: "dispatch", file: ".github/workflows/publish.yml" });
+    // The cut tags v<version>, the ref yodel create takes templates from.
+    expect(release).toMatchObject({ tag: "v{version}", legacyTags: ["release/"], green: "forge-checks" });
     expect(release.publish.map((t) => t.type)).toEqual(["oci", "npm", "forge"]);
     expect(release.images.map((i) => i.archive)).toEqual(["dist/images/sql-yodeler.tar"]);
     // The cut compiles this repository's own workflows and nothing else.
@@ -46,11 +47,6 @@ describe("the release (#319)", () => {
   it("publish.yml is what chant release workflow writes from chant.config.ts, at the file npm's trusted publisher names", () => {
     execFileSync(chant, ["release", "workflow"], { cwd: scratch, stdio: "pipe" });
     expect(read(".github/workflows/publish.yml")).toBe(readFileSync(join(scratch, ".github", "workflows", "publish.yml"), "utf8"));
-  }, 60_000);
-
-  it("chant-ci-green.yml is what chant ci workflow writes from chant.workspace.json's ci.green", () => {
-    execFileSync(chant, ["ci", "workflow", "--token-secret", "CI_GREEN_TOKEN"], { cwd: scratch, stdio: "pipe" });
-    expect(read(".github/workflows/chant-ci-green.yml")).toBe(readFileSync(join(scratch, ".github", "workflows", "chant-ci-green.yml"), "utf8"));
   }, 60_000);
 
   it("the GitHub release's notes are CHANGELOG.md's section for the package's version", () => {
