@@ -7,6 +7,12 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.13.5
+
+- Fixed: a project made from a starter template passes `yodel ci --check` again. The templates pin chant 0.124.103 and the sql lexicon 0.124.102, and their workflows are rendered on them.
+- Changed: a release is tagged `v<version>` only; the earlier 0.13 releases also had a `release/<version>` tag.
+- chant 0.124.105. The starter templates take `^0.13.4`.
+
 ## 0.13.4
 
 - Changed: on GitLab, chant's check job replaces yodel's lint job when the project has a workspace declaration, and keeps the code quality report as `artifacts: { reports: { codequality } }`. With `ci.evidence`, `check-evidence` signs the checks on GitLab too. Run `yodel ci` to write the pipelines again.
