@@ -5,7 +5,7 @@ Working in the INTENTIUS workspace, `../agents/shared.md` applies too. This file
 ## Gate and merging
 
 - Local gate: `npm ci && npm run build && npm run check` (typecheck, lint, test). A template or release pull request also runs `npm run templates:check`.
-- No merge queue yet. A pull request is squash-merged once its local gate passes. Nobody waits for CI.
+- main has a merge queue. Run the local gate, push, open the pull request with `Closes #N`, queue it with `gh pr merge <n> --auto --squash`, and stop. The queue tests it on top of main and merges it; nobody waits for CI.
 - Workflows are declared in `.github/src/<name>.ts` with `@intentius/chant-lexicon-github`. Edit the declaration, run `npm run workflows`, commit both; `npm run check` fails on a difference.
 
 ## chant
