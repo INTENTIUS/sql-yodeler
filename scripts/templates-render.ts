@@ -13,7 +13,7 @@
  * chant.template.json, whose name parameter it holds to chant's rule for a
  * workspace name. Run it again and it writes nothing.
  *
- * It refuses a chant without the product pipeline, and a chant npm does not
+ * It refuses a package that is not installed, and a version npm does not
  * serve: main's templates must work with what is published (AGENTS.md,
  * Releasing), so they are never rendered against a packed or linked chant.
  * The release pull request then moves the templates' yodel range and runs
