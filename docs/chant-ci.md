@@ -107,7 +107,7 @@ SQL Yodeler 0.11 kept its own copy of each part above for an older chant, and fo
 
 | Gone | In its place | A pipeline yodel 0.10 rendered, still committed |
 |---|---|---|
-| yodel's own pipeline generator (`render` without chant's product pipeline) | chant's product pipeline; a chant without it is refused, naming the install line | fails `yodel ci --check` on the pull request |
+| yodel's own pipeline generator (`render` without chant's product pipeline) | chant's product pipeline, which yodel imports without a check for it | fails `yodel ci --check` on the pull request |
 | the `plan` and `apply` callbacks in `yodel-waves.json` | the `sql-migrate` step | the wave jobs are refused (below) |
 | `YODEL_LOCK_WAIT: '10m'` and `YODEL_STAND_DOWN: '1'` on the wave jobs, and yodel's own newer-commit check | chant's lease (exit 5) and `standDown` (exit 6); `--stand-down` at a terminal asks chant | refused by name, exit 1, pointing at `yodel upgrade` |
 | yodel's own pull request note, for one environment | chant's note in yodel's words | |
