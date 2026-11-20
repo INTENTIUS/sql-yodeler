@@ -80,7 +80,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type RespondWaveRefused, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiAgentWaveRefused, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type RespondWaveRefused, type WaveGate, type YodelConfig } from "../config/define.js";
 import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
@@ -236,6 +236,8 @@ export interface Environments {
   respondRebase?: RespondRebase;
   /** yodel.config.ts `ci.respond.wave-refused`: whether a wave that applied nothing posts chant's diff of the plan. Unset, the spec says nothing and chant's default answers. */
   respondWaveRefused?: RespondWaveRefused;
+  /** yodel.config.ts `ci.agent["wave-refused"]`: the model run of `respond.wave-refused: "summary"`. */
+  agentWaveRefused?: CiAgentWaveRefused;
 }
 
 /** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
@@ -953,6 +955,8 @@ interface WavesSpec {
   }>;
   /** The responses a wave job posts (chant's `respond`): `wave-refused` as `ci.respond.wave-refused` sets it; absent when the project leaves it unset, so the rendered files are as before. */
   respond?: { "wave-refused": RespondWaveRefused };
+  /** chant's `waveSummary`, the model run of `wave-refused: summary`: `ci.agent["wave-refused"]` mapped onto chant's field names. Present with that mode only. */
+  waveSummary?: { command?: string; keyEnv?: string; timeout?: number; maxRuns?: number; maxCostUsd?: number };
   /** The scheduled resume job (yodel.config.ts `ci.resume`); only the pipelines are rendered from it, the spec file leaves it out. */
   resume?: { schedule: string };
 }
@@ -961,6 +965,17 @@ interface WavesSpec {
 export interface WaveJobSettings {
   variables: Record<string, string>;
   idTokens?: Record<string, string>;
+}
+
+/** `ci.agent["wave-refused"]` as chant's `WaveSummarySpec`: chant's mechanism, so the keys are only renamed. */
+function waveSummaryOf(s: CiAgentWaveRefused): NonNullable<WavesSpec["waveSummary"]> {
+  return {
+    ...(s.command !== undefined ? { command: s.command } : {}),
+    ...(s.key_secret !== undefined ? { keyEnv: s.key_secret } : {}),
+    ...(s.timeout !== undefined ? { timeout: s.timeout } : {}),
+    ...(s.max_runs !== undefined ? { maxRuns: s.max_runs } : {}),
+    ...(s.max_cost_usd !== undefined ? { maxCostUsd: s.max_cost_usd } : {}),
+  };
 }
 
 /**
@@ -984,7 +999,7 @@ export interface WaveJobSettings {
  * the base commit, as it does run by hand. A step runs once, under the
  * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }, waveRefused?: RespondWaveRefused): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }, waveRefused?: RespondWaveRefused, summary?: CiAgentWaveRefused): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
@@ -1005,6 +1020,7 @@ export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJob
       ...hooksOf(w.steps),
     })),
     ...(waveRefused ? { respond: { "wave-refused": waveRefused } } : {}),
+    ...(waveRefused === "summary" && summary ? { waveSummary: waveSummaryOf(summary) } : {}),
     ...(resume ? { resume } : {}),
   };
 }
@@ -1052,7 +1068,7 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: OpWavesPipelineOptions, cwd: string) => Promise<{ success: boolean; files?: Array<{ name: string; yaml: string }>; error?: string }>;
   };
   const named = (forge: Forge, spec: WavesSpec) => productWaves(product, forge, spec);
-  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves, undefined, undefined, envs.respondWaveRefused)).spec, null, 2)}\n` }];
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves, undefined, undefined, envs.respondWaveRefused, envs.agentWaveRefused)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const jobOf = (forge: Forge) => (env: string): WaveJobSettings => {
     const wave = waves.find((w) => w.env === env);
@@ -1141,7 +1157,7 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
-    const { spec, jobs } = named(forge, wavesSpec(waves, jobOf(forge), envs.resume, envs.respondWaveRefused));
+    const { spec, jobs } = named(forge, wavesSpec(waves, jobOf(forge), envs.resume, envs.respondWaveRefused, envs.agentWaveRefused));
     const result = await generateOpWavesPipeline(
       spec,
       forge,
@@ -1153,7 +1169,7 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
         waveJobs: waveJobs(forge),
         recordPlans: recordPlans(forge),
         // A refused wave's diff is posted with the job's token: pull request comments, and the tracking issue a wave with no pull request uses. GitLab's jobs read CHANT_FORGE_TOKEN.
-        ...(envs.respondWaveRefused === "diff" && forge !== "gitlab" ? { commandToken: { permissions: { "pull-requests": "write" as const, issues: "write" as const } } } : {}),
+        ...((envs.respondWaveRefused === "diff" || envs.respondWaveRefused === "summary") && forge !== "gitlab" ? { commandToken: { permissions: { "pull-requests": "write" as const, issues: "write" as const } } } : {}),
         // Signed checks (sql-yodeler issue 346): each deciding wave signs plan:<wave> and policy:<wave>; on GitLab its <wave job>-evidence job, in chant-evidence.
         ...(envs.evidence ? { evidence: envs.evidence } : {}),
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
@@ -1460,6 +1476,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.respond?.new ? { respondNew: ci.respond.new } : {}),
     ...(ci?.respond?.rebase ? { respondRebase: ci.respond.rebase } : {}),
     ...(ci?.respond?.["wave-refused"] ? { respondWaveRefused: ci.respond["wave-refused"] } : {}),
+    ...(ci?.agent?.["wave-refused"] ? { agentWaveRefused: ci.agent["wave-refused"] } : {}),
     ...(ci?.evidence ? { evidence: ci.evidence } : {}),
     ...(ci?.refGate === true ? { refGate: true as const } : {}),
   };

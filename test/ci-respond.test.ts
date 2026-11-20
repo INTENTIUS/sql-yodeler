@@ -85,7 +85,7 @@ describe("ci.respond.wave-refused in the waves spec", () => {
 
   it("checks the word", () => {
     expect(() => checkYodelConfig({ ci: { respond: { "wave-refused": "diff" } } }, "yodel.config.ts")).not.toThrow();
-    expect(() => checkYodelConfig({ ci: { respond: { "wave-refused": "summary" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.wave-refused: one of off, diff/);
+    expect(() => checkYodelConfig({ ci: { respond: { "wave-refused": "tldr" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.wave-refused: one of off, diff, summary/);
     expect(() => checkYodelConfig({ ci: { respond: { wave_refused: "diff" } } }, "yodel.config.ts")).toThrow(/ci\.respond: expected/);
   });
 });
