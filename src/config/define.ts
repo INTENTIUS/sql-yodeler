@@ -355,6 +355,122 @@ export interface CiConfig {
    * its checks are signed, so set `evidence` and list the runner first.
    */
   refGate?: boolean;
+  /**
+   * The environments as stages of chant's pipeline, in promotion order:
+   * chant's `promotion` key. Set, `yodel ci` writes `.chant/pipeline.ts`
+   * from this config with chant's helper, a merge applies the first stage's
+   * wave and cuts a release, and each later stage takes that release with
+   * `yodel promote --to <env>` behind its gate. It lists the environments
+   * `waves` lists, in the same order. Absent, nothing of the pipeline is
+   * written and the waves apply on merge as before.
+   */
+  promotion?: string[];
+  /**
+   * Each stage's settings, keyed by environment, in the stage keys of
+   * chant's vocabulary. Read only with {@link CiConfig.promotion}. See
+   * {@link CiStageConfig}.
+   */
+  environments?: Record<string, CiStageConfig>;
+  /** The approval rules of every stage's gate, chant's `approval_rules`; a stage's own replace them. */
+  approvalRules?: CiApprovalRule[];
+  /**
+   * The change risk (chant's `risk` keys): `approveAbove` is the score from
+   * 0 to 1 above which a plan needs an approval of its own, for every stage
+   * that sets none, and `questions` are those the review agent answers.
+   * The score only adds approvals. Absent, no score is made.
+   */
+  risk?: CiRisk;
+  /** Shared sets of config and secrets that a stage's `imports` takes, chant's `config_sets`. */
+  configSets?: Record<string, CiEnvironmentSet>;
+  /** What a merge does once the first stage applied, chant's `release` keys: `cut` (default true) and `label` (default `auto`). */
+  release?: { cut?: boolean; label?: string };
+  /** chant's `recheck`: `{ schedule }`, the cron line a promotion a soak holds is tried again on. */
+  recheck?: { schedule: string };
+}
+
+/**
+ * One approval rule of a stage's gate, or a group of them (chant's
+ * `approval_rules`): `count` distinct approvers, from `roles`, `notAuthor`
+ * one who is not the change's author, `proven` only approvers a seal or a
+ * review proves; `all` and `any` group rules, nested up to three deep;
+ * `name` shows in the rule's progress line.
+ */
+export type CiApprovalRule =
+  | { name?: string; count: number; roles?: string[]; notAuthor?: boolean; proven?: boolean }
+  | { name?: string; all: CiApprovalRule[] }
+  | { name?: string; any: CiApprovalRule[] };
+
+/** `ci.risk`. */
+export interface CiRisk {
+  approveAbove?: number;
+  questions?: Array<{ id: string; text: string; weight: number; approveAbove?: number }>;
+}
+
+/** Where a secret is kept: a forge secret's name, or chant's map naming a store. */
+export type CiSecretRef =
+  | string
+  | { forgeSecret: string }
+  | { awsSecretsManager: string; jsonKey?: string; region?: string }
+  | { gcpSecretManager: string }
+  | { azureKeyVault: string };
+
+/** A set of config and secrets a stage's jobs get as variables (chant's environment sets). */
+export interface CiEnvironmentSet {
+  /** Shared sets (`ci.configSets` keys) taken first, in order. */
+  imports?: string[];
+  config?: Record<string, string>;
+  secrets?: Record<string, CiSecretRef>;
+}
+
+/** The soak check kinds a SQL Yodeler stage takes: an HTTP probe, a Prometheus query and a command. */
+export type CiSoakCheckKind = "http" | "prometheus" | "command";
+
+export const CI_SOAK_CHECK_KINDS: readonly CiSoakCheckKind[] = ["http", "prometheus", "command"];
+
+/** One soak check, passed to chant as written: its `kind`, `onFail` (`restart`, the default, or `hold`) and that kind's settings. */
+export interface CiSoakCheck {
+  kind: CiSoakCheckKind;
+  onFail?: "restart" | "hold";
+  timeoutSeconds?: number;
+  [setting: string]: unknown;
+}
+
+/**
+ * `ci.environments.<env>`: one stage of chant's pipeline. Each key is the
+ * camelCase spelling of a stage key on chant's vocabulary page, and yodel
+ * hands it to chant as written. A stage's wave gate and approval mode stay
+ * `waves[].gate` and `waves[].approval`, and the steps around apply stay
+ * `environments.<env>.steps`.
+ */
+export interface CiStageConfig extends CiEnvironmentSet {
+  /** A manual hold: no release is promoted into the stage. */
+  hold?: boolean | { reason?: string; until?: string; description?: string };
+  /** Windows in which no release is promoted into the stage, ISO 8601 times. */
+  freeze?: Array<{ from: string; until: string; reason?: string }>;
+  /** The failed runs a wave of many tenants lets through: a number, or a share such as `"10%"`. */
+  failureTolerance?: number | `${number}%`;
+  /** This stage's approval rules, in place of `ci.approvalRules`. */
+  approvalRules?: CiApprovalRule[];
+  /** Over `approveAbove`, the stage's wave waits whatever its gate says and its gate takes `approvalRules` on top of its own. */
+  risk?: { approveAbove?: number; approvalRules?: Array<Extract<CiApprovalRule, { count: number }>> };
+  /** Checks that must keep passing for `duration` after the stage's last apply before a release goes on. */
+  soak?: { duration: string; checks?: CiSoakCheck[]; overrides?: Array<{ members: string[]; duration?: string; checks?: CiSoakCheck[] }> };
+  /** The canary stage, whose soak holds every stage after it; it needs a soak with a check. */
+  canary?: boolean;
+  /** What a failed verify or soak does: `hold` (the default). A migration that ran stays run, so `rollback` is refused. */
+  onVerifyFail?: "hold" | "rollback";
+  /** The stages a release applies in before this one opens for it; default the stage before. */
+  after?: string[];
+  /** `replace`: one release at a time, a newer one waiting replacing an older. */
+  queue?: "replace";
+  /** The role whose one proven approval passes the stage's gate on `yodel promote --urgent`. */
+  urgent?: { role: string };
+  /** A rollback of the stage pauses it until `yodel resume`. */
+  pauseAfterRollback?: boolean;
+  /** Release artifacts the stage publishes once it applied: `{ member, output }`, or `{ secret }` naming where a secret is kept. */
+  publish?: Record<string, { member: string; output: string } | { secret: CiSecretRef }>;
+  /** Artifacts of earlier stages the stage's promote gets as variables: `{ stage, artifact }`. */
+  reads?: Record<string, { stage: string; artifact: string }>;
 }
 
 /** `ci.evidence`: chant's `PipelineEvidence`, a runner key's secret or a keyless identity. */

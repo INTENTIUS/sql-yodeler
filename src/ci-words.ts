@@ -37,9 +37,11 @@ export interface YodelWords {
   stages: Record<YodelStage, string>;
   verbs: { plan: [string, string]; apply: [string, string] };
   noun: [string, string];
-  commands: Record<string, "plan" | "apply" | "lock" | "unlock" | "agent" | "commit">;
+  commands: Record<string, "plan" | "apply" | "lock" | "unlock" | "agent" | "commit" | "reject">;
   approve: string;
   override: string;
+  /** The reject line (#384, chant's `reject` template): what a person runs to turn down the release a stage's gate waits on. */
+  reject?: string;
   op: string;
   gateName: string;
   approval: "per-wave" | "pull-request";
@@ -62,6 +64,7 @@ export const YODEL_WORDS: YodelWords = {
   // The environment or tenant is the wave's run target (chant#4574).
   approve: "yodel approve {target} --plan {digest} {sign}",
   override: "yodel override {target} --rule {rule} --reason <text>",
+  reject: "yodel reject {op} {gate} --plan {digest} --reason {reason} {sign}",
   op: WAVES_PIPELINE,
   gateName: `${WAVES_PIPELINE}-wave-{k}`,
   approval: "per-wave",
@@ -81,6 +84,15 @@ export const YODEL_PR_ENV = "yodel-pr";
 
 /** The name of yodel's own line in a plan note, `<!-- yodel:plan env=<env> -->` (chant's `productMarker`). */
 export const YODEL_NOTE_MARKER = "yodel:plan";
+
+/**
+ * The words of the reject comment job (#384): `/yodel reject [--stage <env>]
+ * <reason>` records a rejection of the release a stage's gate waits on, where
+ * the stage's approval mode takes the comment author's forge identity. Only
+ * that job runs under them; a project whose environments are no pipeline's
+ * stages renders no such job.
+ */
+export const PIPELINE_WORDS: YodelWords = { ...YODEL_WORDS, commands: { ...YODEL_WORDS.commands, reject: "reject" } };
 
 /** The words without their comment commands, for a part of chant's product pipeline that renders none of their jobs (the waves). */
 export const WAVE_WORDS: YodelWords = { ...YODEL_WORDS, commands: {} };

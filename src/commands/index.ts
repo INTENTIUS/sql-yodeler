@@ -20,6 +20,7 @@ import { rebase } from "./rebase.js";
 import { repair } from "./repair.js";
 import { revert } from "./revert.js";
 import { report } from "./report.js";
+import { pause, promote, reject, resume } from "./stages.js";
 import { status } from "./status.js";
 import { test } from "./test.js";
 import { upgrade } from "./upgrade.js";
@@ -33,6 +34,10 @@ export const commands: readonly Command[] = [
   apply,
   approve,
   override,
+  promote,
+  reject,
+  pause,
+  resume,
   newCommand,
   checkpoint,
   lint,

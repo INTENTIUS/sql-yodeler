@@ -16,6 +16,7 @@ Everything a SQL Yodeler project needs is a `yodel` command, and the starter tem
 | `yodel` | everything about the schema and the migrations: `plan`, `new`, `lint`, `apply`, `status`, `drift`, `report`, `ci` and the rest of the commands `yodel --help` lists below. Inside a project, run it as `npx yodel`. |
 | `yodel approve <env>` | a person's approval of the plan `yodel apply` would run, at a terminal: it shows the plan and asks you to type the environment's name. Every message that asks for an approval prints it with the digest, `yodel approve <env> --plan <digest>` ([Approval](approval.md)). |
 | the template's `just` targets | optional shortcuts that print the command they run; [the table in Your first migration](getting-started.md#the-same-steps-with-just) lists them. |
+| `yodel promote`, `yodel reject`, `yodel pause`, `yodel resume` | the stages of chant's pipeline, when `ci.promotion` makes the environments stages: take a release into a stage behind its gate, turn down the release a gate waits on, and stop or let releases into a stage ([Environments as pipeline stages](pipeline.md#the-stage-commands)). |
 | `yodel check` | lints another tool's migrations (golang-migrate, goose, Flyway, dbmate) on your pull requests while that tool keeps applying them ([Try it without switching](from-other-tools.md#try-it-without-switching)). |
 | `yodel mcp` | read-only tools for a coding agent, over MCP ([Set up with a coding agent](agents.md#read-only-tools-yodel-mcp)). |
 | `yodel upgrade` | once, after installing chant 0.124.67 or later: moves the pipelines onto chant's product pipeline in one commit ([Upgrading the pipelines to chant 0.124.67](workflows.md#upgrading-the-pipelines-to-chant-012467)). |
@@ -40,6 +41,10 @@ Commands:
   apply       bring an environment to its declared schema or pending migrations
   approve     approve the plan yodel apply would run (a person at a terminal)
   override    override a policy rule for the current plan, with a reason
+  promote     take a release into a pipeline stage, behind its gate
+  reject      turn down the release a stage's gate waits on
+  pause       stop releases entering a stage
+  resume      let releases into a paused stage again
   new         write the next migration from the declared schema
   checkpoint  write a checkpoint: the newest recorded schema from nothing
   lint        check the migrations against the lint rules
