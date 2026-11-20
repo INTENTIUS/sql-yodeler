@@ -31,6 +31,19 @@ npm run check     # typecheck, lint and test
 
 Binary files (images, fonts, PDFs, archives) go in [Git LFS](https://git-lfs.com): run `git lfs install` once, and `.gitattributes` sends each binary type there. `npm run check` fails on a binary file committed without LFS (`test/binaries.test.ts`). The brand images committed before LFS stay plain files, listed by name in `.gitattributes`.
 
+## Building against an unreleased chant
+
+`package.json` pins chant and its lexicons to exact versions, and the templates pin the same chant and sql lexicon. To try a chant change that npm does not serve yet:
+
+```sh
+just chant-local ../chant-fix    # pack that chant checkout, install it, run npm run build
+just chant-local --reset         # back to the pinned release (npm ci)
+```
+
+The recipe runs `chant dev local`: it runs `npm pack` for the chant packages this repository's `package.json` names (and the chant packages those depend on) from the checkout into `.chant-local/`, installs them with `npm install --no-save`, so `package.json` and `package-lock.json` do not change, marks each installed copy's `package.json` with a `chantLocal` field naming the chant commit, and runs `npm run build`. For chant's origin/main, make a worktree of it first and pass its path. Run `--reset` before you commit, and never merge a pull request that needs a chant npm does not serve.
+
+The packed build is for testing only. `src/chant-floor.ts` reports the installed chant and there is no floor constant to move. `npm run templates:render` refuses a chant npm does not serve, so render the templates only on the pinned chant.
+
 ## Running an unreleased yodel in a project
 
 A project normally installs `@intentius/sql-yodeler` from npm. To try a commit that is not released yet:

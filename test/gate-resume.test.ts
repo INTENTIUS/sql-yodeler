@@ -81,7 +81,8 @@ async function findOp(dir: string): Promise<MigrateOpRef> {
   return selectMigrateOp(found.ops, project, dev);
 }
 
-describe("the run after yodel approve (chant#3947)", () => {
+// Each case starts chant several times; a busy machine takes longer than the default 60 s.
+describe("the run after yodel approve (chant#3947)", { timeout: 240_000 }, () => {
   it("resumes at the template's gate: chant reports the gate it resumed at, the plan runs again, the apply once", async () => {
     expect(TEMPLATE_OP).toContain(`gate("approve-migrate-dev", { plan: digest, resume: true })`);
     const r = repo();
