@@ -5,9 +5,9 @@ type: howto
 
 # Environments as pipeline stages
 
-With `ci.promotion` in `yodel.config.ts`, the apply pipeline's environments are the stages of [chant's pipeline](https://intentius.io/chant/reference/pipeline/). A merge applies the first environment and cuts a release from what it applied. Each later environment takes that release with `yodel promote`, behind a gate of its own that can read the change's risk, the soak of the stage before it, holds, freeze windows and pauses. Without `ci.promotion`, every wave applies on merge, one after another, as [The pipelines](workflows.md#the-pipelines-yodel-ci) describes.
+With `ci.promotion` in `yodel.config.ts`, the apply pipeline's environments are the stages of [chant's pipeline](https://intentius.io/chant/reference/pipeline/). A merge applies the first environment and cuts a release from what it applied. Each later environment takes that release with `yodel promote`, behind a gate of its own. That gate can read the change's risk and the soak of the stage before it. Without `ci.promotion`, every wave applies on merge, one after another, as [The pipelines](workflows.md#the-pipelines-yodel-ci) describes.
 
-The keys are chant's stage keys from its [CI product config reference](https://intentius.io/chant/reference/ci-product-config/#stage-keys), spelled in camelCase under `ci`, and yodel hands each one to chant as written. chant holds the gates, the risk score, the soak, the holds and the sets.
+The keys are chant's stage keys from its [CI product config reference](https://intentius.io/chant/reference/ci-product-config/#stage-keys), spelled in camelCase under `ci`. yodel hands each one to chant as written, and chant runs every mechanism behind them.
 
 ## Turn it on
 
@@ -79,7 +79,7 @@ approvalRules: [
 | `environments.<env>.risk.approveAbove` | `environments.<name>.risk.approve_above` | one stage's score |
 | `environments.<env>.risk.approvalRules` | `environments.<name>.risk.approval_rules` | the rules the stage's gate takes on top of its own when the score is over |
 
-chant scores each change from its reasons, and the sql lexicon's destructive classes are one of them: each lint rule that makes `on-destructive` wait (a drop, a Postgres rewrite or lock-heavy statement, a ClickHouse mutation or rebuild, an access change). `yodel plan <env> --pr-note` and `--format markdown` show the score, its level and each reason in the plan note, under the stage's threshold. Over it, the stage's wave waits for an approval whatever its gate says, and a promote into a later stage reads the score the release carries. The score only adds approvals. A later stage with risk keys needs the first stage to score too, so `ci.risk.approveAbove` is the usual place for the threshold. [Change risk](https://intentius.io/chant/guide/change-risk/) has how the score is made.
+chant scores each change from its reasons, and the sql lexicon's destructive classes are one of them: each lint rule that makes `on-destructive` wait (a drop, a Postgres rewrite or lock-heavy statement, a ClickHouse mutation or rebuild, an access change). `yodel plan <env> --pr-note` and `--format markdown` show the score, its level and each reason in the plan note, under the stage's threshold. Over it, the stage's wave waits for an approval whatever its gate says. A promote into a later stage reads the score the release carries. The score only adds approvals. A later stage with risk keys needs the first stage to score too, so `ci.risk.approveAbove` is the usual place for the threshold. [Change risk](https://intentius.io/chant/guide/change-risk/) has how the score is made.
 
 ## Soak
 
@@ -96,9 +96,9 @@ A SQL stage soaks on an HTTP probe, a Prometheus query or a command, and `yodel.
 
 ## When a verify or soak fails
 
-`environments.<env>.onVerifyFail` (chant's `on_verify_fail`) takes `hold`, the default: the stage stays as applied and holds the next promote. A migration that ran stays run, and applying an earlier release takes none of it back, so `yodel ci` refuses `rollback` on every stage with chant's reason. Undo a migration with [`yodel revert`](migrations.md), behind its own gate.
+With `environments.<env>.onVerifyFail` (chant's `on_verify_fail`) at `hold`, the default, the stage stays as applied and holds the next promote. A migration that ran stays run, and applying an earlier release takes none of it back, so `yodel ci` refuses `rollback` on every stage with chant's reason. Undo a migration with [`yodel revert`](migrations.md), behind its own gate.
 
-## Holds, freezes, pauses and the urgent rule
+## Stopping a stage, and the urgent rule
 
 | Key under `ci` | chant's key | Sets |
 |---|---|---|
