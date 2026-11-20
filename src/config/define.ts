@@ -361,7 +361,18 @@ export interface CiEvidence {
 export interface CiRespond {
   new?: RespondNew;
   rebase?: RespondRebase;
+  /**
+   * What a wave that applied nothing posts when its plan moved since the
+   * approval, another run held it or its decision declined it: `diff` posts
+   * chant's diff of the migration plan (the members whose plan moved and what
+   * moved in them) on the pull request the wave applies, or on a tracking
+   * issue when it has none; `off` posts nothing. Unset, the rendered files are as before and chant's wave job answers with its own default.
+   */
+  "wave-refused"?: RespondWaveRefused;
 }
+
+export type RespondWaveRefused = "off" | "diff";
+export const RESPOND_WAVE_REFUSED: readonly RespondWaveRefused[] = ["off", "diff"];
 
 export type RespondNew = "off" | "comment" | "on-change";
 export const RESPOND_NEW: readonly RespondNew[] = ["off", "comment", "on-change"];

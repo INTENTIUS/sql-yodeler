@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, RESPOND_REBASE, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, RESPOND_REBASE, RESPOND_WAVE_REFUSED, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
@@ -208,9 +208,10 @@ function checkCi(value: unknown, where: string): void {
   if (value.refGate === true && value.evidence === undefined) throw new YodelError(`${where}.refGate: the ref gate needs signed checks, and ci.evidence names no runner identity; set ci.evidence first`);
   if (value.respond !== undefined) {
     const r = value.respond;
-    if (!isRecord(r) || !Object.keys(r).every((k) => k === "new" || k === "rebase")) throw new YodelError(`${where}.respond: expected { new?, rebase? }`);
+    if (!isRecord(r) || !Object.keys(r).every((k) => k === "new" || k === "rebase" || k === "wave-refused")) throw new YodelError(`${where}.respond: expected { new?, rebase?, "wave-refused"? }`);
     if (r.new !== undefined && !(RESPOND_NEW as readonly unknown[]).includes(r.new)) throw new YodelError(`${where}.respond.new: one of ${RESPOND_NEW.join(", ")}`);
     if (r.rebase !== undefined && !(RESPOND_REBASE as readonly unknown[]).includes(r.rebase)) throw new YodelError(`${where}.respond.rebase: one of ${RESPOND_REBASE.join(", ")}`);
+    if (r["wave-refused"] !== undefined && !(RESPOND_WAVE_REFUSED as readonly unknown[]).includes(r["wave-refused"])) throw new YodelError(`${where}.respond.wave-refused: one of ${RESPOND_WAVE_REFUSED.join(", ")} `);
   }
   if (value.new !== undefined) {
     const n = value.new;

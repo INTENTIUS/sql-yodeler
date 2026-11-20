@@ -80,7 +80,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type RespondWaveRefused, type WaveGate, type YodelConfig } from "../config/define.js";
 import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
@@ -234,6 +234,8 @@ export interface Environments {
   respondNew?: RespondNew;
   /** yodel.config.ts `ci.respond.rebase` (#313): what answers `/yodel rebase`. Default `comment`, or `off` when a reader's password is cloud-minted. */
   respondRebase?: RespondRebase;
+  /** yodel.config.ts `ci.respond.wave-refused`: whether a wave that applied nothing posts chant's diff of the plan. Unset, the spec says nothing and chant's default answers. */
+  respondWaveRefused?: RespondWaveRefused;
 }
 
 /** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
@@ -949,6 +951,8 @@ interface WavesSpec {
     idTokens?: Record<string, string>;
     hooks?: OpWaveHooks;
   }>;
+  /** The responses a wave job posts (chant's `respond`): `wave-refused` as `ci.respond.wave-refused` sets it; absent when the project leaves it unset, so the rendered files are as before. */
+  respond?: { "wave-refused": RespondWaveRefused };
   /** The scheduled resume job (yodel.config.ts `ci.resume`); only the pipelines are rendered from it, the spec file leaves it out. */
   resume?: { schedule: string };
 }
@@ -980,7 +984,7 @@ export interface WaveJobSettings {
  * the base commit, as it does run by hand. A step runs once, under the
  * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }, waveRefused?: RespondWaveRefused): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
@@ -1000,6 +1004,7 @@ export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJob
       // The steps around apply (#64) as chant's stage hooks, which the apply runs under its lock (#206).
       ...hooksOf(w.steps),
     })),
+    ...(waveRefused ? { respond: { "wave-refused": waveRefused } } : {}),
     ...(resume ? { resume } : {}),
   };
 }
@@ -1047,7 +1052,7 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: OpWavesPipelineOptions, cwd: string) => Promise<{ success: boolean; files?: Array<{ name: string; yaml: string }>; error?: string }>;
   };
   const named = (forge: Forge, spec: WavesSpec) => productWaves(product, forge, spec);
-  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves)).spec, null, 2)}\n` }];
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves, undefined, undefined, envs.respondWaveRefused)).spec, null, 2)}\n` }];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const jobOf = (forge: Forge) => (env: string): WaveJobSettings => {
     const wave = waves.find((w) => w.env === env);
@@ -1136,7 +1141,7 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
-    const { spec, jobs } = named(forge, wavesSpec(waves, jobOf(forge), envs.resume));
+    const { spec, jobs } = named(forge, wavesSpec(waves, jobOf(forge), envs.resume, envs.respondWaveRefused));
     const result = await generateOpWavesPipeline(
       spec,
       forge,
@@ -1147,6 +1152,8 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
         beforeScript: [...installLines(tc, forge), fetchApprovals(tc)],
         waveJobs: waveJobs(forge),
         recordPlans: recordPlans(forge),
+        // A refused wave's diff is posted with the job's token: pull request comments, and the tracking issue a wave with no pull request uses. GitLab's jobs read CHANT_FORGE_TOKEN.
+        ...(envs.respondWaveRefused === "diff" && forge !== "gitlab" ? { commandToken: { permissions: { "pull-requests": "write" as const, issues: "write" as const } } } : {}),
         // Signed checks (sql-yodeler issue 346): each deciding wave signs plan:<wave> and policy:<wave>; on GitLab its <wave job>-evidence job, in chant-evidence.
         ...(envs.evidence ? { evidence: envs.evidence } : {}),
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
@@ -1452,6 +1459,7 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
     ...(ci?.respond?.new ? { respondNew: ci.respond.new } : {}),
     ...(ci?.respond?.rebase ? { respondRebase: ci.respond.rebase } : {}),
+    ...(ci?.respond?.["wave-refused"] ? { respondWaveRefused: ci.respond["wave-refused"] } : {}),
     ...(ci?.evidence ? { evidence: ci.evidence } : {}),
     ...(ci?.refGate === true ? { refGate: true as const } : {}),
   };
@@ -1615,12 +1623,12 @@ export async function requireProduct(): Promise<ChantProduct> {
  * check hooks into when the project has none on disk: the one `yodel
  * upgrade` adds (#298). A project with no declaration, in its directory or
  * given here, keeps the lint job's own steps ({@link checkHooksDeclaration}).
- * `options.respondNew` and `options.respondRebase` stand in for yodel.config.ts `ci.respond`.
+ * `options.respondNew`, `options.respondRebase` and `options.respondWaveRefused` stand in for yodel.config.ts `ci.respond`.
  */
-export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew; respondRebase?: RespondRebase } = {}): Promise<RenderedFile[]> {
+export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew; respondRebase?: RespondRebase; respondWaveRefused?: RespondWaveRefused } = {}): Promise<RenderedFile[]> {
   const read = await environments(dir);
   // The starter templates render as the release before #312 did until the release that ships /yodel new renders them (test/template.test.ts).
-  const envs = { ...read, ...(options.respondNew ? { respondNew: options.respondNew } : {}), ...(options.respondRebase ? { respondRebase: options.respondRebase } : {}) };
+  const envs = { ...read, ...(options.respondNew ? { respondNew: options.respondNew } : {}), ...(options.respondRebase ? { respondRebase: options.respondRebase } : {}), ...(options.respondWaveRefused ? { respondWaveRefused: options.respondWaveRefused } : {}) };
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   const product = await requireProduct();
