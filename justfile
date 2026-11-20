@@ -14,6 +14,15 @@ check:
 claims *args:
     npm run claims -- {{args}}
 
+# Build against a local chant instead of the pin, with chant's `chant dev
+# local`: `just chant-local <chant-dir>` packs that checkout, installs it with
+# --no-save, runs `npm run build` and the bundle check, and `just chant-local
+# --reset` goes back to the pin. Each installed chant package gets a chantLocal
+# field naming the chant commit. For chant's origin/main, make a worktree of it
+# first. Never commit from a local build: run --reset first.
+chant-local +args:
+    npx chant dev local {{args}} --build 'npm run build'
+
 # The claims the change since base can affect.
 claims-affected base="origin/main":
     npm run claims -- --affected {{base}}
