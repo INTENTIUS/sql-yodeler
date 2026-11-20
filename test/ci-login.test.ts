@@ -251,11 +251,16 @@ describe("yodel ci: the cloud login of a pipeline stage's promote job (#384)", (
     expect(names(promote).some(LOGGED_IN)).toBe(false);
   });
 
-  it("refuses a cloud-minted role whose cloud ci.login names no login for the stage, on GitHub and GitLab", async () => {
+  it("gives a cloud-minted role with no ci.login entry the forge's OIDC token, as the wave job has it, on GitHub and GitLab", async () => {
     const dir = staged(`{ gcp: { workloadIdentityProvider: "${PROVIDER}", serviceAccount: "${SA}" }, azure: { clientId: "${CLIENT}", tenantId: "${TENANT}" } }`);
     const ran = await yodel(["ci", "--dir", dir]);
-    expect(ran.code).toBe(1);
-    expect(ran.err).toMatch(/prod's promote job holds a rds-iam password.*name prod's aws login in ci\.login/);
+    expect(ran.code, ran.err).toBe(0);
+    const gitlab = yaml(dir, ".gitlab/yodel-apply-promote.gitlab-ci.yml") as Record<string, GitLabJob>;
+    expect(gitlab["promote-prod"]?.id_tokens?.AWS_ID_TOKEN).toEqual({ aud: "sts.amazonaws.com" });
+    expect(JSON.parse(gitlab["promote-prod"]?.variables?.[TRADE_SPEC_ENV] ?? "{}")).not.toHaveProperty("aws");
+    const github = (yaml(dir, ".github/workflows/yodel-apply-promote.yml").jobs as Record<string, { permissions?: Record<string, string>; steps: Array<Step & { env?: Record<string, string> }> }>)["promote-prod"];
+    expect(github?.permissions?.["id-token"]).toBe("write");
+    expect(github?.steps.some((s) => s.env?.AWS_ID_TOKEN_AUDIENCE === "sts.amazonaws.com")).toBe(true);
   });
 });
 

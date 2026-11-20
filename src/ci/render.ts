@@ -1295,8 +1295,11 @@ export const PROMOTE_STAGE = "test";
  * jobs run in, with their install lines (chant's `image` and
  * `beforeScript`), and logs in to its cloud as that environment's wave job
  * does (#132): chant's trade from `ci.login` on GitHub and GitLab, as the
- * stage's `cloud`, and on Forgejo chant's login from the runner's token
- * files, in the promote's own step.
+ * stage's `cloud`, the forge's OIDC token for a cloud-minted role with no
+ * `ci.login` entry, as the stage's `idTokens`, and on Forgejo chant's login
+ * from the runner's token files, in the promote's own step. chant's
+ * generator checks out the default branch with its full history, which
+ * holds each release's commit.
  */
 async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedFile[]> {
   const ci = envs.pipeline;
@@ -1319,12 +1322,9 @@ async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedF
     // The roles the stage's wave job held, and its cloud login from ci.login (#132).
     const held = waveRoles(envs.waves, env);
     const logins = loginsOf(envs, held);
+    // A cloud-minted role with no ci.login reads the forge's OIDC token itself, as in the wave job: the token goes on the promote job (chant's idTokens). Forgejo issues none.
     const bare = forge === "forgejo" ? [] : cloudsOf(envs, held).filter((c) => !logins.some((l) => l.cloud === CLOUD_OF[c]));
-    if (bare.length > 0) {
-      throw new Error(
-        `yodel.config.ts ci.login: ${env}'s promote job holds a ${bare.join(", ")} password, which it mints from its cloud identity; with ci.promotion that identity is chant's trade, so name ${env}'s ${bare.map((c) => CLOUD_OF[c]).join(", ")} login in ci.login`,
-      );
-    }
+    const tokens = bare.length > 0 ? { idTokens: Object.fromEntries(bare.map((c) => [ID_TOKENS[c].variable, ID_TOKENS[c].aud])) } : {};
     const cloud = forge !== "forgejo" && logins.length > 0 ? { cloud: tradeSpec(logins) } : {};
     // Forgejo: the runner's token files, logged in within the promote's step, so the command has the variables.
     const login = forge === "forgejo" ? forgejoLoginLines(logins) : [];
@@ -1334,6 +1334,7 @@ async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedF
       name: env,
       environment: { name: env },
       ...cloud,
+      ...tokens,
       variables: {
         YODEL_CREDENTIALS: `writer:${env}`,
         ...(forge === "gitlab"

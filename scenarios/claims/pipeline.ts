@@ -20,13 +20,19 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *
  * The parts, each broken on its own under BREAK=1:
  *
- * - stages: with every gate `never`, the merge's wave applies a new column
- *   to dev and cuts a release (`yodel chant release cut`), with the column
- *   on neither staging nor prod. `yodel promote --to prod` with staging not
- *   yet promoted is refused, nothing applied to prod. `yodel promote --to
- *   staging --release <release>`, then `--to prod`, apply the same
- *   migration there. BREAK: the promote into prod passes `--allow-skip`, so
- *   the column reaches prod before staging.
+ * - stages: dev's and staging's gates are `never`, and the merge's wave
+ *   applies a new column to dev and cuts a release (`yodel chant release
+ *   cut`), with the column on neither staging nor prod. `yodel promote --to
+ *   prod` with staging not yet promoted is refused, nothing applied to prod.
+ *   `yodel promote --to staging --release <release>` applies the migration
+ *   there. prod takes two approvals: its stage gate (one approval rule)
+ *   waits on the release digest, `chant approve yodel-apply <prod> --env
+ *   <prod> --plan <release digest>`; approved, the same promote runs prod's
+ *   wave, whose gate `always` waits on its plan under the op
+ *   `yodel-apply-<prod>`; approved, the same promote again applies the
+ *   column to prod. BREAK: the promote into prod passes `--allow-skip`, with
+ *   each gate it waits on approved, so the column reaches prod before
+ *   staging.
  * - soak-hold: dev soaks for a minute on a command check that fails while a
  *   file is missing. The promote into staging exits 3 naming the soak, with
  *   nothing applied to staging. Once the file is there and the soak's
@@ -142,11 +148,26 @@ ${STAGES.map((s) => `      "${envs[s]}": ${profile(s)},`).join("\n")}
   return st;
 }
 
-/** yodel.config.ts: the three waves, gate `never`, as the stages of chant's pipeline, with `ci` keys added as TypeScript. */
-function yodelConfig(st: State, ci: { soak?: boolean; risk?: boolean } = {}): string {
+/** What a part sets beside the three stages. */
+interface Keys {
+  /** dev soaks for a minute on the command check. */
+  soak?: boolean;
+  /** `ci.risk.approveAbove`. */
+  risk?: boolean;
+  /** prod's two gates: an approval rule on its stage gate, and its wave's gate `always`. */
+  twoGates?: boolean;
+}
+
+/** yodel.config.ts: the three waves, gate `never` unless `keys` says otherwise, as the stages of chant's pipeline. */
+function yodelConfig(st: State, keys: Keys = {}): string {
   const history = st.p.ctx.db.history;
-  const soak = ci.soak ? `, environments: { "${st.envs.dev}": { soak: { duration: "1m", checks: [{ kind: "command", command: ["test", "-f", ${JSON.stringify(st.soakFile)}] }] } } }` : "";
-  const risk = ci.risk ? `, risk: { approveAbove: 0.1 }` : "";
+  const stageKeys = [
+    ...(keys.soak ? [`"${st.envs.dev}": { soak: { duration: "1m", checks: [{ kind: "command", command: ["test", "-f", ${JSON.stringify(st.soakFile)}] }] } }`] : []),
+    ...(keys.twoGates ? [`"${st.envs.prod}": { approvalRules: [{ count: 1 }] }`] : []),
+  ];
+  const soak = stageKeys.length > 0 ? `, environments: { ${stageKeys.join(", ")} }` : "";
+  const risk = keys.risk ? `, risk: { approveAbove: 0.1 }` : "";
+  const gate = (s: Stage) => (keys.twoGates && s === "prod" ? "always" : "never");
   return `import type { YodelConfig } from "@intentius/sql-yodeler";
 
 export default {
@@ -154,7 +175,7 @@ export default {
 ${STAGES.map((s) => `    "${st.envs[s]}": { history: { database: "${history}" } },`).join("\n")}
   },
   waves: [
-${STAGES.map((s) => `    { env: "${st.envs[s]}", gate: "never" },`).join("\n")}
+${STAGES.map((s) => `    { env: "${st.envs[s]}", gate: "${gate(s)}" },`).join("\n")}
   ],
   ci: { forges: ["github"], promotion: [${STAGES.map((s) => `"${st.envs[s]}"`).join(", ")}]${soak}${risk} },
 } satisfies YodelConfig;
@@ -162,8 +183,8 @@ ${STAGES.map((s) => `    { env: "${st.envs[s]}", gate: "never" },`).join("\n")}
 }
 
 /** Writes yodel.config.ts and what `yodel ci` writes from it, and commits both. */
-async function render(st: State, message: string, ci: { soak?: boolean; risk?: boolean } = {}): Promise<void> {
-  st.p.write("yodel.config.ts", yodelConfig(st, ci));
+async function render(st: State, message: string, keys: Keys = {}): Promise<void> {
+  st.p.write("yodel.config.ts", yodelConfig(st, keys));
   const ran = await st.p.yodel(["ci"], { timeoutMs: 300_000 });
   if (ran.code !== 0) throw new Error(`yodel ci exited ${String(ran.code)}:\n${ran.out}\n${ran.err}`);
   if (!existsSync(st.p.path(".chant", "pipeline.ts"))) throw new Error("yodel ci wrote no .chant/pipeline.ts with ci.promotion set");
@@ -206,26 +227,44 @@ async function merge(st: State, done: Map<string, JobResult> = new Map()): Promi
 /** dev's wave job: the only wave the merge runs with ci.promotion set. */
 const devWave = (results: Map<string, JobResult>): JobResult | undefined => [...results].find(([name]) => /^wave-\d+-/.test(name))?.[1];
 
-/** The release the merge's wave cut at HEAD, from `chant release list --json`. */
-async function releaseAtHead(st: State): Promise<string> {
+/** The release the merge's wave cut at HEAD, from `chant release list --json`: its label (else its digest), and its digest. */
+async function releaseAtHead(st: State): Promise<{ ref: string; digest: string }> {
   const head = (await st.p.git("rev-parse", "HEAD")).out.trim();
   const listed = await st.p.chant(["release", "list", "--json"]);
   if (listed.code !== 0) throw new Error(`chant release list exited ${String(listed.code)}: ${listed.err}`);
   const doc = JSON.parse(listed.out) as { releases?: Array<{ releaseDigest: string; label?: string | null; commit?: string }> };
   const cut = (doc.releases ?? []).filter((r) => r.commit === head).at(-1);
   if (!cut) throw new Error(`the merge's wave cut no release at ${head.slice(0, 12)}`);
-  return cut.label ?? cut.releaseDigest;
+  return { ref: cut.label ?? cut.releaseDigest, digest: cut.releaseDigest };
 }
 
 /** `yodel promote --to <stage> --release <release>`, the line each promote job runs. */
 const promote = (st: State, to: Stage, release: string, extra: string[] = []): Promise<Ran> => st.p.yodel(["promote", "--to", st.envs[to], "--release", release, ...extra], { timeoutMs: 600_000 });
+
+/** The `chant approve` line a waiting gate printed (in yodel's words or chant's), as chant's own. */
+function approveLine(ran: Ran): string | undefined {
+  const line = /(?:yodel )?chant approve \S+ \S+(?: --env \S+)? --plan \S+/.exec(`${ran.out}\n${ran.err}`)?.[0];
+  return line?.replace(/^yodel /, "");
+}
+
+/** A promote whose waiting gates are each approved and the same promote run again, as a person would, up to four times. */
+async function promoteThrough(st: State, to: Stage, release: string, extra: string[] = []): Promise<Ran> {
+  let ran = await promote(st, to, release, extra);
+  for (let i = 0; i < 4 && ran.code === 3; i++) {
+    const line = approveLine(ran);
+    if (!line) break;
+    await st.p.approve(line, { approver: "claims-approver" });
+    ran = await promote(st, to, release, extra);
+  }
+  return ran;
+}
 
 const said = (ran: Pick<Ran, "code" | "out" | "err">): string => `exit ${String(ran.code)}: ${`${ran.out}\n${ran.err}`.trim().split("\n").slice(-3).join(" ")}`;
 
 // ── The parts ────────────────────────────────────────────────────────────────
 
 async function stages(ctx: Ctx, st: State): Promise<void> {
-  await render(st, "the stages: dev, staging, prod");
+  await render(st, "the stages: dev, staging, prod; prod with two gates", { twoGates: true });
   addColumn(st.p, "staged");
   await migrate(st, "add-staged", "feat: a staged column");
 
@@ -234,19 +273,34 @@ async function stages(ctx: Ctx, st: State): Promise<void> {
   hold(wave?.ok === true, `the merge's wave did not apply dev (${wave ? said({ code: wave.code, out: wave.out, err: "" }) : "no wave job"})`);
   hold(await st.columnOn("dev", "staged"), "the column is not on dev after the merge's wave");
   hold(!(await st.columnOn("staging", "staged")) && !(await st.columnOn("prod", "staged")), "the merge applied a later stage; with ci.promotion it applies the first stage alone");
-  const release = await releaseAtHead(st);
+  const { ref: release, digest } = await releaseAtHead(st);
   ctx.log(`the merge cut release ${release}`);
 
-  // prod before staging: refused, nothing applied. Broken, the promote passes --allow-skip.
-  if (ctx.broken) ctx.log("BREAK: the promote into prod passes --allow-skip");
-  const early = await promote(st, "prod", release, ctx.broken ? ["--allow-skip"] : []);
+  // prod before staging: refused, nothing applied. Broken, the promote passes --allow-skip and each gate it waits on is approved.
+  if (ctx.broken) ctx.log("BREAK: the promote into prod passes --allow-skip, with each gate it waits on approved");
+  const early = ctx.broken ? await promoteThrough(st, "prod", release, ["--allow-skip"]) : await promote(st, "prod", release);
   hold(!(await st.columnOn("prod", "staged")), `prod got the column before staging (${said(early)})`);
   hold(early.code !== 0, `yodel promote --to prod with staging not promoted was not refused (${said(early)})`);
 
   const toStaging = await promote(st, "staging", release);
   hold(toStaging.code === 0 && (await st.columnOn("staging", "staged")), `yodel promote --to staging did not apply the release there (${said(toStaging)})`);
+
+  // prod's first approval: its stage gate, on the release digest.
+  const atStage = await promote(st, "prod", release);
+  const stageLine = approveLine(atStage);
+  hold(atStage.code === 3 && !(await st.columnOn("prod", "staged")), `the promote into prod did not wait at prod's stage gate (${said(atStage)})`);
+  hold(stageLine !== undefined && stageLine.includes(` --env ${st.envs.prod} `) && stageLine.endsWith(` --plan ${digest}`), `prod's stage gate does not wait on the release digest ${digest}: ${String(stageLine)}`);
+  await st.p.approve(stageLine, { approver: "claims-approver" });
+
+  // prod's second approval: its wave's gate, on the wave's plan, under the op yodel-apply-<prod>.
+  const atWave = await promote(st, "prod", release);
+  const waveLine = approveLine(atWave);
+  hold(atWave.code === 3 && !(await st.columnOn("prod", "staged")), `with prod's stage gate approved, prod's wave under gate always did not wait (${said(atWave)})`);
+  hold(waveLine !== undefined && waveLine.startsWith(`chant approve yodel-apply-${st.envs.prod} `) && !waveLine.endsWith(` --plan ${digest}`), `prod's wave does not wait on its plan under the op yodel-apply-${st.envs.prod}: ${String(waveLine)}`);
+  await st.p.approve(waveLine, { approver: "claims-approver" });
+
   const toProd = await promote(st, "prod", release);
-  hold(toProd.code === 0 && (await st.columnOn("prod", "staged")), `yodel promote --to prod did not apply the release there after staging (${said(toProd)})`);
+  hold(toProd.code === 0 && (await st.columnOn("prod", "staged")), `yodel promote --to prod did not apply the release once both gates were approved (${said(toProd)})`);
 }
 
 async function soakHold(ctx: Ctx, st: State): Promise<void> {
@@ -256,7 +310,7 @@ async function soakHold(ctx: Ctx, st: State): Promise<void> {
   await migrate(st, "add-soaked", "feat: a soaked column");
   const wave = devWave(await merge(st));
   hold(wave?.ok === true, "the merge's wave did not apply dev");
-  const release = await releaseAtHead(st);
+  const { ref: release } = await releaseAtHead(st);
 
   // The check fails while the file is missing: the promote into staging waits on dev's soak.
   const held = await promote(st, "staging", release);

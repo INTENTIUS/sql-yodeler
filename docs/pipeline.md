@@ -42,12 +42,12 @@ Then `yodel ci` writes these files, and `yodel ci --check` fails while any of th
 | File | Holds |
 |---|---|
 | `.chant/pipeline.ts` | the pipeline declaration, written with chant's `pipelineFromConfig` and `pipelineSource`. `chant build` folds it, and the gates read it at the base commit. `yodel ci --check` runs chant's `checkPipelineFile` on it and prints the line diff |
-| `yodel-waves.json` | the first stage's op-waves spec, taken from the folded file, under the op name `yodel-apply`, so approvals already on `chant/lifecycle` keep counting. Its last wave cuts the release |
+| `yodel-waves.json` | the first stage's op-waves spec, taken from the folded file, under the op name `yodel-apply`, so approvals already on `chant/lifecycle` keep counting. Its last wave cuts the release, and its release records name the component `yodel-apply`, the name every stage records under |
 | `yodel-apply.yml` (`.gitlab/yodel-apply.gitlab-ci.yml`) | the first stage's wave job, on a push to main |
 | `yodel-apply-promote.yml` (`.gitlab/yodel-apply-promote.gitlab-ci.yml`) | one job per later stage, started by hand with the stage and the release. On GitLab, start a pipeline from the web with `CHANT_PROMOTE_STAGE` and `CHANT_PROMOTE_RELEASE` |
 | `yodel-reject.yml` (GitHub and Forgejo) | the job that answers `/yodel reject` on a pull request |
 
-Each promote job holds its environment's writer and the reader of the environment it requires, the same secrets that environment's wave job held. It runs in the wave jobs' image (`ci.image`, or Node with `npm ci`) and installs yodel the same way before it runs `yodel chant components promote`. A promote job whose environment has a cloud-minted password logs in as that environment's wave job does: on GitHub and GitLab through chant's trade with the `ci.login` the environment names, and on Forgejo from the runner's token files. With `ci.promotion`, `yodel ci` takes a cloud-minted password once `ci.login` names that environment's login for its cloud.
+Each promote job holds its environment's writer and the reader of the environment it requires, the same secrets that environment's wave job held. It runs in the wave jobs' image (`ci.image`, or Node with `npm ci`) and installs yodel the same way before it runs `yodel chant components promote`. A promote job whose environment has a cloud-minted password logs in as that environment's wave job does. On GitHub and GitLab it trades for the `ci.login` the environment names, or requests the forge's OIDC token for a cloud with no `ci.login` entry. On Forgejo it logs in from the runner's token files. The job checks out the default branch with its full history, which holds the commit each release was cut from.
 
 ## Gates and approval rules
 
@@ -146,5 +146,14 @@ The first stage's wave job gets its stage's set, and each promote job its own. T
 | `yodel reject yodel-apply <env> --reason <text>` | `chant reject` | turns down the release the stage's gate waits on; a promote of it into that stage then exits 8. `--sign` seals it |
 | `yodel pause <env> --reason <text>` | `chant stage pause` | stops releases entering the stage |
 | `yodel resume <env> --reason <text>` | `chant stage resume` | lets them in again; the newest release that waited enters |
+
+### Two approvals for a later stage
+
+A promote into a later stage passes two gates, and each can wait with exit 3 and the line that approves it:
+
+1. The stage's gate, on the release. It binds the release digest: `chant approve yodel-apply <env> --env <env> --plan <release digest>`. Its approval rules, risk, soak, hold and freeze windows decide whether it waits.
+2. Each wave's gate, on its plan. Once the stage's gate passes, the promote writes the stage's spec to `.chant/op-waves/yodel-apply-<env>.spec.json` and runs the stage's waves in order. Each wave plans, and its gate (`waves[].gate`, `waves[].approval`) binds that plan's digest under the op `yodel-apply-<env>`. A wave that waits prints its own `chant approve yodel-apply-<env> ...` line. Run that line, then run the same `yodel promote` again: the stage's gate stands, and the waves carry on.
+
+The engine checks the wave's decision again under its lock, reading the gate from `.chant/pipeline.ts` at the default branch's tip, as the promote read it.
 
 On GitHub and Forgejo a comment `/yodel reject [--stage <env>] <reason>` on a pull request records the rejection under the author's forge identity, where the stage's approval mode takes it: `ledger` and `pr-review` do. A `sealed` stage, and a rule that needs a proven approver, get a reply with the `yodel reject` line to run with `--sign`.
