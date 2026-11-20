@@ -147,6 +147,17 @@ function forgejoSteps(logins: readonly Login[]): LoginSteps {
   return { steps: out.steps.map((st) => ({ name: st.name, lines: st.run })), variables: {} };
 }
 
+/**
+ * A Forgejo login as lines of the step that runs yodel (chant's `sameStep`):
+ * the promote job of a pipeline stage (#384) runs its command in one step,
+ * where a variable written to $GITHUB_ENV would arrive too late.
+ */
+export function forgejoLoginLines(logins: readonly Login[]): string[] {
+  const spec = forgejoLoginSpec(logins);
+  if (Object.keys(spec).length === 0) return [];
+  return forgejoCloudLogin(spec, { sameStep: true }).steps.flatMap((st) => st.run);
+}
+
 /** The login steps of a job on `forge`, for `logins`: chant's trade on GitHub and GitLab, the runner's token file on Forgejo. */
 export function loginSteps(forge: LoginForge, logins: readonly Login[]): LoginSteps {
   if (logins.length === 0) return { steps: [], variables: {} };

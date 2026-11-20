@@ -55,6 +55,9 @@ export const STAGE_KEYS = [
   "imports",
 ] as const;
 
+/** `value` without the keys `keys`. */
+const omit = <T extends object, K extends keyof T>(value: T, keys: readonly K[]): Omit<T, K> => Object.fromEntries(Object.entries(value).filter(([k]) => !(keys as readonly PropertyKey[]).includes(k))) as Omit<T, K>;
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
@@ -71,7 +74,7 @@ export function pipelineConfigProblem(ci: Record<string, unknown>, waves: readon
   if (promotion === undefined) {
     // Without a pipeline, the sets reach the wave jobs and the risk score the plan note; the rest are stage keys.
     const only = stageKeys.filter((k) => k !== "risk" && k !== "configSets" && k !== "environments");
-    if (only.length > 0) return `${where}.${only[0]}: a pipeline key, read with ci.promotion; set ci.promotion to the environments in order`;
+    if (only.length > 0) return `${where}.${String(only[0])}: a pipeline key, read with ci.promotion; set ci.promotion to the environments in order`;
     const envs = ci.environments;
     if (envs === undefined) return undefined;
     if (!isRecord(envs)) return `${where}.environments: a map of stage settings, keyed by environment`;
@@ -81,7 +84,7 @@ export function pipelineConfigProblem(ci: Record<string, unknown>, waves: readon
       const problem = stageProblem(stage, at);
       if (problem) return problem;
       const staged = Object.keys(stage as object).filter((k) => !["config", "secrets", "imports", "risk"].includes(k));
-      if (staged.length > 0) return `${at}.${staged[0]}: a stage key, read with ci.promotion; set ci.promotion to the environments in order`;
+      if (staged.length > 0) return `${at}.${String(staged[0])}: a stage key, read with ci.promotion; set ci.promotion to the environments in order`;
     }
     return undefined;
   }
@@ -176,18 +179,31 @@ export function stageRisk(ci: CiConfig, env: string): { approveAbove?: number; q
   return { ...(approveAbove !== undefined ? { approveAbove } : {}), ...(quorum ? { quorum } : {}) };
 }
 
+/** A stage's `risk` as chant's `pipelineFromConfig` reads it: its own keys, with `ci.risk.approveAbove` where the stage sets no threshold. */
+export function stageRiskConfig(ci: CiConfig, env: string): { approveAbove?: number; approvalRules?: Array<Record<string, unknown>> } | undefined {
+  const own = ci.environments?.[env]?.risk;
+  const approveAbove = own?.approveAbove ?? ci.risk?.approveAbove;
+  const rules = own?.approvalRules && own.approvalRules.length > 0 ? own.approvalRules.map(ruleOf) : undefined;
+  if (approveAbove === undefined && rules === undefined) return undefined;
+  return { ...(approveAbove !== undefined ? { approveAbove } : {}), ...(rules ? { approvalRules: rules } : {}) };
+}
+
 /** The pipeline's declaration from yodel.config.ts, through chant's `pipelineFromConfig`. Throws what chant refuses. */
 export async function pipelineDeclaration(input: PipelineInput): Promise<import("@intentius/chant/pipeline").PipelineDeclaration> {
   const { pipelineFromConfig, verifyRollbackProblems } = await import("@intentius/chant/pipeline");
   const { ci } = input;
   const promotion = ci.promotion ?? [];
-  const { name: _name, waves, ...defaults } = input.spec;
+  const { waves } = input.spec;
+  const defaults = omit(input.spec, ["name", "waves"]);
   const byEnv = Object.fromEntries(promotion.map((env) => [env, waves.filter((w) => w.name === env)]));
   const environments = Object.fromEntries(
     promotion.map((env) => {
       const stage = ci.environments?.[env] ?? {};
-      const { risk: _risk, approvalRules, config: _config, secrets: _secrets, imports: _imports, ...keys } = stage;
-      return [env, { ...keys, ...(approvalRules ? { approvalRules: approvalRules.map(ruleOf) } : {}) }];
+      const { approvalRules } = stage;
+      const keys = omit(stage, ["risk", "approvalRules", "config", "secrets", "imports"]);
+      // The risk keys (chant's `environments.<name>.risk`): the stage's own, else `ci.risk.approveAbove`; chant puts them on the gate's `holds.risk`.
+      const risk = stageRiskConfig(ci, env);
+      return [env, { ...keys, ...(approvalRules ? { approvalRules: approvalRules.map(ruleOf) } : {}), ...(risk ? { risk } : {}) }];
     }),
   );
   const declaration = pipelineFromConfig({
@@ -196,15 +212,10 @@ export async function pipelineDeclaration(input: PipelineInput): Promise<import(
     environments: environments as never,
     ...(ci.approvalRules ? { approvalRules: ci.approvalRules.map(ruleOf) as never } : {}),
     waves: byEnv as never,
-    defaults: defaults as never,
+    defaults,
     release: { ...(ci.release?.cut !== undefined ? { cut: ci.release.cut } : {}), ...(ci.release?.label !== undefined ? { label: ci.release.label } : {}), bin: [...input.bin] },
     ...(ci.recheck ? { recheck: { schedule: ci.recheck.schedule } } : {}),
   });
-  // The risk keys (chant's `environments.<name>.risk`): each stage gate's `holds.risk`, as chant reads it.
-  for (const stage of declaration.stages) {
-    const risk = stageRisk(ci, stage.name);
-    if (risk) stage.gate = { ...stage.gate, holds: { ...stage.gate?.holds, risk: risk as never } };
-  }
   // chant refuses onVerifyFail: "rollback" on a stage that applies a sql-migrate step: a migration that ran stays run.
   const step = (defaults as { step?: { kind?: string } }).step;
   const refused = verifyRollbackProblems({ spec: declaration, steps: step?.kind ? [{ where: "defaults.step", kind: step.kind }] : [], capability: () => undefined });
@@ -229,7 +240,7 @@ export async function firstStageSpec(text: string, name: string): Promise<Record
   if ("finding" in folded) throw new Error(pipelineFindingLine(PIPELINE_TS, folded.finding));
   const first = folded.spec.stages[0];
   if (!first) throw new Error(`${PIPELINE_TS}: the pipeline has no stage`);
-  const { labels: _labels, ...spec } = stageWavesSpec(folded.spec, first.name) as unknown as Record<string, unknown> & { waves: StageWave[] };
+  const spec = omit(stageWavesSpec(folded.spec, first.name) as unknown as Record<string, unknown> & { waves: StageWave[] }, ["labels"]) as Record<string, unknown> & { waves: StageWave[] };
   return { ...spec, name, waves: spec.waves };
 }
 
@@ -252,6 +263,6 @@ export function environmentSetsOf(ci: CiConfig | undefined, envs: readonly strin
   });
   return {
     environments: Object.fromEntries(envs.map((env) => [env, set(ci?.environments?.[env])])),
-    ...(ci?.configSets ? { configSets: structuredClone(ci.configSets) as never } : {}),
+    ...(ci?.configSets ? { configSets: structuredClone(ci.configSets) } : {}),
   };
 }

@@ -211,3 +211,72 @@ describe("the login steps, per cloud and forge", () => {
     expect(() => jobLogins({ aws: { roleArn: ROLE }, environments: { prod: { aws: { roleArn: PROD_ROLE } } } }, held, cloudOf)).toThrow(/a job holds prod's and dev's roles, which log in to aws differently/);
   });
 });
+
+/** {@link project} with the environments as stages of chant's pipeline (#384): prod's promote job holds what prod's wave job held. */
+function staged(login?: string): string {
+  const dir = project(login);
+  const config = join(dir, "yodel.config.ts");
+  const text = readFileSync(config, "utf8");
+  const next = text.replace(/^( {2}ci: \{ forges: \[[^\]]*\])/m, `$1, promotion: ["dev", "prod"]`);
+  if (next === text) throw new Error("yodel.config.ts: no ci to add ci.promotion to");
+  writeFileSync(config, next);
+  return dir;
+}
+
+describe("yodel ci: the cloud login of a pipeline stage's promote job (#384)", () => {
+  it("GitHub and GitLab: chant's trade as the stage's cloud, with prod's own AWS role and the clouds of the readers it holds", async () => {
+    const dir = staged();
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code, wrote.err).toBe(0);
+    const env = TRADE_SPEC_ENV;
+    const promote = (yaml(dir, ".github/workflows/yodel-apply-promote.yml").jobs as Record<string, { permissions?: Record<string, string>; steps: Array<Step & { env?: Record<string, string> }> }>)["promote-prod"];
+    expect(promote?.permissions?.["id-token"]).toBe("write");
+    const trade = promote?.steps.find((s) => s.env?.[env] !== undefined);
+    expect(Object.keys(JSON.parse(trade?.env?.[env] ?? "{}") as object)).toEqual(["aws", "gcp", "azure"]);
+    expect(JSON.parse(trade?.env?.[env] ?? "{}")).toMatchObject({ aws: { role: PROD_ROLE } });
+
+    const gitlab = yaml(dir, ".gitlab/yodel-apply-promote.gitlab-ci.yml") as Record<string, GitLabJob>;
+    expect(gitlab["promote-prod"]?.id_tokens?.CHANT_ID_TOKEN_AWS).toEqual({ aud: "sts.amazonaws.com" });
+    expect(JSON.parse(gitlab["promote-prod"]?.variables?.[env] ?? "{}")).toMatchObject({ aws: { role: PROD_ROLE } });
+    expect(gitlab["promote-prod"]?.script?.slice(0, gitlabTradeLines().length)).toEqual(gitlabTradeLines());
+  });
+
+  it("Forgejo: the runner's token file, logged in within the promote's own step", async () => {
+    const dir = staged(`{ aws: { roleArn: "${ROLE}", tokenFile: "/var/run/forge/aws-token" }, gcp: { workloadIdentityProvider: "${PROVIDER}", serviceAccount: "${SA}" }, azure: { clientId: "${CLIENT}", tenantId: "${TENANT}" } }`);
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    const promote = actionsJob(dir, ".forgejo/workflows/yodel-apply-promote.yml", "promote-prod");
+    const run = promote.steps.map((s) => s.run ?? "").find((r) => r.includes("components promote --to prod")) ?? "";
+    expect(run).toContain("/var/run/forge/aws-token");
+    expect(run.indexOf("/var/run/forge/aws-token")).toBeLessThan(run.indexOf("components promote --to prod"));
+    expect(names(promote).some(LOGGED_IN)).toBe(false);
+  });
+
+  it("refuses a cloud-minted role whose cloud ci.login names no login for the stage, on GitHub and GitLab", async () => {
+    const dir = staged(`{ gcp: { workloadIdentityProvider: "${PROVIDER}", serviceAccount: "${SA}" }, azure: { clientId: "${CLIENT}", tenantId: "${TENANT}" } }`);
+    const ran = await yodel(["ci", "--dir", dir]);
+    expect(ran.code).toBe(1);
+    expect(ran.err).toMatch(/prod's promote job holds a rds-iam password.*name prod's aws login in ci\.login/);
+  });
+});
+
+describe("yodel ci: a pipeline stage's promote job runs in the wave jobs' image, with their install lines (#384)", () => {
+  it("takes Node and npm ci by default, and the yodel image with nothing installed under ci.image", async () => {
+    const dir = staged();
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    const gitlab = yaml(dir, ".gitlab/yodel-apply-promote.gitlab-ci.yml") as Record<string, GitLabJob & { image?: string }>;
+    expect(gitlab["promote-prod"]?.image).toBe("node:22-bookworm");
+    const script = gitlab["promote-prod"]?.script ?? [];
+    expect(script.indexOf("npm ci")).toBeLessThan(script.findIndex((l) => l.includes("components promote --to prod")));
+    expect(script).toContain('export PATH="$PWD/node_modules/.bin:$PATH"');
+    const github = (yaml(dir, ".github/workflows/yodel-apply-promote.yml").jobs as Record<string, { container?: unknown }>)["promote-prod"];
+    expect(JSON.stringify(github?.container)).toContain("node:22-bookworm");
+
+    const image = `ghcr.io/intentius/sql-yodeler:0.13.5@sha256:${"a".repeat(64)}`;
+    const config = join(dir, "yodel.config.ts");
+    writeFileSync(config, readFileSync(config, "utf8").replace(/^( {2}ci: \{ forges: \[[^\]]*\])/m, `$1, image: "${image}"`));
+    expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
+    const pinned = yaml(dir, ".gitlab/yodel-apply-promote.gitlab-ci.yml") as Record<string, GitLabJob & { image?: string }>;
+    expect(pinned["promote-prod"]?.image).toBe(image);
+    expect(pinned["promote-prod"]?.script).not.toContain("npm ci");
+  });
+});

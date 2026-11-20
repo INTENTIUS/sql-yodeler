@@ -128,7 +128,7 @@ describe("yodel ci with ci.promotion", () => {
     expect((await yodel(["ci", "--dir", dir])).code).toBe(0);
     const folded = foldPipelineSource(read(dir, ".chant/pipeline.ts"));
     if (!("spec" in folded)) throw new Error("the pipeline does not fold");
-    const { labels: _labels, ...first } = stageWavesSpec(asPipelineSpec(folded.spec), "dev") as unknown as Record<string, unknown>;
+    const first = Object.fromEntries(Object.entries(stageWavesSpec(asPipelineSpec(folded.spec), "dev") as unknown as Record<string, unknown>).filter(([k]) => k !== "labels"));
     const committed = JSON.parse(read(dir, "yodel-waves.json")) as Record<string, unknown> & { waves: Array<{ name: string; hooks?: unknown }> };
     expect(committed).toEqual({ ...first, name: "yodel-apply" });
     expect(committed.waves.map((w) => w.name)).toEqual(["dev"]);

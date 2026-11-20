@@ -87,7 +87,7 @@ import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js"
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
 import type { OpWaveJobInputs, OpWaveRunStep, OpWavesPipelineOptions, OpWavesRecordPlansInputs } from "@intentius/chant/lexicon";
-import { CLOUD_OF, forgejoLoginSpec, jobLogins, loginSteps, tradeIdTokens, tradeSpec, type Login } from "./login.js";
+import { CLOUD_OF, forgejoLoginLines, forgejoLoginSpec, jobLogins, loginSteps, tradeIdTokens, tradeSpec, type Login } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
@@ -1219,8 +1219,8 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
 
 /** `.chant/pipeline.ts` from yodel.config.ts, and the first stage's spec from the folded file: what the merge applies (#384). */
 async function stagedWaves(ci: CiConfig, plain: WavesSpec): Promise<{ text: string; spec: WavesSpec }> {
-  const { resume: _resume, ...spec } = plain;
-  const declaration = await pipelineDeclaration({ name: APPLY_PIPELINE, ci, spec: spec as unknown as { name: string; waves: StageWave[] }, bin: YODEL_WORDS.bin.split(" ") });
+  const spec = Object.fromEntries(Object.entries(plain).filter(([k]) => k !== "resume")) as unknown as { name: string; waves: StageWave[] };
+  const declaration = await pipelineDeclaration({ name: APPLY_PIPELINE, ci, spec, bin: YODEL_WORDS.bin.split(" ") });
   const text = await pipelineText(declaration);
   return { text, spec: (await firstStageSpec(text, APPLY_PIPELINE)) as unknown as WavesSpec };
 }
@@ -1291,7 +1291,12 @@ export const PROMOTE_STAGE = "test";
  * with the release, running `yodel chant components promote --to <env>
  * --release <release>`. Each holds its environment's writer, as that
  * environment's wave job did, the reader of the environment it requires,
- * and its stage's set of config and secrets.
+ * and its stage's set of config and secrets. It runs in the image the wave
+ * jobs run in, with their install lines (chant's `image` and
+ * `beforeScript`), and logs in to its cloud as that environment's wave job
+ * does (#132): chant's trade from `ci.login` on GitHub and GitLab, as the
+ * stage's `cloud`, and on Forgejo chant's login from the runner's token
+ * files, in the promote's own step.
  */
 async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedFile[]> {
   const ci = envs.pipeline;
@@ -1307,15 +1312,28 @@ async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedF
         : (await import("@intentius/chant-lexicon-forgejo/components/generate-pipeline-promote")).generateForgejoPipelinePromote;
   const { resolveEnvironmentSet, environmentSetJobInputs } = await import("@intentius/chant/components");
   const { environmentSetForgeVariables } = await import("@intentius/chant/op/op-waves-environment-sets");
+  const tc = toolchainOf(envs);
   const stages = later.map((env) => {
     const required = envs.waves.find((w) => w.env === env)?.requires;
     const set = envs.environmentSets ? resolveEnvironmentSet(envs.environmentSets, env) : undefined;
-    // yodel and its chant in the job's shell (the promote runs `yodel chant`), the ledger fetched as every job that reads an approval does, then the set's store secrets.
-    const tc = toolchainOf(envs);
-    const setup = [...installLines(tc, "gitlab"), fetchApprovals(tc), ...(set ? environmentSetJobInputs(set, forge).setup : [])];
+    // The roles the stage's wave job held, and its cloud login from ci.login (#132).
+    const held = waveRoles(envs.waves, env);
+    const logins = loginsOf(envs, held);
+    const bare = forge === "forgejo" ? [] : cloudsOf(envs, held).filter((c) => !logins.some((l) => l.cloud === CLOUD_OF[c]));
+    if (bare.length > 0) {
+      throw new Error(
+        `yodel.config.ts ci.login: ${env}'s promote job holds a ${bare.join(", ")} password, which it mints from its cloud identity; with ci.promotion that identity is chant's trade, so name ${env}'s ${bare.map((c) => CLOUD_OF[c]).join(", ")} login in ci.login`,
+      );
+    }
+    const cloud = forge !== "forgejo" && logins.length > 0 ? { cloud: tradeSpec(logins) } : {};
+    // Forgejo: the runner's token files, logged in within the promote's step, so the command has the variables.
+    const login = forge === "forgejo" ? forgejoLoginLines(logins) : [];
+    // The ledger fetched as every job that reads an approval does, then the set's store secrets.
+    const setup = [...login, fetchApprovals(tc), ...(set ? environmentSetJobInputs(set, forge).setup : [])];
     return {
       name: env,
       environment: { name: env },
+      ...cloud,
       variables: {
         YODEL_CREDENTIALS: `writer:${env}`,
         ...(forge === "gitlab"
@@ -1330,7 +1348,17 @@ async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedF
       setup,
     };
   });
-  const files = generate({ pipeline: APPLY_PIPELINE, stages, bin: YODEL_WORDS.bin, ...(ci.recheck ? { recheck: { schedule: ci.recheck.schedule } } : {}) });
+  // yodel's image and install lines, as the wave jobs take them (chant's image and beforeScript). The promote's
+  // command runs in the same shell as its install, on every forge, so the bins go on PATH with an export.
+  const install = installLines(tc, "gitlab");
+  const files = generate({
+    pipeline: APPLY_PIPELINE,
+    stages,
+    bin: YODEL_WORDS.bin,
+    image: tc.image,
+    ...(install.length > 0 ? { beforeScript: install } : {}),
+    ...(ci.recheck ? { recheck: { schedule: ci.recheck.schedule } } : {}),
+  });
   const header = [
     ...HEADER,
     "#",

@@ -47,7 +47,7 @@ Then `yodel ci` writes these files, and `yodel ci --check` fails while any of th
 | `yodel-apply-promote.yml` (`.gitlab/yodel-apply-promote.gitlab-ci.yml`) | one job per later stage, started by hand with the stage and the release. On GitLab, start a pipeline from the web with `CHANT_PROMOTE_STAGE` and `CHANT_PROMOTE_RELEASE` |
 | `yodel-reject.yml` (GitHub and Forgejo) | the job that answers `/yodel reject` on a pull request |
 
-Each promote job holds its environment's writer and the reader of the environment it requires, the same secrets that environment's wave job held, and installs yodel before it runs `yodel chant components promote`.
+Each promote job holds its environment's writer and the reader of the environment it requires, the same secrets that environment's wave job held. It runs in the wave jobs' image (`ci.image`, or Node with `npm ci`) and installs yodel the same way before it runs `yodel chant components promote`. A promote job whose environment has a cloud-minted password logs in as that environment's wave job does: on GitHub and GitLab through chant's trade with the `ci.login` the environment names, and on Forgejo from the runner's token files. With `ci.promotion`, `yodel ci` takes a cloud-minted password once `ci.login` names that environment's login for its cloud.
 
 ## Gates and approval rules
 
