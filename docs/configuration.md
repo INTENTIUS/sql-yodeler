@@ -132,15 +132,15 @@ A token is reused until 80% of its lifetime has passed (`ttlSeconds`; 900 for `r
 | Forge | What `yodel ci` renders |
 |---|---|
 | GitHub | `permissions: id-token: write`: on the pull request and watch workflows whose jobs hold such a role, and in the apply pipeline on each wave job (and the plans job) that holds one |
-| GitLab | `id_tokens` on each job holding such a role: chant's `CHANT_ID_TOKEN_AWS`, `_GCP` or `_AZURE` for a cloud `ci.login` names, else `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
+| GitLab | `id_tokens` on each job holding such a role: chant's `CHANT_ID_TOKEN_AWS`, `_GCP` or `_AZURE` for a cloud `ci.identity` names, else `AWS_ID_TOKEN` (audience `sts.amazonaws.com`), `GCP_ID_TOKEN` (`https://iam.googleapis.com/`) or `AZURE_ID_TOKEN` (`api://AzureADTokenExchange`) |
 | Forgejo | nothing: Forgejo gives a job no OIDC token, so the runner's own cloud identity (an instance profile, a workload or managed identity) mints. The rendered files say so. |
 
-The token source then has to reach that identity in the job. A runner that carries the identity itself needs nothing more. Otherwise `ci.login` in yodel.config.ts tells `yodel ci` how to exchange the token, and each job holding such a role logs in before yodel runs:
+The token source then has to reach that identity in the job. A runner that carries the identity itself needs nothing more. Otherwise `ci.identity` in yodel.config.ts tells `yodel ci` how to exchange the token, and each job holding such a role logs in before yodel runs:
 
 ```ts
 ci: {
   forges: ["github", "gitlab"],
-  login: {
+  identity: {
     aws: { roleArn: "arn:aws:iam::123456789012:role/yodel-dev" },
     gcp: { workloadIdentityProvider: "projects/123456789/locations/global/workloadIdentityPools/ci/providers/forge", serviceAccount: "yodel@shop.iam.gserviceaccount.com" },
     azure: { clientId: "<application id>", tenantId: "<directory id>" },
@@ -149,7 +149,7 @@ ci: {
 },
 ```
 
-On GitHub and GitLab the login is chant's ci-identity trade: one step, `Cloud identity (chant ci-identity: <clouds>)`, with `ci.login` mapped to chant's trade spec, which exchanges the job's OIDC token for each cloud the job holds a role in and leaves the cloud's variables for the later steps (the report too). The sql lexicon mints the database token from what the trade leaves, so the job's image needs no `aws`, `gcloud` or `az` ([Cloud login](chant-ci.md#cloud-login) has the detail, `ci.login.aws.region` among it). yodel's own login steps there, which ran the cloud's command line from a token file, are gone from 0.12, and `tokenFile` is read on Forgejo only.
+On GitHub and GitLab the login is chant's ci-identity trade: one step, `Cloud identity (chant ci-identity: <clouds>)`, with `ci.identity` mapped to chant's trade spec, which exchanges the job's OIDC token for each cloud the job holds a role in and leaves the cloud's variables for the later steps (the report too). The sql lexicon mints the database token from what the trade leaves, so the job's image needs no `aws`, `gcloud` or `az` ([Cloud login](chant-ci.md#cloud-login) has the detail, `ci.identity.aws.region` among it). yodel's own login steps there, which ran the cloud's command line from a token file, are gone from 0.12, and `tokenFile` is read on Forgejo only.
 
 Forgejo gives a job no token, so there a login is rendered only when `tokenFile` names a token the runner provides; without one, the runner's identity mints. That login is chant's cloud login from the file (`forgejoCloudLogin`, `@intentius/chant/ci-login`): one step, `Cloud login (chant ci-login: <clouds>)`, which runs with `node -e` from `/` and leaves the token where the runner keeps it. Per cloud it sets:
 
@@ -163,7 +163,7 @@ The variables go to `$GITHUB_ENV`, so the later steps have them. `environments.<
 
 ### yodel config check
 
-`yodel config check [<env>...]` prints each environment's settings and where each came from: the server, the role this process connects as, each role's user and password variable and whether it is set here (or the token source), the history's database, the topology and the lock settings. It never prints a password.
+`yodel config check [<env>...]` prints each environment's settings and where each came from: the server, the role this process connects as, each role's user and password variable and whether it is set here (or the token source), the history's database, the topology and the lock settings. It never prints a password. A spelling in `yodel.config.ts` that chant's product vocabulary names another key for is reported on stderr with that key ([Spellings yodel.config.ts accepts](#spellings-yodelconfigts-accepts)).
 
 `--write-probe` tries a write with the credentials this process holds and exits 1 when the server lets it through: a `CREATE TABLE` in the environment's first schema inside a transaction that is rolled back (Postgres), or a `Memory` table in its first database, dropped at once (ClickHouse). Only a refusal for want of privilege counts as "cannot write"; a probe that cannot tell is an error. Every pull request plan job `yodel ci` renders runs it before the plan, with each reader the job holds (`yodel config check prod dev --write-probe`), so a pull request job that holds a writer fails. The pull request job that records the plans a `pr-review` wave's review approves (`yodel-apply-plans.yml`, GitLab's `yodel-apply-record-plans`) runs it too, before `chant run wave --record-plans`, with the reader of every environment a wave applies.
 
@@ -231,6 +231,16 @@ yodel plan: yodel.config.ts sets environments.dev.topology to cluster:main, but 
 ```
 
 `access` is the same: the declarative apply and `yodel drift` run chant, which reads `sql.profiles.<env>.access`, so on the declarative path an `access` in `yodel.config.ts` that the profile does not say is refused. yodel's own commands (`yodel plan`, `yodel new`, `yodel init --from`, the versioned apply) use `yodel.config.ts`'s. On ClickHouse, chant's apply has no access setting and makes every access declaration it is given, so the declarative path is refused instead where the environment does not manage access and `src/` declares a user, role, row policy or grant ([Access control](access.md#turn-it-on-per-environment)).
+
+### Spellings yodel.config.ts accepts
+
+`ci.identity`, `notify.webhookKey` and `notify.relayKey` are the keys of chant's product vocabulary (chant's reference page "CI Product Config Keys"). yodel keeps reading each earlier spelling, and `yodel config check` prints one warning per spelling that names the key. Setting a key and its earlier spelling together is refused.
+
+| Spelling | Key |
+|---|---|
+| `ci.login` | `ci.identity` |
+| `notify.key` | `notify.webhookKey` |
+| `notify.relay` | `notify.relayKey` |
 
 ## Environment variables
 

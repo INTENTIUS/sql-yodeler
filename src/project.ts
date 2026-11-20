@@ -57,7 +57,7 @@ export interface Project {
   /** Where the declared schema lives, relative to `dir`: chant's `resolveSourceDir` (chant issue 4794), the config's `sourceDir`, else `.`. */
   sourceDir: string;
   /** `yodel.config.ts`, checked, when the project has one (`./config/`). */
-  yodel?: { path: string; config: YodelConfig } | undefined;
+  yodel?: { path: string; config: YodelConfig; /** One line per older spelling in the file, naming the vocabulary's key. */ warnings?: string[] } | undefined;
   /**
    * `sql.profiles.<env>.access` as chant.config.ts says it, before
    * yodel.config.ts's `environments.<env>.access` is put in {@link config}'s

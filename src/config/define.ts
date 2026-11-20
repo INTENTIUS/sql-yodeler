@@ -280,6 +280,8 @@ export interface CiConfig {
    * {@link CiLogin}.
    */
   login?: CiLogin;
+  /** The vocabulary's key for {@link CiConfig.login}, which stays accepted: set one of them. */
+  identity?: CiLogin;
   /**
    * Whether `yodel ci` renders the apply pipeline (#175). Default `true`.
    * With `false` it renders the pull request checks (lint, the replay check,
@@ -493,7 +495,12 @@ export interface YodelConfig {
    * webhook's URL and signing key, and optionally a Slack or Teams incoming
    * webhook's URL. `{ webhook: "YODEL_WEBHOOK_URL", key: "YODEL_WEBHOOK_KEY" }`.
    */
-  notify?: NotifyConfig;
+  notify?: NotifyConfig & {
+    /** The variable holding the key the webhook's events are signed with: the vocabulary's key for `key`, which stays accepted. */
+    webhookKey?: string;
+    /** The variable holding the key the relay checks Approve and Decline with: the vocabulary's key for `relay`, which stays accepted. */
+    relayKey?: string;
+  };
   /**
    * DDL sources (#67): schema an ORM defines, read from the DDL it prints,
    * keyed by a name. Each is written out as declarations in
