@@ -30,7 +30,23 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 
 /** chant's findings for a parsed yodel.config.ts: its keys are camelCase and the vocabulary's CI keys sit under `ci`. */
 export function vocabularyProblems(config: unknown): ProductConfigProblem[] {
-  return productConfigProblems(config, { product: PRODUCT, case: "camel", scopes: ["ci"] });
+  return productConfigProblems(withEveryStage(config), { product: PRODUCT, case: "camel", scopes: ["ci"] });
+}
+
+/**
+ * The config as chant's check reads `ci.promotion`: each step a key of
+ * `ci.environments`. In yodel.config.ts the waves declare the environments
+ * and `ci.environments` holds the stages that have settings, so a step it
+ * leaves out is given an empty entry here. The steps are checked against
+ * the waves in `pipelineConfigProblem`.
+ */
+function withEveryStage(config: unknown): unknown {
+  if (!isRecord(config) || !isRecord(config.ci)) return config;
+  const { promotion, environments } = config.ci;
+  if (!Array.isArray(promotion) || !isRecord(environments)) return config;
+  const steps = promotion.filter((s): s is string => typeof s === "string" && !(s in environments));
+  if (steps.length === 0) return config;
+  return { ...config, ci: { ...config.ci, environments: { ...environments, ...Object.fromEntries(steps.map((s) => [s, {}])) } } };
 }
 
 /** A finding as a line: where it is, what it says, and the vocabulary's key. */

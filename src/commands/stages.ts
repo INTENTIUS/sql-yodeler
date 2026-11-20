@@ -8,6 +8,8 @@
 
 import type { Command, Io } from "../command.js";
 import { EXIT_FAILED } from "../exit.js";
+import { resolve } from "node:path";
+import { findProjectDir } from "../project.js";
 import { runChantVerb } from "./chant.js";
 
 interface StageVerb {
@@ -24,7 +26,7 @@ const VERBS: readonly StageVerb[] = [
     summary: "take a release into a pipeline stage, behind its gate",
     chant: ["components", "promote"],
     help: `usage: yodel promote --to <env> --release <label> [--from <env>]
-                     [--allow-skip] [--dry-run]
+                     [--allow-skip] [--dry-run] [--dir <project>]
        yodel promote --to <env> --release <label> --urgent --reason <text>
 
 Takes the release the merge cut into the stage --to names (chant components
@@ -49,7 +51,7 @@ from its role.
     summary: "turn down the release a stage's gate waits on",
     chant: ["reject"],
     help: `usage: yodel reject <pipeline> <env> --reason <text> [--plan <digest>]
-                    [--sign [<key file>]]
+                    [--sign [<key file>]] [--dir <project>]
 
 Rejects the release the stage's gate waits on (chant reject): a promote of
 it into that stage exits 8, naming who rejected it and why. The pipeline is
@@ -60,7 +62,7 @@ yodel-apply. --sign seals the rejection, which a sealed stage needs.
     name: "pause",
     summary: "stop releases entering a stage",
     chant: ["stage", "pause"],
-    help: `usage: yodel pause <env> --reason <text>
+    help: `usage: yodel pause <env> --reason <text> [--dir <project>]
 
 Pauses the stage (chant stage pause): a promote into it exits 3 and its
 release waits. A promote that is applying finishes.
@@ -70,7 +72,7 @@ release waits. A promote that is applying finishes.
     name: "resume",
     summary: "let releases into a paused stage again",
     chant: ["stage", "resume"],
-    help: `usage: yodel resume <env> --reason <text>
+    help: `usage: yodel resume <env> --reason <text> [--dir <project>]
 
 Resumes the stage (chant stage resume). The newest release that waited is
 the one that enters.
@@ -93,9 +95,36 @@ function stageCommand(verb: StageVerb): Command {
         io.err(`yodel promote takes the release the merge cut: add --release <label>\n\n${verb.help}`);
         return EXIT_FAILED;
       }
-      return runChantVerb([...verb.chant, ...args], io);
+      // The project, from --dir or the working directory, as the other verbs find it; chant runs there.
+      const { dir, rest } = takeDir(args);
+      const project = findProjectDir(dir ?? process.cwd());
+      if (!project) {
+        io.err(`yodel ${verb.name}: no chant.config.ts in ${resolve(dir ?? process.cwd())} or any directory above it\n`);
+        return EXIT_FAILED;
+      }
+      if (project === process.cwd()) return runChantVerb([...verb.chant, ...rest], io);
+      const from = process.cwd();
+      process.chdir(project);
+      try {
+        return await runChantVerb([...verb.chant, ...rest], io);
+      } finally {
+        process.chdir(from);
+      }
     },
   };
+}
+
+/** `--dir <project>` (or `-C`, or `--dir=<project>`) taken out of a stage verb's arguments; chant reads the rest. */
+function takeDir(args: string[]): { dir?: string; rest: string[] } {
+  const rest: string[] = [];
+  let dir: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string;
+    if ((a === "--dir" || a === "-C") && i + 1 < args.length) dir = args[++i];
+    else if (a.startsWith("--dir=")) dir = a.slice("--dir=".length);
+    else rest.push(a);
+  }
+  return dir === undefined ? { rest } : { dir, rest };
 }
 
 export const [promote, reject, pause, resume] = VERBS.map(stageCommand) as [Command, Command, Command, Command];

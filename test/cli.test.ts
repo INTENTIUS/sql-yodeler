@@ -102,7 +102,7 @@ describe("yodel", () => {
     try {
       // yodel create makes a project, so it runs outside one.
       for (const verb of built.filter((v) => v !== "create")) {
-        const args = verb === "new" ? ["add-country"] : verb === "init" ? ["--from", "dev"] : verb === "repair" ? ["20261009T1000-one", "--reason", "x", "dev"] : verb === "revert" ? ["dev", "20261009T1000-one"] : verb === "lint" || verb === "test" || verb === "mcp" || verb === "docs" || verb === "ci" || verb === "upgrade" ? [] : verb === "config" ? ["check"] : verb === "emulator" ? ["status"] : ["dev"];
+        const args = verb === "new" ? ["add-country"] : verb === "init" ? ["--from", "dev"] : verb === "repair" ? ["20261009T1000-one", "--reason", "x", "dev"] : verb === "revert" ? ["dev", "20261009T1000-one"] : verb === "lint" || verb === "test" || verb === "mcp" || verb === "docs" || verb === "ci" || verb === "upgrade" ? [] : verb === "config" ? ["check"] : verb === "emulator" ? ["status"] : verb === "promote" ? ["--to", "dev", "--release", "1.0.0"] : ["dev"];
         const { code, err } = await run([verb, ...args, "--dir", dir]);
         expect(code).toBe(1);
         expect(err).toMatch(new RegExp(`^yodel ${verb}: no chant.config.ts in `));

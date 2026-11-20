@@ -7,7 +7,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -28,6 +28,9 @@ afterEach(() => {
   for (const t of temps.splice(0)) rmSync(t, { recursive: true, force: true });
 });
 
+/** A public key for `.chant/allowed_signers`; nothing signs with it here. */
+const SIGNER = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+
 /** The ClickHouse template (waves dev, prod) in a directory of its own with `ci` set to `ci`. */
 function template(ci: string): string {
   const dir = mkdtempSync(join(tmpdir(), "yodel-pipeline-"));
@@ -36,6 +39,9 @@ function template(ci: string): string {
   symlinkSync(join(repoRoot, "node_modules"), join(dir, "node_modules"));
   const config = join(dir, "yodel.config.ts");
   writeFileSync(config, readFileSync(config, "utf8").replace(/^ {2}ci: .*$/m, `  ci: ${ci},`));
+  // A signer, so a rule that needs a proven approver has one who can meet it (chant refuses the spec otherwise).
+  mkdirSync(join(dir, ".chant"), { recursive: true });
+  writeFileSync(join(dir, ".chant", "allowed_signers"), `alice ${SIGNER}\n`);
   execFileSync("git", ["init", "-q"], { cwd: dir });
   return dir;
 }
@@ -132,6 +138,8 @@ describe("yodel ci with ci.promotion", () => {
     const committed = JSON.parse(read(dir, "yodel-waves.json")) as Record<string, unknown> & { waves: Array<{ name: string; hooks?: unknown }> };
     expect(committed).toEqual({ ...first, name: "yodel-apply" });
     expect(committed.waves.map((w) => w.name)).toEqual(["dev"]);
+    // The merge's apply records under the pipeline's component, which the promotes' soak and skip checks read.
+    expect(committed.release).toEqual({ component: "yodel-apply" });
     expect(JSON.stringify(committed.waves[0]?.hooks)).toContain('"release","cut","auto","--yes"');
   });
 
