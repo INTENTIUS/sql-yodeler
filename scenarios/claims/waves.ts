@@ -182,12 +182,15 @@ ${waves.map((w, i) => `    { env: "${w.env}", gate: "${w.gate}"${noRequires && i
 `;
 }
 
+/** An export name of its own per op, since chant folds every op file into one module. */
+const ident = (kind: string, env: string): string => kind + `-${env}`.replace(/[^A-Za-z0-9]+(.)?/g, (_m, c: string | undefined) => (c ? c.toUpperCase() : ""));
+
 const migrateOp = (env: string) => `import { Op, phase, gate, shell, stepOutput } from "@intentius/chant/op";
 
 const plan = shell("yodel apply ${env} --digest", { id: "plan" });
 const digest = stepOutput(plan, "stdout");
 
-export const op = Op({
+export const ${ident("migrate", env)} = Op({
   name: "migrate-${env}",
   overview: "Apply the pending migrations to ${env}",
   phases: [
