@@ -60,7 +60,10 @@ yodel.config.ts ci:
            stage's spec from the folded file) and cuts a release, and each
            later stage takes it with yodel promote. ci.environments.<env>
            holds each stage's keys (docs/pipeline.md); --check fails while
-           the committed .chant/pipeline.ts differs from the config
+           the committed .chant/pipeline.ts differs from the config. The
+           merge's cut reads the merge commit's checks with the wave job's
+           token (release.green: "forge-checks" in chant.config.ts, which
+           yodel ci names when chant.config.ts sets no release.green)
 
 Options:
   --check          write nothing; exit 1 naming each file that differs from
@@ -127,7 +130,8 @@ export const ci: Command = {
         return fetchLedger(resolve(a.dir), io);
       }
       // The project, as every command reads it: chant.config.ts and a checked yodel.config.ts.
-      const dir = (await loadProject(resolve(a.dir))).dir;
+      const project = await loadProject(resolve(a.dir));
+      const dir = project.dir;
       if (a.replay) {
         const { replayLocally } = await import("../ci/replay.js");
         return replayLocally(dir, a.rest);
@@ -165,6 +169,10 @@ export const ci: Command = {
         const found = checkPipelineFile(dir, pipelineFile.content, { command: PIPELINE_SOURCE_OPTIONS.command });
         if (found.status !== "current") io.err(`${found.message}\n${found.status === "stale" ? `${found.diff.join("\n")}\n` : ""}`);
       }
+      // Under ci.promotion, the release cut's green gate (#395): the line chant.config.ts carries, named when it is not there.
+      const { releaseGreenNote } = await import("../ci/pipeline.js");
+      const greenNote = releaseGreenNote(project.yodel?.config.ci, project.config);
+      if (greenNote) io.err(`note: ${greenNote}\n`);
       if (a.check && (stale.length > 0 || left.length > 0)) {
         if (stale.length > 0) io.err(`stale, run yodel ci: ${stale.join(", ")}\n`);
         if (left.length > 0) io.err(`no longer rendered, run yodel ci to remove: ${left.join(", ")}\n`);
