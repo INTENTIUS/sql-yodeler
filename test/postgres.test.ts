@@ -6,7 +6,7 @@ import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-state
 import type { ActivityFn } from "@intentius/chant/op/activity-registry";
 import { MIGRATION_ROW, type HistoryRow } from "../src/history/index.js";
 import { acquireAdvisoryLock, insertRows, LOCK_CLASS, lockKeys, pgHistoryDdl, PostgresHistoryStore } from "../src/history/postgres/index.js";
-import { concurrentIndex, DEFAULT_PG_TIMEOUTS, PgStatementError, pgCatalogFingerprint, pgSettings, runPgStatement, type PgStatementOptions } from "../src/versioned/postgres/index.js";
+import { concurrentIndex, declaredRoles, DEFAULT_PG_TIMEOUTS, PgStatementError, pgCatalogFingerprint, pgSettings, PRIVILEGES_SQL, readPgCatalog, runPgStatement, type PgAclRow, type PgLiveReader, type PgStatementOptions } from "../src/versioned/postgres/index.js";
 import { classifySteps, closeVersioned, currentDigest, executeApply, inspect, openVersioned, selectToApply, statusReport, type VersionedEnv } from "../src/versioned/index.js";
 import { projectFromConfig } from "../src/project.js";
 import { writeMigration, type Migration } from "../src/migrations/index.js";
@@ -224,6 +224,101 @@ describe("Postgres settings and the fingerprint", () => {
     const t = { type: "Postgres::Table", schema: "app", name: "a", statement: "CREATE TABLE app.a (x int)", comment: "" };
     expect(pgCatalogFingerprint([t])).toBe(pgCatalogFingerprint([{ ...t }]));
     expect(pgCatalogFingerprint([{ ...t, statement: "CREATE TABLE app.a (x bigint)" }])).not.toBe(pgCatalogFingerprint([t]));
+  });
+});
+
+describe("the fingerprint covers privileges (#397)", () => {
+  // The reader's objects: schema app, its table and function. Schema other and its table are out of scope, so the reader does not return them.
+  const objects = [
+    { type: "Postgres::Schema", name: "app", oid: "10", statement: "CREATE SCHEMA app" },
+    { type: "Postgres::Table", schema: "app", name: "orders", oid: "100", statement: "CREATE TABLE app.orders (id bigint)" },
+    { type: "Postgres::Function", schema: "app", name: "n", oid: "200", statement: "CREATE FUNCTION app.n() ..." },
+    { type: "Postgres::Policy", schema: "app", name: "keep ON orders", oid: "400", statement: "CREATE POLICY keep ON app.orders USING (true)" },
+  ];
+  const acl = (kind: string, schema: string, name: string, grantee: string, privilege: string, grantor = "owner"): PgAclRow => ({
+    kind, schema, name, target: `${schema}.${name}`, role: null, grantor, grantee, privilege, grantable: false,
+  });
+  // What acldefault('r', owner) gives a table: the owner holds every privilege.
+  const OWNER_TABLE = ["INSERT", "SELECT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER", "MAINTAIN"].map((p) => acl("TABLE", "app", "orders", "owner", p));
+  const DEFAULTS: Record<string, PgAclRow[]> = {
+    "10": [acl("SCHEMA", "app", "app", "owner", "USAGE"), acl("SCHEMA", "app", "app", "owner", "CREATE")],
+    "100": OWNER_TABLE,
+    "200": [acl("FUNCTION", "app", "n()", "owner", "EXECUTE"), acl("FUNCTION", "app", "n()", "PUBLIC", "EXECUTE")],
+    "300": [acl("TABLE", "other", "t", "owner", "SELECT")],
+  };
+
+  /** A server whose ACLs are `acls`, by oid; it answers the privileges query for the oids it is asked about, and records them. */
+  function server(acls: Record<string, PgAclRow[]>) {
+    const asked: string[] = [];
+    const client = {
+      query<T>(sql: string, params?: readonly unknown[]): Promise<T[]> {
+        if (sql !== PRIVILEGES_SQL) return Promise.resolve([]);
+        const oids = (params ?? []).slice(0, 3).flatMap((p) => p as string[]);
+        asked.push(...oids);
+        return Promise.resolve(oids.flatMap((oid) => acls[oid] ?? []) as T[]);
+      },
+    };
+    return { client, asked };
+  }
+  const reading = (seen: Array<Parameters<PgLiveReader>[1]> = []): PgLiveReader => (_client, scope) => {
+    seen.push(scope);
+    return Promise.resolve(scope.access ? objects : objects.filter((o) => o.type !== "Postgres::Policy"));
+  };
+  const fingerprint = async (acls: Record<string, PgAclRow[]>, access?: boolean) =>
+    pgCatalogFingerprint(await readPgCatalog(server(acls).client, { schemas: ["app"], historySchema: "yodeler", ...(access === undefined ? {} : { access }) }, reading()));
+
+  it("reads a null ACL as the owner's defaults, so a grant and the revoke that undoes it fingerprint the same as no grant", async () => {
+    expect(PRIVILEGES_SQL).toContain("COALESCE(c.relacl, pg_catalog.acldefault(");
+    expect(PRIVILEGES_SQL).toContain("COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))");
+    expect(PRIVILEGES_SQL).toContain("COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))");
+    const none = await fingerprint(DEFAULTS);
+    // After GRANT SELECT ... TO reader and REVOKE SELECT ... FROM reader, relacl is set and holds the defaults, in its own order.
+    const undone = await fingerprint({ ...DEFAULTS, "100": [...OWNER_TABLE].reverse() });
+    expect(undone).toBe(none);
+    const granted = await fingerprint({ ...DEFAULTS, "100": [...OWNER_TABLE, acl("TABLE", "app", "orders", "reader", "SELECT")] });
+    expect(granted).not.toBe(none);
+  });
+
+  it("moves on a grant or revoke on a table, a routine or the schema, and on default privileges", async () => {
+    const none = await fingerprint(DEFAULTS);
+    const moved = [
+      { "100": OWNER_TABLE.filter((r) => r.privilege !== "INSERT") },
+      { "200": DEFAULTS["200"]?.filter((r) => r.grantee !== "PUBLIC") ?? [] },
+      { "10": [...(DEFAULTS["10"] ?? []), acl("SCHEMA", "app", "app", "reader", "USAGE")] },
+      { "10": [...(DEFAULTS["10"] ?? []), { ...acl("DEFAULT", "app", "TABLES", "reader", "SELECT"), target: "app", role: "owner" }] },
+    ];
+    for (const change of moved) expect(await fingerprint({ ...DEFAULTS, ...change })).not.toBe(none);
+  });
+
+  it("does not move when an object outside the scope changes", async () => {
+    const { client, asked } = server(DEFAULTS);
+    const before = pgCatalogFingerprint(await readPgCatalog(client, { schemas: ["app"], historySchema: "yodeler" }, reading()));
+    expect(asked.sort()).toEqual(["10", "100", "200"]);
+    expect(await fingerprint({ ...DEFAULTS, "300": [acl("TABLE", "other", "t", "reader", "SELECT")] })).toBe(before);
+  });
+
+  it("with access off reads no policies, and privileges still move it", async () => {
+    const seen: Array<Parameters<PgLiveReader>[1]> = [];
+    const off = await readPgCatalog(server(DEFAULTS).client, { schemas: ["app"], historySchema: "yodeler", access: false, roles: ["reader"] }, reading(seen));
+    expect(seen).toEqual([{ schemas: ["app"] }]);
+    expect(off.some((e) => e.type === "Postgres::Policy")).toBe(false);
+    expect(off.filter((e) => e.type === "Postgres::Privilege").map((e) => e.name)).toEqual(["FUNCTION n()", "SCHEMA app", "TABLE orders"]);
+    const granted = { ...DEFAULTS, "100": [...OWNER_TABLE, acl("TABLE", "app", "orders", "reader", "SELECT")] };
+    expect(await fingerprint(granted, false)).not.toBe(await fingerprint(DEFAULTS, false));
+  });
+
+  it("with access on passes access and the declared roles to the reader, and the policies move it", async () => {
+    const seen: Array<Parameters<PgLiveReader>[1]> = [];
+    const on = await readPgCatalog(server(DEFAULTS).client, { schemas: ["app", "yodeler"], historySchema: "yodeler", access: true, roles: ["reader"] }, reading(seen));
+    expect(seen).toEqual([{ schemas: ["app"], access: true, roles: ["reader"] }]);
+    expect(on.some((e) => e.type === "Postgres::Policy")).toBe(true);
+    expect(await fingerprint(DEFAULTS, true)).not.toBe(await fingerprint(DEFAULTS, false));
+  });
+
+  it("names the roles the newest recorded schema declares", () => {
+    const role = (ddl: string) => ({ export: "r", type: "Postgres::Role", ddl });
+    expect(declaredRoles({ objects: [role("CREATE ROLE Reader NOLOGIN"), role('CREATE ROLE "Writer ""x""" LOGIN'), { export: "t", type: "Postgres::Table", ddl: "CREATE TABLE t ()" }] })).toEqual(["Writer \"x\"", "reader"]);
+    expect(declaredRoles(undefined)).toEqual([]);
   });
 });
 

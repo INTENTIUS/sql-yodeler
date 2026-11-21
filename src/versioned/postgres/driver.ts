@@ -15,6 +15,9 @@
  *   statementTimeoutMs  statement_timeout for a catalog change (default 60000)
  *   scanTimeoutMs       statement_timeout for a statement that reads or rewrites rows (default none)
  *   schemas             the schemas the plan digest's fingerprint covers (default every schema but the server's own)
+ *   access              whether the fingerprint covers policies, row-level security and the
+ *                       declared roles (those the newest migration's recorded schema names);
+ *                       privileges it covers either way (`./catalog.ts`)
  *
  * Two connections: the work connection, opened on first use, on which the
  * history is read and written and the statements run; and the lock's,
@@ -23,7 +26,10 @@
 
 import type { PostgresEndpoint } from "@intentius/chant-lexicon-sql/postgres/live/client";
 import type { StatementStep } from "@intentius/chant-lexicon-sql/migration-statements";
+import { join } from "node:path";
 import { YodelError, type Environment, type Project } from "../../project.js";
+import { MIGRATIONS_DIR, newestMigration, scanMigrations } from "../../migrations/directory.js";
+import type { BuildOutput } from "../../chant/build.js";
 import { DEFAULT_HISTORY_DATABASE } from "../../history/index.js";
 import { acquireAdvisoryLock, pgIdent, PostgresHistoryStore, type PgLockConnection } from "../../history/postgres/index.js";
 import type { VersionedDriver } from "../driver.js";
@@ -78,6 +84,26 @@ export class LazyConnection implements PgLockConnection {
   }
 }
 
+/** `CREATE ROLE <name>`'s name, unquoted as the server stores it. */
+const ROLE_NAME = /^\s*CREATE\s+ROLE\s+(?:"((?:[^"]|"")+)"|([^\s;"]+))/i;
+
+/** The roles a recorded schema declares, by name. */
+export function declaredRoles(schema: Pick<BuildOutput, "objects"> | undefined): string[] {
+  const names = new Set<string>();
+  for (const o of schema?.objects ?? []) {
+    if (o.type !== "Postgres::Role") continue;
+    const m = ROLE_NAME.exec(o.ddl);
+    if (m) names.add(m[1] !== undefined ? m[1].replace(/""/g, '"') : String(m[2]).toLowerCase());
+  }
+  return [...names].sort();
+}
+
+/** The roles the project's newest migration declares; none when the directory cannot be read in order (the verbs refuse that themselves). */
+function projectRoles(project: Project): string[] {
+  const scan = scanMigrations(join(project.dir, MIGRATIONS_DIR));
+  return declaredRoles(scan.ordered ? newestMigration(scan.ordered)?.document.schema : undefined);
+}
+
 /** Everything the versioned verbs need about one Postgres environment. */
 export interface PostgresEnv {
   endpoint: PostgresEndpoint;
@@ -99,7 +125,8 @@ export async function openPostgres(project: Project, env: Environment, processEn
   const client = new LazyConnection(() => connect(target.endpoint, "yodel"));
   const store = new PostgresHistoryStore(client, { schema: settings.historySchema });
   const schemas = target.schemas;
-  const driver = postgresDriver({ client, connect: () => connect(target.endpoint, "yodel lock"), settings, schemas, store });
+  const access = target.access === true;
+  const driver = postgresDriver({ client, connect: () => connect(target.endpoint, "yodel lock"), settings, schemas, access, roles: access ? projectRoles(project) : [], store });
   return { endpoint: target.endpoint, schemas, defaultSchema: target.defaultSchema, settings, client, store, driver };
 }
 
@@ -109,6 +136,10 @@ export interface PostgresDriverInput {
   connect: () => Promise<PgLockConnection>;
   settings: PgSettings;
   schemas: string[] | undefined;
+  /** `sql.profiles.<env>.access`: the fingerprint covers policies, row-level security and {@link roles}. */
+  access?: boolean;
+  /** The declared roles, read when {@link access} is on. */
+  roles?: readonly string[];
   store: PostgresHistoryStore;
   sleep?: (ms: number) => Promise<void>;
   retryBaseMs?: number;
@@ -124,7 +155,11 @@ export function postgresDriver(input: PostgresDriverInput): VersionedDriver {
       return acquireAdvisoryLock(await input.connect(), { schema: settings.historySchema, holder });
     },
     async liveFingerprint() {
-      const read = () => readPgCatalog(client, { schemas: input.schemas, historySchema: settings.historySchema });
+      const read = () => readPgCatalog(client, {
+          schemas: input.schemas,
+          historySchema: settings.historySchema,
+          ...(input.access === true ? { access: true, roles: input.roles ?? [] } : {}),
+        });
       const entries = await readUnderLockTimeout(client, read, {
         lockTimeoutMs: settings.timeouts.lockTimeoutMs,
         retries: settings.lockRetries,
