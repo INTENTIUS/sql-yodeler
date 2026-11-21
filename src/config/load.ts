@@ -16,6 +16,7 @@ import { TENANT_NAME } from "../tenants/target.js";
 import { checksProblem } from "../migrations/checks.js";
 import { MIGRATION_NAME } from "../migrations/directory.js";
 import { loginProblem } from "../ci/login.js";
+import { describeProblem, readVocabulary, vocabularyProblems } from "./vocabulary.js";
 
 export const CONFIG_FILE = "yodel.config.ts";
 
@@ -274,6 +275,20 @@ function checkCheck(value: unknown, where: string, profiles?: readonly string[])
  * error, so a typo does not silently leave an environment on the defaults.
  */
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
+  return checkVocabulary(value, path, profiles).config;
+}
+
+/** {@link checkYodelConfig}, with the warnings chant's vocabulary check has for the file's older spellings. */
+export function checkVocabulary(raw: unknown, path: string, profiles?: readonly string[]): { config: YodelConfig; warnings: string[] } {
+  const problems = vocabularyProblems(raw);
+  const value = isRecord(raw) ? readVocabulary(raw, path) : raw;
+  const config = checkShape(value, path, profiles);
+  const error = problems.find((p) => p.level === "error");
+  if (error) throw new YodelError(`${path}: ${describeProblem(error)}`);
+  return { config, warnings: problems.filter((p) => p.level === "warning").map(describeProblem) };
+}
+
+function checkShape(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
     if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci", "check"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci, check)`);
@@ -309,7 +324,7 @@ export function checkYodelConfig(value: unknown, path: string, profiles?: readon
 }
 
 /** Loads `<dir>/yodel.config.ts`, or `undefined` when there is none. */
-export async function loadYodelConfig(dir: string, profiles?: readonly string[]): Promise<{ path: string; config: YodelConfig } | undefined> {
+export async function loadYodelConfig(dir: string, profiles?: readonly string[]): Promise<{ path: string; config: YodelConfig; warnings: string[] } | undefined> {
   const path = join(dir, CONFIG_FILE);
   if (!existsSync(path)) return undefined;
   let mod: { default?: unknown };
@@ -320,5 +335,6 @@ export async function loadYodelConfig(dir: string, profiles?: readonly string[])
   } catch (e) {
     throw new YodelError(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { path, config: checkYodelConfig(mod.default, path, profiles) };
+  const { config, warnings } = checkVocabulary(mod.default, path, profiles);
+  return { path, config, warnings };
 }
