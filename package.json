@@ -61,9 +61,9 @@
     "grant": "tsx scripts/grant.ts"
   },
   "dependencies": {
-    "@intentius/chant": "0.124.110",
-    "@intentius/chant-lexicon-forgejo": "0.124.102",
-    "@intentius/chant-lexicon-github": "0.124.102",
+    "@intentius/chant": "0.124.112",
+    "@intentius/chant-lexicon-forgejo": "0.124.103",
+    "@intentius/chant-lexicon-github": "0.124.103",
     "@intentius/chant-lexicon-gitlab": "0.124.102",
     "@intentius/chant-lexicon-sql": "0.124.102",
     "tsx": "^4.23.15"

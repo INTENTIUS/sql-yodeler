@@ -4,6 +4,7 @@ import { parseYAMLDocument } from "@intentius/chant/yaml";
 import { hold, partNames, runParts, Violation, type Claim, type Ctx, type PartEntry } from "../lib/claim.js";
 import { endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
+import { checksForge, type ChecksForge } from "../lib/forge-checks.js";
 import { Project } from "../lib/project.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 
@@ -45,6 +46,16 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   Approved, it applies. BREAK: the risk keys are left out, so the drop
  *   applies unapproved.
  *
+ * The merge's cut passes chant's `forge-checks` gate (#395): chant.config.ts
+ * sets `release: { green: "forge-checks" }`, as docs/pipeline.md has a
+ * project under `ci.promotion` set it, and no `ci/green` tag is written.
+ * Before each merge the claim pushes main to a bare origin (the cut takes a
+ * commit of origin/main) and posts a `yodel-claims/ci` success status on
+ * the merge commit to a Forgejo status endpoint of its own
+ * (scenarios/lib/forge-checks.ts), standing for the repository's CI on a
+ * push. The wave jobs run with that forge's job variables and token, and the
+ * cut reads the commit's status with them, waiting with `--wait-checks`.
+ *
  * The record has no row for it until a maintainer runs it: `docs/claims.md`
  * shows it as not recorded.
  */
@@ -60,6 +71,8 @@ interface State {
   columnOn: (stage: Stage, column: string) => Promise<boolean>;
   /** The file the soak's command check looks for. */
   soakFile: string;
+  /** The forge the merge's cut reads the merge commit's checks from. */
+  forge: ChecksForge;
 }
 
 // ── The project ──────────────────────────────────────────────────────────────
@@ -111,7 +124,7 @@ export const op = Op({
 });
 `;
 
-async function setup(ctx: Ctx): Promise<State> {
+async function setup(ctx: Ctx, forge: ChecksForge): Promise<State> {
   for (const stage of STAGES) {
     const db = databaseOf(ctx, stage);
     if (db) await postgresQuery(`CREATE DATABASE ${db}`);
@@ -127,6 +140,8 @@ import "@intentius/chant-lexicon-sql";
 
 export default {
   lexicons: ["sql"],
+  // The merge's release cut waits for the merge commit's checks on the forge (#395).
+  release: { green: "forge-checks" },
   sql: {
     dialect: "postgres",
     profiles: {
@@ -137,11 +152,17 @@ ${STAGES.map((s) => `      "${envs[s]}": ${profile(s)},`).join("\n")}
 `,
   );
   for (const s of STAGES) p.write(`ops/migrate-${envs[s]}.op.ts`, migrateOp(envs[s]));
+  // The cut takes a commit of origin/main: a bare origin each merge pushes main to.
+  const origin = join(ctx.work, "origin.git");
+  const bare = await run("git", ["init", "-q", "--bare", "-b", "main", origin], { cwd: ctx.work, env: p.envFor() });
+  if (bare.code !== 0) throw new Error(`git init --bare ${origin} failed: ${bare.err}`);
+  await p.git("remote", "add", "origin", origin);
   const table = mainTable(ctx);
   const st: State = {
     p,
     envs,
     soakFile: join(ctx.work, "soak-ok"),
+    forge,
     columnOn: async (stage, column) =>
       (await queryOn(ctx, stage, `SELECT count(*) FROM information_schema.columns WHERE table_schema = '${ctx.db.name}' AND table_name = '${table}' AND column_name = '${column}'`)) === 1,
   };
@@ -208,6 +229,10 @@ interface JobResult {
 
 /** Runs the rendered GitHub apply workflow's jobs in order, as waves.ts does: a job whose needs did not all succeed is skipped, and one that already succeeded is not run again. */
 async function merge(st: State, done: Map<string, JobResult> = new Map()): Promise<Map<string, JobResult>> {
+  // The push to main, and the repository's CI reporting on the merge commit: the check the cut's forge-checks gate reads.
+  await st.p.git("push", "-q", "-f", "origin", "main");
+  const head = (await st.p.git("rev-parse", "HEAD")).out.trim();
+  if (done.size === 0) st.forge.post(head, { context: "yodel-claims/ci", state: "success" });
   const doc = parseYAMLDocument(st.p.read(".github/workflows/yodel-apply.yml")) as { jobs: Record<string, { needs?: string[]; steps: Array<{ run?: string }> }> };
   const results = new Map(done);
   for (const [name, job] of Object.entries(doc.jobs)) {
@@ -218,7 +243,7 @@ async function merge(st: State, done: Map<string, JobResult> = new Map()): Promi
     }
     const command = job.steps.map((s) => (s.run ?? "").replace(/^yodel chant /, "chant ")).find((r) => r.startsWith("chant run wave "));
     if (!command) continue;
-    const ran = await run("chant", command.split(" ").slice(1), { cwd: st.p.dir, env: st.p.envFor(), timeoutMs: 600_000 });
+    const ran = await run("chant", command.split(" ").slice(1), { cwd: st.p.dir, env: st.p.envFor(st.forge.env), timeoutMs: 600_000 });
     results.set(name, { ok: ran.code === 0, code: ran.code, out: `${ran.out}\n${ran.err}` });
   }
   return results;
@@ -235,6 +260,7 @@ async function releaseAtHead(st: State): Promise<{ ref: string; digest: string }
   const doc = JSON.parse(listed.out) as { releases?: Array<{ releaseDigest: string; label?: string | null; commit?: string }> };
   const cut = (doc.releases ?? []).filter((r) => r.commit === head).at(-1);
   if (!cut) throw new Error(`the merge's wave cut no release at ${head.slice(0, 12)}`);
+  hold(st.forge.readStatusOf.includes(head), `the merge's cut did not read ${head.slice(0, 12)}'s checks from the forge with the job's token (release.green: forge-checks)${st.forge.refused.length > 0 ? `; refused for want of the token: ${st.forge.refused.join(", ")}` : ""}`);
   return { ref: cut.label ?? cut.releaseDigest, digest: cut.releaseDigest };
 }
 
@@ -365,9 +391,11 @@ const parts: ReadonlyArray<PartEntry<State>> = [
 
 async function body(ctx: Ctx): Promise<void> {
   await dropDatabases(ctx);
+  const forge = await checksForge();
   try {
-    await runParts(ctx, await setup(ctx), parts);
+    await runParts(ctx, await setup(ctx, forge), parts);
   } finally {
+    await forge.close();
     await dropDatabases(ctx);
   }
 }
