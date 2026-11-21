@@ -326,6 +326,11 @@ export interface CiConfig {
    */
   respond?: CiRespond;
   /**
+   * The model run behind `respond.wave-refused: "summary"`, keyed as chant's
+   * key vocabulary spells it (`agent.wave-refused.*`). Read only with that mode.
+   */
+  agent?: CiAgent;
+  /**
    * Signed checks (chant issues 4870, 4869, 4964, 4978; sql-yodeler issue
    * 346): the pipeline's runner identity, which signs each environment's
    * plan as `plan:<env>` and `policy:<env>`, each check hook that passed by
@@ -366,13 +371,34 @@ export interface CiRespond {
    * approval, another run held it or its decision declined it: `diff` posts
    * chant's diff of the migration plan (the members whose plan moved and what
    * moved in them) on the pull request the wave applies, or on a tracking
-   * issue when it has none; `off` posts nothing. Unset, the rendered files are as before and chant's wave job answers with its own default.
+   * issue when it has none; `summary` posts the same diff with a model's
+   * summary above it (chant's mechanism, off unless set, see `ci.agent`);
+   * `off` posts nothing. Unset, the rendered files are as before and chant's wave job answers with its own default.
    */
   "wave-refused"?: RespondWaveRefused;
 }
 
-export type RespondWaveRefused = "off" | "diff";
-export const RESPOND_WAVE_REFUSED: readonly RespondWaveRefused[] = ["off", "diff"];
+export type RespondWaveRefused = "off" | "diff" | "summary";
+export const RESPOND_WAVE_REFUSED: readonly RespondWaveRefused[] = ["off", "diff", "summary"];
+
+/** `ci.agent`: the model run of a refused wave's summary, as chant's `agent.wave-refused.*` keys name it. */
+export interface CiAgent {
+  "wave-refused"?: CiAgentWaveRefused;
+}
+
+/** The summary's settings. Every field is optional; chant's defaults answer for the ones left out. */
+export interface CiAgentWaveRefused {
+  /** The model command: prompt on stdin, summary on stdout. */
+  command?: string;
+  /** The secret holding the model's key (default `ANTHROPIC_API_KEY`). */
+  key_secret?: string;
+  /** Minutes the command may run. */
+  timeout?: number;
+  /** The most summaries per day. */
+  max_runs?: number;
+  /** The most US dollars the summaries may cost per day. */
+  max_cost_usd?: number;
+}
 
 export type RespondNew = "off" | "comment" | "on-change";
 export const RESPOND_NEW: readonly RespondNew[] = ["off", "comment", "on-change"];

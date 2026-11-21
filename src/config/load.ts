@@ -194,8 +194,8 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond?, evidence?, refGate? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond", "evidence", "refGate"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new, respond, evidence, refGate)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond?, agent?, evidence?, refGate? }`);
+  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond", "agent", "evidence", "refGate"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new, respond, agent, evidence, refGate)`);
   if (value.evidence !== undefined) {
     const e = value.evidence;
     if (!isRecord(e) || !Object.keys(e).every((k) => ["runnerKeySecret", "identity", "audience"].includes(k))) throw new YodelError(`${where}.evidence: expected { runnerKeySecret } or { identity: "oidc", audience? }`);
@@ -212,6 +212,19 @@ function checkCi(value: unknown, where: string): void {
     if (r.new !== undefined && !(RESPOND_NEW as readonly unknown[]).includes(r.new)) throw new YodelError(`${where}.respond.new: one of ${RESPOND_NEW.join(", ")}`);
     if (r.rebase !== undefined && !(RESPOND_REBASE as readonly unknown[]).includes(r.rebase)) throw new YodelError(`${where}.respond.rebase: one of ${RESPOND_REBASE.join(", ")}`);
     if (r["wave-refused"] !== undefined && !(RESPOND_WAVE_REFUSED as readonly unknown[]).includes(r["wave-refused"])) throw new YodelError(`${where}.respond.wave-refused: one of ${RESPOND_WAVE_REFUSED.join(", ")} `);
+  }
+  if (value.agent !== undefined) {
+    const a = value.agent;
+    if (!isRecord(a) || !Object.keys(a).every((k) => k === "wave-refused")) throw new YodelError(`${where}.agent: expected { "wave-refused"? }`);
+    const s = a["wave-refused"];
+    if (s !== undefined) {
+      const fields = ["command", "key_secret", "timeout", "max_runs", "max_cost_usd"];
+      if (!isRecord(s) || !Object.keys(s).every((k) => fields.includes(k))) throw new YodelError(`${where}.agent.wave-refused: expected { ${fields.join("?, ")}? }`);
+      for (const k of ["command", "key_secret"]) if (s[k] !== undefined && typeof s[k] !== "string") throw new YodelError(`${where}.agent.wave-refused.${k}: a string`);
+      for (const k of ["timeout", "max_runs", "max_cost_usd"]) if (s[k] !== undefined && (typeof s[k] !== "number" || !(s[k] > 0))) throw new YodelError(`${where}.agent.wave-refused.${k}: a number above 0`);
+      const mode = isRecord(value.respond) ? value.respond["wave-refused"] : undefined;
+      if (mode !== "summary") throw new YodelError(`${where}.agent.wave-refused: read with ci.respond.wave-refused set to "summary"`);
+    }
   }
   if (value.new !== undefined) {
     const n = value.new;
