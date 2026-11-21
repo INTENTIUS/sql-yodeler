@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0
+
+### Added
+
+- `ci.promotion` makes the environments stages of chant's pipeline (issue 384). `yodel ci` writes `.chant/pipeline.ts` from `yodel.config.ts`, commits the first stage's spec as `yodel-waves.json`, and renders a promote job per later stage and the `/yodel reject` comment job. A stage takes a risk gate and a soak with http, prometheus and command checks, and the change risk shows in the plan note. `yodel ci --check` runs chant's pipeline check. `yodel promote`, `reject`, `pause` and `resume` run chant's commands and take `--dir`.
+- `yodel report --audit` and `--json` write the audit report in chant's audit format (issue 385).
+- `ci.respond.wave-refused` posts chant's diff and summary of a refused wave.
+- Config keys follow chant's product vocabulary, and today's spellings stay as aliases.
+
+### Changed
+
+- Under `ci.promotion` the release gate is `forge-checks`, and `yodel ci` keeps the wave's work directories out of the tree the release cut reads. The watch ops of a pipeline get one op per stage and an export name per op.
+- yodel pins chant 0.124.112 exactly, and `.chant/op-waves` is ignored.
+- Building against an unreleased chant goes through `just chant-local <chant-dir>`.
+
+chant is at 0.124.112, and the starter templates take `^0.14.0`.
+
 ## 0.13.5
 
 ### Fixed
