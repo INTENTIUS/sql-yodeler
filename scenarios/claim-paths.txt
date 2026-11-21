@@ -47,6 +47,7 @@ tsconfig.json                          ALL
 tsconfig.build.json                    ALL
 scenarios/run.ts                       ALL
 scenarios/claim.ts                     ALL
+scenarios/lib/forge-checks.ts          pipeline
 scenarios/lib/                         ALL
 scenarios/fixtures/                    ALL
 scenarios/claims/index.ts              ALL

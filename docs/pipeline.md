@@ -126,6 +126,22 @@ A hold and a freeze live in `.chant/pipeline.ts`, and a change to the config lif
 | `environments.<env>.imports` | `environments.<name>.imports` | the shared sets the stage takes first, in order |
 | `configSets.<set>` | `config_sets.<set>` | a shared set of `config`, `secrets` and `imports` |
 
+## The release cut's green gate
+
+The merge's cut runs `yodel chant release cut auto --yes --wait-checks` after the first stage's last wave. It cuts a commit that a green gate passed, and `chant.config.ts` names the gate:
+
+```ts
+export default {
+  lexicons: ["sql"],
+  release: { green: "forge-checks" },
+  sql: { /* ... */ },
+} satisfies ChantConfig;
+```
+
+Under `forge-checks` the cut reads the merge commit's checks on the forge and waits while any is still running. It reads them with the wave job's token: on GitHub and Forgejo `yodel ci` gives the first stage's wave jobs the job's token with `checks: read` and `statuses: read`, and on GitLab the job reads `CHANT_GITLAB_TOKEN`, `GITLAB_TOKEN` or its own `CI_JOB_TOKEN`. The cut leaves out its own run, so the commit needs a check from another workflow, such as the repository's own CI on a push to main. A check that failed stops the cut with `release-commit-not-green`, and the stages after the first get no release from that merge.
+
+`chant.config.ts` is the project's own file, and while it names no `release.green`, `yodel ci` prints the line to add. With no `release.green`, chant picks `chant` (a `ci/green/<sha>` tag, which this merge does not write) once the repository holds any `ci/green/` tag, else `forge-checks`. `release: { green: "chant" }` keeps the tags, and `ci.release.cut: false` turns the cut off. [`chant release cut`](https://intentius.io/chant/cli/release/cut/) has each gate.
+
 The first stage's wave job gets its stage's set, and each promote job its own. The sets work without `ci.promotion` too, where each wave job gets its environment's set.
 
 ## Release artifacts

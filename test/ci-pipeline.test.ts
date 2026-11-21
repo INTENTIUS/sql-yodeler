@@ -13,7 +13,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { asPipelineSpec, foldPipelineSource, stageWavesSpec } from "@intentius/chant/pipeline";
 import { checkYodelConfig } from "../src/config/load.js";
-import { environmentSetsOf, pipelineConfigProblem, stageRisk } from "../src/ci/pipeline.js";
+import { environmentSetsOf, pipelineConfigProblem, releaseGreenNote, stageRisk } from "../src/ci/pipeline.js";
+import { commandToken } from "../src/ci/render.js";
 import { planRisk } from "../src/pr/note.js";
 import { PIPELINE_WORDS, YODEL_WORDS } from "../src/ci-words.js";
 import { promote, reject, pause, resume } from "../src/commands/stages.js";
@@ -173,6 +174,37 @@ describe("yodel ci with ci.promotion", () => {
     expect(stale.err).toContain(".chant/pipeline.ts is not what the config writes; run `yodel ci` and commit it");
     expect(stale.err).toMatch(/^\+\s+"count": 2$/m);
     expect(stale.err).toContain("stale, run yodel ci: .chant/pipeline.ts");
+  });
+
+  it("gives the merge's wave jobs a token that reads the commit's checks, for the release cut's forge-checks gate (#395)", async () => {
+    const dir = template(ci);
+    const wrote = await yodel(["ci", "--dir", dir]);
+    expect(wrote.code).toBe(0);
+    expect(wrote.err).toContain('note: chant.config.ts: set release: { green: "forge-checks" } in it');
+    expect(JSON.stringify(JSON.parse(read(dir, "yodel-waves.json")))).toContain('"release","cut","auto","--yes","--wait-checks"');
+    for (const file of [".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
+      const text = read(dir, file);
+      expect(text, file).toContain("GITHUB_TOKEN: '${{ github.token }}'");
+    }
+    expect(read(dir, ".github/workflows/yodel-apply.yml")).toMatch(/checks: read\n\s+statuses: read/);
+    // A chant.config.ts that names the gate hears nothing.
+    const config = join(dir, "chant.config.ts");
+    writeFileSync(config, readFileSync(config, "utf8").replace('lexicons: ["sql"],', 'lexicons: ["sql"],\n  release: { green: "forge-checks" },'));
+    const again = await yodel(["ci", "--check", "--dir", dir]);
+    expect(again.code, again.err).toBe(0);
+    expect(again.err).not.toContain("release.green");
+  });
+
+  it("names the release gate and asks for the token only under ci.promotion with the cut on", () => {
+    expect(releaseGreenNote(undefined, {})).toBeUndefined();
+    expect(releaseGreenNote({ promotion: ["dev", "prod"] }, {})).toContain('release: { green: "forge-checks" }');
+    expect(releaseGreenNote({ promotion: ["dev", "prod"] }, { release: { green: "chant" } })).toBeUndefined();
+    expect(releaseGreenNote({ promotion: ["dev", "prod"], release: { cut: false } }, {})).toBeUndefined();
+    expect(commandToken("github", undefined, undefined)).toBeUndefined();
+    expect(commandToken("github", undefined, { promotion: ["dev"] })).toEqual({ commandToken: { permissions: { checks: "read", statuses: "read" } } });
+    expect(commandToken("forgejo", "diff", { promotion: ["dev"] })).toEqual({ commandToken: { permissions: { "pull-requests": "write", issues: "write", checks: "read", statuses: "read" } } });
+    expect(commandToken("github", undefined, { promotion: ["dev"], release: { cut: false } })).toBeUndefined();
+    expect(commandToken("gitlab", "diff", { promotion: ["dev"] })).toBeUndefined();
   });
 
   it("refuses onVerifyFail: rollback on a sql-migrate stage with chant's reason", async () => {

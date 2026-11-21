@@ -1195,8 +1195,8 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
         beforeScript: [...installLines(tc, forge), fetchApprovals(tc)],
         waveJobs: waveJobs(forge),
         recordPlans: recordPlans(forge),
-        // A refused wave's diff is posted with the job's token: pull request comments, and the tracking issue a wave with no pull request uses. GitLab's jobs read CHANT_FORGE_TOKEN.
-        ...((envs.respondWaveRefused === "diff" || envs.respondWaveRefused === "summary") && forge !== "gitlab" ? { commandToken: { permissions: { "pull-requests": "write" as const, issues: "write" as const } } } : {}),
+        // The wave jobs' token on GitHub and Forgejo (a GitLab job reads its CI/CD variables or CI_JOB_TOKEN): see commandToken.
+        ...(commandToken(forge, envs.respondWaveRefused, envs.pipeline) ?? {}),
         // Signed checks (sql-yodeler issue 346): each deciding wave signs plan:<wave> and policy:<wave>; on GitLab its <wave job>-evidence job, in chant-evidence.
         ...(envs.evidence ? { evidence: envs.evidence } : {}),
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
@@ -1215,6 +1215,24 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     if (envs.pipeline) out.push(...(await promoteFiles(forge, envs)));
   }
   return out;
+}
+
+/**
+ * The job's token a GitHub or Forgejo wave job's command gets, with the
+ * scopes it needs beside chant's own, or undefined for none. A refused
+ * wave's diff is posted with it: pull request comments, and the tracking
+ * issue a wave with no pull request uses. With `ci.promotion` the first
+ * stage's last wave cuts the release, and under `release.green:
+ * "forge-checks"` (chant's default without `ci.green`) the cut reads the
+ * merge commit's checks and statuses with it (#395).
+ */
+export function commandToken(forge: Forge, respondWaveRefused: RespondWaveRefused | undefined, pipeline: CiConfig | undefined): { commandToken: { permissions: Record<string, "read" | "write"> } } | undefined {
+  if (forge === "gitlab") return undefined;
+  const permissions: Record<string, "read" | "write"> = {
+    ...(respondWaveRefused === "diff" || respondWaveRefused === "summary" ? { "pull-requests": "write", issues: "write" } : {}),
+    ...(pipeline && pipeline.release?.cut !== false ? { checks: "read", statuses: "read" } : {}),
+  };
+  return Object.keys(permissions).length > 0 ? { commandToken: { permissions } } : undefined;
 }
 
 /** `.chant/pipeline.ts` from yodel.config.ts, and the first stage's spec from the folded file: what the merge applies (#384). */

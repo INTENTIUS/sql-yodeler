@@ -34,6 +34,26 @@ export const PIPELINE_SOURCE_OPTIONS = { product: "yodel", config: "yodel.config
 /** Whether the project's environments are chant pipeline stages: `ci.promotion` is set. */
 export const pipelineOn = (ci: Pick<CiConfig, "promotion"> | undefined): boolean => ci?.promotion !== undefined;
 
+/** The line `chant.config.ts` carries under `ci.promotion`, so the merge's release cut waits for the merge commit's checks on the forge (#395). */
+export const RELEASE_GREEN_LINE = 'release: { green: "forge-checks" }';
+
+/**
+ * What `yodel ci` tells a project under `ci.promotion` whose
+ * `chant.config.ts` names no `release.green`, or undefined. The merge's
+ * last wave of the first stage cuts the release (`release cut auto --yes
+ * --wait-checks`), and without `release.green` chant picks the gate: `chant`
+ * (a `ci/green/<sha>` tag the merge never writes) once the repository holds
+ * any `ci/green/` tag, else `forge-checks`. yodel does not write
+ * `chant.config.ts`, so it names the line. A project that sets
+ * `release.green` itself, or turns the cut off, hears nothing.
+ */
+export function releaseGreenNote(ci: Pick<CiConfig, "promotion" | "release"> | undefined, chantConfig: Record<string, unknown>): string | undefined {
+  if (!pipelineOn(ci) || ci?.release?.cut === false) return undefined;
+  const green = isRecord(chantConfig.release) ? chantConfig.release.green : undefined;
+  if (green !== undefined) return undefined;
+  return `chant.config.ts: set ${RELEASE_GREEN_LINE} in it, so the release cut on merge waits for the merge commit's checks on the forge`;
+}
+
 /** The stage keys yodel reads under `ci.environments.<env>`, in camelCase. */
 export const STAGE_KEYS = [
   "hold",
