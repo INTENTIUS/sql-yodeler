@@ -284,8 +284,8 @@ export async function verifyWaveDecision(cwd: string, specFile: string, env: str
   if (waveSetDigest(decision.members) !== decision.digest) throw new YodelError(`refused: chant's decision for wave ${String(k)} does not hold the digest of its own members; nothing was applied`, EXIT_FAILED, true);
   // The policy and the approval mode (#48), asked of chant's rule again rather than trusting the record,
   // at yodel's base (../config/base.ts), never at a base the spec in the change names.
-  const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
-  const policy = yodelPolicy(readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd));
+  const { opWaveNeedsApproval } = await import("@intentius/chant/op");
+  const policy = yodelPolicy(await wavePolicyAtBase(cwd, specFile, name));
   const ledger = async () => portFor(await gitLedger(cwd), policy.approval, cwd, policy.base);
   const how = policy.approval === "ledger" ? "" : `, approval ${policy.approval}`;
   if (decision.status === "approved") {
@@ -348,7 +348,7 @@ export async function forecastWave(cwd: string, specFile: string, plan: Pick<Wav
   const spec = readJson<WavesSpec & { gate?: string }>(resolve(cwd, specFile), "the waves spec");
   const { k, name } = waveOf(spec, plan.environment, specFile);
   const { waveSetDigest, waveGateName } = await import("@intentius/chant/gated-waves");
-  const { opWaveNeedsApproval, readOpWavePolicy } = await import("@intentius/chant/op");
+  const { opWaveNeedsApproval } = await import("@intentius/chant/op");
   const member = (target: string, p: Pick<WavePlanFile, "planDigest" | "destructive" | "empty">) => ({ member: target, planDigest: p.planDigest, op: "", ...(p.destructive ? { destructive: true } : {}), ...(p.empty ? { empty: true } : {}) });
   const runs = spec.waves[k - 1]?.runs ?? [];
   if (runs.at(-1)?.target !== plan.environment) return undefined;
@@ -364,7 +364,7 @@ export async function forecastWave(cwd: string, specFile: string, plan: Pick<Wav
   }
   const digest = waveSetDigest(members);
   const gate = waveGateName(spec.gate ?? spec.name, k);
-  const policy = yodelPolicy(readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd));
+  const policy = yodelPolicy(await wavePolicyAtBase(cwd, specFile, name));
   let waits = opWaveNeedsApproval(policy.policy, members);
   if (waits) {
     try {
@@ -384,6 +384,24 @@ export async function forecastWave(cwd: string, specFile: string, plan: Pick<Wav
  * own digest (`per-wave`, ../ci-words.ts) and yodel ci never writes it, so a
  * spec that names it is refused.
  */
+/** A later pipeline stage's spec, which `chant components promote` writes for the stage it runs (#384). */
+const STAGE_SPEC_FILE = /^(\.\/)?\.chant\/op-waves\/[^/]+\.spec\.json$/;
+
+/**
+ * The wave's policy at base, chant's `readOpWavePolicy`. A wave of a later
+ * pipeline stage (#384) runs from the spec `chant components promote` wrote
+ * to `.chant/op-waves/<pipeline>-<stage>.spec.json`, which no commit holds:
+ * its gate is read from `.chant/pipeline.ts` at the default branch's tip
+ * (chant's `promoteBase` and `pipelineStageShow`), as the promote read it.
+ * Every other spec file is read at yodel's base (../config/base.ts).
+ */
+async function wavePolicyAtBase(cwd: string, specFile: string, name: string): Promise<ReturnType<typeof import("@intentius/chant/op").readOpWavePolicy>> {
+  const { readOpWavePolicy } = await import("@intentius/chant/op");
+  if (!STAGE_SPEC_FILE.test(specFile.split("\\").join("/"))) return readOpWavePolicy(specFile, name, baseRef(cwd).ref, cwd);
+  const { pipelineStageShow, promoteBase } = await import("@intentius/chant/pipeline");
+  return readOpWavePolicy(specFile, name, promoteBase(cwd) ?? baseRef(cwd).ref, cwd, pipelineStageShow());
+}
+
 function yodelPolicy<P extends { approval: string }>(policy: P): Omit<P, "approval"> & { approval: ApprovalMode } {
   const approval = APPROVAL_MODES.find((m) => m === policy.approval);
   if (!approval) throw new YodelError(`refused: the waves spec names approval ${policy.approval}, which yodel does not use (${APPROVAL_MODES.join(", ")}); render it again with yodel ci. Nothing was applied.`, EXIT_FAILED, true);

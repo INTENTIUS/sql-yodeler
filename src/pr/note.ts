@@ -27,7 +27,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chantProduct, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
-import { describeWave } from "../waves/index.js";
+import { describeWave, destructiveSteps } from "../waves/index.js";
 import { WAVES_PIPELINE } from "../waves/record.js";
 import type { VersionedPlan } from "./model.js";
 import { noteLimit } from "@intentius/chant/plan-summary";
@@ -120,6 +120,8 @@ interface NoteFrame {
    * one `yodel approve <set>` line; see {@link tenantSetNoteFits}.
    */
   approveTargets?: string[];
+  /** The change risk (#384), chant's record, which chant's note shows under the cost. */
+  risk?: unknown;
 }
 
 /** chant's pull request report for the note: one member per environment (or tenant), at the plan stage. */
@@ -239,10 +241,26 @@ export const SUBJECT_PART_WORDS: Record<string, { added?: string; gone?: string;
   environment: { changed: "the environment changed" },
 };
 
-/** One environment's note through chant, cut to `limit` (chant's `noteLimit` for the forge; GitHub's when none is named). */
-export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote; limit?: number }): Promise<string> {
+/**
+ * The change risk of one environment's plan (#384), chant's
+ * `scoreChangeRisk`: its reasons are the sql lexicon's destructive classes
+ * of the pending steps, the rules `on-destructive` waits on, and the change
+ * set's deletes and replacements. `approveAbove` is the stage's, as the
+ * stage gate reads it. The record only adds approvals.
+ */
+export async function planRisk(plan: VersionedPlan, changeSet: unknown, settings: { approveAbove?: number }): Promise<unknown> {
+  const { scoreChangeRisk } = await import("@intentius/chant/ci-product");
+  const steps = plan.wave?.destructiveSteps ?? destructiveSteps(plan.dialect === "postgres" ? "postgres" : "clickhouse", plan.pending.map((p) => ({ id: p.id, migration: { document: { steps: p.steps.map((s) => s.step) } as never } })));
+  const destructive = [...new Set(steps.flatMap((s) => s.why.split(",").map((w) => w.trim()).filter((w) => w !== "")))].sort();
+  return scoreChangeRisk({ changeSet: changeSet as never, ...(destructive.length > 0 ? { destructive } : {}), environments: [plan.environment] }, settings.approveAbove !== undefined ? { approveAbove: settings.approveAbove } : {});
+}
+
+/** One environment's note through chant, cut to `limit` (chant's `noteLimit` for the forge; GitHub's when none is named). `risk` is the stage's risk settings: with it the note shows the change risk (#384). */
+export async function renderPlanNote(plan: VersionedPlan, options: { dir: string; base?: string; note?: ChantNote; limit?: number; risk?: { approveAbove?: number } }): Promise<string> {
   const note = options.note ?? (await chantNote());
   const { op, gate, digest } = gateOf(plan);
+  const members = [{ environment: plan.environment, digest: plan.digest, pending: plan.pending.length, refused: plan.refusal !== undefined, part: planPart(plan, plan.environment) }];
+  const risk = options.risk ? await planRisk(plan, report(note, members, { env: "", op: "", gate: "", digest: "", head: "", base: "", approval: { status: "pending" }, details: [] }).changeSet, options.risk) : undefined;
   const limit = options.limit ?? noteLimit();
   // chant cuts its note to what is left once yodel's marker is above it.
   const room = limit - framed(plan.environment, "").length;
@@ -250,7 +268,7 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
     framed(
       plan.environment,
       note.renderPrNote(
-        report(note, [{ environment: plan.environment, digest: plan.digest, pending: plan.pending.length, refused: plan.refusal !== undefined, part: planPart(plan, plan.environment) }], {
+        report(note, members, {
           env: plan.environment,
           op,
           gate,
@@ -259,6 +277,7 @@ export async function renderPlanNote(plan: VersionedPlan, options: { dir: string
           approval: approvalOf(plan),
           details: [{ member: plan.environment, title: `The SQL plan for \`${plan.environment}\``, lines: planDetailLines(plan, withSql) }],
           ...(plan.refusal ? { message: plan.refusal.message } : {}),
+          ...(risk ? { risk } : {}),
         }),
         { words: note.words, limit: room },
       ),

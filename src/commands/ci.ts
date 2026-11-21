@@ -23,6 +23,9 @@ Ops), each declared with chant's lexicons:
                 makes at the head, for the review to approve (on GitLab, the
                 merge request job yodel-apply-record-plans)
   watch-<env>   each environment's drift watch, on its schedule
+  yodel-apply-promote
+                with ci.promotion: one job per stage after the first, started
+                by hand with a release (yodel promote --to <env>)
 
 The pipelines come from the installed yodel, so upgrading yodel and running
 yodel ci again brings its fixes to the project; yodel ci --check then fails
@@ -50,6 +53,14 @@ yodel.config.ts ci:
            checks and the watches remain, all with readers; --check does
            not expect the apply files. Refused with a pr-review wave or
            resume, which need the apply pipeline
+  promotion
+           the environments as stages of chant's pipeline, in the waves'
+           order. yodel ci writes .chant/pipeline.ts with chant's helper,
+           the merge applies the first stage (yodel-waves.json is that
+           stage's spec from the folded file) and cuts a release, and each
+           later stage takes it with yodel promote. ci.environments.<env>
+           holds each stage's keys (docs/pipeline.md); --check fails while
+           the committed .chant/pipeline.ts differs from the config
 
 Options:
   --check          write nothing; exit 1 naming each file that differs from
@@ -145,6 +156,14 @@ export const ci: Command = {
         writePlannedFiles([...planned.map((p) => p.file), ...removals]);
         for (const p of stale) io.out(`wrote ${p}\n`);
         for (const p of left) io.out(`removed ${p}\n`);
+      }
+      // chant's pipeline (#384): chant's own check of .chant/pipeline.ts, with its line diff and why the file does not fold.
+      const { PIPELINE_TS, PIPELINE_SOURCE_OPTIONS } = await import("../ci/pipeline.js");
+      const pipelineFile = files.find((f) => f.path === PIPELINE_TS);
+      if (a.check && pipelineFile) {
+        const { checkPipelineFile } = await import("@intentius/chant/pipeline");
+        const found = checkPipelineFile(dir, pipelineFile.content, { command: PIPELINE_SOURCE_OPTIONS.command });
+        if (found.status !== "current") io.err(`${found.message}\n${found.status === "stale" ? `${found.diff.join("\n")}\n` : ""}`);
       }
       if (a.check && (stale.length > 0 || left.length > 0)) {
         if (stale.length > 0) io.err(`stale, run yodel ci: ${stale.join(", ")}\n`);

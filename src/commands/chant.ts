@@ -15,7 +15,7 @@
 
 import type { Io } from "../command.js";
 import { EXIT_FAILED } from "../exit.js";
-import { chantProduct, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
+import { chantProduct, PIPELINE_WORDS, YODEL_WORDS, type ChantProduct } from "../ci-words.js";
 import { runChant } from "@intentius/chant/chant-install";
 
 export const CHANT_VERB = "chant";
@@ -54,7 +54,9 @@ export async function runChantVerb(argv: string[], io: Io, deps: ChantVerbDeps =
   if (product) {
     // chant's commit job (#312): a refused yodel new or yodel rebase gets a reply that names the migration and the object.
     if (argv[0] === "commit") await setRefusalReply();
-    return product.runChantInProcess(argv, YODEL_WORDS);
+    // The reject comment job (#384) answers /yodel reject under the words that map it onto chant's reject.
+    const words = argv[0] === "components" && argv[1] === "pr-comment" ? PIPELINE_WORDS : YODEL_WORDS;
+    return product.runChantInProcess(argv, words);
   }
   const ran = await (deps.child ?? runChant)(argv, { cwd: deps.cwd ?? process.cwd(), noColor: true, resolveFallback: true, onStdout: io.out, onStderr: io.err });
   return ran.code;
