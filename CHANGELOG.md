@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `yodel lint` raises `pg-access` on a `REVOKE` that chant files beside a grant (issue 398). When a role loses one privilege on an object and gains another, chant writes the `REVOKE` and the `GRANT` under SQLPG296, and a default-privilege change, `ALTER DEFAULT PRIVILEGES ... REVOKE` included, under SQLPG298; lint read only SQLPG297 as a revoke. It now reads the step's SQL for those two rules, `REVOKE GRANT OPTION FOR` included, and a step that only grants still raises nothing. `yodel new`, `yodel plan` and the pull request comment name the same steps as taking access away, and a revoke chant files under `acl <entry>` beside a grant is marked as one no declaration grants any more. On the declarative path, `yodel lint --env` raises `pg-access` on a SQLPG296 change that takes a privilege away, and `yodel plan` marks a hand-made privilege swapped for a declared one `byHand` and lists it under "Revoked by this apply".
+
 ## 0.13.5
 
 ### Fixed

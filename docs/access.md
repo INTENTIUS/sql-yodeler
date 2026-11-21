@@ -90,7 +90,7 @@ Revoked by this apply, though no declaration revokes it: privileges granted by h
 To keep it, declare it with grant`...`.
 ```
 
-`yodel plan --json` has the same under `access`: `managed`, `source`, and `changes`, a revoke of a hand-made grant marked `byHand: true`. The apply prints the section before it runs. Its gate binds the digest of chant's `lifecycle diff`, which observes policies and roles but not privileges, so an approval on the declarative path does not cover a privilege granted or revoked by hand after it: the apply makes the privileges match the declarations whatever changed in between. On the versioned path every statement, grants and revokes included, is in the migration's checksum and so in the digest the approval binds.
+`yodel plan --json` has the same under `access`: `managed`, `source`, and `changes`, a revoke of a hand-made grant marked `byHand: true`. A change that swaps a hand-made privilege for a declared one on the same object (`insert -> update`) is SQLPG296 and is marked and listed the same way. The apply prints the section before it runs. Its gate binds the digest of chant's `lifecycle diff`, which observes policies and roles but not privileges, so an approval on the declarative path does not cover a privilege granted or revoked by hand after it: the apply makes the privileges match the declarations whatever changed in between. On the versioned path every statement, grants and revokes included, is in the migration's checksum and so in the digest the approval binds.
 
 On the versioned path, `yodel new` writes each access change as a statement with its rule and class (SQLPG200 for a role or policy created with its table, SQLPG290 to SQLPG298 otherwise), and prints how many steps are about access and which of them take access away. `yodel plan` and the pull request comment list the same under each pending migration.
 
@@ -101,7 +101,7 @@ On the versioned path, `yodel new` writes each access change as a statement with
 | SQLPG292 | A policy dropped | drop |
 | SQLPG293 | Row-level security turned on or off, or forced | metadata |
 | SQLPG294 | A role's attributes changed | metadata |
-| SQLPG296 | A privilege granted | metadata |
+| SQLPG296 | A privilege granted, or a grantee's privileges on an object swapped (a revoke beside a grant) | metadata |
 | SQLPG297 | A privilege revoked | metadata |
 | SQLPG298 | Default privileges changed | metadata |
 
@@ -109,7 +109,7 @@ On the versioned path, `yodel new` writes each access change as a statement with
 
 Two lint rules read access steps ([Lint](lint.md)):
 
-- `pg-access` (an error, silenceable): a statement that takes access away. That is a revoke, a dropped policy, or row-level security turned off or no longer forced. A revoke on an object the same migration creates, such as `REVOKE EXECUTE ... FROM PUBLIC` on a new function, takes nothing from anyone and is not flagged.
+- `pg-access` (an error, silenceable): a statement that takes access away. That is a revoke, a dropped policy, or row-level security turned off or no longer forced. A revoke counts whatever rule chant files it under: a `REVOKE` beside a grant for the same role and object is SQLPG296, and `ALTER DEFAULT PRIVILEGES ... REVOKE` is SQLPG298. A revoke on an object the same migration creates, such as `REVOKE EXECUTE ... FROM PUBLIC` on a new function, takes nothing from anyone and is not flagged.
 - `pg-rls-not-forced` (a warning, silenceable): a migration that enables a table's row-level security while its recorded schema does not force it. Postgres does not hold a table's owner to its policies unless the table forces them, and the owner is usually the role that applies migrations.
 
 A wave with gate `on-destructive` waits on a `pg-access` step as it waits on a drop ([Approval](approval.md#waves-a-gate-per-environment)).

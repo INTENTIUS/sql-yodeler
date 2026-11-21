@@ -10,7 +10,9 @@
  * The plan already lists each access change with its rule and class. This
  * module picks them out so `yodel plan`, `yodel new`, lint and the pull
  * request comment can show them together, and names the changes that take
- * access away: a privilege revoked (SQLPG297), a policy dropped (SQLPG292),
+ * access away: a privilege revoked (SQLPG297, or a REVOKE that chant files
+ * under SQLPG296 beside a grant or under SQLPG298 for default privileges), a
+ * policy dropped (SQLPG292),
  * row-level security turned off or no longer forced (SQLPG293), and on
  * ClickHouse a privilege or role revoked (SQLCH274). A revoke no `REVOKE`
  * declaration asks for takes away a privilege granted by hand (or one whose
@@ -56,9 +58,27 @@ export function isAccessStep(s: MigrationStep): boolean {
 
 const OFF = /\b(?:DISABLE|NO\s+FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/i;
 
+/** `REVOKE ...` (with `REVOKE GRANT OPTION FOR`), or `ALTER DEFAULT PRIVILEGES [FOR ROLE ...] [IN SCHEMA ...] REVOKE ...`. */
+const REVOKE_SQL = /^\s*(?:ALTER\s+DEFAULT\s+PRIVILEGES\b(?:(?!\b(?:GRANT|REVOKE)\b)[\s\S])*)?\bREVOKE\b/i;
+
+/**
+ * Whether a Postgres privilege statement or change takes a privilege or a
+ * grant option away. chant files a revoke under SQLPG297 only when the same
+ * grantee and object gain nothing; a revoke beside a grant is SQLPG296, and
+ * every default-privilege change is SQLPG298. So for those two a step is
+ * read by its SQL, and a declarative change, which has no SQL, by its
+ * `before` and `after`.
+ */
+export function revokesPrivilege(s: { rule: string; sql?: string; before?: unknown; after?: unknown }): boolean {
+  if (s.rule === "SQLPG297") return true;
+  if (s.rule !== "SQLPG296" && s.rule !== "SQLPG298") return false;
+  if (s.sql !== undefined) return REVOKE_SQL.test(s.sql);
+  return removed(s).length > 0;
+}
+
 /** Why a statement takes access away, or `undefined`. */
-export function takesAccessAway(s: { rule: string; sql?: string }): string | undefined {
-  if (s.rule === "SQLPG297") return "revokes a privilege";
+export function takesAccessAway(s: { rule: string; sql?: string; before?: unknown; after?: unknown }): string | undefined {
+  if (revokesPrivilege(s)) return "revokes a privilege";
   if (s.rule === "SQLCH274") return s.sql !== undefined && !/\sON\s/i.test(s.sql.replace(/\bON\s+CLUSTER\s+\S+/i, "")) ? "revokes a role" : "revokes a privilege";
   if (s.rule === "SQLPG292") return "drops a policy";
   if (s.rule === "SQLPG293" && s.sql !== undefined && OFF.test(s.sql)) return /NO\s+FORCE/i.test(s.sql) ? "stops forcing row-level security on the table's owner" : "turns row-level security off";
@@ -98,11 +118,13 @@ async function declaredEntries(build: BuildOutput): Promise<ReadonlyMap<string, 
 export async function accessItems(changes: readonly ClassifiedChange[], build: BuildOutput): Promise<AccessItem[]> {
   const access = changes.filter(isAccessChange);
   if (access.length === 0) return [];
-  const declared = access.some((c) => c.rule === "SQLPG297") ? await declaredEntries(build) : new Map<string, string[]>();
+  // A SQLPG296 change revokes too when the role loses a privilege beside the one it gains (`insert -> update`).
+  const revoke = (c: ClassifiedChange): boolean => c.rule === "SQLPG297" || (c.rule === "SQLPG296" && removed(c).length > 0);
+  const declared = access.some(revoke) ? await declaredEntries(build) : new Map<string, string[]>();
   // A revoke the declarations ask for is theirs; any other takes away what a grant made by hand (or a deleted declaration) gave.
   const revokes = new Set(build.objects.filter((o) => o.type === "Postgres::Grant" && /^\s*REVOKE\b/i.test(o.ddl)).map((o) => o.export));
   // ClickHouse takes no REVOKE declaration: a grantee's grant declarations are the whole of what it holds, so every revoke takes away what none of them grants.
-  const byHand = (c: ClassifiedChange): boolean => c.rule === "SQLCH274" || (c.rule === "SQLPG297" && !(declared.get(c.object) ?? []).some((e) => revokes.has(e)));
+  const byHand = (c: ClassifiedChange): boolean => c.rule === "SQLCH274" || (revoke(c) && !(declared.get(c.object) ?? []).some((e) => revokes.has(e)));
   return access.map((c) => ({
     object: c.object,
     rule: c.rule,
@@ -123,10 +145,15 @@ export async function accessReview(project: Pick<Project, "yodel" | "profileAcce
 
 const list = (v: unknown): string[] => (typeof v === "string" ? v.split(",").map((x) => x.trim()).filter(Boolean) : []);
 
-/** The privileges a revoke takes away: what the role held before and does not after. */
-export const removed = (c: Pick<AccessItem, "before" | "after">): string[] => {
-  const after = new Set(list(c.after));
-  return list(c.before).filter((x) => !after.has(x));
+/** The privileges a revoke takes away: what the role held before and does not after (`insert`, `insert*` with its grant option), and a grant option it keeps the privilege without (`grant option for insert`). */
+export const removed = (c: { before?: unknown; after?: unknown }): string[] => {
+  const after = new Map(list(c.after).map((x) => [x.replace(/\*$/, ""), x.endsWith("*")] as const));
+  return list(c.before).flatMap((x) => {
+    const name = x.replace(/\*$/, "");
+    const option = after.get(name);
+    if (option === undefined) return [x];
+    return x.endsWith("*") && !option ? [`grant option for ${name}`] : [];
+  });
 };
 
 const value = (v: unknown): string => (v === undefined || v === null || v === "" ? "nothing" : typeof v === "string" ? v : JSON.stringify(v));
@@ -162,8 +189,8 @@ export function accessSteps(steps: readonly MigrationStep[]): Array<{ index: num
   steps.forEach((step, index) => {
     if (!isAccessStep(step)) return;
     const away = step.kind === "statement" ? takesAccessAway(step) : undefined;
-    // chant files a Postgres revoke no declaration is behind under the ACL entry, `acl <entry>`; a ClickHouse revoke never has one.
-    const undeclared = step.kind === "statement" && ((step.rule === "SQLPG297" && step.object.startsWith("acl ")) || step.rule === "SQLCH274");
+    // chant files a Postgres revoke no declaration is behind under the ACL entry, `acl <entry>`, whether it stands alone (SQLPG297) or beside a grant (SQLPG296); a ClickHouse revoke never has one.
+    const undeclared = step.kind === "statement" && ((step.rule !== "SQLPG298" && revokesPrivilege(step) && step.object.startsWith("acl ")) || step.rule === "SQLCH274");
     out.push({ index, step, ...(away ? { away } : {}), ...(undeclared ? { undeclared: true as const } : {}) });
   });
   return out;
