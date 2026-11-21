@@ -173,6 +173,11 @@ export const ci: Command = {
       const { releaseGreenNote } = await import("../ci/pipeline.js");
       const greenNote = releaseGreenNote(project.yodel?.config.ci, project.config);
       if (greenNote) io.err(`note: ${greenNote}\n`);
+      // Under ci.promotion, the wave's own plans stay out of the tree the release cut reads.
+      if (!a.check) {
+        const { ignoreWaveWorkDirs, WAVE_WORK_DIRS } = await import("../ci/pipeline.js");
+        if (ignoreWaveWorkDirs(project.yodel?.config.ci, dir)) io.out(`added ${WAVE_WORK_DIRS} to .gitignore, so the release cut after the first stage reads a clean tree; commit it with the workflows\n`);
+      }
       if (a.check && (stale.length > 0 || left.length > 0)) {
         if (stale.length > 0) io.err(`stale, run yodel ci: ${stale.join(", ")}\n`);
         if (left.length > 0) io.err(`no longer rendered, run yodel ci to remove: ${left.join(", ")}\n`);

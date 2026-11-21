@@ -23,6 +23,8 @@
  * `sql-migrate` stage are chant's.
  */
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { CI_SOAK_CHECK_KINDS, type CiApprovalRule, type CiConfig, type CiStageConfig } from "../config/define.js";
 
 /** The committed file chant folds. */
@@ -52,6 +54,25 @@ export function releaseGreenNote(ci: Pick<CiConfig, "promotion" | "release"> | u
   const green = isRecord(chantConfig.release) ? chantConfig.release.green : undefined;
   if (green !== undefined) return undefined;
   return `chant.config.ts: set ${RELEASE_GREEN_LINE} in it, so the release cut on merge waits for the merge commit's checks on the forge`;
+}
+
+/** The directories a wave job writes its plans and outcomes under, beside the waves spec. */
+export const WAVE_WORK_DIRS = ".chant/op-waves/*/";
+
+/**
+ * Under `ci.promotion` with the cut on, add {@link WAVE_WORK_DIRS} to the
+ * project's .gitignore. The first stage's last wave cuts the release in the
+ * same job, after the apply, and chant's cut refuses a tree with an
+ * untracked file (release-worktree-dirty), which the wave's own plans would
+ * be. True when the file changed.
+ */
+export function ignoreWaveWorkDirs(ci: Pick<CiConfig, "promotion" | "release"> | undefined, dir: string): boolean {
+  if (!pipelineOn(ci) || ci?.release?.cut === false) return false;
+  const path = join(dir, ".gitignore");
+  const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+  if (before.split(/\r?\n/).some((l) => l.trim() === WAVE_WORK_DIRS)) return false;
+  writeFileSync(path, `${before}${before === "" || before.endsWith("\n") ? "" : "\n"}${WAVE_WORK_DIRS}\n`);
+  return true;
 }
 
 /** The stage keys yodel reads under `ci.environments.<env>`, in camelCase. */
