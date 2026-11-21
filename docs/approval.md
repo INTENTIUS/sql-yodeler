@@ -67,6 +67,7 @@ On the versioned path the digest covers what the run would do and the state it w
 - the history it starts from: every applied migration and its checksum;
 - the topology the statements are rendered for;
 - the live schema: a fingerprint of the server's catalog in the environment's databases or schemas. The history's own database is left out, so recording a run does not move the digest.
+  On Postgres the fingerprint also covers the privileges on the tables, views, sequences, functions and procedures in scope, on the schemas themselves, and the default privileges set in those schemas, whatever the profile's `access` says. Where `access` is on, it covers the policies, each table's row-level security and the declared roles as well. A `GRANT`, a dropped policy or row-level security turned off after an approval moves the digest, and the approval no longer counts.
 
 It is chant's plan digest (`jcs1-sha256:...`), the one the gate binds. `yodel plan <env>` prints it with the command that approves it, `npx yodel approve <env> --plan <digest>`:
 

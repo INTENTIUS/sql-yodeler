@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+Every approval made on an earlier version is invalidated once after the upgrade: the Postgres plan digest covers more, so the digest of an unchanged plan differs from the one approved. Run `yodel approve <env>` again for each pending plan.
+
+### Fixed
+
+- An approval no longer counts after access changes on a Postgres server (issue 397). The live-schema fingerprint in the plan digest now covers the privileges on the tables, views, materialized views, sequences, functions and procedures in scope, on the schemas in scope, and the default privileges set in them, whatever the profile's `access` says. A null ACL reads as the owner's defaults, so a grant followed by the revoke that undoes it leaves the digest where it was. Where `access` is on, the fingerprint also covers the policies, each table's row-level security and the roles the newest migration declares. So a `GRANT` or `REVOKE`, `ALTER DEFAULT PRIVILEGES`, a created, altered or dropped policy, or row-level security turned off or no longer forced after `yodel approve` makes `yodel apply` refuse with exit 4 until the plan is approved again. The history schema stays out of the fingerprint.
+
 ## 0.13.5
 
 ### Fixed
