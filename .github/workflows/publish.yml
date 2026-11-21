@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       label:
-        description: The release's label, such as v1.4.0, or auto for the one chant release next computes
+        description: The release's label, a bare version such as 1.4.0 since the tag template adds any v (one leading v is dropped), or auto for the one chant release next computes
         required: true
         type: string
 permissions:
