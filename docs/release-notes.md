@@ -7,6 +7,14 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.14.0
+
+- Added: `ci.promotion` makes the environments stages of chant's pipeline, with risk and soak gates. `yodel ci` writes `.chant/pipeline.ts`, a promote job per later stage and the `/yodel reject` job; `yodel promote`, `reject`, `pause` and `resume` run chant's commands.
+- Added: `yodel report --audit` and `--json` write chant's audit format.
+- Added: `ci.respond.wave-refused` posts chant's diff and summary of a refused wave.
+- Changed: config keys follow chant's product vocabulary, with today's spellings as aliases. Under `ci.promotion` the release gate is `forge-checks`.
+- chant 0.124.112. The starter templates take `^0.14.0`.
+
 ## 0.13.5
 
 - Fixed: a project made from a starter template passes `yodel ci --check` again. The templates pin chant 0.124.103 and the sql lexicon 0.124.102, and their workflows are rendered on them.
