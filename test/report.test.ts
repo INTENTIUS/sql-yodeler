@@ -6,7 +6,7 @@
  * docs/audit.md describes in the schema.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -18,7 +18,10 @@ import { reportJson } from "../src/commands/report.js";
 import type { HistoryRow } from "../src/history/index.js";
 import type { Migration } from "../src/migrations/index.js";
 import type { Project } from "../src/project.js";
-import { deriveAudit, type AuditEntry, type LedgerInput } from "../src/report/audit.js";
+import { readAuditLine, toProductAuditLine } from "@intentius/chant/report-store";
+import chantAuditSchema from "@intentius/chant/report-store/audit.schema.json" with { type: "json" };
+import { AUDIT_KINDS, deriveAudit, type AuditEntry, type LedgerInput } from "../src/report/audit.js";
+import { toAuditEntry, toAuditLines, type AuditLine } from "../src/report/chant-audit.js";
 import { appendAudit, compareAudit, readAuditFile } from "../src/report/jsonl.js";
 import { collectReport, type ReportSources } from "../src/report/model.js";
 import { renderReportHtml, renderReportText } from "../src/report/render.js";
@@ -226,25 +229,113 @@ describe("audit.jsonl", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("appends only what it does not have, and --check names an entry whose ledger line or history row was removed", () => {
+  const lines = (entries: AuditEntry[]): AuditLine[] => toAuditLines(entries, "/work/shop");
+  const detailText = (l: AuditLine) => (l.detail as { text?: string } | undefined)?.text;
+
+  it("appends only what it does not have, and --check names a line whose ledger line or history row was removed", () => {
     const path = join(dir, "audit.jsonl");
-    const full = derive().entries;
+    const full = lines(derive().entries);
     appendAudit(path, compareAudit(readAuditFile(path), full, ["dev"]).added);
     expect(readAuditFile(path).entries).toHaveLength(full.length);
     // Again: nothing new.
     expect(compareAudit(readAuditFile(path), full, ["dev"])).toEqual({ missing: [], added: [] });
-    const lines = readFileSync(path, "utf8");
+    const text = readFileSync(path, "utf8");
 
     // A pending line removed from the ledger.
     const l = devLines();
-    const noPending = derive(rows(), ledger({ ...l, pending: l.pending.slice(1) })).entries;
-    expect(kinds(compareAudit(readAuditFile(path), noPending, ["dev"]).missing)).toEqual(["approval-requested"]);
+    const noPending = lines(derive(rows(), ledger({ ...l, pending: l.pending.slice(1) })).entries);
+    expect(compareAudit(readAuditFile(path), noPending, ["dev"]).missing.map((e) => e.kind)).toEqual(["approval-requested"]);
     // A history row removed.
-    const noRow = derive(rows().filter((r) => r.seq !== 5)).entries;
-    expect(compareAudit(readAuditFile(path), noRow, ["dev"]).missing.map((e) => e.detail)).toEqual(["check table-empty failed: 1 row"]);
+    const noRow = lines(derive(rows().filter((r) => r.seq !== 5)).entries);
+    expect(compareAudit(readAuditFile(path), noRow, ["dev"]).missing.map(detailText)).toEqual(["check table-empty failed: 1 row"]);
     // An environment not read is not compared.
     expect(compareAudit(readAuditFile(path), [], ["prod"]).missing).toEqual([]);
-    expect(readFileSync(path, "utf8")).toBe(lines);
+    expect(readFileSync(path, "utf8")).toBe(text);
+  });
+
+  it("reads a file of yodel's earlier entries, or a mix, and appends no entry it already holds in either form", () => {
+    const path = join(dir, "audit-mixed.jsonl");
+    const entries = derive().entries;
+    const [first, second] = entries;
+    // The first two entries in yodel's own format, the rest absent.
+    writeFileSync(path, [first, second].map((e) => `${JSON.stringify(e)}\n`).join(""));
+    const file = readAuditFile(path);
+    expect(file.entries.map((e) => e.id)).toEqual([first?.id, second?.id]);
+    const { added, missing } = compareAudit(file, lines(entries), ["dev"]);
+    expect(missing).toEqual([]);
+    expect(added).toHaveLength(entries.length - 2);
+    appendAudit(path, added);
+    const written = readFileSync(path, "utf8").trim().split("\n").map((t) => JSON.parse(t) as Record<string, unknown>);
+    // The earlier lines stay as they were; the new ones are chant's.
+    expect(written.slice(0, 2)).toEqual([first, second]);
+    expect(written.slice(2).every((w) => w.schema === "chant.audit/v1")).toBe(true);
+    expect(compareAudit(readAuditFile(path), lines(entries), ["dev"])).toEqual({ missing: [], added: [] });
+  });
+});
+
+describe("the audit lines in chant's format (#385)", () => {
+  const ajvAudit = new Ajv2020({ allErrors: true, strict: false });
+  const validateChant = ajvAudit.compile(chantAuditSchema as object);
+  const entries = derive().entries;
+
+  it("gives every entry as a line chant's published audit schema and readAuditLine accept, under chant's kinds", () => {
+    const out = toAuditLines(entries, "/work/shop");
+    expect(out).toHaveLength(entries.length);
+    for (const l of out) {
+      expect(validateChant(l), JSON.stringify(validateChant.errors)).toBe(true);
+      expect(readAuditLine(JSON.parse(JSON.stringify(l)))).toEqual(l);
+      expect(l).toMatchObject({ schema: "chant.audit/v1", product: "sql-yodeler", project: "/work/shop", environment: "dev" });
+    }
+    expect(out.map((l) => [l.product_kind ?? l.kind, l.kind])).toEqual([
+      ["approval-requested", "approval-requested"],
+      ["approved", "approved"],
+      ["silenced", "recorded"],
+      ["applied", "applied"],
+      ["approval-requested", "approval-requested"],
+      ["approved", "approved"],
+      ["override", "override-recorded"],
+      ["refused", "refused"],
+      ["applied", "applied"],
+      ["repaired", "recorded"],
+    ]);
+    // The same id, so a file of earlier entries and one of lines agree on what they hold.
+    expect(out.map((l) => l.id)).toEqual(entries.map((e) => e.id));
+  });
+
+  it("loses nothing: chant's toProductAuditLine gives each earlier entry back, fixture by fixture", () => {
+    for (const e of entries) {
+      expect(toProductAuditLine(toAuditLines([e], "/work/shop")[0] as AuditLine, "sql-yodeler")).toEqual(e);
+      expect(toAuditEntry(toAuditLines([e], "/work/shop")[0] as AuditLine)).toEqual(e);
+    }
+  });
+
+  it("keeps yodel's word for every kind it derives, with chant's word beside it, and gives back each one", () => {
+    const at = "2026-10-10T09:00:00.000Z";
+    const source = { history: "yodeler.history", seq: 1, run: "r" };
+    const base = { id: "sha256:x", at, environment: "dev", by: "ci", migration: "m1", digest: D1, detail: "d", source };
+    const want: Record<string, string> = {
+      "approval-requested": "approval-requested",
+      approved: "approved",
+      override: "override-recorded",
+      silenced: "recorded",
+      applied: "applied",
+      refused: "refused",
+      failed: "applied",
+      repaired: "recorded",
+      reverted: "recorded",
+      step: "recorded",
+      "wave-run": "recorded",
+      spent: "recorded",
+    };
+    expect(Object.keys(want).sort()).toEqual([...AUDIT_KINDS].sort());
+    for (const [kind, chantKind] of Object.entries(want)) {
+      const e = { ...base, kind, wave: { gate: "g", digest: "d", status: "approved" } } as unknown as AuditEntry;
+      const l = toAuditLines([e], "p")[0] as AuditLine;
+      expect(l.kind, kind).toBe(chantKind);
+      expect(l.product_kind, kind).toBe(kind === chantKind ? undefined : kind);
+      expect(validateChant(l), kind).toBe(true);
+      expect(toAuditEntry(l), kind).toEqual(e);
+    }
   });
 });
 
@@ -345,8 +436,21 @@ describe("the report across environments", async () => {
   ajv.addSchema(readSchema("report"));
   const validate = ajv.getSchema(schemaId("report"));
 
+  it("is what yodel report --json prints in audit[] and auditFile.missing, the other fields as before", () => {
+    const doc = reportJson(r, { path: "audit.jsonl", appended: 0, missing: toAuditLines(r.audit.slice(0, 1), r.project) });
+    const { audit, auditFile, ...others } = doc;
+    const { audit: _earlier, ...before } = r;
+    expect(_earlier).toHaveLength(r.audit.length);
+    expect(others).toEqual(before);
+    expect(audit).toEqual(toAuditLines(r.audit, r.project));
+    expect((auditFile as { missing: unknown[] }).missing).toHaveLength(1);
+    expect((audit as AuditLine[]).map(toAuditEntry)).toEqual(r.audit);
+  });
+
   it("validates against schemas/report.schema.json, with and without the audit file", () => {
-    for (const doc of [reportJson(r), reportJson(r, { path: "audit.jsonl", appended: 3, missing: r.audit.slice(0, 1) })]) {
+    const earlier = { ...r, audit: r.audit };
+    const lines = toAuditLines(r.audit.slice(0, 1), r.project);
+    for (const doc of [reportJson(r), reportJson(r, { path: "audit.jsonl", appended: 3, missing: lines }), { ...earlier }, { ...earlier, auditFile: { path: "a", appended: 0, missing: r.audit.slice(0, 1) } }]) {
       expect(validate?.(JSON.parse(JSON.stringify(doc))), JSON.stringify(validate?.errors)).toBe(true);
     }
   });
@@ -356,6 +460,8 @@ describe("the report across environments", async () => {
     const deref = (s: unknown): Record<string, unknown> => {
       const o = s as Record<string, unknown>;
       if (typeof o.$ref === "string") return deref(schema.$defs[o.$ref.replace("#/$defs/", "")]);
+      // An audit entry is chant's line or yodel's earlier entry; the docs describe the line.
+      if (Array.isArray(o.oneOf) && o.oneOf.length === 2 && JSON.stringify(o.oneOf[0]).includes("/line")) return deref(o.oneOf[0]);
       return o;
     };
     const fields = (s: unknown, prefix: string): string[] => {

@@ -6,7 +6,7 @@ import { guarded } from "../env-args.js";
 import { loadProject, resolveEnvironment, YodelError } from "../project.js";
 import { hasMigrations, readChain } from "../versioned/index.js";
 import { expandTargets } from "../tenants/index.js";
-import type { AuditEntry } from "../report/audit.js";
+import { toAuditLines, type AuditLine } from "../report/chant-audit.js";
 import { appendAudit, compareAudit, describeEntry, readAuditFile } from "../report/jsonl.js";
 import { collectReport, type Report } from "../report/model.js";
 import { renderReportHtml, renderReportText } from "../report/render.js";
@@ -89,8 +89,8 @@ function parseReportArgs(args: string[]): ReportArgs {
 }
 
 /** The JSON `yodel report --json` prints (schemas/report.schema.json). */
-export function reportJson(r: Report, auditFile?: { path: string; appended: number; missing: AuditEntry[] }): Record<string, unknown> {
-  return { ...r, ...(auditFile ? { auditFile } : {}) };
+export function reportJson(r: Report, auditFile?: { path: string; appended: number; missing: AuditLine[] }): Record<string, unknown> {
+  return { ...r, audit: toAuditLines(r.audit, r.project), ...(auditFile ? { auditFile } : {}) };
 }
 
 /** `yodel report [<env>...]`; the exit codes are in `help`. */
@@ -108,12 +108,12 @@ export const report: Command = {
       for (const n of names) resolveEnvironment(project, n);
       const r = await collectReport(project, readChain(project), names);
 
-      let auditFile: { path: string; appended: number; missing: AuditEntry[] } | undefined;
+      let auditFile: { path: string; appended: number; missing: AuditLine[] } | undefined;
       if (a.audit) {
         const path = resolve(a.audit);
         const file = readAuditFile(path);
         const read = r.environments.filter((e) => !e.error).map((e) => e.name);
-        const { missing, added } = compareAudit(file, r.audit, read);
+        const { missing, added } = compareAudit(file, toAuditLines(r.audit, r.project), read);
         if (!a.check) appendAudit(path, added);
         auditFile = { path: a.audit, appended: a.check ? 0 : added.length, missing };
       }

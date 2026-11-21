@@ -30,18 +30,22 @@ By default it reads every environment in `chant.config.ts`'s `sql.profiles`, in 
 
 Every entry comes from a history row or a ledger line, so the log cannot say something they do not. Deriving it again from the same sources gives the same entries with the same ids.
 
-| Entry | From |
-|---|---|
-| `approval-requested` | a pending fact on the ledger: a run stopped at the migrations Op's gate, or the environment's wave stopped at its wave gate |
-| `approved` | a resolution of the gate or the wave gate (`chant approve`, `yodel approve`) |
-| `override` | an override on chant's override gate (`yodel override`), with the rules, the plan and the reason; or, before 0.8, a resolution of an `override-<rule>` gate |
-| `silenced` | a `-- yodel:allow` silence, on the migration's first started row |
-| `applied` | the history row that first recorded the migration succeeded |
-| `refused` | a failed migration row naming a pre-migration check |
-| `failed` | any other failed migration row: a statement, an Op step |
-| `repaired` | a succeeded row after the migration was applied (`yodel repair`) |
+| Entry | chant's `kind` | From |
+|---|---|---|
+| `approval-requested` | `approval-requested` | a pending fact on the ledger: a run stopped at the migrations Op's gate, or the environment's wave stopped at its wave gate |
+| `approved` | `approved` | a resolution of the gate or the wave gate (`chant approve`, `yodel approve`) |
+| `override` | `override-recorded` | an override on chant's override gate (`yodel override`), with the rules, the plan and the reason; or, before 0.8, a resolution of an `override-<rule>` gate |
+| `silenced` | `recorded` | a `-- yodel:allow` silence, on the migration's first started row |
+| `applied` | `applied` | the history row that first recorded the migration succeeded |
+| `refused` | `refused` | a failed migration row naming a pre-migration check |
+| `failed` | `applied` | any other failed migration row: a statement, an Op step |
+| `repaired` | `recorded` | a succeeded row after the migration was applied (`yodel repair`) |
+| `reverted` | `recorded` | a reverted migration row (`yodel revert`) |
+| `step` | `recorded` | a step around apply and its outcome |
+| `wave-run` | `recorded` | a run record of the apply pipeline's wave job that ran the environment |
+| `spent` | `recorded` | an approval an apply spent, with how the apply ended |
 
-`--audit audit.jsonl` keeps the log as a file, one entry per line. Each run appends the entries the file does not have yet and never rewrites a line. `--audit audit.jsonl --check` appends nothing. Instead it names every entry of the file that the sources no longer give: a ledger line or a history row removed since the file was written. A CI job that keeps `audit.jsonl` as an artifact, or commits it, can run `--check` before it appends.
+`--audit audit.jsonl` keeps the log as a file, one `chant.audit/v1` line per entry, the format chant's report store holds (`@intentius/chant/report-store`). A file written before that holds yodel's own entries; both are read, one file may hold both, and an entry already in the file in either form is not appended again. Each run appends the entries the file does not have yet and never rewrites a line. `--audit audit.jsonl --check` appends nothing. Instead it names every entry of the file that the sources no longer give: a ledger line or a history row removed since the file was written. A CI job that keeps `audit.jsonl` as an artifact, or commits it, can run `--check` before it appends.
 
 ## Gaps
 
@@ -78,7 +82,7 @@ The schema is already applied when the record is written, so a record that canno
 
 ## The JSON
 
-`yodel report --json` prints the report described by [schemas/report.schema.json](../schemas/report.schema.json). Within version 1 fields are only added.
+`yodel report --json` prints the report described by [schemas/report.schema.json](../schemas/report.schema.json). Within version 1 fields are only added. A report written before chant's format has yodel's own entries in `audit[]` (`id`, `at`, `environment`, `kind`, `by`, `migration`, `digest`, `detail`, `wave`, `source`); the schema accepts both. Each line's `product_kind` is the word in the first column of the table above that the old entry used as its `kind`, and chant's `toProductAuditLine` gives the old entry back from a line.
 
 | Field | What it holds |
 |---|---|
@@ -102,20 +106,23 @@ The schema is already applied when the record is written, so a record that canno
 | `environments[].migrations[].digest` | the plan digest it was applied under |
 | `environments[].migrations[].approvedBy` | who approved that digest on the ledger |
 | `environments[].migrations[].approvedAt` | when |
-| `audit` | every entry, oldest first |
-| `audit[].id` | a hash of the entry and its source |
-| `audit[].at` | when, ISO 8601 UTC |
+| `audit` | every entry, oldest first, as a `chant.audit/v1` line |
+| `audit[].schema` | `chant.audit/v1` |
+| `audit[].product` | `sql-yodeler` |
+| `audit[].id` | a hash of the entry and its source: the same sources give the same id |
+| `audit[].kind` | chant's word: `approval-requested`, `approved`, `override-recorded`, `applied`, `refused` or `recorded` |
+| `audit[].product_kind` | yodel's own word from the table above, when it is not `kind` |
+| `audit[].project` | the project directory |
 | `audit[].environment` | the environment |
-| `audit[].kind` | one of the entries in the table above |
-| `audit[].by` | the approver, or who ran the apply |
-| `audit[].migration` | the migration, for history entries |
-| `audit[].digest` | the plan digest |
-| `audit[].detail` | the silence, the override's rule and reason, the error, the repair's reason |
-| `audit[].wave` | on an `applied` entry a wave applied: the wave's gate, its set digest, and `approved` or `not-required` |
-| `audit[].wave.gate` | the wave's gate, `yodel-apply-wave-<k>` |
-| `audit[].wave.digest` | the wave's set digest, the one its approval is bound to |
-| `audit[].wave.status` | `approved`, or `not-required` when the wave's policy at the base needed no approval |
-| `audit[].source` | the ledger file, Op and gate; or the history table, the row's `seq` and its run |
+| `audit[].at` | when, ISO 8601 UTC |
+| `audit[].who` | the approver, or who ran the apply; null when nobody did |
+| `audit[].what` | the migration, else the gate, else the environment |
+| `audit[].digest` | the plan digest; null when the entry has none |
+| `audit[].result` | `waiting` for a request, else the entry's own word |
+| `audit[].evidence` | where it was read: `ledger` with `path`, `op` and `gate`, or `history` with `table`, `seq` and `run` |
+| `audit[].evidence.source` | `ledger` or `history` |
+| `audit[].detail` | `migration`, `text` (the silence, the override's rule and reason, the error, the repair's reason) and `wave` (on an `applied` entry a wave applied: the wave's `gate`, its set `digest`, and `status`, `approved` or `not-required`) |
+| `audit[].product_fields` | fields of an entry that no other field holds |
 | `gaps` | each gap |
 | `gaps[].environment` | the environment |
 | `gaps[].kind` | `history-row` or `approval` |
@@ -123,7 +130,7 @@ The schema is already applied when the record is written, so a record that canno
 | `auditFile` | with `--audit`: the file |
 | `auditFile.path` | the file as given |
 | `auditFile.appended` | how many entries were appended (0 with `--check`) |
-| `auditFile.missing` | the entries of the file the sources no longer give, shaped as `audit[]` |
+| `auditFile.missing` | the lines of the file the sources no longer give, shaped as `audit[]` |
 
 ## What proves it
 
