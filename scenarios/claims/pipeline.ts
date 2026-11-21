@@ -108,12 +108,15 @@ async function queryOn(ctx: Ctx, stage: Stage, sql: string): Promise<number> {
   }
 }
 
+/** An export name of its own per op, since chant folds every op file into one module. */
+const ident = (kind: string, env: string): string => kind + `-${env}`.replace(/[^A-Za-z0-9]+(.)?/g, (_m, c: string | undefined) => (c ? c.toUpperCase() : ""));
+
 const migrateOp = (env: string) => `import { Op, phase, gate, shell, stepOutput } from "@intentius/chant/op";
 
 const plan = shell("yodel apply ${env} --digest", { id: "plan" });
 const digest = stepOutput(plan, "stdout");
 
-export const op = Op({
+export const ${ident("migrate", env)} = Op({
   name: "migrate-${env}",
   overview: "Apply the pending migrations to ${env}",
   phases: [
@@ -122,6 +125,12 @@ export const op = Op({
     phase("Apply", [shell("yodel apply ${env} --execute", { env: { YODEL_APPROVED_PLAN: digest }, timeout: "2h" })]),
   ],
 });
+`;
+
+/** The environment's drift watch, which `yodel ci` requires beside its migrate op. The claim never runs it. */
+const watchOp = (env: string) => `import { WatchOp } from "@intentius/chant/op";
+
+export const { op: ${ident("watch", env)} } = WatchOp({ name: "watch-${env}", env: "${env}", schedule: "47 * * * *" });
 `;
 
 async function setup(ctx: Ctx, forge: ChecksForge): Promise<State> {
@@ -152,6 +161,7 @@ ${STAGES.map((s) => `      "${envs[s]}": ${profile(s)},`).join("\n")}
 `,
   );
   for (const s of STAGES) p.write(`ops/migrate-${envs[s]}.op.ts`, migrateOp(envs[s]));
+  for (const s of STAGES) p.write(`ops/watch-${envs[s]}.op.ts`, watchOp(envs[s]));
   // The cut takes a commit of origin/main: a bare origin each merge pushes main to.
   const origin = join(ctx.work, "origin.git");
   const bare = await run("git", ["init", "-q", "--bare", "-b", "main", origin], { cwd: ctx.work, env: p.envFor() });
