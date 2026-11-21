@@ -6,8 +6,10 @@
  * - `destructive`: a statement marked destructive (a table or column drop),
  *   or an Op step one of whose changes is.
  * - `pg-access`: a Postgres statement that takes access away (#45): a
- *   privilege revoked (SQLPG297), a policy dropped (SQLPG292), row-level
- *   security turned off or no longer forced (SQLPG293). A revoke on an
+ *   privilege revoked (SQLPG297, or a REVOKE that chant files under SQLPG296
+ *   beside a grant, or under SQLPG298 for default privileges), a policy
+ *   dropped (SQLPG292), row-level security turned off or no longer forced
+ *   (SQLPG293). A revoke on an
  *   object the same migration creates (`REVOKE EXECUTE ... FROM PUBLIC` on
  *   a new function) takes nothing from anyone and is left out.
  * - `ch-mutation`: a ClickHouse statement of class `rewrite`, or one that
@@ -44,7 +46,7 @@ import type { MigrationStep } from "@intentius/chant-lexicon-sql/migration-state
 import { CLASSIFIER_RULES } from "@intentius/chant-lexicon-sql/clickhouse/plan/rules";
 import { PG_CLASSIFIER_RULES } from "@intentius/chant-lexicon-sql/postgres/plan/rules";
 import { planStep, REBUILD_OP } from "../steps/kinds.js";
-import { takesAccessAway } from "../chant/access.js";
+import { revokesPrivilege, takesAccessAway } from "../chant/access.js";
 
 export type Dialect = "clickhouse" | "postgres";
 
@@ -126,7 +128,7 @@ export function createdObjects(steps: readonly MigrationStep[]): Set<string> {
 
 /** A REVOKE on an object `created` holds: nobody had the privilege before the migration. */
 function revokesOnNew(step: Extract<MigrationStep, { kind: "statement" }>, created: ReadonlySet<string> | undefined): boolean {
-  if (step.rule !== "SQLPG297" || !created || created.size === 0) return false;
+  if (!created || created.size === 0 || !revokesPrivilege(step)) return false;
   const on = REVOKE_ON.exec(step.sql)?.[1];
   return on !== undefined && on.split(",").every((n) => created.has(n.replace(/\s+/g, "")));
 }

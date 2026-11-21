@@ -72,7 +72,7 @@ export function changeFindings(dialect: SqlDialect, changes: readonly Classified
     if (dialect === "clickhouse" && c.class === "rewrite") out.push({ rule: "ch-mutation", ...at, message: `${what}: a mutation that rewrites existing parts in the background, with no rollback` });
     if (dialect === "clickhouse" && c.class === "rebuild") out.push({ rule: "ch-rebuild", ...at, message: `${what}: a rebuild, every row copied into a new table and swapped in (ClickHouseRebuildOp)` });
     if (dialect === "postgres" && c.class === "rewrite") out.push({ rule: "pg-rewrite", ...at, message: `${what}: blocks reads and writes on the table while it runs` });
-    const away = takesAccessAway({ rule: c.rule });
+    const away = takesAccessAway({ rule: c.rule, before: c.before, after: c.after });
     if (away) out.push({ rule: dialect === "clickhouse" ? "ch-access" : "pg-access", ...at, message: `${what}: ${away}, which changes what a ${dialect === "clickhouse" ? "user or role" : "role"} can do` });
     if (isRefused.has(`${c.object}\u0000${c.field}\u0000${c.rule}`)) {
       out.push({ rule: "refused-step", ...at, message: `${what}: yodel apply refuses it in place; it needs its own Op (${dialect === "clickhouse" ? "ClickHouseRebuildOp" : "PostgresMigrationOp"}), or a versioned migration that runs one` });
