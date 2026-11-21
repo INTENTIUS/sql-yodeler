@@ -130,6 +130,7 @@ async function check(args: string[], io: Io): Promise<number> {
   }
   const { values, positionals } = parsed;
   const project = await loadProject(typeof values.dir === "string" ? values.dir : process.cwd());
+  for (const w of project.yodel?.warnings ?? []) io.err(`yodel config: ${CONFIG_FILE}: ${w}\n`);
   const names = positionals.length > 0 ? positionals : Object.keys(project.config.sql?.profiles ?? {});
   const views: EnvView[] = [];
   for (const name of names) {

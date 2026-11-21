@@ -9,13 +9,18 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, RESPOND_REBASE, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, RESPOND_REBASE, RESPOND_WAVE_REFUSED, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
 import { checksProblem } from "../migrations/checks.js";
 import { MIGRATION_NAME } from "../migrations/directory.js";
 import { loginProblem } from "../ci/login.js";
+import { describeProblem, readVocabulary, vocabularyProblems } from "./vocabulary.js";
+import { pipelineConfigProblem } from "../ci/pipeline.js";
+
+/** The keys of `ci` that set chant's pipeline stages (#384). */
+const PIPELINE_CI_KEYS = ["promotion", "environments", "approvalRules", "risk", "configSets", "release", "recheck"];
 
 export const CONFIG_FILE = "yodel.config.ts";
 
@@ -194,8 +199,17 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond?, evidence?, refGate? }`);
-  for (const k of Object.keys(value)) if (!["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond", "evidence", "refGate"].includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected forges, jobs, image, resume, login, apply, tools, new, respond, evidence, refGate)`);
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond?, agent?, evidence?, refGate?, promotion?, environments?, approvalRules?, risk?, configSets?, release?, recheck? }`);
+  const keys = ["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond", "agent", "evidence", "refGate", ...PIPELINE_CI_KEYS];
+  for (const k of Object.keys(value)) if (!keys.includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected ${keys.join(", ")})`);
+  if (value.apply === false && value.promotion !== undefined) throw new YodelError(`${where}.promotion: the pipeline's first stage is the apply pipeline's wave, which ci.apply: false leaves out; remove ci.promotion, or ci.apply`);
+  if (value.risk !== undefined) {
+    const r = value.risk;
+    const score = (v: unknown) => v === undefined || (typeof v === "number" && v >= 0 && v <= 1);
+    if (!isRecord(r) || !Object.keys(r).every((k) => k === "approveAbove" || k === "questions") || !score(r.approveAbove) || (r.questions !== undefined && !Array.isArray(r.questions))) {
+      throw new YodelError(`${where}.risk: { approveAbove?: a score from 0 to 1, questions?: [{ id, text, weight, approveAbove? }] }`);
+    }
+  }
   if (value.evidence !== undefined) {
     const e = value.evidence;
     if (!isRecord(e) || !Object.keys(e).every((k) => ["runnerKeySecret", "identity", "audience"].includes(k))) throw new YodelError(`${where}.evidence: expected { runnerKeySecret } or { identity: "oidc", audience? }`);
@@ -208,9 +222,23 @@ function checkCi(value: unknown, where: string): void {
   if (value.refGate === true && value.evidence === undefined) throw new YodelError(`${where}.refGate: the ref gate needs signed checks, and ci.evidence names no runner identity; set ci.evidence first`);
   if (value.respond !== undefined) {
     const r = value.respond;
-    if (!isRecord(r) || !Object.keys(r).every((k) => k === "new" || k === "rebase")) throw new YodelError(`${where}.respond: expected { new?, rebase? }`);
+    if (!isRecord(r) || !Object.keys(r).every((k) => k === "new" || k === "rebase" || k === "wave-refused")) throw new YodelError(`${where}.respond: expected { new?, rebase?, "wave-refused"? }`);
     if (r.new !== undefined && !(RESPOND_NEW as readonly unknown[]).includes(r.new)) throw new YodelError(`${where}.respond.new: one of ${RESPOND_NEW.join(", ")}`);
     if (r.rebase !== undefined && !(RESPOND_REBASE as readonly unknown[]).includes(r.rebase)) throw new YodelError(`${where}.respond.rebase: one of ${RESPOND_REBASE.join(", ")}`);
+    if (r["wave-refused"] !== undefined && !(RESPOND_WAVE_REFUSED as readonly unknown[]).includes(r["wave-refused"])) throw new YodelError(`${where}.respond.wave-refused: one of ${RESPOND_WAVE_REFUSED.join(", ")} `);
+  }
+  if (value.agent !== undefined) {
+    const a = value.agent;
+    if (!isRecord(a) || !Object.keys(a).every((k) => k === "wave-refused")) throw new YodelError(`${where}.agent: expected { "wave-refused"? }`);
+    const s = a["wave-refused"];
+    if (s !== undefined) {
+      const fields = ["command", "key_secret", "timeout", "max_runs", "max_cost_usd"];
+      if (!isRecord(s) || !Object.keys(s).every((k) => fields.includes(k))) throw new YodelError(`${where}.agent.wave-refused: expected { ${fields.join("?, ")}? }`);
+      for (const k of ["command", "key_secret"]) if (s[k] !== undefined && typeof s[k] !== "string") throw new YodelError(`${where}.agent.wave-refused.${k}: a string`);
+      for (const k of ["timeout", "max_runs", "max_cost_usd"]) if (s[k] !== undefined && (typeof s[k] !== "number" || !(s[k] > 0))) throw new YodelError(`${where}.agent.wave-refused.${k}: a number above 0`);
+      const mode = isRecord(value.respond) ? value.respond["wave-refused"] : undefined;
+      if (mode !== "summary") throw new YodelError(`${where}.agent.wave-refused: read with ci.respond.wave-refused set to "summary"`);
+    }
   }
   if (value.new !== undefined) {
     const n = value.new;
@@ -260,6 +288,20 @@ function checkCheck(value: unknown, where: string, profiles?: readonly string[])
  * error, so a typo does not silently leave an environment on the defaults.
  */
 export function checkYodelConfig(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
+  return checkVocabulary(value, path, profiles).config;
+}
+
+/** {@link checkYodelConfig}, with the warnings chant's vocabulary check has for the file's older spellings. */
+export function checkVocabulary(raw: unknown, path: string, profiles?: readonly string[]): { config: YodelConfig; warnings: string[] } {
+  const problems = vocabularyProblems(raw);
+  const value = isRecord(raw) ? readVocabulary(raw, path) : raw;
+  const config = checkShape(value, path, profiles);
+  const error = problems.find((p) => p.level === "error");
+  if (error) throw new YodelError(`${path}: ${describeProblem(error)}`);
+  return { config, warnings: problems.filter((p) => p.level === "warning").map(describeProblem) };
+}
+
+function checkShape(value: unknown, path: string, profiles?: readonly string[]): YodelConfig {
   if (!isRecord(value)) throw new YodelError(`${path}: the default export must be a config object (export default defineConfig({ ... }))`);
   for (const k of Object.keys(value)) {
     if (!["environments", "lint", "policy", "notify", "sources", "waves", "ci", "check"].includes(k)) throw new YodelError(`${path}: unknown setting ${k} (expected environments, lint, policy, notify, sources, waves, ci, check)`);
@@ -273,6 +315,12 @@ export function checkYodelConfig(value: unknown, path: string, profiles?: readon
   }
   if (value.policy !== undefined) checkPolicy(value.policy, `${path}: policy`, profiles);
   if (value.waves !== undefined) checkWaves(value.waves, `${path}: waves`, profiles);
+  if (isRecord(value.ci)) {
+    // The stages (#384): the waves' environments, in their order; without waves, every profile but replay.
+    const waveEnvs = Array.isArray(value.waves) ? value.waves.map((w) => String((w as { env?: unknown }).env)) : profiles?.filter((p) => p !== "replay");
+    const problem = pipelineConfigProblem(value.ci, waveEnvs, `${path}: ci`);
+    if (problem) throw new YodelError(problem);
+  }
   if (isRecord(value.ci) && value.ci.apply === false && Array.isArray(value.waves)) {
     const i = value.waves.findIndex((w) => isRecord(w) && w.approval === "pr-review");
     if (i >= 0) {
@@ -295,7 +343,7 @@ export function checkYodelConfig(value: unknown, path: string, profiles?: readon
 }
 
 /** Loads `<dir>/yodel.config.ts`, or `undefined` when there is none. */
-export async function loadYodelConfig(dir: string, profiles?: readonly string[]): Promise<{ path: string; config: YodelConfig } | undefined> {
+export async function loadYodelConfig(dir: string, profiles?: readonly string[]): Promise<{ path: string; config: YodelConfig; warnings: string[] } | undefined> {
   const path = join(dir, CONFIG_FILE);
   if (!existsSync(path)) return undefined;
   let mod: { default?: unknown };
@@ -306,5 +354,6 @@ export async function loadYodelConfig(dir: string, profiles?: readonly string[])
   } catch (e) {
     throw new YodelError(`${path}: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { path, config: checkYodelConfig(mod.default, path, profiles) };
+  const { config, warnings } = checkVocabulary(mod.default, path, profiles);
+  return { path, config, warnings };
 }

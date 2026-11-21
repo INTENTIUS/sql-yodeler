@@ -17,13 +17,15 @@ A prod apply waiting for approval, a run refused because the plan moved or a pol
 export default defineConfig({
   notify: {
     webhook: "YODEL_WEBHOOK_URL", // the variable holding the webhook's URL
-    key: "YODEL_WEBHOOK_KEY",     // the variable holding the signing key
+    webhookKey: "YODEL_WEBHOOK_KEY", // the variable holding the signing key
     slack: "SLACK_WEBHOOK_URL",   // optional: a Slack incoming webhook
     teams: "TEAMS_WEBHOOK_URL",   // optional: a Microsoft Teams (Workflows) incoming webhook
     events: ["waiting", "refused", "failed", "drift"], // optional: default all four
   },
 });
 ```
+
+`webhookKey` was spelled `key` before chant's product vocabulary named it, and `relayKey` (the variable holding the key the relay checks Approve and Decline with) was `relay`; both earlier spellings are still read ([Spellings yodel.config.ts accepts](configuration.md#spellings-yodelconfigts-accepts)).
 
 Give the jobs that run `yodel apply`, `yodel plan` and the watch's `yodel drift` those variables, from the forge's secrets. A webhook needs its key: when the key variable is not set, yodel sends nothing to the webhook rather than an unsigned event.
 

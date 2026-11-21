@@ -10,7 +10,8 @@ Working in the INTENTIUS workspace, `../agents/shared.md` applies too. This file
 
 ## chant
 
-- `@intentius/chant` and `@intentius/chant-lexicon-sql` come from npm, never a `file:` or workspace link.
+- chant and its lexicons come from npm at an exact version in `package.json` (no `^` range), and both templates pin the same chant and sql lexicon; `npm run templates:render` writes them. Never a `file:` or workspace link.
+- One exception, for testing: `just chant-local <chant-dir>` builds against a packed local chant through `chant dev local`, and `just chant-local --reset` goes back to the pin. Never commit from a local build; run `--reset` first. The other rules hold: there is no floor constant (`src/chant-floor.ts` reports the installed chant), and `templates:render` refuses a chant npm does not serve, so templates are never rendered against the packed build.
 - A CI feature goes in chant CI core first, then chant's sql lexicon, and in SQL Yodeler only for a reason that belongs to its audience. The migration engine stays here and chant runs it ([CONTRIBUTING.md, Where a feature goes](CONTRIBUTING.md#where-a-feature-goes)).
 
 ## Templates

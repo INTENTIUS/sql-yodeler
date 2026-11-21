@@ -182,7 +182,7 @@ describe("yodel ci renders /yodel new through chant's commit job (#312)", () => 
     expect(checkYodelConfig({ ci: { respond: { rebase: "on-fork" } } }, "yodel.config.ts").ci).toEqual({ respond: { rebase: "on-fork" } });
     expect(() => checkYodelConfig({ ci: { respond: { rebase: "on-change" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.rebase: one of off, comment, on-fork/);
     expect(() => checkYodelConfig({ ci: { respond: { new: "always" } } }, "yodel.config.ts")).toThrow(/ci\.respond\.new: one of off, comment, on-change/);
-    expect(() => checkYodelConfig({ ci: { respond: { merge: "comment" } } }, "yodel.config.ts")).toThrow(/ci\.respond: expected \{ new\?, rebase\? \}/);
+    expect(() => checkYodelConfig({ ci: { respond: { merge: "comment" } } }, "yodel.config.ts")).toThrow(/ci\.respond: expected \{ new\?, rebase\?, "wave-refused"\? \}/);
   });
 });
 

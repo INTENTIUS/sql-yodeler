@@ -63,6 +63,7 @@ scenarios/claims/resume/               resume
 scenarios/claims/clickhouse.ts         clickhouse
 scenarios/claims/clickhouse/           clickhouse
 scenarios/claims/waves.ts              waves
+scenarios/claims/pipeline.ts           pipeline
 scenarios/claims/forge.ts              forge
 
 # The forge the forge claim runs on, and its template body.
@@ -71,8 +72,10 @@ scenarios/forges/                      forge
 
 # The starter templates: only the forge claim makes a project from them.
 # yodel ci renders their pipelines, and the waves claim renders its pipeline with it.
-src/ci/                                waves forge
-src/commands/ci.ts                     forge
+src/ci/pipeline.ts                     waves forge pipeline
+src/ci/                                waves forge pipeline
+src/commands/ci.ts                     forge pipeline
+src/commands/stages.ts                 pipeline
 templates/                             forge
 
 # yodel init, and what --from adopts with.

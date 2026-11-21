@@ -80,12 +80,14 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiAgentWaveRefused, type CiConfig, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type RespondWaveRefused, type WaveGate, type YodelConfig } from "../config/define.js";
+import type { EnvironmentSets } from "@intentius/chant/components";
+import { environmentSetsOf, firstStageSpec, laterStages, pipelineDeclaration, pipelineOn, pipelineText, PIPELINE_TS, type StageWave } from "./pipeline.js";
 import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
 import { stepHooks } from "../apply-steps/index.js";
 import type { OpWaveHooks } from "@intentius/chant/op";
 import type { OpWaveJobInputs, OpWaveRunStep, OpWavesPipelineOptions, OpWavesRecordPlansInputs } from "@intentius/chant/lexicon";
-import { CLOUD_OF, forgejoLoginSpec, jobLogins, loginSteps, tradeIdTokens, tradeSpec, type Login } from "./login.js";
+import { CLOUD_OF, forgejoLoginLines, forgejoLoginSpec, jobLogins, loginSteps, tradeIdTokens, tradeSpec, type Login } from "./login.js";
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
@@ -126,7 +128,7 @@ import { emitGitlabFile } from "@intentius/chant-lexicon-gitlab/components/ci-jo
 import type { ProductPlanTarget } from "@intentius/chant/components/product-plan";
 import type { ScheduledWatch } from "@intentius/chant/op/schedule-overdue";
 import { parseYAML } from "@intentius/chant/yaml";
-import { chantProduct, WAVE_WORDS, YODEL_NOTE_MARKER, YODEL_PR_ENV, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
+import { chantProduct, PIPELINE_WORDS, WAVE_WORDS, YODEL_NOTE_MARKER, YODEL_PR_ENV, YODEL_WORDS, type ChantProduct, type ProductWaveJob } from "../ci-words.js";
 import { SUBJECT_PART_WORDS } from "../pr/note.js";
 
 export type Forge = "github" | "gitlab" | "forgejo";
@@ -234,6 +236,18 @@ export interface Environments {
   respondNew?: RespondNew;
   /** yodel.config.ts `ci.respond.rebase` (#313): what answers `/yodel rebase`. Default `comment`, or `off` when a reader's password is cloud-minted. */
   respondRebase?: RespondRebase;
+  /** yodel.config.ts `ci.respond.wave-refused`: whether a wave that applied nothing posts chant's diff of the plan. Unset, the spec says nothing and chant's default answers. */
+  respondWaveRefused?: RespondWaveRefused;
+  /** yodel.config.ts `ci.agent["wave-refused"]`: the model run of `respond.wave-refused: "summary"`. */
+  agentWaveRefused?: CiAgentWaveRefused;
+  /**
+   * yodel.config.ts `ci` with `ci.promotion` set (#384): the environments are
+   * stages of chant's pipeline, `.chant/pipeline.ts` is written from it, the
+   * merge applies the first stage and the promote jobs the rest.
+   */
+  pipeline?: CiConfig;
+  /** chant's environment sets from `ci.environments.<env>` and `ci.configSets` (#384): each wave job and promote job gets its stage's set. */
+  environmentSets?: EnvironmentSets;
 }
 
 /** yodel's checks and the project's tools as check-hook presets for `forge` (#294). */
@@ -801,6 +815,8 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   const plan = gitlabPlan(envs_);
   for (const [name, job] of Object.entries(ownJobs<Declarable>(own?.gitlab, { ...Object.fromEntries(jobs), ...Object.fromEntries(plan.jobs.map((j) => [j, true])) }, "gitlab"))) jobs.set(name, job);
   const apply = rendersApply(envs_);
+  // In chant's pipeline (#384) a later stage's writer is held by its promote job.
+  const promotedHere = (env: string): boolean => (envs_.pipeline?.promotion ?? []).slice(1).includes(env);
   const variables = envs.flatMap((env) => {
     const creds = envs_.credentials?.[env];
     // With ci.apply: false no job holds a writer, so no writer variable is set.
@@ -809,7 +825,7 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
       `#   ${readerVariables(env, dialect, creds).join(", ")}: not protected (merge request`,
       "#     pipelines run on unprotected branches), masked; no environment scope.",
       ...(writer.length > 0
-        ? [`#   ${writer.join(", ")}: protected, masked,`, `#     environment scope "${env}": only ${env}'s wave job declares that environment.`]
+        ? [`#   ${writer.join(", ")}: protected, masked,`, `#     environment scope "${env}": only ${env}'s ${promotedHere(env) ? "promote" : "wave"} job declares that environment.`]
         : []),
     ];
   });
@@ -826,6 +842,9 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
     ...(apply
       ? [`# A push to the default branch: the apply waves, one stage each, in ${GITLAB_APPLY_FILE}.`]
       : ["# No apply pipeline (yodel.config.ts ci.apply: false): migrations are applied outside CI."]),
+    ...(apply && envs_.pipeline?.promotion && envs_.pipeline.promotion.length > 1
+      ? [`# The stages after ${envs_.pipeline.promotion[0] ?? ""} take the release the merge cut, in ${GITLAB_PROMOTE_FILE}.`]
+      : []),
     `# The drift watches are in ${GITLAB_WATCH_FILE} (stage ops).`,
     ...(respondsNew(envs_) ? [`# /yodel new, chant's commit job, is in ${GITLAB_COMMIT_FILES.new} (stage ops).`] : []),
     ...(rebaseRespond(envs_) !== "off" ? [`# /yodel rebase, after the merge request's check, is in ${GITLAB_COMMIT_FILES.rebase} (stage ops).`] : []),
@@ -859,11 +878,15 @@ export function gitlabPipeline(envs_: Environments): RenderedFile {
   // A pr-review wave (#48) adds the merge request job that records the plans, in chant's stage "plans".
   const jobStages = [...jobs.values()].map((job) => (job as { props?: { stage?: unknown } }).props?.stage).filter((stage) => typeof stage === "string");
   // ci.apply: false (#175): no apply file, so neither its include nor its stages.
-  const plans = apply && waves.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
-  const applyStages = apply ? [...plans, ...waveStages(waves), ...(envs_.resume ? [RESUME_STAGE] : [])] : [];
+  // chant's pipeline (#384): the merge applies the first stage's wave, and the promote file takes the rest.
+  const staged = envs_.pipeline?.promotion;
+  const merged = staged ? waves.filter((w) => w.env === staged[0]) : waves;
+  const promotes = apply && staged !== undefined && staged.length > 1;
+  const plans = apply && merged.some((w) => w.approval === "pr-review") ? [PLANS_STAGE] : [];
+  const applyStages = apply ? [...plans, ...waveStages(merged), ...(envs_.resume ? [RESUME_STAGE] : []), ...(promotes ? [PROMOTE_STAGE] : [])] : [];
   const pipeline = new GitLabPipeline({
     comment: asComment(header),
-    include: [{ local: GITLAB_PLAN_FILE }, ...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILES.new }] : []), ...(rebaseRespond(envs_) !== "off" ? [{ local: GITLAB_COMMIT_FILES.rebase }] : [])],
+    include: [{ local: GITLAB_PLAN_FILE }, ...(apply ? [{ local: GITLAB_APPLY_FILE }] : []), ...(promotes ? [{ local: GITLAB_PROMOTE_FILE }] : []), { local: GITLAB_WATCH_FILE }, ...(respondsNew(envs_) ? [{ local: GITLAB_COMMIT_FILES.new }] : []), ...(rebaseRespond(envs_) !== "off" ? [{ local: GITLAB_COMMIT_FILES.rebase }] : [])],
     // The plan file's stages (chant's plan and plan-note) right after review.
     stages: [...new Set(["review", ...plan.stages, ...jobStages, ...applyStages, "ops"])],
     variables: { GIT_DEPTH: "0" },
@@ -949,6 +972,10 @@ interface WavesSpec {
     idTokens?: Record<string, string>;
     hooks?: OpWaveHooks;
   }>;
+  /** The responses a wave job posts (chant's `respond`): `wave-refused` as `ci.respond.wave-refused` sets it; absent when the project leaves it unset, so the rendered files are as before. */
+  respond?: { "wave-refused": RespondWaveRefused };
+  /** chant's `waveSummary`, the model run of `wave-refused: summary`: `ci.agent["wave-refused"]` mapped onto chant's field names. Present with that mode only. */
+  waveSummary?: { command?: string; keyEnv?: string; timeout?: number; maxRuns?: number; maxCostUsd?: number };
   /** The scheduled resume job (yodel.config.ts `ci.resume`); only the pipelines are rendered from it, the spec file leaves it out. */
   resume?: { schedule: string };
 }
@@ -957,6 +984,17 @@ interface WavesSpec {
 export interface WaveJobSettings {
   variables: Record<string, string>;
   idTokens?: Record<string, string>;
+}
+
+/** `ci.agent["wave-refused"]` as chant's `WaveSummarySpec`: chant's mechanism, so the keys are only renamed. */
+function waveSummaryOf(s: CiAgentWaveRefused): NonNullable<WavesSpec["waveSummary"]> {
+  return {
+    ...(s.command !== undefined ? { command: s.command } : {}),
+    ...(s.key_secret !== undefined ? { keyEnv: s.key_secret } : {}),
+    ...(s.timeout !== undefined ? { timeout: s.timeout } : {}),
+    ...(s.max_runs !== undefined ? { maxRuns: s.max_runs } : {}),
+    ...(s.max_cost_usd !== undefined ? { maxCostUsd: s.max_cost_usd } : {}),
+  };
 }
 
 /**
@@ -980,7 +1018,7 @@ export interface WaveJobSettings {
  * the base commit, as it does run by hand. A step runs once, under the
  * lock, as #107 asks.
  */
-export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }): WavesSpec {
+export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJobSettings, resume?: { schedule: string }, waveRefused?: RespondWaveRefused, summary?: CiAgentWaveRefused): WavesSpec {
   const first = waves[0];
   if (!first) throw new Error("no waves to render");
   return {
@@ -1000,6 +1038,8 @@ export function wavesSpec(waves: readonly Wave[], job?: (env: string) => WaveJob
       // The steps around apply (#64) as chant's stage hooks, which the apply runs under its lock (#206).
       ...hooksOf(w.steps),
     })),
+    ...(waveRefused ? { respond: { "wave-refused": waveRefused } } : {}),
+    ...(waveRefused === "summary" && summary ? { waveSummary: waveSummaryOf(summary) } : {}),
     ...(resume ? { resume } : {}),
   };
 }
@@ -1041,13 +1081,19 @@ function jobLogin(forge: Forge, envs: Pick<Environments, "credentials" | "login"
  * variables and OIDC tokens in the spec.
  */
 export async function applyPipelines(dir: string, envs: Environments, product: ChantProduct): Promise<RenderedFile[]> {
-  const { dialect, waves } = envs;
+  const { dialect } = envs;
   const tc = toolchainOf(envs);
   const { generateOpWavesPipeline } = (await import("@intentius/chant/op")) as unknown as {
     generateOpWavesPipeline: (spec: unknown, lexicon: string, options: OpWavesPipelineOptions, cwd: string) => Promise<{ success: boolean; files?: Array<{ name: string; yaml: string }>; error?: string }>;
   };
   const named = (forge: Forge, spec: WavesSpec) => productWaves(product, forge, spec);
-  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(named("github", wavesSpec(waves)).spec, null, 2)}\n` }];
+  const plain = named("github", wavesSpec(envs.waves, undefined, undefined, envs.respondWaveRefused, envs.agentWaveRefused)).spec;
+  // chant's pipeline (#384): the spec the merge applies is the first stage's, from the folded .chant/pipeline.ts.
+  const staged = envs.pipeline ? await stagedWaves(envs.pipeline, plain) : undefined;
+  const first = staged?.spec.waves[0]?.name;
+  // The waves the merge applies: every one, or in a pipeline the first stage's.
+  const waves = first === undefined ? envs.waves : envs.waves.filter((w) => w.env === first);
+  const out: RenderedFile[] = [{ path: WAVES_SPEC, content: `${JSON.stringify(staged?.spec ?? plain, null, 2)}\n` }, ...(staged ? [{ path: PIPELINE_TS, content: staged.text }] : [])];
   // A GitLab job already has the project's variables, a writer's only under its environment.
   const jobOf = (forge: Forge) => (env: string): WaveJobSettings => {
     const wave = waves.find((w) => w.env === env);
@@ -1136,17 +1182,21 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
     "# holds no writer's credentials: it plans with each environment's reader.",
   ];
   for (const forge of FORGES) {
-    const { spec, jobs } = named(forge, wavesSpec(waves, jobOf(forge), envs.resume));
+    const { spec, jobs } = named(forge, staged ? withJobs(staged.spec, jobOf(forge), envs.resume) : wavesSpec(waves, jobOf(forge), envs.resume, envs.respondWaveRefused, envs.agentWaveRefused));
     const result = await generateOpWavesPipeline(
       spec,
       forge,
       {
+        // Each wave job gets its environment's set of config and secrets (#384, chant's environment sets).
+        ...(envs.environmentSets ? { environmentSets: envs.environmentSets } : {}),
         specFile: WAVES_SPEC,
         bin: YODEL_WORDS.bin,
         image: tc.image,
         beforeScript: [...installLines(tc, forge), fetchApprovals(tc)],
         waveJobs: waveJobs(forge),
         recordPlans: recordPlans(forge),
+        // A refused wave's diff is posted with the job's token: pull request comments, and the tracking issue a wave with no pull request uses. GitLab's jobs read CHANT_FORGE_TOKEN.
+        ...((envs.respondWaveRefused === "diff" || envs.respondWaveRefused === "summary") && forge !== "gitlab" ? { commandToken: { permissions: { "pull-requests": "write" as const, issues: "write" as const } } } : {}),
         // Signed checks (sql-yodeler issue 346): each deciding wave signs plan:<wave> and policy:<wave>; on GitLab its <wave job>-evidence job, in chant-evidence.
         ...(envs.evidence ? { evidence: envs.evidence } : {}),
         ...(forge === "gitlab" ? { opsFileName: GITLAB_APPLY_FILE } : {}),
@@ -1162,8 +1212,167 @@ export async function applyPipelines(dir: string, envs: Environments, product: C
       else if (forge !== "gitlab" && file.name === `${APPLY_PIPELINE}-plans.yml`) out.push({ path: at, content: withHeader(plansHeader, yaml) });
       else out.push({ path: at, content: withHeader([...header, ...identityHeader(forge, waveClouds)], withWaveLines(forge, yaml, jobs)) });
     }
+    if (envs.pipeline) out.push(...(await promoteFiles(forge, envs)));
   }
   return out;
+}
+
+/** `.chant/pipeline.ts` from yodel.config.ts, and the first stage's spec from the folded file: what the merge applies (#384). */
+async function stagedWaves(ci: CiConfig, plain: WavesSpec): Promise<{ text: string; spec: WavesSpec }> {
+  const spec = Object.fromEntries(Object.entries(plain).filter(([k]) => k !== "resume")) as unknown as { name: string; waves: StageWave[] };
+  const declaration = await pipelineDeclaration({ name: APPLY_PIPELINE, ci, spec, bin: YODEL_WORDS.bin.split(" ") });
+  const text = await pipelineText(declaration);
+  return { text, spec: (await firstStageSpec(text, APPLY_PIPELINE)) as unknown as WavesSpec };
+}
+
+/** The first stage's spec with each wave's forge settings, as {@link wavesSpec} adds them with a `job`. */
+function withJobs(spec: WavesSpec, job: (env: string) => WaveJobSettings, resume: { schedule: string } | undefined): WavesSpec {
+  return { ...spec, waves: spec.waves.map((w) => ({ ...w, environment: { name: w.name }, ...job(w.name) })), ...(resume ? { resume } : {}) };
+}
+
+/** The reject comment workflow's job (#384). */
+export const REJECT_JOB = "reject";
+
+/**
+ * `/yodel reject [--stage <env>] <reason>` on a pull request (#384), on
+ * GitHub and Forgejo: chant's comment job (`components pr-comment`) under the
+ * words that map `reject` onto chant's reject, which records a rejection of
+ * the release a stage's gate waits on when the stage's approval mode takes
+ * the author's forge identity, and otherwise replies with the `yodel reject`
+ * line to run with `--sign`. It reads `.chant/pipeline.ts` at the default
+ * branch. On GitLab a person runs `yodel reject` at a terminal.
+ */
+async function rejectCommentFiles(envs: Environments): Promise<RenderedFile[]> {
+  if (!envs.pipeline || laterStages(envs.pipeline).length === 0 || !rendersApply(envs)) return [];
+  const product = await chantProduct();
+  const { productCommentJob } = (await import("@intentius/chant/ci-product")) as unknown as {
+    productCommentJob: (forge: Forge, words: unknown, jobs: Record<string, unknown>, jobName?: string) => { command: string; env: Record<string, string>; prefixes: string[] };
+  };
+  const words = product.assertProductWords(PIPELINE_WORDS);
+  const tc = toolchainOf(envs);
+  const header = [
+    ...HEADER,
+    "#",
+    "# A comment /yodel reject [--stage <env>] <reason> on a pull request: chant's",
+    "# comment job records a rejection of the release the stage's gate waits on,",
+    "# under the author's forge identity, where the stage's approval mode takes it;",
+    "# otherwise it replies with the yodel reject line to run with --sign. It reads",
+    "# .chant/pipeline.ts at the default branch and pushes chant/lifecycle.",
+  ];
+  return (["github", "forgejo"] as const).map((forge) => {
+    const job = productCommentJob(forge, words, { commits: true }, REJECT_JOB);
+    const container = inContainer(forge, tc);
+    const workflow = new ActionsWorkflow({
+      comment: asComment(header),
+      name: "yodel-reject",
+      on: { issue_comment: { types: ["created"] } },
+      permissions: new Permissions({ contents: "write", "pull-requests": "write", issues: "write" }),
+      jobs: {
+        [REJECT_JOB]: new ActionsJob({
+          ...runner(container, tc),
+          if: "${{ github.event.issue.pull_request && startsWith(github.event.comment.body, '/yodel reject') }}",
+          steps: [...setupSteps(container, tc), new Step({ name: "/yodel reject (chant components pr-comment)", env: job.env, run: job.command })],
+        }),
+      },
+    });
+    return { path: `${forge === "github" ? ".github" : ".forgejo"}/workflows/yodel-reject.yml`, content: renderActions(forge, workflow) };
+  });
+}
+
+/** Where the promote jobs go on GitLab: their own file, which `.gitlab-ci.yml` includes. */
+export const GITLAB_PROMOTE_FILE = `.gitlab/${APPLY_PIPELINE}-promote.gitlab-ci.yml`;
+
+/** The stage chant's GitLab promote jobs run in: they name none, so GitLab's default. */
+export const PROMOTE_STAGE = "test";
+
+/**
+ * The promote jobs of the stages after the first (#384), from the forge
+ * lexicon's `generatePipelinePromote`: one job per stage, started by hand
+ * with the release, running `yodel chant components promote --to <env>
+ * --release <release>`. Each holds its environment's writer, as that
+ * environment's wave job did, the reader of the environment it requires,
+ * and its stage's set of config and secrets. It runs in the image the wave
+ * jobs run in, with their install lines (chant's `image` and
+ * `beforeScript`), and logs in to its cloud as that environment's wave job
+ * does (#132): chant's trade from `ci.login` on GitHub and GitLab, as the
+ * stage's `cloud`, the forge's OIDC token for a cloud-minted role with no
+ * `ci.login` entry, as the stage's `idTokens`, and on Forgejo chant's login
+ * from the runner's token files, in the promote's own step. chant's
+ * generator checks out the default branch with its full history, which
+ * holds each release's commit.
+ */
+async function promoteFiles(forge: Forge, envs: Environments): Promise<RenderedFile[]> {
+  const ci = envs.pipeline;
+  if (!ci) return [];
+  const later = laterStages(ci);
+  if (later.length === 0) return [];
+  type Promote = (input: import("@intentius/chant/lexicon").PipelinePromoteInput) => Array<{ name: string; yaml: string }>;
+  const generate: Promote =
+    forge === "github"
+      ? (await import("@intentius/chant-lexicon-github/components/generate-pipeline-promote")).generateGithubPipelinePromote
+      : forge === "gitlab"
+        ? (await import("@intentius/chant-lexicon-gitlab/components/generate-pipeline-promote")).generateGitlabPipelinePromote
+        : (await import("@intentius/chant-lexicon-forgejo/components/generate-pipeline-promote")).generateForgejoPipelinePromote;
+  const { resolveEnvironmentSet, environmentSetJobInputs } = await import("@intentius/chant/components");
+  const { environmentSetForgeVariables } = await import("@intentius/chant/op/op-waves-environment-sets");
+  const tc = toolchainOf(envs);
+  const stages = later.map((env) => {
+    const required = envs.waves.find((w) => w.env === env)?.requires;
+    const set = envs.environmentSets ? resolveEnvironmentSet(envs.environmentSets, env) : undefined;
+    // The roles the stage's wave job held, and its cloud login from ci.login (#132).
+    const held = waveRoles(envs.waves, env);
+    const logins = loginsOf(envs, held);
+    // A cloud-minted role with no ci.login reads the forge's OIDC token itself, as in the wave job: the token goes on the promote job (chant's idTokens). Forgejo issues none.
+    const bare = forge === "forgejo" ? [] : cloudsOf(envs, held).filter((c) => !logins.some((l) => l.cloud === CLOUD_OF[c]));
+    const tokens = bare.length > 0 ? { idTokens: Object.fromEntries(bare.map((c) => [ID_TOKENS[c].variable, ID_TOKENS[c].aud])) } : {};
+    const cloud = forge !== "forgejo" && logins.length > 0 ? { cloud: tradeSpec(logins) } : {};
+    // Forgejo: the runner's token files, logged in within the promote's step, so the command has the variables.
+    const login = forge === "forgejo" ? forgejoLoginLines(logins) : [];
+    // The ledger fetched as every job that reads an approval does, then the set's store secrets.
+    const setup = [...login, fetchApprovals(tc), ...(set ? environmentSetJobInputs(set, forge).setup : [])];
+    return {
+      name: env,
+      environment: { name: env },
+      ...cloud,
+      ...tokens,
+      variables: {
+        YODEL_CREDENTIALS: `writer:${env}`,
+        ...(forge === "gitlab"
+          ? {}
+          : {
+              ...secrets([...writerVariables(env, envs.dialect, envs.credentials?.[env]), ...WEBHOOK_VARIABLES]),
+              ...secrets(readerVariables(env, envs.dialect, envs.credentials?.[env])),
+              ...(required ? secrets(readerVariables(required, envs.dialect, envs.credentials?.[required])) : {}),
+            }),
+        ...(set ? environmentSetForgeVariables(set, forge) : {}),
+      },
+      setup,
+    };
+  });
+  // yodel's image and install lines, as the wave jobs take them (chant's image and beforeScript). The promote's
+  // command runs in the same shell as its install, on every forge, so the bins go on PATH with an export.
+  const install = installLines(tc, "gitlab");
+  const files = generate({
+    pipeline: APPLY_PIPELINE,
+    stages,
+    bin: YODEL_WORDS.bin,
+    image: tc.image,
+    ...(install.length > 0 ? { beforeScript: install } : {}),
+    ...(ci.recheck ? { recheck: { schedule: ci.recheck.schedule } } : {}),
+  });
+  const header = [
+    ...HEADER,
+    "#",
+    `# The stages after ${String(ci.promotion?.[0])} (yodel.config.ts ci.promotion): each takes the release the merge`,
+    "# cut through yodel promote --to <env> --release <release>, behind the stage's gate,",
+    "# which chant reads from .chant/pipeline.ts on the default branch. Each job holds",
+    "# its environment's writer, as that environment's wave job did.",
+  ];
+  return files.map((file) => {
+    const yaml = file.yaml.endsWith("\n") ? file.yaml : `${file.yaml}\n`;
+    const at = forge === "gitlab" ? GITLAB_PROMOTE_FILE : `${forge === "github" ? ".github" : ".forgejo"}/workflows/${file.name}`;
+    return { path: at, content: withHeader(header, yaml) };
+  });
 }
 
 /** yodel.config.ts `waves`, checked against the environments; one wave per environment, gate `always`, without it. */
@@ -1452,10 +1661,16 @@ export async function environments(dir: string): Promise<Environments> {
     ...(ci?.tools && ci.tools.length > 0 ? { tools: ci.tools } : {}),
     ...(ci?.respond?.new ? { respondNew: ci.respond.new } : {}),
     ...(ci?.respond?.rebase ? { respondRebase: ci.respond.rebase } : {}),
+    ...(ci?.respond?.["wave-refused"] ? { respondWaveRefused: ci.respond["wave-refused"] } : {}),
+    ...(ci?.agent?.["wave-refused"] ? { agentWaveRefused: ci.agent["wave-refused"] } : {}),
     ...(ci?.evidence ? { evidence: ci.evidence } : {}),
     ...(ci?.refGate === true ? { refGate: true as const } : {}),
+    ...(ci && pipelineOn(ci) ? { pipeline: ci } : {}),
+    ...withSets(environmentSetsOf(ci, envs)),
   };
 }
+
+const withSets = (sets: EnvironmentSets | undefined): { environmentSets?: EnvironmentSets } => (sets ? { environmentSets: sets } : {});
 
 /** The roles of each environment whose profile is made with credentials(). */
 export function credentialsIn(profiles: Record<string, unknown>, envs: readonly string[]): Record<string, EnvCredentials> {
@@ -1615,12 +1830,12 @@ export async function requireProduct(): Promise<ChantProduct> {
  * check hooks into when the project has none on disk: the one `yodel
  * upgrade` adds (#298). A project with no declaration, in its directory or
  * given here, keeps the lint job's own steps ({@link checkHooksDeclaration}).
- * `options.respondNew` and `options.respondRebase` stand in for yodel.config.ts `ci.respond`.
+ * `options.respondNew`, `options.respondRebase` and `options.respondWaveRefused` stand in for yodel.config.ts `ci.respond`.
  */
-export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew; respondRebase?: RespondRebase } = {}): Promise<RenderedFile[]> {
+export async function render(dir: string, options: { declaration?: RenderedFile; respondNew?: RespondNew; respondRebase?: RespondRebase; respondWaveRefused?: RespondWaveRefused } = {}): Promise<RenderedFile[]> {
   const read = await environments(dir);
   // The starter templates render as the release before #312 did until the release that ships /yodel new renders them (test/template.test.ts).
-  const envs = { ...read, ...(options.respondNew ? { respondNew: options.respondNew } : {}), ...(options.respondRebase ? { respondRebase: options.respondRebase } : {}) };
+  const envs = { ...read, ...(options.respondNew ? { respondNew: options.respondNew } : {}), ...(options.respondRebase ? { respondRebase: options.respondRebase } : {}), ...(options.respondWaveRefused ? { respondWaveRefused: options.respondWaveRefused } : {}) };
   const forges = envs.forges ?? FORGES;
   if (envs.checkOnly) return review(envs).filter((f) => forges.includes(forgeOf(f.path) as Forge));
   const product = await requireProduct();
@@ -1632,6 +1847,7 @@ export async function render(dir: string, options: { declaration?: RenderedFile;
     ...review(reviewed, await envWatches(dir, envs.names)),
     ...(hooks ? [hooks] : []),
     ...(rendersApply(envs) ? await applyPipelines(dir, envs, product) : []),
+    ...(await rejectCommentFiles(envs)),
     ...(await watchPipelines(dir, envs)),
     ...(await commitPipelines(dir, envs)),
     ...(envs.refGate ? await refGateFiles(dir, envs) : []),

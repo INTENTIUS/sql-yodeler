@@ -62,10 +62,36 @@
       }
     },
     "entry": {
+      "oneOf": [{ "$ref": "#/$defs/line" }, { "$ref": "#/$defs/legacyEntry" }],
+      "description": "One audit entry; audit.jsonl holds one per line. A chant.audit/v1 line, which is what yodel writes, or yodel's earlier entry, which it still reads. chant publishes the full schema of the line as @intentius/chant/report-store/audit.schema.json, which every line here also passes."
+    },
+    "line": {
+      "type": "object",
+      "required": ["schema", "product", "id", "kind", "project", "environment", "at", "who", "what", "digest", "result", "evidence"],
+      "description": "chant.audit/v1, with product sql-yodeler and an environment on every line.",
+      "properties": {
+        "schema": { "const": "chant.audit/v1" },
+        "product": { "const": "sql-yodeler" },
+        "id": { "type": "string", "description": "A hash of the entry and its source: the same sources give the same id." },
+        "kind": { "enum": ["approval-requested", "approved", "revoked", "override-requested", "override-recorded", "override-spent", "applied", "refused", "hook", "recorded"], "description": "chant's word for the event." },
+        "product_kind": { "enum": ["override", "silenced", "failed", "repaired", "reverted", "step", "wave-run", "spent"], "description": "yodel's own word for the event, when it is not kind." },
+        "project": { "type": "string" },
+        "environment": { "type": "string" },
+        "at": { "type": "string" },
+        "who": { "type": ["string", "null"] },
+        "what": { "type": "string" },
+        "digest": { "type": ["string", "null"] },
+        "result": { "type": "string" },
+        "evidence": { "type": "object", "required": ["source"], "properties": { "source": { "enum": ["ledger", "report", "state", "history", "run"] } } },
+        "detail": { "type": "object" },
+        "product_fields": { "type": "object" }
+      }
+    },
+    "legacyEntry": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "at", "environment", "kind", "source"],
-      "description": "One audit entry; audit.jsonl holds one per line.",
+      "description": "yodel's own entry, as reports and audit.jsonl held it before chant's format.",
       "properties": {
         "id": { "type": "string", "description": "A hash of the entry and its source: the same sources give the same id." },
         "at": { "type": "string" },

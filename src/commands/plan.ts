@@ -18,7 +18,8 @@ import { planJsonVersioned, renderPlanText } from "../pr/render.js";
 import { planPart, slotPart } from "../pr/part.js";
 import { noteSubject, renderPlanNote, renderTenantSetNote } from "../pr/note.js";
 import { YODEL_PR_ENV } from "../ci-words.js";
-import { baseRef } from "../config/base.js";
+import { baseRef, loadYodelConfigAtBase } from "../config/base.js";
+import { stageRisk } from "../ci/pipeline.js";
 import { collectTenantSetPlan, renderTenantSetMarkdown, renderTenantSetText, tenantSetExitCode, tenantSetJson } from "../pr/tenants.js";
 import { tenantSetOf } from "../tenants/index.js";
 import { tenantTarget } from "../tenants/target.js";
@@ -203,7 +204,8 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
 
   // chant's note in yodel's words (#290), handed to chant's note job with the plan's subject (chant issues 4963, 4972).
   if (pr && a.prNote !== undefined) {
-    const body = await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref, limit: noteLimit(noteForge()) });
+    const risk = await riskSettings(project, env.name);
+    const body = await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref, limit: noteLimit(noteForge()), ...(risk ? { risk } : {}) });
     const description = result.refusal ? `yodel apply would refuse (exit ${String(result.refusal.exitCode)})` : `${String(result.pending.length)} pending`;
     await writeNote(a.prNote, env.name, pr, body, result.refusal ? "failure" : "success", description, noteSubject(result), io);
   }
@@ -214,7 +216,10 @@ async function versionedPlan(project: Project, env: Environment, a: PlanArgs, io
   }
   const doc = planJsonVersioned(result);
   if (a.format === "json") io.out(`${JSON.stringify(doc, null, 2)}\n`);
-  else if (a.format === "markdown") io.out(await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref }));
+  else if (a.format === "markdown") {
+    const risk = await riskSettings(project, env.name);
+    io.out(await renderPlanNote(result, { dir: project.dir, base: baseRef(project.dir).ref, ...(risk ? { risk } : {}) }));
+  }
   else io.out(renderPlanText(result, { runnable: (c) => runnable(c, project.dir) }));
   // A plan that is refused, or that the policy denies, is news before anyone merges it (#61).
   await sendEvent(project.yodel?.config.notify, eventFromRun("plan", doc), { io, verb: "plan" });
@@ -302,4 +307,23 @@ async function writeNote(dir: string, env: string, at: { pr: number; head: strin
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(handoff, null, 2)}\n`);
   io.err(`yodel plan: wrote the plan note for pull request #${String(at.pr)} to ${file}\n`);
+}
+
+/**
+ * The change risk settings of `env`'s stage (#384), as the base commit's
+ * yodel.config.ts has them, which is what the stage gate reads; the working
+ * tree's outside a git checkout. Undefined when no `ci.risk` or stage `risk`
+ * key is set, and the note shows no score.
+ */
+async function riskSettings(project: Project, env: string): Promise<{ approveAbove?: number } | undefined> {
+  let config = project.yodel?.config;
+  try {
+    config = (await loadYodelConfigAtBase(project.dir)).config;
+  } catch {
+    // No git, or no base commit: the working tree's config.
+  }
+  const ci = config?.ci;
+  if (!ci || (ci.risk === undefined && ci.environments?.[env]?.risk === undefined)) return undefined;
+  const risk = stageRisk(ci, env);
+  return risk?.approveAbove !== undefined ? { approveAbove: risk.approveAbove } : {};
 }

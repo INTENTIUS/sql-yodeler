@@ -243,6 +243,7 @@ export const ROOMS = [
 		tasks: [
 			{ label: 'Setting up each forge', href: 'forges' },
 			{ label: 'Lint and plan on pull requests only', href: 'lint-and-plan' },
+			{ label: 'Environments as pipeline stages', href: 'pipeline' },
 		],
 		background: [
 			{ label: 'The pipelines: yodel ci', href: 'workflows#the-pipelines-yodel-ci' },
