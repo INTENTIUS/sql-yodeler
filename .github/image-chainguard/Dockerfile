@@ -30,7 +30,7 @@ ENV NODE_DISABLE_COMPILE_CACHE=1
 ENV npm_config_logs_max=0
 ENV CHANT_IMAGE_USER=65532
 ENV PATH=/opt/yodel/node_modules/.bin:$PATH
-RUN apk add --no-cache git ca-certificates openssh-client && mkdir -p /usr/local/bin
+RUN apk add --no-cache git=2.56.1-r1 ca-certificates=20261020-r0 openssh-client=10.6_p2-r0 || { echo "apk add failed. If Wolfi no longer serves a pinned version, move the pin: a newer chant moves its own (WOLFI_PACKAGE_PINS), and chant release images --repin <file> moves an apk:<name>=<version> entry in your source; then render this Dockerfile again." >&2; exit 1; } && mkdir -p /usr/local/bin
 RUN git config --system --add safe.directory '*'
 RUN mkdir -p /opt/yodel && chown 65532:65532 /opt/yodel
 RUN --mount=type=bind,target=/ctx test -n "$YODEL_VERSION" && mkdir -p /opt/yodel && cd /opt/yodel && echo '{"name":"ci-image","private":true}' > package.json && { ok=; for try in 1 2 3; do if npm install --omit=dev --no-audit --no-fund "${YODEL_PACKAGE:-@intentius/sql-yodeler@$YODEL_VERSION}" $CHANT_PINS 2>/tmp/npm.err; then ok=1; break; fi; cat /tmp/npm.err >&2; grep -qE "E404|ETARGET" /tmp/npm.err || break; [ "$try" = 3 ] || sleep 45; done; test -n "$ok"; } && npm cache clean --force && ln -s /opt/yodel/node_modules /node_modules && test "$(yodel --version)" = "$YODEL_VERSION" && chant --version

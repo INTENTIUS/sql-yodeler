@@ -80,7 +80,11 @@ describe("the Dockerfiles", () => {
     const chainguard = files.get(".github/image-chainguard/Dockerfile") ?? "";
     expect(chainguard).toMatch(/^FROM cgr\.dev\/chainguard\/node:latest-dev@sha256:[0-9a-f]{64}$/m);
     // Packages come from apk under their Wolfi names, and the install steps run as root.
-    expect(chainguard).toMatch(/^RUN apk add --no-cache git ca-certificates openssh-client/m);
+    const apkAdd = /^RUN apk add --no-cache ((?:[a-z][a-z0-9._+-]*=\S+ )+)\|\|/m.exec(chainguard);
+    expect(apkAdd).not.toBeNull();
+    const pinned = (apkAdd?.[1] ?? "").trim().split(" ");
+    expect(pinned.map((p) => p.split("=")[0])).toEqual(["git", "ca-certificates", "openssh-client"]);
+    for (const p of pinned) expect(p).toMatch(/^[^=]+=\S+-r\d+$/);
     expect(chainguard).not.toContain("apt-get");
     expect(chainguard.split("\n").filter((l) => l.startsWith("USER ")).at(-1)).toBe("USER 65532");
     expect(chainguard).toContain('LABEL io.intentius.chant.image.base="chainguard"');

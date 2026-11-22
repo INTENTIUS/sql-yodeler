@@ -206,6 +206,8 @@ With neither, every job runs in `node:22-bookworm` and installs the project's pa
 
 The Chainguard image runs Node 26 because Chainguard's `latest-dev` node image carries it, so a project that needs Node 22 runs its jobs in the Debian image.
 
+The Chainguard image's apk packages (git, ca-certificates and openssh-client) are installed at versions chant pins, so two builds of a release carry the same ones; a release picks up newer versions when chant's pins move.
+
 The pull request pipeline runs `yodel ci --check` in the image, and that yodel cannot carry its own image's digest. A yodel with no release digests, such as that one or a clone, takes the digest the committed pipelines already name for its version and compares everything else in the files. With no such digest committed, `yodel ci` refuses and asks for a yodel from the registry, or for `ci.image`. Moving to a new release is `npm install` of the new yodel and `yodel ci`, which writes the new digests.
 
 ### /yodel new: the migration committed to the pull request
