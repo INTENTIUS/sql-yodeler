@@ -12,11 +12,10 @@
 ### Changed
 
 - Under `ci.promotion` the release gate is `forge-checks`, and `yodel ci` keeps the wave's work directories out of the tree the release cut reads. The watch ops of a pipeline get one op per stage and an export name per op.
-- yodel pins chant 0.124.114 exactly, and `.chant/op-waves` is ignored.
-- A project whose `sql.dialect` is `mysql` is refused with a message: chant's sql lexicon knows MySQL, and yodel does not handle it yet.
+- yodel pins chant 0.124.112 exactly, and `.chant/op-waves` is ignored.
 - Building against an unreleased chant goes through `just chant-local <chant-dir>`.
 
-chant is at 0.124.114, and the starter templates take `^0.14.0`.
+chant is at 0.124.112, and the starter templates take `^0.14.0`.
 
 ## 0.13.5
 
