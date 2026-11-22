@@ -19,6 +19,8 @@ type: howto
 | Runner requirements | `ubuntu-latest`; the lint job runs in a `node:22-bookworm` container with its replay server as a service, so a self-hosted runner needs Docker | a runner that runs `image:` and `services:` (the Docker executor, say); the jobs run in `node:22-bookworm` | an Actions runner with the `docker` label |
 | Pull requests from forks | they get no secrets and a read-only token: lint runs, but the plan jobs hold no reader and post no comment | a merge request from a fork runs its pipeline in the fork's project by default, with none of this project's variables | they get no secrets |
 
+The jobs run in `node:22-bookworm` on every forge unless `ci.image` or `ci.imageBase` names the release's CI image, in its Debian or Chainguard set; then every job runs in it, the lint job included, and installs nothing ([The CI image](workflows.md#the-ci-image)). The Chainguard set runs Node 26 as user 65532, the Debian set Node 22 as root, so a runner that needs one or the other picks the set for it.
+
 `yodel approve` takes its token from `CHANT_FORGE_TOKEN`, else `GITHUB_TOKEN` or `GH_TOKEN` (GitHub and Forgejo), or `GITLAB_TOKEN` (GitLab), on your machine ([Approve and resume](approval.md#approve-and-resume)). With `ci: { apply: false }` ([Lint and plan on pull requests only](lint-and-plan.md)) there is no apply pipeline and no writer's secret on any forge, and the rows about the writer and resuming do not apply. A role whose password a cloud token source mints has no password variable; [Short-lived tokens](configuration.md#short-lived-tokens) has the sources, and `ci.identity` for exchanging the forge's OIDC token. [SQL Yodeler on chant CI](chant-ci.md) says which parts of these pipelines chant runs.
 
 ## The steps on each forge
@@ -33,6 +35,7 @@ The README a starter template writes into the project has the same steps, for re
 - Environments `dev` and `prod` (Settings > Environments > `<env>`), each with deployment branches limited to `main`, holding that environment's URL and writer variables. Only the wave job names the environment, so pull request jobs cannot read its secrets. Pull requests from forks get no secrets at all.
 - The workflows set their own token permissions: `contents: read` and `pull-requests: write` on `yodel-pr.yml` for the comment, `issues: write` on each `watch-<env>.yml` for the tracking issue, and `contents: write` on `yodel-apply.yml`, which pushes the pending approval to `chant/lifecycle`.
 - The lint job runs in a `node:22-bookworm` container and reaches its replay server by the service's name, so it needs no free port on the runner; a self-hosted runner needs Docker.
+- With `ci.image` or `ci.imageBase` ([The CI image](workflows.md#the-ci-image)) every job runs in that image, the lint job too: the `node:22-bookworm` container is what the jobs use without either. The replay server is still a service of the lint job.
 
 #### GitLab
 

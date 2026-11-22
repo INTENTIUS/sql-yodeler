@@ -183,6 +183,31 @@ export const gitlab = {
 
 By default every job runs in `node:22-bookworm` (GitHub's plan jobs on the runner, with `setup-node`) and installs the project's packages with `npm ci`. `ci.image` runs every job in the CI image instead, `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>`, which a release publishes with Node, yodel, chant and the lexicons on it: no job runs `npm ci` or `setup-node`, and a checkout resolves chant and the lexicons from the image. It is taken only pinned by its digest, which the release's `image` job writes to its summary, so a job never runs a different image under the same tag. Use the version the project's `package.json` installs, so the image's yodel renders the same pipelines `yodel ci --check` compares; a project whose jobs need packages of their own leaves `image` unset.
 
+### The CI image
+
+A release publishes the CI image twice to `ghcr.io/intentius/sql-yodeler`, with the same yodel, chant and sql lexicon in each:
+
+| | Debian | Chainguard |
+|---|---|---|
+| Tag | `<version>` | `<version>-chainguard` |
+| Base | `node:22-bookworm-slim`, pinned by digest | Chainguard's `node` image, pinned by digest |
+| Node | 22 | 26 |
+| Packages | apt | apk |
+| User | root | 65532 |
+
+Both are rendered from `.github/src/image.ts` and scanned, signed and given provenance in the release, and each carries an SBOM made from its layers. The release's `after-release` job writes both digests to the run's summary. The package carries them as well, which is how `ci.imageBase` finds them.
+
+Two ways to run the jobs in one of them:
+
+- `ci.image` names an image by digest, `ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest>` for Debian or `...:<version>-chainguard@sha256:<digest>` for Chainguard, taken from the release's summary.
+- `ci.imageBase: "debian"` or `"chainguard"` names the release's own image of that set, by the digest the installed yodel carries. The yodel the project installs and the image it runs in are then the same release. With both keys, `ci.image` wins.
+
+With neither, every job runs in `node:22-bookworm` and installs the project's packages with `npm ci`. That stock container is the only place the lint job's `node:22-bookworm` appears: with `ci.image` or `ci.imageBase`, the lint job runs in the image too, beside the replay server it starts as a service.
+
+The Chainguard image runs Node 26 because Chainguard's `latest-dev` node image carries it, so a project that needs Node 22 runs its jobs in the Debian image.
+
+The pull request pipeline runs `yodel ci --check` in the image, and that yodel cannot carry its own image's digest. A yodel with no release digests, such as that one or a clone, takes the digest the committed pipelines already name for its version and compares everything else in the files. With no such digest committed, `yodel ci` refuses and asks for a yodel from the registry, or for `ci.image`. Moving to a new release is `npm install` of the new yodel and `yodel ci`, which writes the new digests.
+
 ### /yodel new: the migration committed to the pull request
 
 A pull request that changes the declared schema needs the migration that goes with it. Commenting `/yodel new` on the pull request writes it in CI and pushes it to the branch, through chant's commit job:
