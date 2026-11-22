@@ -19,7 +19,7 @@
 #
 #   docker build -f .github/image-chainguard/Dockerfile --build-arg YODEL_VERSION=0.1.0 .github/image-chainguard
 
-FROM cgr.dev/chainguard/node:latest-dev@sha256:cd993dc8ec644f8f35e8356f6b442e807cdc5e42f303da5ce19a55d7cf660b51
+FROM cgr.dev/chainguard/node:latest-dev@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527
 USER root
 ARG YODEL_VERSION
 ARG YODEL_PACKAGE
@@ -40,7 +40,7 @@ LABEL org.opencontainers.image.version="${YODEL_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/INTENTIUS/sql-yodeler"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.base.name="cgr.dev/chainguard/node:latest-dev"
-LABEL org.opencontainers.image.base.digest="sha256:cd993dc8ec644f8f35e8356f6b442e807cdc5e42f303da5ce19a55d7cf660b51"
+LABEL org.opencontainers.image.base.digest="sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527"
 LABEL io.intentius.chant.image.base="chainguard"
 ENTRYPOINT []
 CMD ["bash"]

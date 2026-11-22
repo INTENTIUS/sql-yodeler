@@ -17,7 +17,7 @@
 #
 #   docker build -f .github/image/Dockerfile --build-arg YODEL_VERSION=0.1.0 .github/image
 
-FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 ARG YODEL_VERSION
 ARG YODEL_PACKAGE
 ARG CHANT_PINS
@@ -35,6 +35,6 @@ LABEL org.opencontainers.image.version="${YODEL_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/INTENTIUS/sql-yodeler"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.base.name="node:22-bookworm-slim"
-LABEL org.opencontainers.image.base.digest="sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392"
+LABEL org.opencontainers.image.base.digest="sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee"
 LABEL io.intentius.chant.image.base="debian"
 CMD ["bash"]

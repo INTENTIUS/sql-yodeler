@@ -1,6 +1,17 @@
 # Changelog
 
+## 0.15.1
+
+This release carries everything listed under 0.15.0 below. Nothing was published as 0.15.0: its release was refused by the vulnerability scan before any package or image went out, so 0.15.1 is the first release with those changes.
+
+### Changed
+
+- yodel pins chant 0.124.115, which pins the Debian CI image's base to a Node 22 build that carries the fix for the critical advisory the 0.15.0 scan refused. The starter templates pin the same chant and take `^0.15.1`.
+- The release's scan of the npm package covers what installing the package brings in, and the scan runs before the release's tag is pushed.
+
 ## 0.15.0
+
+Never published; see 0.15.1.
 
 ### Added
 

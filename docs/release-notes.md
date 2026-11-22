@@ -7,7 +7,15 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.15.1
+
+- Carries everything listed under 0.15.0, which was never published: its release was refused by the vulnerability scan before any package or image went out.
+- Changed: the Debian CI image is built on a Node 22 base that carries the fix for the advisory the 0.15.0 scan refused. The scan of the npm package covers what installing it brings in, and it runs before the release is tagged.
+- chant 0.124.115 and the sql lexicon 0.124.103. The starter templates take `^0.15.1`.
+
 ## 0.15.0
+
+Never published; see 0.15.1.
 
 - Added: `ci.imageBase` (`"debian"` or `"chainguard"`) runs the pipelines' jobs in the release's own CI image of that set. A release publishes both, `<version>` (Node 22, root) and `<version>-chainguard` (Node 26, user 65532), and the package carries their digests. `ci.image` wins when both are set. The Chainguard image's apk packages are installed at versions chant pins.
 - Changed: `supply-chain` is on for the product's own release: each image is scanned before it is pushed, signed with cosign, given provenance and a layer SBOM.
