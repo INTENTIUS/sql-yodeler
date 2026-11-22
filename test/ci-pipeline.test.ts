@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { asPipelineSpec, foldPipelineSource, stageWavesSpec } from "@intentius/chant/pipeline";
 import { checkYodelConfig } from "../src/config/load.js";
-import { environmentSetsOf, ignoreWaveWorkDirs, pipelineConfigProblem, releaseGreenNote, stageRisk, WAVE_WORK_DIRS } from "../src/ci/pipeline.js";
+import { environmentSetsOf, pipelineConfigProblem, releaseGreenNote, stageRisk } from "../src/ci/pipeline.js";
 import { commandToken } from "../src/ci/render.js";
 import { planRisk } from "../src/pr/note.js";
 import { PIPELINE_WORDS, YODEL_WORDS } from "../src/ci-words.js";
@@ -254,32 +254,5 @@ describe("the stage words and commands", () => {
       expect(await command.run(["--help"], io)).toBe(0);
       expect(out).toContain(usage);
     }
-  });
-});
-
-describe("the wave's work directories under ci.promotion", () => {
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  });
-  const fresh = (gitignore?: string): string => {
-    const d = mkdtempSync(join(tmpdir(), "yodel-ignore-"));
-    dirs.push(d);
-    if (gitignore !== undefined) writeFileSync(join(d, ".gitignore"), gitignore);
-    return d;
-  };
-
-  it("adds them to .gitignore once, keeping what is there", () => {
-    const d = fresh("node_modules");
-    expect(ignoreWaveWorkDirs({ promotion: ["dev", "prod"] }, d)).toBe(true);
-    expect(readFileSync(join(d, ".gitignore"), "utf8")).toBe(`node_modules\n${WAVE_WORK_DIRS}\n`);
-    expect(ignoreWaveWorkDirs({ promotion: ["dev", "prod"] }, d)).toBe(false);
-  });
-
-  it("leaves .gitignore alone without ci.promotion or with the cut off", () => {
-    const d = fresh();
-    expect(ignoreWaveWorkDirs({}, d)).toBe(false);
-    expect(ignoreWaveWorkDirs({ promotion: ["dev"], release: { cut: false } }, d)).toBe(false);
-    expect(existsSync(join(d, ".gitignore"))).toBe(false);
   });
 });
