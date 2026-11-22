@@ -36,6 +36,11 @@ describe("projectFromConfig", () => {
     expect(make({ lexicons: ["sql"], sql: { dialect: ["postgres"] } }).dialect).toBe("postgres");
   });
 
+  it("refuses mysql, a dialect chant's sql lexicon knows and yodel does not handle yet", () => {
+    expect(() => make({ lexicons: ["sql"], sql: { dialect: "mysql" } })).toThrow(/"mysql" is a dialect chant's sql lexicon knows, but yodel does not handle MySQL yet/);
+    expect(() => make({ lexicons: ["sql"], sql: { dialect: ["mysql"] } })).toThrow(YodelError);
+  });
+
   it("refuses a config without the sql lexicon, or with two dialects", () => {
     expect(() => make({ lexicons: ["aws"] })).toThrow(/does not include "sql"/);
     expect(() => make({ lexicons: ["sql"], sql: { dialect: ["clickhouse", "postgres"] } })).toThrow(YodelError);
