@@ -71,7 +71,9 @@
  * needs no token, in IMAGE. With yodel.config.ts `ci.image` (#66), the CI
  * image ghcr.io/intentius/sql-yodeler pinned by its digest, every job runs
  * in that image instead, which carries node, yodel, chant and the lexicons
- * on PATH, and no job runs `npm ci` ({@link Toolchain}).
+ * on PATH, and no job runs `npm ci` ({@link Toolchain}). `ci.imageBase`
+ * (sql-yodeler issue 405) names that image from the release's digests, in
+ * its Debian or Chainguard set ({@link imageOf}, ./image-set.ts).
  *
  * yodel ci renders through chant's product pipeline (chant#4550) with
  * yodel's words (#289, ../ci-words.ts): {@link productWaves}.
@@ -80,7 +82,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiAgentWaveRefused, type CiConfig, type CiEvidence, type CiLogin, type RespondNew, type RespondRebase, type RespondWaveRefused, type WaveGate, type YodelConfig } from "../config/define.js";
+import { APPROVAL_MODES, WAVE_GATES, waveGateHint, type ApplySteps, type ApprovalMode, type CiAgentWaveRefused, type CiConfig, type CiEvidence, type CiImageBase, type CiLogin, type RespondNew, type RespondRebase, type RespondWaveRefused, type WaveGate, type YodelConfig } from "../config/define.js";
 import type { EnvironmentSets } from "@intentius/chant/components";
 import { environmentSetsOf, firstStageSpec, laterStages, pipelineDeclaration, pipelineOn, pipelineText, PIPELINE_TS, type StageWave } from "./pipeline.js";
 import { commitFiles, COMMIT_TOKEN_ENV, GITLAB_COMMIT_FILES } from "./commit.js";
@@ -91,6 +93,7 @@ import { CLOUD_OF, forgejoLoginLines, forgejoLoginSpec, jobLogins, loginSteps, t
 import { RECORD_PLANS_ENV } from "../approval-mode/index.js";
 import { cloudToken, credentialsOf, roleVariables, type CloudToken, type Role } from "../credentials.js";
 import { loadYodelConfig } from "../config/load.js";
+import { committedImage, imageForBase } from "./image-set.js";
 import { testFiles } from "../testing/files.js";
 import { CODE_QUALITY_FILE } from "../lint/annotations.js";
 import { chantCheckHooks, checkPresets, declarationFile, declarationWithHooks, type CheckHook } from "./check-hooks.js";
@@ -1622,6 +1625,24 @@ export async function commitPipelines(dir: string, envs_: Environments): Promise
 /** Whether the project has a test file for yodel test (tests/*.test.ts). */
 const hasTests = (dir: string): boolean => testFiles(dir).length > 0;
 
+/**
+ * The CI image the jobs run in: `ci.image`, which wins, else the image
+ * `ci.imageBase` picks, else none, and the jobs run in IMAGE. The pick is
+ * the digest this yodel's release carries (./image-set.ts). A yodel with no
+ * release digests, a clone or the one inside the CI image, takes the digest
+ * the project's committed pipelines name, so `yodel ci --check` runs in the
+ * image; with none committed there is nothing to write and it refuses.
+ */
+function imageOf(dir: string, ci: { image?: string; imageBase?: CiImageBase } | undefined): { image?: string } {
+  if (ci?.image) return { image: ci.image };
+  if (!ci?.imageBase) return {};
+  const image = imageForBase(ci.imageBase) ?? committedImage(dir, ci.imageBase);
+  if (!image) {
+    throw new Error(`yodel.config.ts ci.imageBase: "${ci.imageBase}" names the release's ${ci.imageBase} image by its digest, and this yodel carries no release digests (it is a clone, or runs inside the CI image) and no committed pipeline names that image; run yodel ci with a yodel from the registry, or set ci.image`);
+  }
+  return { image };
+}
+
 /** The dialect and the environments chant.config.ts declares, in order. */
 export async function environments(dir: string): Promise<Environments> {
   const { loadChantConfig } = await import("@intentius/chant/config");
@@ -1649,7 +1670,7 @@ export async function environments(dir: string): Promise<Environments> {
       checkOnly: true,
       forges: ci0?.forges ?? FORGES,
       ...(ci0?.jobs ? { jobs: await loadProjectJobs(dir, ci0.jobs) } : {}),
-      ...(ci0?.image ? { image: ci0.image } : {}),
+      ...imageOf(dir, ci0),
       apply: false,
     };
   }
@@ -1671,7 +1692,7 @@ export async function environments(dir: string): Promise<Environments> {
     waves: await withTenants(dir, await readWaves(dir, envs)),
     forges: ci?.forges ?? FORGES,
     ...(ci?.jobs ? { jobs: await loadProjectJobs(dir, ci.jobs) } : {}),
-    ...(ci?.image ? { image: ci.image } : {}),
+    ...imageOf(dir, ci),
     ...(ci?.resume ? { resume: { schedule: ci.resume.schedule } } : {}),
     ...(ci?.login ? { login: ci.login } : {}),
     ...(ci?.apply === false ? { apply: false as const } : {}),

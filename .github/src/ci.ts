@@ -95,21 +95,31 @@ fi
         // npm pack below builds dist/ (prepare); the install needs no build of its own.
         new Step({ run: "npm ci --ignore-scripts" }),
         new Step({
-          name: "Build the image from npm pack of this checkout",
+          name: "Build both images from npm pack of this checkout",
           run: `version=$(node -p 'require("./package.json").version')
 ctx=$(mktemp -d)
 npm pack --silent --pack-destination "$ctx"
 ${chantPins}
 docker build -f .github/image/Dockerfile --build-arg "YODEL_VERSION=$version" \\
   --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" --build-arg "CHANT_PINS=$CHANT_PINS" -t yodel-ci "$ctx"
+docker build -f .github/image-chainguard/Dockerfile --build-arg "YODEL_VERSION=$version" \\
+  --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" --build-arg "CHANT_PINS=$CHANT_PINS" -t yodel-ci-chainguard "$ctx"
 `,
         }),
-        new Step({ name: "yodel --version from the image", run: "docker run --rm yodel-ci yodel --version" }),
         new Step({
-          name: "The ClickHouse example builds and lints in the image, with no npm ci",
+          name: "yodel --version from each image",
+          run: `docker run --rm yodel-ci yodel --version
+docker run --rm yodel-ci-chainguard yodel --version
+test "$(docker run --rm yodel-ci-chainguard id -u)" = 65532
+`,
+        }),
+        new Step({
+          name: "The ClickHouse example builds and lints in each image, with no npm ci",
           run: `cp -R examples/clickhouse "$RUNNER_TEMP/project"
 rm -rf "$RUNNER_TEMP/project/node_modules"
-docker run --rm -v "$RUNNER_TEMP/project:/work" -w /work yodel-ci sh -c 'chant build src --lexicon sql -o /tmp/schema.json && yodel lint'
+for img in yodel-ci yodel-ci-chainguard; do
+  docker run --rm -v "$RUNNER_TEMP/project:/work" -w /work "$img" sh -c 'chant build src --lexicon sql -o /tmp/schema.json && yodel lint'
+done
 `,
         }),
       ],

@@ -22,7 +22,12 @@ export default tseslint.config(
     languageOptions: { parserOptions: { projectService: false, project: "./tsconfig.templates.json", tsconfigRootDir: import.meta.dirname } },
   },
   {
-    files: ["eslint.config.js"],
+    // Plain Node scripts run by npm run build; not part of any tsconfig.
+    files: ["eslint.config.js", "scripts/*.mjs"],
     ...tseslint.configs.disableTypeChecked,
+  },
+  {
+    files: ["scripts/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly" } },
   },
 );

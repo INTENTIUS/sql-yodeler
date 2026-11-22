@@ -10,12 +10,25 @@ import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { resolveSourceDir } from "@intentius/chant/config";
 import type { SqlConfig, SqlProfile } from "@intentius/chant-lexicon-sql/config";
-import type { SqlDialect } from "@intentius/chant-lexicon-sql/dialects";
+import type { SqlDialect as ChantSqlDialect } from "@intentius/chant-lexicon-sql/dialects";
 import type { YodelConfig } from "./config/define.js";
 import { EXIT_FAILED } from "./exit.js";
 import { splitTarget, TENANT_NAME } from "./tenants/target.js";
 
-export type { SqlDialect, SqlProfile };
+/**
+ * The dialects yodel handles. chant's sql lexicon also knows `mysql`; yodel has
+ * no driver, lint rules or migration format for it, so a project that names it
+ * is refused where its dialect is read ({@link projectDialect}).
+ */
+export type SqlDialect = Exclude<ChantSqlDialect, "mysql">;
+export type { SqlProfile };
+
+function handled(dialect: ChantSqlDialect, configPath: string): SqlDialect {
+  if (dialect === "mysql") {
+    throw new YodelError(`${configPath}: sql.dialect "mysql" is a dialect chant's sql lexicon knows, but yodel does not handle MySQL yet; use "clickhouse" or "postgres"`);
+  }
+  return dialect;
+}
 
 /**
  * An error a verb reports as one line on stderr, with the exit code it ends
@@ -102,10 +115,10 @@ export function projectDialect(config: ProjectConfig, configPath: string): SqlDi
   const dialect = config.sql?.dialect;
   if (dialect === undefined) return "clickhouse";
   if (Array.isArray(dialect)) {
-    if (dialect.length === 1 && dialect[0]) return dialect[0];
+    if (dialect.length === 1 && dialect[0]) return handled(dialect[0], configPath);
     throw new YodelError(`${configPath}: sql.dialect lists ${dialect.join(", ")}; a yodel project is one database, so name one dialect`);
   }
-  return dialect;
+  return handled(dialect, configPath);
 }
 
 /** Builds a {@link Project} from a config already loaded. Pure, for tests and callers that load the config themselves. */
