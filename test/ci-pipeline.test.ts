@@ -157,7 +157,7 @@ describe("yodel ci with ci.promotion", () => {
     expect(committed.waves.map((w) => w.name)).toEqual(["dev"]);
     // The merge's apply records under the pipeline's component, which the promotes' soak and skip checks read.
     expect(committed.release).toEqual({ component: "yodel-apply" });
-    expect(JSON.stringify(committed.waves[0]?.hooks)).toContain('"release","cut","auto","--yes"');
+    expect(JSON.stringify(committed.waves[0]?.hooks)).toContain('"release","cut","auto","--first","0.1.0","--yes"');
   });
 
   it("renders the merge's wave for the first stage and a promote job for each later stage, on every forge", async () => {
@@ -197,7 +197,7 @@ describe("yodel ci with ci.promotion", () => {
     const wrote = await yodel(["ci", "--dir", dir]);
     expect(wrote.code).toBe(0);
     expect(wrote.err).toContain('note: chant.config.ts: set release: { green: "forge-checks" } in it');
-    expect(JSON.stringify(JSON.parse(read(dir, "yodel-waves.json")))).toContain('"release","cut","auto","--yes","--wait-checks"');
+    expect(JSON.stringify(JSON.parse(read(dir, "yodel-waves.json")))).toContain('"release","cut","auto","--first","0.1.0","--yes","--wait-checks"');
     for (const file of [".github/workflows/yodel-apply.yml", ".forgejo/workflows/yodel-apply.yml"]) {
       const text = read(dir, file);
       expect(text, file).toContain("GITHUB_TOKEN: '${{ github.token }}'");
