@@ -31,6 +31,26 @@ claims-affected base="origin/main":
 claims-page:
     npm run claims:page
 
+# Build the CI image of one set (debian, chainguard or both) from npm pack of this checkout into the local Docker daemon, and run yodel --version in it. Nothing is pushed. The Chainguard Dockerfile needs a chant whose CI images take base.
+images set="both":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{set}}" in
+      debian) sets="debian" ;;
+      chainguard) sets="chainguard" ;;
+      both) sets="debian chainguard" ;;
+      *) echo "images: set is debian, chainguard or both, not {{set}}" >&2; exit 2 ;;
+    esac
+    version="$(node -p 'require("./package.json").version')"
+    ctx="$(mktemp -d)"
+    npm pack --silent --pack-destination "$ctx"
+    pins="$(node -p 'const l=require("./package-lock.json");Object.entries(l.packages).filter(([k,v])=>/^node_modules\/@intentius\/chant[^/]*$/.test(k)&&!v.dev).map(([k,v])=>k.slice(13)+"@"+v.version).join(" ")')"
+    for s in $sets; do
+      dir=".github/image"; [ "$s" = chainguard ] && dir=".github/image-chainguard"
+      docker build -f "$dir/Dockerfile" --build-arg "YODEL_VERSION=$version" --build-arg "YODEL_PACKAGE=/ctx/intentius-sql-yodeler-$version.tgz" --build-arg "CHANT_PINS=$pins" -t "yodel-ci:$s" "$ctx"
+      docker run --rm "yodel-ci:$s" yodel --version
+    done
+
 # Render .github/workflows/ from .github/src/.
 workflows:
     npm run workflows

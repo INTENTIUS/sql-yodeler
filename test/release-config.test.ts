@@ -37,8 +37,9 @@ describe("the release (#319)", () => {
     expect(release.workflow).toMatchObject({ trigger: "dispatch", file: ".github/workflows/publish.yml" });
     // The cut tags v<version>, the ref yodel create takes templates from.
     expect(release).toMatchObject({ tag: "v{version}", legacyTags: ["release/"], green: "forge-checks" });
-    expect(release.publish.map((t) => t.type)).toEqual(["oci", "npm", "forge"]);
-    expect(release.images.map((i) => i.archive)).toEqual(["dist/images/sql-yodeler.tar"]);
+    // The Debian image and the Chainguard one (test/ci-image-base.test.ts), then the package and the GitHub release.
+    expect(release.publish.map((t) => t.type)).toEqual(["oci", "oci", "npm", "forge"]);
+    expect(release.images.map((i) => i.archive)).toEqual(["dist/images/sql-yodeler.tar", "dist/images/sql-yodeler-chainguard.tar"]);
     // The cut compiles this repository's own workflows and nothing else.
     expect(config.sourceDir).toBe(".github/chant");
     expect(Object.keys(compiled).sort()).toEqual(["ci", "claims", "claimsWeekly", "pages", "templates"]);

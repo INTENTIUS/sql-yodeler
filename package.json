@@ -44,7 +44,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && chmod +x dist/bin.js",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/bin.js && node scripts/image-digests.mjs",
     "prepare": "npm run build",
     "test": "vitest run",
     "lint": "eslint .",

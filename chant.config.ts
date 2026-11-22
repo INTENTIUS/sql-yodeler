@@ -23,6 +23,16 @@ import type { ChantConfig } from "@intentius/chant";
 
 const IMAGE = "ghcr.io/intentius/sql-yodeler";
 
+/**
+ * The CI image in each set (sql-yodeler issue 405): the Debian image, and the Chainguard one beside it in the same
+ * repository under a tag ending -chainguard. src/ci/image-set.ts's releaseImages() names the same two, and
+ * test/ci-image-base.test.ts checks they agree; this file stays free of src/ so chant loads it alone.
+ */
+const IMAGES = [
+  { name: "sql-yodeler", dockerfile: ".github/image/Dockerfile", tag: "{label}" },
+  { name: "sql-yodeler-chainguard", dockerfile: ".github/image-chainguard/Dockerfile", tag: "{label}-chainguard" },
+] as const;
+
 const read = (file: string): unknown => JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8"));
 
 /** The package version, which is the release's label. */
@@ -65,33 +75,37 @@ export default {
       after: [
         // The release as a user gets it: from the registry, into an empty directory, and run.
         `dir="$(mktemp -d)" && cd "$dir" && npm init -y >/dev/null && for attempt in $(seq 1 30); do npm install --prefer-online --no-audit --no-fund "@intentius/sql-yodeler@$CHANT_RELEASE_LABEL" && break; [ "$attempt" = 30 ] && exit 1; sleep 20; done && test "$(npx --no-install yodel --version)" = "$CHANT_RELEASE_LABEL"`,
-        // The image the publish pushed, and its digest for ci.image.
-        `test "$(docker run --rm --pull always "${IMAGE}:$CHANT_RELEASE_LABEL" yodel --version)" = "$CHANT_RELEASE_LABEL" && docker buildx imagetools inspect "${IMAGE}:$CHANT_RELEASE_LABEL" --format '{{json .Manifest.Digest}}' | tr -d '"' | sed "s|^|${IMAGE}:$CHANT_RELEASE_LABEL@|" | tee -a "$GITHUB_STEP_SUMMARY"`,
+        // Each image the publish pushed, run once, and its digest, which ci.image pins, for the Debian image and for the
+        // Chainguard one (the package also carries both, for ci.imageBase).
+        `for tag in "$CHANT_RELEASE_LABEL" "$CHANT_RELEASE_LABEL-chainguard"; do test "$(docker run --rm --pull always "${IMAGE}:$tag" yodel --version)" = "$CHANT_RELEASE_LABEL" && docker buildx imagetools inspect "${IMAGE}:$tag" --format '{{json .Manifest.Digest}}' | tr -d '"' | sed "s|^|${IMAGE}:$tag@|" | tee -a "$GITHUB_STEP_SUMMARY" || exit 1; done`,
       ],
       // npm's trusted publisher for this package names publish.yml.
       file: ".github/workflows/publish.yml",
     },
-    images: [
-      {
-        name: "sql-yodeler",
-        dockerfile: ".github/image/Dockerfile",
-        // The image installs yodel from npm pack of the commit being cut, not from npm, since the cut runs
-        // before the publish. The context holds only the tarball, under dist/images, which the package leaves out.
-        prepare: `mkdir -p ${IMAGE_CONTEXT} && npm pack --silent --pack-destination ${IMAGE_CONTEXT} >/dev/null`,
-        context: IMAGE_CONTEXT,
-        archive: "dist/images/sql-yodeler.tar",
-        args: {
-          YODEL_VERSION: VERSION,
-          YODEL_PACKAGE: `/ctx/intentius-sql-yodeler-${VERSION}.tgz`,
-          CHANT_PINS: chantPins(),
-        },
+    images: IMAGES.map(({ name, dockerfile }) => ({
+      name,
+      dockerfile,
+      // Each image installs yodel from npm pack of the commit being cut, not from npm, since the cut runs
+      // before the publish. The context holds only the tarball, under dist/images, which the package leaves out.
+      // The base images are pinned by digest (chant's pins for the Chainguard set), which supply-chain requires.
+      prepare: `mkdir -p ${IMAGE_CONTEXT} && npm pack --silent --pack-destination ${IMAGE_CONTEXT} >/dev/null`,
+      context: IMAGE_CONTEXT,
+      archive: `dist/images/${name}.tar`,
+      args: {
+        YODEL_VERSION: VERSION,
+        YODEL_PACKAGE: `/ctx/intentius-sql-yodeler-${VERSION}.tgz`,
+        CHANT_PINS: chantPins(),
       },
-    ],
+    })),
     publish: [
-      // The image's SBOM is not the repository's lockfile, so none is attached; chant attaches the provenance.
-      { type: "oci" as const, image: "dist/images/sql-yodeler.tar", repository: IMAGE, tags: ["{label}"], sbom: false as const },
+      // Each image keeps the SBOM chant makes from its layers, which lists the OS packages, and is scanned, signed and
+      // given provenance under supply-chain (chant.workspace.json).
+      ...IMAGES.map(({ name, tag }) => ({ type: "oci" as const, image: `dist/images/${name}.tar`, repository: IMAGE, tags: [tag] })),
       // Trusted publishing may publish but not move a dist-tag, so straight to latest.
-      { type: "npm" as const, packages: ["."], access: "public" as const, stage: false, sbom: false as const },
+      // The package carries both images' digests (dist/image-digests.json, from scripts/image-digests.mjs) for ci.imageBase;
+      // the publish plan refuses a digest the release did not build. It has no SBOM file of its own (one would differ
+      // between the cut's pack and the publish's, and the images install that pack); chant scans it from the lockfile.
+      { type: "npm" as const, packages: ["."], access: "public" as const, stage: false, sbom: false as const, pins: "dist/image-digests.json" },
       {
         type: "forge" as const,
         forge: "github" as const,
@@ -101,7 +115,7 @@ export default {
         notes: {
           file: "CHANGELOG.md",
           heading: "## {version}",
-          before: "`@intentius/sql-yodeler@{version}` on npm, and the CI image `ghcr.io/intentius/sql-yodeler:{version}`.",
+          before: "`@intentius/sql-yodeler@{version}` on npm, and the CI images `ghcr.io/intentius/sql-yodeler:{version}` and `ghcr.io/intentius/sql-yodeler:{version}-chainguard`.",
           after: "[Release notes](https://intentius.io/sql-yodeler/release-notes/) lists every release.",
         },
       },

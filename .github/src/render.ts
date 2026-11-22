@@ -1,6 +1,7 @@
 /**
  * Renders each workflow declared here to .github/workflows/<name>.yml, and
- * the CI image (image.ts) to .github/image/Dockerfile.
+ * the CI image (image.ts) to .github/image/Dockerfile and its Chainguard set
+ * to .github/image-chainguard/Dockerfile.
  *
  *   npm run workflows             write the files
  *   npm run workflows -- --check  exit 1 naming each file that differs
@@ -12,7 +13,9 @@
  * Each workflow's comment at the top of its file is the Workflow's `comment`
  * (rendered() in shared.ts). The Dockerfile is chant's product image, image.ts's
  * `dockerfile`, written by the docker lexicon's serializer, and its comment is
- * added here, from image.ts's `comment`.
+ * added here, from image.ts's `comment`. The Chainguard Dockerfile needs a
+ * chant whose CI images take `base`; on an older one it is not rendered or
+ * checked, and the write says so.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,6 +28,7 @@ import * as ci from "./ci.js";
 import * as claims from "./claims.js";
 import * as claimsWeekly from "./claims-weekly.js";
 import * as image from "./image.js";
+import { chantHasImageBase, type ImageSet } from "../../src/ci/image-set.js";
 import * as pages from "./pages.js";
 import * as templates from "./templates.js";
 import { rendered } from "./shared.js";
@@ -46,12 +50,12 @@ const repoDir = fileURLToPath(new URL("../../", import.meta.url));
 const header = (comment: string): string =>
   rendered("image.ts", comment).split("\n").map((l) => (l ? `# ${l}` : "#")).join("\n");
 
-/** The CI image's Dockerfile: image.ts's declaration, as the docker lexicon writes it. */
-function renderImage(): string {
-  const result = dockerSerializer.serialize(new Map([["image", image.dockerfile]]));
+/** The CI image's Dockerfile for `set`: image.ts's declaration, as the docker lexicon writes it. */
+function renderImage(set: ImageSet): string {
+  const result = dockerSerializer.serialize(new Map([["image", image.dockerfileOf(set)]]));
   const text = typeof result === "string" ? undefined : result.files?.["Dockerfile.image"];
   if (text === undefined) throw new Error("image.ts: the docker lexicon wrote no Dockerfile");
-  return `${header(image.comment)}\n\n${text}`;
+  return `${header(image.comment(set))}\n\n${text}`;
 }
 
 /** Each rendered file's path in the repository and its content. */
@@ -62,7 +66,8 @@ export function render(): Map<string, string> {
     if (typeof yaml !== "string") throw new Error(`${name}: expected one workflow file, got several`);
     out.set(`.github/workflows/${name}.yml`, yaml);
   }
-  out.set(".github/image/Dockerfile", renderImage());
+  out.set(".github/image/Dockerfile", renderImage("debian"));
+  if (chantHasImageBase()) out.set(".github/image-chainguard/Dockerfile", renderImage("chainguard"));
   return out;
 }
 
@@ -83,6 +88,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const f of files) process.stderr.write(`${f} is stale: run npm run workflows\n`);
     process.exit(files.length ? 1 : 0);
   }
+  if (!chantHasImageBase()) process.stderr.write(".github/image-chainguard/Dockerfile is not rendered: the installed chant has no base for CI images (CI_IMAGE_BASE_FLOOR); move the @intentius/chant pin to a release that has it\n");
   for (const [file, content] of render()) {
     mkdirSync(dirname(repoDir + file), { recursive: true });
     writeFileSync(repoDir + file, content);

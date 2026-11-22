@@ -2,5 +2,6 @@
   "name": "sql-yodeler",
   "schema": 1,
   "minReader": "0.124.77",
-  "members": []
+  "members": [],
+  "security": ["supply-chain"]
 }

@@ -9,13 +9,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseTopology } from "@intentius/chant-lexicon-sql/clickhouse/topology";
 import { YodelError } from "../project.js";
-import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, RESPOND_NEW, RESPOND_REBASE, RESPOND_WAVE_REFUSED, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
+import { APPROVAL_MODES, CHECK_TOOLS, CI_FORGES, CI_IMAGE_BASES, type CiImageBase, RESPOND_NEW, RESPOND_REBASE, RESPOND_WAVE_REFUSED, ENVIRONMENT_APPROVAL_MODES, WAVE_GATES, waveGateHint, type EnvironmentConfig, type YodelConfig } from "./define.js";
 import { notifyConfigProblem } from "../notify/index.js";
 import { checkSources } from "../sources/index.js";
 import { TENANT_NAME } from "../tenants/target.js";
 import { checksProblem } from "../migrations/checks.js";
 import { MIGRATION_NAME } from "../migrations/directory.js";
 import { loginProblem } from "../ci/login.js";
+import { imageSetRefusal } from "../ci/image-set.js";
 import { describeProblem, readVocabulary, vocabularyProblems } from "./vocabulary.js";
 import { pipelineConfigProblem } from "../ci/pipeline.js";
 
@@ -199,8 +200,8 @@ function checkWaves(value: unknown, where: string, profiles?: readonly string[])
 const CI_IMAGE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
 
 function checkCi(value: unknown, where: string): void {
-  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, resume?, login?, apply?, tools?, new?, respond?, agent?, evidence?, refGate?, promotion?, environments?, approvalRules?, risk?, configSets?, release?, recheck? }`);
-  const keys = ["forges", "jobs", "image", "resume", "login", "apply", "tools", "new", "respond", "agent", "evidence", "refGate", ...PIPELINE_CI_KEYS];
+  if (!isRecord(value)) throw new YodelError(`${where}: expected { forges?, jobs?, image?, imageBase?, resume?, login?, apply?, tools?, new?, respond?, agent?, evidence?, refGate?, promotion?, environments?, approvalRules?, risk?, configSets?, release?, recheck? }`);
+  const keys = ["forges", "jobs", "image", "imageBase", "resume", "login", "apply", "tools", "new", "respond", "agent", "evidence", "refGate", ...PIPELINE_CI_KEYS];
   for (const k of Object.keys(value)) if (!keys.includes(k)) throw new YodelError(`${where}.${k}: unknown setting (expected ${keys.join(", ")})`);
   if (value.apply === false && value.promotion !== undefined) throw new YodelError(`${where}.promotion: the pipeline's first stage is the apply pipeline's wave, which ci.apply: false leaves out; remove ci.promotion, or ci.apply`);
   if (value.risk !== undefined) {
@@ -263,6 +264,14 @@ function checkCi(value: unknown, where: string): void {
   }
   if (value.image !== undefined && (typeof value.image !== "string" || !CI_IMAGE.test(value.image))) {
     throw new YodelError(`${where}.image: the CI image pinned by its digest, ghcr.io/intentius/sql-yodeler:<version>@sha256:<digest> (the release's image job writes the digest to its summary)`);
+  }
+  if (value.imageBase !== undefined) {
+    if (typeof value.imageBase !== "string" || !(CI_IMAGE_BASES as readonly string[]).includes(value.imageBase)) {
+      throw new YodelError(`${where}.imageBase: ${CI_IMAGE_BASES.map((b) => `"${b}"`).join(" or ")}, the release's CI image set the jobs run in`);
+    }
+    // ci.image names its own image, so the pick has nothing to refuse.
+    const refusal = value.image === undefined ? imageSetRefusal(value.imageBase as CiImageBase) : undefined;
+    if (refusal) throw new YodelError(`${where}.imageBase: ${refusal}`);
   }
   const forges = value.forges;
   if (forges !== undefined && !(Array.isArray(forges) && forges.length > 0 && forges.every((f) => (CI_FORGES as readonly unknown[]).includes(f)))) {

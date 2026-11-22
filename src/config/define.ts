@@ -237,6 +237,11 @@ export interface WaveConfig {
   approval?: ApprovalMode;
 }
 
+/** The CI image set `ci.imageBase` picks. */
+export type CiImageBase = "debian" | "chainguard";
+
+export const CI_IMAGE_BASES: readonly CiImageBase[] = ["debian", "chainguard"];
+
 /** A forge `yodel ci` renders pipelines for. */
 export type CiForge = "github" | "gitlab" | "forgejo";
 
@@ -261,6 +266,21 @@ export interface CiConfig {
    * no `npm ci`. Default: `node:22-bookworm`, and each job runs `npm ci`.
    */
   image?: string;
+  /**
+   * Which of the release's CI images the jobs run in when `image` is not set
+   * (sql-yodeler issue 405): `"debian"` or `"chainguard"`. Each release
+   * publishes both to ghcr.io/intentius/sql-yodeler, `<version>` and
+   * `<version>-chainguard`, and records both digests in the package, so
+   * `yodel ci` names the one picked by its digest and every job runs in it
+   * with no `npm ci`. The Debian image runs Node 22 as root; the Chainguard
+   * image is Chainguard's `node` image, which runs Node 26, as user 65532.
+   * Left out, the jobs run in `node:22-bookworm` and install the project's
+   * packages, as before. `image` wins when both are set. A yodel release that
+   * carries digests but none for the set picked refuses it; a yodel with no
+   * digests (a clone, the yodel inside the image) takes the digest the
+   * committed pipelines name.
+   */
+  imageBase?: CiImageBase;
   /**
    * A scheduled job that starts again an apply wave whose approval has
    * arrived (#47): `chant run resume --op yodel-apply`, which re-runs the
