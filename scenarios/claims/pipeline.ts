@@ -6,6 +6,7 @@ import { endpoints, postgresQuery } from "../lib/db.js";
 import { run, type Ran } from "../lib/exec.js";
 import { checksForge, type ChecksForge } from "../lib/forge-checks.js";
 import { Project } from "../lib/project.js";
+import { yodelBuild } from "../lib/yodel-build.js";
 import { addColumn, mainTable } from "../lib/schema.js";
 
 /**
@@ -27,11 +28,12 @@ import { addColumn, mainTable } from "../lib/schema.js";
  *   prod` with staging not yet promoted is refused, nothing applied to prod.
  *   `yodel promote --to staging --release <release>` applies the migration
  *   there. prod takes two approvals: its stage gate (one approval rule)
- *   waits on the release digest, `chant approve yodel-apply <prod> --env
- *   <prod> --plan <release digest>`; approved, the same promote runs prod's
- *   wave, whose gate `always` waits on its plan under the op
- *   `yodel-apply-<prod>`; approved, the same promote again applies the
- *   column to prod. BREAK: the promote into prod passes `--allow-skip`, with
+ *   waits on the release digest, `yodel approve <prod> --plan <release
+ *   digest>`; approved, the same promote runs prod's wave, whose gate
+ *   `always` waits on its own plan, `yodel approve <prod> --plan <wave
+ *   digest>`; approved, the same promote again applies the column to prod.
+ *   Each approve line is the one promote prints, run at a terminal that
+ *   types the environment's name. BREAK: the promote into prod passes `--allow-skip`, with
  *   each gate it waits on approved, so the column reaches prod before
  *   staging.
  * - soak-hold: dev soaks for a minute on a command check that fails while a
@@ -279,19 +281,27 @@ async function releaseAtHead(st: State): Promise<{ ref: string; digest: string }
 /** `yodel promote --to <stage> --release <release>`, the line each promote job runs. */
 const promote = (st: State, to: Stage, release: string, extra: string[] = []): Promise<Ran> => st.p.yodel(["promote", "--to", st.envs[to], "--release", release, ...extra], { timeoutMs: 600_000 });
 
-/** The `chant approve` line a waiting gate printed (in yodel's words or chant's), as chant's own. */
-function approveLine(ran: Ran): string | undefined {
-  const line = /(?:yodel )?chant approve \S+ \S+(?: --env \S+)? --plan \S+/.exec(`${ran.out}\n${ran.err}`)?.[0];
-  return line?.replace(/^yodel /, "");
+/** The `yodel approve <env> --plan <digest>` line a waiting gate printed, in yodel's words. */
+function approveLine(ran: Ran): { line: string; env: string; digest: string } | undefined {
+  const m = /yodel approve (\S+) --plan (\S+)/.exec(`${ran.out}\n${ran.err}`);
+  return m ? { line: m[0], env: m[1] as string, digest: m[2] as string } : undefined;
+}
+
+/** Runs the printed `yodel approve` line as a person at a terminal would: the answer typed is the environment's name, and the approver is not the requester. */
+async function approveAs(ctx: Ctx, st: State, said: { line: string; env: string } | undefined): Promise<void> {
+  if (!said) throw new Error("the waiting promote printed no yodel approve line");
+  const args = said.line.split(" ").slice(1);
+  const ran = await yodelBuild(ctx, st.p, "yodel").ask(said.env, [...args, "--actor", "claims-approver"]);
+  if (ran.code !== 0) throw new Error(`${said.line} exited ${String(ran.code)}:\n${ran.out}\n${ran.err}`);
 }
 
 /** A promote whose waiting gates are each approved and the same promote run again, as a person would, up to four times. */
-async function promoteThrough(st: State, to: Stage, release: string, extra: string[] = []): Promise<Ran> {
+async function promoteThrough(ctx: Ctx, st: State, to: Stage, release: string, extra: string[] = []): Promise<Ran> {
   let ran = await promote(st, to, release, extra);
   for (let i = 0; i < 4 && ran.code === 3; i++) {
     const line = approveLine(ran);
     if (!line) break;
-    await st.p.approve(line, { approver: "claims-approver" });
+    await approveAs(ctx, st, line);
     ran = await promote(st, to, release, extra);
   }
   return ran;
@@ -316,7 +326,7 @@ async function stages(ctx: Ctx, st: State): Promise<void> {
 
   // prod before staging: refused, nothing applied. Broken, the promote passes --allow-skip and each gate it waits on is approved.
   if (ctx.broken) ctx.log("BREAK: the promote into prod passes --allow-skip, with each gate it waits on approved");
-  const early = ctx.broken ? await promoteThrough(st, "prod", release, ["--allow-skip"]) : await promote(st, "prod", release);
+  const early = ctx.broken ? await promoteThrough(ctx, st, "prod", release, ["--allow-skip"]) : await promote(st, "prod", release);
   hold(!(await st.columnOn("prod", "staged")), `prod got the column before staging (${said(early)})`);
   hold(early.code !== 0, `yodel promote --to prod with staging not promoted was not refused (${said(early)})`);
 
@@ -327,15 +337,15 @@ async function stages(ctx: Ctx, st: State): Promise<void> {
   const atStage = await promote(st, "prod", release);
   const stageLine = approveLine(atStage);
   hold(atStage.code === 3 && !(await st.columnOn("prod", "staged")), `the promote into prod did not wait at prod's stage gate (${said(atStage)})`);
-  hold(stageLine !== undefined && stageLine.includes(` --env ${st.envs.prod} `) && stageLine.endsWith(` --plan ${digest}`), `prod's stage gate does not wait on the release digest ${digest}: ${String(stageLine)}`);
-  await st.p.approve(stageLine, { approver: "claims-approver" });
+  hold(stageLine !== undefined && stageLine.env === st.envs.prod && stageLine.digest === digest, `prod's stage gate does not wait on the release digest ${digest}: ${String(stageLine?.line)}`);
+  await approveAs(ctx, st, stageLine);
 
   // prod's second approval: its wave's gate, on the wave's plan, under the op yodel-apply-<prod>.
   const atWave = await promote(st, "prod", release);
   const waveLine = approveLine(atWave);
   hold(atWave.code === 3 && !(await st.columnOn("prod", "staged")), `with prod's stage gate approved, prod's wave under gate always did not wait (${said(atWave)})`);
-  hold(waveLine !== undefined && waveLine.startsWith(`chant approve yodel-apply-${st.envs.prod} `) && !waveLine.endsWith(` --plan ${digest}`), `prod's wave does not wait on its plan under the op yodel-apply-${st.envs.prod}: ${String(waveLine)}`);
-  await st.p.approve(waveLine, { approver: "claims-approver" });
+  hold(waveLine !== undefined && waveLine.env === st.envs.prod && waveLine.digest !== digest, `prod's wave does not wait on its own plan, apart from the release digest ${digest}: ${String(waveLine?.line)}`);
+  await approveAs(ctx, st, waveLine);
 
   const toProd = await promote(st, "prod", release);
   hold(toProd.code === 0 && (await st.columnOn("prod", "staged")), `yodel promote --to prod did not apply the release once both gates were approved (${said(toProd)})`);
