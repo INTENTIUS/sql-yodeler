@@ -7,6 +7,7 @@ import type { GateResolutionRecord, PendingGateRecord } from "@intentius/chant/l
 import { gitGateLedgerPort } from "@intentius/chant/op/gate";
 import { approveDeclarative, approveOther, chantApproveArgs, standingGate, type OtherContext } from "../src/commands/approve.js";
 import type { Io } from "../src/command.js";
+import { loadPendingApprovals } from "../src/chant/pending-approvals.js";
 import { approveCommand } from "../src/approval-mode/index.js";
 import { findApplyOp } from "../src/chant/apply.js";
 import { findMigrateOp } from "../src/versioned/index.js";
@@ -247,6 +248,96 @@ describe("yodel approve <env> --plan for a plan the migrations Op stopped for (#
       expect(await approveOther({ ...c, expected: "jcs1-sha256:nothing" })).toBeUndefined();
     } finally {
       dispose();
+    }
+  });
+});
+
+const withCall = (await loadPendingApprovals()) !== undefined;
+
+describe("yodel approve <env> --plan asks chant where the environment waits (#411)", () => {
+  // The first four need chant's call (0.124.117 and later); the fallback case runs on any chant.
+  const release = `jcs1-sha256:${"c".repeat(64)}`;
+  const waveDigest = `jcs1-sha256:${"d".repeat(64)}`;
+
+  async function setup(facts: Array<Partial<PendingGateRecord> & { op: string; gate: string }>) {
+    const { dir, dispose } = projectFrom("lint-clickhouse");
+    const project = await loadProject(dir);
+    const env = resolveEnvironment(project, "e2e");
+    const now = Date.now();
+    for (const f of facts) {
+      await gitGateLedgerPort({ cwd: dir }).appendPending({ timestamp: new Date(now).toISOString(), expiresAt: new Date(now + 3_600_000).toISOString(), ...f });
+    }
+    const ran: string[][] = [];
+    let out = "";
+    let err = "";
+    const c: OtherContext = {
+      project, env, expected: release, ask: () => Promise.resolve("e2e"), io: { out: (t) => (out += t), err: (t) => (err += t) },
+      resuming: () => Promise.resolve(false), signing: () => ({}),
+      run: (args) => {
+        ran.push([...args]);
+        return Promise.resolve({ code: 0, stdout: "", stderr: "" });
+      },
+    };
+    return { c, ran, dispose, text: () => ({ out, err }) };
+  }
+
+  it.skipIf(!withCall)("approves the pipeline stage's gate on the release digest, with the stage's environment", async () => {
+    const t = await setup([{ op: "yodel-apply", gate: "e2e", environment: "e2e", planDigest: release, releaseDigest: release }]);
+    try {
+      expect(await approveOther(t.c)).toBe(0);
+      expect(t.ran).toEqual([["approve", "yodel-apply", "e2e", "--plan", release, "--env", "e2e"]]);
+      expect(t.text().out).toContain(`yodel-apply is waiting at gate "e2e" for approval of ${release}`);
+    } finally {
+      t.dispose();
+    }
+  });
+
+  it.skipIf(!withCall)("approves a wave's gate on the wave's digest", async () => {
+    const t = await setup([{ op: "yodel-apply", gate: "yodel-apply-wave-1", planDigest: waveDigest }]);
+    try {
+      expect(await approveOther({ ...t.c, expected: waveDigest })).toBe(0);
+      expect(t.ran).toEqual([["approve", "yodel-apply", "yodel-apply-wave-1", "--plan", waveDigest]]);
+    } finally {
+      t.dispose();
+    }
+  });
+
+  it.skipIf(!withCall)("approves nothing for a digest no gate of the environment waits on", async () => {
+    const t = await setup([{ op: "yodel-apply", gate: "e2e", environment: "e2e", planDigest: release }, { op: "yodel-apply", gate: "other", environment: "prod", planDigest: `jcs1-sha256:${"e".repeat(64)}` }]);
+    try {
+      expect(await approveOther({ ...t.c, expected: `jcs1-sha256:${"f".repeat(64)}` })).toBeUndefined();
+      expect(t.ran).toEqual([]);
+    } finally {
+      t.dispose();
+    }
+  });
+
+  it.skipIf(!withCall)("refuses with a list when one digest waits at several gates", async () => {
+    const t = await setup([
+      { op: "yodel-apply", gate: "e2e", environment: "e2e", planDigest: release },
+      { op: "yodel-apply", gate: "e2e-soak", environment: "e2e", planDigest: release },
+    ]);
+    try {
+      expect(await approveOther(t.c)).toBe(1);
+      expect(t.ran).toEqual([]);
+      expect(t.text().err).toContain("waits at 2 gates of e2e");
+      expect(t.text().err).toContain("chant approve yodel-apply e2e-soak");
+    } finally {
+      t.dispose();
+    }
+  });
+
+  it("below chant's floor searches the migrations Op and wave gates only", async () => {
+    const t = await setup([{ op: "yodel-apply", gate: "e2e", environment: "e2e", planDigest: release }]);
+    try {
+      expect(await approveOther({ ...t.c, pendingApprovals: null })).toBeUndefined();
+      expect(t.ran).toEqual([]);
+      const op = await findMigrateOp(t.c.project, t.c.env);
+      await gitGateLedgerPort({ cwd: t.c.project.dir }).appendPending({ op: op.name, gate: op.gate, timestamp: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString(), planDigest: waveDigest });
+      expect(await approveOther({ ...t.c, expected: waveDigest, pendingApprovals: null })).toBe(0);
+      expect(t.ran).toEqual([["approve", op.name, op.gate, "--plan", waveDigest]]);
+    } finally {
+      t.dispose();
     }
   });
 });

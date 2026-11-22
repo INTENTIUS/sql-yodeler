@@ -9,6 +9,7 @@ import { planEnvironment, renderPlan } from "../chant/plan.js";
 import { findApplyOp } from "../chant/apply.js";
 import { cleanupDigest, cleanupGate, describeRetained, findRetained, retainedServer } from "../cleanup/index.js";
 import { gatedRequests } from "../chant/gated-request.js";
+import { loadPendingApprovals, type PendingApproval, type PendingApprovalsFn } from "../chant/pending-approvals.js";
 import { storedPlanText } from "../chant/stored-plan.js";
 import { chantConfirms, confirmApproval } from "../chant/confirm.js";
 import { baselineGate } from "../init/index.js";
@@ -133,6 +134,7 @@ Exit codes:
 export function chantApproveArgs(op: string, gate: string, digest: string, resume: boolean, signing: Signing = {}): string[] {
   return [
     "approve", op, gate, "--plan", digest,
+    ...(signing.environment !== undefined ? ["--env", signing.environment] : []),
     ...(signing.actor !== undefined ? ["--actor", signing.actor] : []),
     ...(signing.sign === true ? ["--sign", ...(signing.key !== undefined ? [signing.key] : [])] : []),
     ...(resume ? ["--resume"] : []),
@@ -144,6 +146,8 @@ export interface Signing {
   sign?: boolean;
   key?: string;
   actor?: string;
+  /** The fact's own environment, for a pipeline stage's or a component's gate (chant approve --env). */
+  environment?: string;
 }
 
 /** Whether the project's git repository has a remote: without one there is nothing to push to and no CI job to resume. */
@@ -273,6 +277,11 @@ export const approve: Command = {
         if (report.refusal) {
           io.err(`yodel approve: ${report.refusal.message}\nNothing was approved.\n`);
           return report.refusal.exitCode;
+        }
+        if (expected !== undefined && (report.status.pending.length === 0 || !report.digest) && (project.yodel?.config.waves ?? []).some((w) => w.env === env.name)) {
+          // A stage gate of the promotion pipeline can wait with nothing left to migrate here.
+          const done = await other();
+          if (done !== undefined) return done;
         }
         if (report.status.pending.length === 0 || !report.digest) {
           io.out(`${env.name} is up to date: there is nothing to approve.\n`);
@@ -416,6 +425,8 @@ export interface OtherContext {
   signing: (mode: string | undefined) => Signing;
   /** Runs chant (tests pass their own). */
   run?: typeof runChant;
+  /** chant's `pendingApprovals`; null stands for a chant below its floor. Default: the installed chant's, when it has one. */
+  pendingApprovals?: PendingApprovalsFn | null;
 }
 
 /** A gate a run stopped at and recorded on chant/lifecycle, waiting for a person. */
@@ -426,6 +437,8 @@ export interface StandingGate {
   /** When the run reached the gate. */
   at: string;
   description?: string;
+  /** The fact's own environment, on a pipeline stage's or a component's gate. */
+  environment?: string;
 }
 
 /** A gate yodel looks for a waiting plan at, with the approval mode that counts there. */
@@ -453,8 +466,16 @@ export function standingGate(
   return { op, gate, digest: p.planDigest, at: p.timestamp, ...(p.description ? { description: p.description } : {}) };
 }
 
+/** A waiting plan found, the approval mode that counts at its gate, and how to read what waits there again. */
+interface Found {
+  standing: StandingGate;
+  mode?: string | undefined;
+  /** The digest now waiting at the same gate, for a fact chant's `pendingApprovals` found. */
+  again?: () => Promise<string | undefined>;
+}
+
 /** The plan waiting at one of `gates` in the project's ledger: the one for `digest`, else (no digest) the only one. */
-async function findStanding(dir: string, gates: readonly GateRef[], digest: string | undefined): Promise<{ standing: StandingGate; mode?: string | undefined } | undefined> {
+async function findStanding(dir: string, gates: readonly GateRef[], digest: string | undefined): Promise<Found | undefined> {
   const ledger = await gitLedger(dir);
   for (const g of gates) {
     const standing = standingGate(await ledger.read(g.op), g.op, g.gate);
@@ -463,8 +484,19 @@ async function findStanding(dir: string, gates: readonly GateRef[], digest: stri
   return undefined;
 }
 
+/** The facts that differ in op, gate or digest: one fact per gate. */
+function distinct(facts: readonly PendingApproval[]): PendingApproval[] {
+  const seen = new Set<string>();
+  return facts.filter((f) => {
+    const key = `${f.op}\0${f.gate}\0${f.digest ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** Shows the waiting plan, asks, reads the ledger again and records the approval. */
-async function approveStanding(c: OtherContext, found: { standing: StandingGate; mode?: string | undefined }, gates: readonly GateRef[], next: string): Promise<number> {
+async function approveStanding(c: OtherContext, found: Found, gates: readonly GateRef[], next: string): Promise<number> {
   const { io, env } = c;
   const s = found.standing;
   io.out(`${s.op} is waiting at gate "${s.gate}" for approval of ${s.digest}, since ${s.at}${s.description ? ` (${s.description})` : ""}.\n`);
@@ -476,12 +508,13 @@ async function approveStanding(c: OtherContext, found: { standing: StandingGate;
   const declined = await confirmApproval({ io, ask: c.ask, dir: c.project.dir, op: s.op, gate: s.gate, digest: s.digest, target: env.name, question: `\nApprove ${s.digest} for ${env.name}? Type ${env.name} to approve: ` });
   if (declined !== undefined) return declined;
   // What waits is read again: what is approved is what the person saw.
-  const again = await findStanding(c.project.dir, gates.filter((g) => g.op === s.op && g.gate === s.gate), undefined);
-  if (again?.standing.digest !== s.digest) {
-    io.err(`Not approved: the plan waiting at ${s.gate} moved while you were asked (now ${again?.standing.digest ?? "nothing waits"}); run yodel approve ${env.name} again.\n`);
+  const now = found.again ? await found.again() : (await findStanding(c.project.dir, gates.filter((g) => g.op === s.op && g.gate === s.gate), undefined))?.standing.digest;
+  if (now !== s.digest) {
+    io.err(`Not approved: the plan waiting at ${s.gate} moved while you were asked (now ${now ?? "nothing waits"}); run yodel approve ${env.name} again.\n`);
     return EXIT_MOVED;
   }
-  return record(io, c.project.dir, s.op, s.gate, s.digest, await c.resuming(c.project.dir), next, "", c.signing(found.mode), c.run);
+  const signing = c.signing(found.mode);
+  return record(io, c.project.dir, s.op, s.gate, s.digest, await c.resuming(c.project.dir), next, "", s.environment !== undefined ? { ...signing, environment: s.environment } : signing, c.run);
 }
 
 /**
@@ -493,7 +526,6 @@ async function approveStanding(c: OtherContext, found: { standing: StandingGate;
 export async function approveOther(c: OtherContext, opName?: string, venv?: VersionedEnv): Promise<number | undefined> {
   const { project, env, expected } = c;
   if (expected === undefined) return undefined;
-  const gates: GateRef[] = [];
   let migrate: MigrateOpRef | undefined;
   try {
     migrate = await findMigrateOp(project, env, opName);
@@ -501,17 +533,40 @@ export async function approveOther(c: OtherContext, opName?: string, venv?: Vers
     // No migrations Op (a waves project may have none): nothing waits at its gate.
   }
   const mode = migrate ? (await migrationsApprovalAtBase(project, env.name)).mode : undefined;
-  if (migrate) gates.push({ op: migrate.name, gate: migrate.gate, mode });
-  // chant's gated requests (#292, chant#4551): the drop yodel cleanup asks for and the record yodel init --baseline asks for wait as pending facts at their own gates.
-  if (migrate && (await gatedRequests())) gates.push({ op: migrate.name, gate: cleanupGate(migrate.gate), mode }, { op: migrate.name, gate: baselineGate(migrate.gate), mode });
   const base = baseEnvironment(env.name);
   const k = (project.yodel?.config.waves ?? []).findIndex((w) => w.env === base) + 1;
-  if (k > 0) {
-    const { waveGateName } = await import("@intentius/chant/gated-waves");
-    const { at } = await gateAtBase(project, base);
-    gates.push({ op: WAVES_PIPELINE, gate: waveGateName(WAVES_PIPELINE, k), mode: waveApproval(at.config, base) });
+  const waveMode = async (): Promise<string | undefined> => (k > 0 ? waveApproval((await gateAtBase(project, base)).at.config, base) : undefined);
+  const pending = c.pendingApprovals === undefined ? await loadPendingApprovals() : (c.pendingApprovals ?? undefined);
+  let found: Found | undefined;
+  const gates: GateRef[] = [];
+  if (pending) {
+    // chant says where env waits (chant#5480): a wave, a pipeline stage, a component or the migrations Op's gate, by the digest it binds.
+    const ask = { cwd: project.dir, env: base, plan: expected, ops: [...(migrate ? [migrate.name] : []), WAVES_PIPELINE], pipeline: WAVES_PIPELINE };
+    const facts = distinct(await pending(ask));
+    if (facts.length > 1) {
+      c.io.err(`yodel approve: ${expected} waits at ${String(facts.length)} gates of ${env.name}; nothing was approved. Approve one with chant approve:\n${facts.map((f) => `  chant approve ${f.op} ${f.gate} --plan ${f.digest ?? expected}${f.environment !== undefined ? ` --env ${f.environment}` : ""}${f.description ? `  (${f.description})` : ""}\n`).join("")}`);
+      return EXIT_FAILED;
+    }
+    const fact = facts[0];
+    if (fact) {
+      const digest = fact.digest ?? expected;
+      const gateMode = fact.kind === "wave" ? await waveMode() : fact.kind === "op" ? mode : undefined;
+      found = {
+        standing: { op: fact.op, gate: fact.gate, digest, at: fact.timestamp, ...(fact.description ? { description: fact.description } : {}), ...(fact.environment !== undefined ? { environment: fact.environment } : {}) },
+        mode: gateMode,
+        again: async () => distinct(await pending(ask)).find((f) => f.op === fact.op && f.gate === fact.gate)?.digest,
+      };
+    }
+  } else {
+    if (migrate) gates.push({ op: migrate.name, gate: migrate.gate, mode });
+    // chant's gated requests (#292, chant#4551): the drop yodel cleanup asks for and the record yodel init --baseline asks for wait as pending facts at their own gates.
+    if (migrate && (await gatedRequests())) gates.push({ op: migrate.name, gate: cleanupGate(migrate.gate), mode }, { op: migrate.name, gate: baselineGate(migrate.gate), mode });
+    if (k > 0) {
+      const { waveGateName } = await import("@intentius/chant/gated-waves");
+      gates.push({ op: WAVES_PIPELINE, gate: waveGateName(WAVES_PIPELINE, k), mode: await waveMode() });
+    }
+    found = await findStanding(project.dir, gates, expected);
   }
-  const found = await findStanding(project.dir, gates, expected);
   if (found) return approveStanding(c, found, gates, `Run the yodel command that stopped at ${found.standing.gate} again (push chant/lifecycle first if chant did not).`);
   // The drop yodel cleanup asks for: nothing records it waiting, so its digest is worked out again here.
   if (migrate && venv && !env.tenant) {
