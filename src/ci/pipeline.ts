@@ -223,7 +223,11 @@ export async function pipelineDeclaration(input: PipelineInput): Promise<import(
       const keys = omit(stage, ["risk", "approvalRules", "config", "secrets", "imports"]);
       // The risk keys (chant's `environments.<name>.risk`): the stage's own, else `ci.risk.approveAbove`; chant puts them on the gate's `holds.risk`.
       const risk = stageRiskConfig(ci, env);
-      return [env, { ...keys, ...(approvalRules ? { approvalRules: approvalRules.map(ruleOf) } : {}), ...(risk ? { risk } : {}) }];
+      // The stage's gate takes its wave's: a promote reads the stage's `gate.policy` (`never` passes without an approval), and a wave that sets none leaves the stage on chant's default.
+      const wave = byEnv[env]?.[0];
+      const gate = wave?.gate !== undefined ? { gate: wave.gate } : {};
+      const approval = wave?.approval !== undefined ? { approval: wave.approval } : {};
+      return [env, { ...gate, ...approval, ...keys, ...(approvalRules ? { approvalRules: approvalRules.map(ruleOf) } : {}), ...(risk ? { risk } : {}) }];
     }),
   );
   const declaration = pipelineFromConfig({

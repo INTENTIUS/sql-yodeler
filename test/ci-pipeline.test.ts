@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { asPipelineSpec, foldPipelineSource, stageWavesSpec } from "@intentius/chant/pipeline";
 import { checkYodelConfig } from "../src/config/load.js";
-import { environmentSetsOf, pipelineConfigProblem, releaseGreenNote, stageRisk } from "../src/ci/pipeline.js";
+import { environmentSetsOf, pipelineConfigProblem, pipelineDeclaration, pipelineText, releaseGreenNote, stageRisk } from "../src/ci/pipeline.js";
 import { commandToken } from "../src/ci/render.js";
 import { planRisk } from "../src/pr/note.js";
 import { PIPELINE_WORDS, YODEL_WORDS } from "../src/ci-words.js";
@@ -88,6 +88,22 @@ describe("the pipeline keys in yodel.config.ts", () => {
   it("are checked against the waves the profiles give when the config names none", () => {
     expect(pipelineConfigProblem({ promotion: ["dev", "prod"] }, ["dev", "prod"], "ci")).toBeUndefined();
     expect(pipelineConfigProblem({ promotion: ["dev", "staging", "prod"] }, ["dev", "prod"], "ci")).toMatch(/the waves apply dev, prod/);
+  });
+});
+
+describe("the stage gate (#409)", () => {
+  const wave = (name: string, gate?: string) => ({ name, runs: [{ target: name, op: "apply" }], ...(gate ? { gate } : {}) });
+
+  it("is the wave's gate: never stays never, always stays always, and a wave with none leaves chant's default", async () => {
+    const spec = { name: "yodel-apply", waves: [wave("dev", "never"), wave("staging", "never"), wave("prod", "always"), wave("qa")] } as never;
+    const ci = { promotion: ["dev", "staging", "prod", "qa"] };
+    const declaration = await pipelineDeclaration({ name: "yodel-apply", ci, spec, bin: ["yodel", "chant"] });
+    const folded = foldPipelineSource(await pipelineText(declaration));
+    if (!("spec" in folded)) throw new Error("the pipeline does not fold");
+    const policy = (name: string) => folded.spec.stages.find((s) => s.name === name)?.gate?.policy;
+    expect(policy("staging")).toBe("never");
+    expect(policy("prod")).toBe("always");
+    expect(policy("qa")).toBeUndefined();
   });
 });
 
