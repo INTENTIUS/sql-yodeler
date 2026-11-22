@@ -13,7 +13,7 @@ What each release of `@intentius/sql-yodeler` changed, newest first, in short. T
 - Added: `yodel report --audit` and `--json` write chant's audit format.
 - Added: `ci.respond.wave-refused` posts chant's diff and summary of a refused wave.
 - Changed: config keys follow chant's product vocabulary, with today's spellings as aliases. Under `ci.promotion` the release gate is `forge-checks`.
-- chant 0.124.112. The starter templates take `^0.14.0`.
+- chant 0.124.114. The starter templates take `^0.14.0`.
 
 ## 0.13.5
 
