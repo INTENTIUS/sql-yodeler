@@ -167,6 +167,8 @@ ${STAGES.map((s) => `      "${envs[s]}": ${profile(s)},`).join("\n")}
   const bare = await run("git", ["init", "-q", "--bare", "-b", "main", origin], { cwd: ctx.work, env: p.envFor() });
   if (bare.code !== 0) throw new Error(`git init --bare ${origin} failed: ${bare.err}`);
   await p.git("remote", "add", "origin", origin);
+  // `release cut auto` reads the next label from the previous release, and a new project has none: the fixture commit carries the first, as the tag chant's default template reads.
+  await p.git("tag", "release/0.1.0");
   const table = mainTable(ctx);
   const st: State = {
     p,
