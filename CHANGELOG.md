@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0
+
+### Added
+
+- `ci.imageBase`, `"debian"` or `"chainguard"`, runs `yodel ci`'s jobs in the release's own CI image of that set. A release now publishes two images to `ghcr.io/intentius/sql-yodeler`, `<version>` (Debian, Node 22, root) and `<version>-chainguard` (Chainguard's `node` image, Node 26, user 65532), each with yodel, chant and the sql lexicon, and the package carries both digests in `dist/image-digests.json`, so the key needs no digest of its own. `ci.image` wins when both are set, and a release with no Chainguard image refuses `"chainguard"`. The Chainguard image's apk packages (git, ca-certificates and openssh-client) are installed at versions chant pins, so two builds carry the same ones. `just images` builds either image locally from `npm pack` of a checkout.
+
+### Changed
+
+- `supply-chain` is on for this product's own release. The release scans each image before pushing it, signs both keylessly with cosign, gives them SLSA provenance and attaches an SBOM made from the image's layers.
+- yodel pins chant 0.124.114 and the sql lexicon 0.124.103 exactly, and both starter templates pin the same.
+- A project that sets `sql.dialect: "mysql"` is refused with an error that names `clickhouse` and `postgres`, the dialects yodel handles. chant's sql lexicon knows `mysql`; yodel has no driver, lint rules or migration format for it.
+
+chant is at 0.124.114, and the starter templates take `^0.15.0`.
+
 ## 0.14.0
 
 ### Added

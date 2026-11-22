@@ -7,6 +7,13 @@ type: reference
 
 What each release of `@intentius/sql-yodeler` changed, newest first, in short. The full notes for each release, with the upgrade steps, are on [GitHub releases](https://github.com/INTENTIUS/sql-yodeler/releases).
 
+## 0.15.0
+
+- Added: `ci.imageBase` (`"debian"` or `"chainguard"`) runs the pipelines' jobs in the release's own CI image of that set. A release publishes both, `<version>` (Node 22, root) and `<version>-chainguard` (Node 26, user 65532), and the package carries their digests. `ci.image` wins when both are set. The Chainguard image's apk packages are installed at versions chant pins.
+- Changed: `supply-chain` is on for the product's own release: each image is scanned before it is pushed, signed with cosign, given provenance and a layer SBOM.
+- Changed: `sql.dialect: "mysql"` is refused with an error naming `clickhouse` and `postgres`.
+- chant 0.124.114 and the sql lexicon 0.124.103, which the starter templates pin as well. The templates take `^0.15.0`.
+
 ## 0.14.0
 
 - Added: `ci.promotion` makes the environments stages of chant's pipeline, with risk and soak gates. `yodel ci` writes `.chant/pipeline.ts`, a promote job per later stage and the `/yodel reject` job; `yodel promote`, `reject`, `pause` and `resume` run chant's commands.
